@@ -377,5 +377,148 @@ def central(
     store.close()
 
 
+@app.command(name="export-obsidian")
+def export_obsidian(
+    vault_path: str = typer.Option(
+        "/Users/taka/ObsidianVaults/note",
+        "--vault",
+        "-v",
+        help="Path to Obsidian vault",
+    ),
+    folder: str = typer.Option("Graph", "--folder", "-f", help="Subfolder within vault"),
+    clean: bool = typer.Option(False, "--clean", help="Remove existing folder before export"),
+) -> None:
+    """Export knowledge graph to Obsidian vault as markdown notes with wikilinks."""
+    import re
+    import shutil
+    from pathlib import Path
+
+    store = _get_store()
+
+    output_dir = Path(vault_path) / folder
+    if clean and output_dir.exists():
+        shutil.rmtree(output_dir)
+
+    # Create subdirectories per project
+    for proj in ["forty_two", "max", "presence", "me"]:
+        (output_dir / proj).mkdir(parents=True, exist_ok=True)
+
+    all_units = store.get_all_units()
+    all_edges = store.get_all_edges()
+
+    # Build lookup: unit_id -> unit
+    unit_map = {u.id: u for u in all_units}
+
+    # Build edge lookup: unit_id -> list of (relation, target_unit)
+    outgoing: dict[str, list[tuple[str, str]]] = {}
+    incoming: dict[str, list[tuple[str, str]]] = {}
+    for e in all_edges:
+        outgoing.setdefault(e.from_unit_id, []).append((e.relation, e.to_unit_id))
+        incoming.setdefault(e.to_unit_id, []).append((e.relation, e.from_unit_id))
+
+    def _safe_filename(title: str) -> str:
+        """Make a filesystem-safe filename from a title."""
+        name = re.sub(r'[<>:"/\\|?*]', '', title)
+        name = name.strip('. ')
+        return name[:120] if name else "Untitled"
+
+    # Build unit_id -> filename lookup for wikilinks
+    id_to_path: dict[str, str] = {}
+    for u in all_units:
+        filename = _safe_filename(u.title)
+        id_to_path[u.id] = f"{folder}/{u.source_project}/{filename}"
+
+    # Write each unit as a markdown note
+    written = 0
+    for u in all_units:
+        filename = _safe_filename(u.title)
+        filepath = output_dir / u.source_project / f"{filename}.md"
+
+        lines = []
+
+        # Frontmatter
+        lines.append("---")
+        lines.append(f"id: {u.id}")
+        lines.append(f"source_project: {u.source_project}")
+        lines.append(f"source_entity_type: {u.source_entity_type}")
+        lines.append(f"content_type: {u.content_type}")
+        if u.tags:
+            lines.append(f"tags: [{', '.join(u.tags)}]")
+        if u.confidence is not None:
+            lines.append(f"confidence: {u.confidence}")
+        if u.utility_score is not None:
+            lines.append(f"utility_score: {u.utility_score}")
+        lines.append(f"created_at: {u.created_at}")
+        lines.append("---")
+        lines.append("")
+
+        # Content
+        lines.append(u.content)
+        lines.append("")
+
+        # Outgoing edges
+        out_edges = outgoing.get(u.id, [])
+        if out_edges:
+            lines.append("## Connections")
+            lines.append("")
+            for relation, target_id in out_edges:
+                target = unit_map.get(target_id)
+                if target:
+                    link_path = f"{folder}/{target.source_project}/{_safe_filename(target.title)}"
+                    lines.append(f"- **{relation}** [[{link_path}|{target.title}]]")
+            lines.append("")
+
+        # Incoming edges
+        in_edges = incoming.get(u.id, [])
+        if in_edges:
+            lines.append("## Referenced by")
+            lines.append("")
+            for relation, source_id in in_edges:
+                source = unit_map.get(source_id)
+                if source:
+                    link_path = f"{folder}/{source.source_project}/{_safe_filename(source.title)}"
+                    lines.append(f"- **{relation}** from [[{link_path}|{source.title}]]")
+            lines.append("")
+
+        # Metadata
+        if u.metadata:
+            interesting = {k: v for k, v in u.metadata.items() if v}
+            if interesting:
+                lines.append("## Metadata")
+                lines.append("")
+                for k, v in interesting.items():
+                    if isinstance(v, (dict, list)):
+                        lines.append(f"- **{k}**: `{json.dumps(v)}`")
+                    else:
+                        lines.append(f"- **{k}**: {v}")
+                lines.append("")
+
+        filepath.write_text("\n".join(lines))
+        written += 1
+
+    # Write index note
+    index_path = output_dir / "Index.md"
+    index_lines = [
+        "# Knowledge Graph Index",
+        "",
+        f"**{len(all_units)} units** | **{len(all_edges)} edges**",
+        "",
+    ]
+    for proj in ["forty_two", "max", "presence", "me"]:
+        proj_units = [u for u in all_units if u.source_project == proj]
+        if proj_units:
+            index_lines.append(f"## {proj} ({len(proj_units)})")
+            index_lines.append("")
+            for u in sorted(proj_units, key=lambda x: x.title):
+                link_path = f"{folder}/{u.source_project}/{_safe_filename(u.title)}"
+                index_lines.append(f"- [[{link_path}|{u.title}]] `{u.content_type}`")
+            index_lines.append("")
+
+    index_path.write_text("\n".join(index_lines))
+
+    store.close()
+    typer.echo(f"Exported {written} notes + index to {output_dir}")
+
+
 if __name__ == "__main__":
     app()
