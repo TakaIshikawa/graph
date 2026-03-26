@@ -94,6 +94,56 @@ def ingest(
 
 
 @app.command()
+def embed(
+    project: str | None = typer.Option(None, "--project", "-p", help="Filter by source project"),
+    batch_size: int = typer.Option(5, "--batch-size", "-b", help="Batch size for API calls"),
+    delay: float = typer.Option(21.0, "--delay", help="Seconds between batches (rate limit)"),
+) -> None:
+    """Generate embeddings for all units missing them."""
+    import time
+
+    from graph.rag.embeddings import get_embedding_provider
+    from graph.rag.search import RAGService
+
+    store = _get_store()
+    provider = get_embedding_provider(
+        settings.embedding_provider,
+        settings.embedding_api_key,
+        settings.embedding_model,
+    )
+    rag = RAGService(store, provider)
+
+    all_units = store.get_all_units()
+    embedded_ids = {unit.id for unit, _ in store.get_units_with_embeddings()}
+
+    units_to_embed = [
+        u.id
+        for u in all_units
+        if u.id not in embedded_ids and (project is None or u.source_project == project)
+    ]
+
+    if not units_to_embed:
+        typer.echo("All units already have embeddings.")
+        store.close()
+        return
+
+    total_batches = (len(units_to_embed) + batch_size - 1) // batch_size
+    typer.echo(f"Embedding {len(units_to_embed)} units in {total_batches} batches...")
+    total = 0
+    for i in range(0, len(units_to_embed), batch_size):
+        batch = units_to_embed[i : i + batch_size]
+        count = rag.embed_batch_and_store(batch)
+        total += count
+        batch_num = i // batch_size + 1
+        typer.echo(f"  Batch {batch_num}/{total_batches}: {count} embedded ({total}/{len(units_to_embed)})")
+        if i + batch_size < len(units_to_embed):
+            time.sleep(delay)
+
+    store.close()
+    typer.echo(f"Done. {total} units embedded.")
+
+
+@app.command()
 def search(
     query: str = typer.Argument(..., help="Search query"),
     limit: int = typer.Option(10, "--limit", "-n", help="Max results"),
