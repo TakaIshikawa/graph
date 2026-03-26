@@ -1,0 +1,41 @@
+[project]
+name = "graph"
+version = "0.1.0"
+description = "Personal Knowledge Graph — aggregate, connect, retrieve from sibling projects"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "networkx>=3.2",
+    "numpy>=1.26",
+    "scipy>=1.12",
+    "typer>=0.12.0",
+    "mcp>=1.0.0",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+voyage = ["voyageai>=0.2.0"]
+openai = ["openai>=1.0"]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.8.0",
+]
+
+[project.scripts]
+graph = "graph.cli.main:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/graph"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
