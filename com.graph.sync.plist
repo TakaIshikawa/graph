@@ -11,8 +11,13 @@
     </array>
     <key>WorkingDirectory</key>
     <string>/Users/taka/Project/experiments/graph</string>
-    <key>StartInterval</key>
-    <integer>21600</integer>
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Hour</key><integer>0</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Hour</key><integer>12</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>0</integer></dict>
+    </array>
     <key>StandardOutPath</key>
     <string>/Users/taka/Project/experiments/graph/logs/sync.log</string>
     <key>StandardErrorPath</key>
