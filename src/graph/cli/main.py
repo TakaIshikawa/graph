@@ -38,14 +38,12 @@ def _get_adapter_for_project(name: str):
     return factory()
 
 
-@app.command()
-def ingest(
-    project: str = typer.Argument("all", help="Source project or 'all'"),
-    entity_type: str | None = typer.Option(None, "--type", "-t", help="Specific entity type"),
-) -> None:
-    """Ingest knowledge from source projects."""
-    store = _get_store()
-
+def _do_ingest(
+    store: Store,
+    project: str = "all",
+    entity_type: str | None = None,
+) -> dict:
+    """Core ingest logic. Returns total stats dict."""
     projects = ["forty_two", "max", "presence", "me"] if project == "all" else [project]
     entity_types = [entity_type] if entity_type else None
 
@@ -72,7 +70,6 @@ def ingest(
             f"{stats['edges_inserted']} edges"
         )
 
-        # Update sync state per entity type
         for et in adapter.entity_types:
             if entity_types and et not in entity_types:
                 continue
@@ -85,27 +82,37 @@ def ingest(
                 )
             )
 
-    store.close()
     typer.echo(
         f"\nTotal: {total_stats['units_inserted']} new units, "
         f"{total_stats['units_skipped']} updated, "
         f"{total_stats['edges_inserted']} edges"
     )
+    return total_stats
 
 
 @app.command()
-def embed(
-    project: str | None = typer.Option(None, "--project", "-p", help="Filter by source project"),
-    batch_size: int = typer.Option(5, "--batch-size", "-b", help="Batch size for API calls"),
-    delay: float = typer.Option(21.0, "--delay", help="Seconds between batches (rate limit)"),
+def ingest(
+    project: str = typer.Argument("all", help="Source project or 'all'"),
+    entity_type: str | None = typer.Option(None, "--type", "-t", help="Specific entity type"),
 ) -> None:
-    """Generate embeddings for all units missing them."""
+    """Ingest knowledge from source projects."""
+    store = _get_store()
+    _do_ingest(store, project=project, entity_type=entity_type)
+    store.close()
+
+
+def _do_embed(
+    store: Store,
+    project: str | None = None,
+    batch_size: int = 5,
+    delay: float = 21.0,
+) -> int:
+    """Core embed logic. Returns number of units embedded."""
     import time
 
     from graph.rag.embeddings import get_embedding_provider
     from graph.rag.search import RAGService
 
-    store = _get_store()
     provider = get_embedding_provider(
         settings.embedding_provider,
         settings.embedding_api_key,
@@ -124,8 +131,7 @@ def embed(
 
     if not units_to_embed:
         typer.echo("All units already have embeddings.")
-        store.close()
-        return
+        return 0
 
     total_batches = (len(units_to_embed) + batch_size - 1) // batch_size
     typer.echo(f"Embedding {len(units_to_embed)} units in {total_batches} batches...")
@@ -139,8 +145,20 @@ def embed(
         if i + batch_size < len(units_to_embed):
             time.sleep(delay)
 
-    store.close()
     typer.echo(f"Done. {total} units embedded.")
+    return total
+
+
+@app.command()
+def embed(
+    project: str | None = typer.Option(None, "--project", "-p", help="Filter by source project"),
+    batch_size: int = typer.Option(5, "--batch-size", "-b", help="Batch size for API calls"),
+    delay: float = typer.Option(21.0, "--delay", help="Seconds between batches (rate limit)"),
+) -> None:
+    """Generate embeddings for all units missing them."""
+    store = _get_store()
+    _do_embed(store, project=project, batch_size=batch_size, delay=delay)
+    store.close()
 
 
 @app.command()
@@ -377,39 +395,29 @@ def central(
     store.close()
 
 
-@app.command(name="export-obsidian")
-def export_obsidian(
-    vault_path: str = typer.Option(
-        "/Users/taka/ObsidianVaults/note",
-        "--vault",
-        "-v",
-        help="Path to Obsidian vault",
-    ),
-    folder: str = typer.Option("Graph", "--folder", "-f", help="Subfolder within vault"),
-    clean: bool = typer.Option(False, "--clean", help="Remove existing folder before export"),
-) -> None:
-    """Export knowledge graph to Obsidian vault as markdown notes with wikilinks."""
+def _do_export_obsidian(
+    store: Store,
+    vault_path: str = "/Users/taka/ObsidianVaults/note",
+    folder: str = "Graph",
+    clean: bool = False,
+) -> int:
+    """Core Obsidian export logic. Returns number of notes written."""
     import re
     import shutil
     from pathlib import Path
-
-    store = _get_store()
 
     output_dir = Path(vault_path) / folder
     if clean and output_dir.exists():
         shutil.rmtree(output_dir)
 
-    # Create subdirectories per project
     for proj in ["forty_two", "max", "presence", "me"]:
         (output_dir / proj).mkdir(parents=True, exist_ok=True)
 
     all_units = store.get_all_units()
     all_edges = store.get_all_edges()
 
-    # Build lookup: unit_id -> unit
     unit_map = {u.id: u for u in all_units}
 
-    # Build edge lookup: unit_id -> list of (relation, target_unit)
     outgoing: dict[str, list[tuple[str, str]]] = {}
     incoming: dict[str, list[tuple[str, str]]] = {}
     for e in all_edges:
@@ -417,18 +425,10 @@ def export_obsidian(
         incoming.setdefault(e.to_unit_id, []).append((e.relation, e.from_unit_id))
 
     def _safe_filename(title: str) -> str:
-        """Make a filesystem-safe filename from a title."""
         name = re.sub(r'[<>:"/\\|?*]', '', title)
         name = name.strip('. ')
         return name[:120] if name else "Untitled"
 
-    # Build unit_id -> filename lookup for wikilinks
-    id_to_path: dict[str, str] = {}
-    for u in all_units:
-        filename = _safe_filename(u.title)
-        id_to_path[u.id] = f"{folder}/{u.source_project}/{filename}"
-
-    # Write each unit as a markdown note
     written = 0
     for u in all_units:
         filename = _safe_filename(u.title)
@@ -436,7 +436,6 @@ def export_obsidian(
 
         lines = []
 
-        # Frontmatter
         lines.append("---")
         lines.append(f"id: {u.id}")
         lines.append(f"source_project: {u.source_project}")
@@ -452,11 +451,9 @@ def export_obsidian(
         lines.append("---")
         lines.append("")
 
-        # Content
         lines.append(u.content)
         lines.append("")
 
-        # Outgoing edges
         out_edges = outgoing.get(u.id, [])
         if out_edges:
             lines.append("## Connections")
@@ -468,7 +465,6 @@ def export_obsidian(
                     lines.append(f"- **{relation}** [[{link_path}|{target.title}]]")
             lines.append("")
 
-        # Incoming edges
         in_edges = incoming.get(u.id, [])
         if in_edges:
             lines.append("## Referenced by")
@@ -480,7 +476,6 @@ def export_obsidian(
                     lines.append(f"- **{relation}** from [[{link_path}|{source.title}]]")
             lines.append("")
 
-        # Metadata
         if u.metadata:
             interesting = {k: v for k, v in u.metadata.items() if v}
             if interesting:
@@ -496,7 +491,6 @@ def export_obsidian(
         filepath.write_text("\n".join(lines))
         written += 1
 
-    # Write index note
     index_path = output_dir / "Index.md"
     index_lines = [
         "# Knowledge Graph Index",
@@ -516,8 +510,54 @@ def export_obsidian(
 
     index_path.write_text("\n".join(index_lines))
 
-    store.close()
     typer.echo(f"Exported {written} notes + index to {output_dir}")
+    return written
+
+
+@app.command(name="export-obsidian")
+def export_obsidian(
+    vault_path: str = typer.Option(
+        "/Users/taka/ObsidianVaults/note",
+        "--vault",
+        "-v",
+        help="Path to Obsidian vault",
+    ),
+    folder: str = typer.Option("Graph", "--folder", "-f", help="Subfolder within vault"),
+    clean: bool = typer.Option(False, "--clean", help="Remove existing folder before export"),
+) -> None:
+    """Export knowledge graph to Obsidian vault as markdown notes with wikilinks."""
+    store = _get_store()
+    _do_export_obsidian(store, vault_path=vault_path, folder=folder, clean=clean)
+    store.close()
+
+
+@app.command()
+def sync(
+    vault_path: str = typer.Option(
+        "/Users/taka/ObsidianVaults/note",
+        "--vault",
+        "-v",
+        help="Path to Obsidian vault",
+    ),
+    batch_size: int = typer.Option(5, "--batch-size", "-b", help="Embedding batch size"),
+    delay: float = typer.Option(21.0, "--delay", help="Seconds between embedding batches"),
+) -> None:
+    """Full sync pipeline: ingest -> embed -> export to Obsidian."""
+    store = _get_store()
+
+    typer.echo("=== Graph Sync ===\n")
+
+    typer.echo("Step 1/3: Ingesting from all sources...")
+    _do_ingest(store, project="all")
+
+    typer.echo("\nStep 2/3: Embedding new units...")
+    _do_embed(store, batch_size=batch_size, delay=delay)
+
+    typer.echo("\nStep 3/3: Exporting to Obsidian...")
+    _do_export_obsidian(store, vault_path=vault_path, clean=True)
+
+    store.close()
+    typer.echo("\n=== Sync complete ===")
 
 
 if __name__ == "__main__":
