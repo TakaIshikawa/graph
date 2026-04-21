@@ -20,6 +20,7 @@ def _get_store() -> Store:
 
 def _get_adapter_for_project(name: str):
     from graph.adapters.forty_two import FortyTwoAdapter
+    from graph.adapters.kindle import KindleAdapter
     from graph.adapters.max_adapter import MaxAdapter
     from graph.adapters.me import MeAdapter
     from graph.adapters.presence import PresenceAdapter
@@ -31,6 +32,7 @@ def _get_adapter_for_project(name: str):
             db_path=settings.presence_db, min_score=settings.content_min_score
         ),
         "me": lambda: MeAdapter(config_path=settings.me_config),
+        "kindle": lambda: KindleAdapter(db_path=settings.kindle_db),
     }
     factory = mapping.get(name)
     if factory is None:
@@ -45,7 +47,7 @@ def _do_ingest(
     full: bool = False,
 ) -> dict:
     """Core ingest logic. Returns total stats dict."""
-    projects = ["forty_two", "max", "presence", "me"] if project == "all" else [project]
+    projects = ["forty_two", "max", "presence", "me", "kindle"] if project == "all" else [project]
     entity_types = [entity_type] if entity_type else None
 
     total_stats = {"units_inserted": 0, "units_skipped": 0, "edges_inserted": 0}
@@ -471,10 +473,10 @@ def _do_export_obsidian(
     if clean and output_dir.exists():
         shutil.rmtree(output_dir)
 
-    for proj in ["forty_two", "max", "presence", "me"]:
-        (output_dir / proj).mkdir(parents=True, exist_ok=True)
-
+    # Create directories for all source projects dynamically
     all_units = store.get_all_units()
+    for u in all_units:
+        (output_dir / u.source_project).mkdir(parents=True, exist_ok=True)
     all_edges = store.get_all_edges()
 
     unit_map = {u.id: u for u in all_units}

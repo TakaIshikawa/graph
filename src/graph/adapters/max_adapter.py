@@ -19,7 +19,7 @@ class MaxAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["insight", "buildable_unit"]
+        return ["insight", "buildable_unit", "design_brief"]
 
     def __init__(self, db_path: str = "") -> None:
         self.db_path = db_path
@@ -44,6 +44,9 @@ class MaxAdapter(SourceAdapter):
 
         if "buildable_unit" in types:
             self._ingest_buildable_units(conn, result, since)
+
+        if "design_brief" in types:
+            self._ingest_design_briefs(conn, result, since)
 
         conn.close()
         return result
@@ -332,7 +335,107 @@ class MaxAdapter(SourceAdapter):
                     to_unit_id=row["id"],
                     relation=EdgeRelation.INSPIRES,
                     source=EdgeSource.SOURCE,
-                    metadata={"source_project": "max"},
+                    metadata={
+                        "source_project": "max",
+                        "from_entity_type": "insight",
+                        "to_entity_type": "buildable_unit",
+                    },
+                )
+                result.edges.append(edge)
+
+    def _ingest_design_briefs(
+        self, conn: sqlite3.Connection, result: IngestResult, since: SyncState | None
+    ) -> None:
+        if not _table_exists(conn, "design_briefs"):
+            return
+
+        where = ""
+        params: list = []
+        if since and since.last_sync_at:
+            since_value = (
+                since.last_sync_at.isoformat()
+                if hasattr(since.last_sync_at, "isoformat")
+                else str(since.last_sync_at)
+            )
+            where = "WHERE updated_at > ? OR created_at > ?"
+            params.extend([since_value, since_value])
+
+        rows = conn.execute(
+            f"""SELECT id, title, domain, theme, readiness_score, lead_idea_id,
+                       buyer, specific_user, workflow_context, why_this_now,
+                       merged_product_concept, synthesis_rationale, mvp_scope,
+                       first_milestones, validation_plan, risks, source_idea_ids,
+                       design_status, created_at, updated_at
+                FROM design_briefs
+                {where}
+                ORDER BY updated_at""",
+            params,
+        ).fetchall()
+
+        for row in rows:
+            mvp_scope = _json_value(row["mvp_scope"], [])
+            first_milestones = _json_value(row["first_milestones"], [])
+            risks = _json_value(row["risks"], [])
+            source_idea_ids = _json_value(row["source_idea_ids"], [])
+
+            content = _design_brief_content(
+                row,
+                mvp_scope=mvp_scope,
+                first_milestones=first_milestones,
+                risks=risks,
+            )
+            readiness_score = row["readiness_score"]
+            utility_score = (
+                float(readiness_score) / 100.0 if readiness_score is not None else None
+            )
+            title = f"{row['title']} - Design Brief"
+
+            unit = KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id=row["id"],
+                source_entity_type="design_brief",
+                title=title,
+                content=content,
+                content_type=ContentType.DESIGN_BRIEF,
+                metadata={
+                    "brief_title": row["title"],
+                    "domain": row["domain"],
+                    "theme": row["theme"],
+                    "readiness_score": readiness_score,
+                    "lead_idea_id": row["lead_idea_id"],
+                    "buyer": row["buyer"],
+                    "specific_user": row["specific_user"],
+                    "workflow_context": row["workflow_context"],
+                    "why_this_now": row["why_this_now"],
+                    "merged_product_concept": row["merged_product_concept"],
+                    "synthesis_rationale": row["synthesis_rationale"],
+                    "mvp_scope": mvp_scope,
+                    "first_milestones": first_milestones,
+                    "validation_plan": row["validation_plan"],
+                    "risks": risks,
+                    "source_idea_ids": source_idea_ids,
+                    "design_status": row["design_status"],
+                    "updated_at": row["updated_at"],
+                },
+                tags=_design_brief_tags(row),
+                utility_score=utility_score,
+                created_at=row["created_at"] or "1970-01-01T00:00:00+00:00",
+            )
+            result.units.append(unit)
+
+            for source in _design_brief_sources(conn, row, source_idea_ids):
+                edge = KnowledgeEdge(
+                    from_unit_id=row["id"],
+                    to_unit_id=source["idea_id"],
+                    relation=EdgeRelation.DERIVES_FROM,
+                    source=EdgeSource.SOURCE,
+                    metadata={
+                        "source_project": "max",
+                        "from_entity_type": "design_brief",
+                        "to_entity_type": "buildable_unit",
+                        "role": source["role"],
+                        "rank": source["rank"],
+                    },
                 )
                 result.edges.append(edge)
 
@@ -378,6 +481,82 @@ def _json_value(raw: Any, default: Any) -> Any:
         return default
 
 
+def _design_brief_content(
+    row: sqlite3.Row,
+    *,
+    mvp_scope: list[str],
+    first_milestones: list[str],
+    risks: list[str],
+) -> str:
+    sections = [
+        ("Why this now", row["why_this_now"]),
+        ("Product concept", row["merged_product_concept"]),
+        ("Synthesis rationale", row["synthesis_rationale"]),
+        ("Validation plan", row["validation_plan"]),
+    ]
+    lines = [
+        f"Domain: {row['domain']}",
+        f"Theme: {row['theme']}",
+        f"Buyer: {row['buyer']}",
+        f"Specific user: {row['specific_user']}",
+        f"Workflow: {row['workflow_context']}",
+        f"Readiness score: {row['readiness_score']}",
+    ]
+    for label, value in sections:
+        if value:
+            lines.append(f"\n{label}: {value}")
+    for label, values in [
+        ("MVP scope", mvp_scope),
+        ("First milestones", first_milestones),
+        ("Risks", risks),
+    ]:
+        if values:
+            lines.append(f"\n{label}:")
+            lines.extend(f"- {value}" for value in values)
+    return "\n".join(lines)
+
+
+def _design_brief_sources(
+    conn: sqlite3.Connection, row: sqlite3.Row, source_idea_ids: list[str]
+) -> list[dict[str, Any]]:
+    if _table_exists(conn, "design_brief_sources"):
+        rows = conn.execute(
+            """SELECT idea_id, role, rank
+               FROM design_brief_sources
+               WHERE brief_id = ?
+               ORDER BY rank""",
+            (row["id"],),
+        ).fetchall()
+        if rows:
+            return [
+                {"idea_id": source["idea_id"], "role": source["role"], "rank": source["rank"]}
+                for source in rows
+            ]
+
+    seen: set[str] = set()
+    sources: list[dict[str, Any]] = []
+    if row["lead_idea_id"]:
+        seen.add(row["lead_idea_id"])
+        sources.append({"idea_id": row["lead_idea_id"], "role": "lead", "rank": 0})
+    for rank, idea_id in enumerate(source_idea_ids, start=1):
+        if idea_id and idea_id not in seen:
+            seen.add(idea_id)
+            sources.append({"idea_id": idea_id, "role": "source", "rank": rank})
+    return sources
+
+
+def _design_brief_tags(row: sqlite3.Row) -> list[str]:
+    tags = ["design-brief"]
+    for value in [
+        row["domain"],
+        f"theme-{row['theme']}" if row["theme"] else "",
+        f"design-{row['design_status']}" if row["design_status"] else "",
+    ]:
+        if value:
+            tags.append(str(value).replace(":", "-").replace(" ", "-"))
+    return list(dict.fromkeys(tags))
+
+
 def _review_state(status: str | None, feedback_outcome: str | None) -> str:
     outcome = (feedback_outcome or "").strip().lower()
     if outcome in {"approved", "rejected"}:
@@ -400,13 +579,13 @@ def _graph_labels(review_state: str) -> list[str]:
 
 def _idea_tags(row: sqlite3.Row, review_state: str, is_approved: bool) -> list[str]:
     tags = []
-    for value in [row["category"], row["domain"], f"review:{review_state}"]:
+    for value in [row["category"], row["domain"], f"review-{review_state}"]:
         if value:
             tags.append(str(value))
     if is_approved:
         tags.append("approved")
     if row["feedback_outcome"]:
-        tags.append(f"feedback:{row['feedback_outcome']}")
+        tags.append(f"feedback-{row['feedback_outcome']}")
     if row["recommendation"]:
-        tags.append(f"recommendation:{row['recommendation']}")
+        tags.append(f"recommendation-{row['recommendation']}")
     return list(dict.fromkeys(tags))

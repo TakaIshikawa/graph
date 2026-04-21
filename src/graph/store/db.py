@@ -350,8 +350,11 @@ class Store:
     def _guess_entity_type(self, edge: KnowledgeEdge, direction: str) -> str:
         """Guess entity type for edge resolution based on source metadata."""
         source_project = edge.metadata.get("source_project", "")
+        if source_project == "max":
+            explicit_type = edge.metadata.get(f"{direction}_entity_type")
+            if explicit_type:
+                return explicit_type
+            return "insight" if direction == "from" else "buildable_unit"
         if source_project == "forty_two" or edge.source == EdgeSource.SOURCE:
             return "knowledge_node"
-        if source_project == "max":
-            return "insight" if direction == "from" else "buildable_unit"
         return "knowledge_node"

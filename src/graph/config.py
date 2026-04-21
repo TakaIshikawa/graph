@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     max_db: str = str(Path("~/Project/experiments/max/max.db").expanduser())
     presence_db: str = str(Path("~/Project/experiments/presence/presence.db").expanduser())
     me_config: str = str(Path("~/Project/experiments/me/config/projects.yaml").expanduser())
+    kindle_db: str = str(Path("~/Project/experiments/supabooks/supabooks.db").expanduser())
 
     embedding_provider: str = "voyage"
     embedding_model: str = "voyage-3-lite"

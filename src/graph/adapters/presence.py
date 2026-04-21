@@ -94,7 +94,7 @@ class PresenceAdapter(SourceAdapter):
     def _ingest_content(
         self, conn: sqlite3.Connection, result: IngestResult, since: SyncState | None
     ) -> None:
-        where = f"WHERE published = 1 AND eval_score >= ?"
+        where = "WHERE published = 1 AND eval_score >= ?"
         params: list = [self.min_score]
         if since and since.last_sync_at:
             where += " AND created_at > ?"

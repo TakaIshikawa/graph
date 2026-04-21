@@ -57,7 +57,7 @@ def populated_store(store: Store):
             utility_score=0.5,
         )
     )
-    d = store.insert_unit(
+    store.insert_unit(
         KnowledgeUnit(
             source_project=SourceProject.PRESENCE,
             source_id="d",

@@ -6,12 +6,15 @@ class SourceProject(StrEnum):
     MAX = "max"
     PRESENCE = "presence"
     ME = "me"
+    KINDLE = "kindle"
+    SOTA = "sota"
 
 
 class ContentType(StrEnum):
     INSIGHT = "insight"
     FINDING = "finding"
     IDEA = "idea"
+    DESIGN_BRIEF = "design_brief"
     ARTIFACT = "artifact"
     METADATA = "metadata"
 

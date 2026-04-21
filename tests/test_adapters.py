@@ -160,6 +160,35 @@ def max_db():
             evidence_pack TEXT NOT NULL DEFAULT '{}',
             created_at TEXT NOT NULL
         );
+        CREATE TABLE design_briefs (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            domain TEXT NOT NULL,
+            theme TEXT NOT NULL,
+            readiness_score REAL NOT NULL DEFAULT 0.0,
+            lead_idea_id TEXT NOT NULL,
+            buyer TEXT NOT NULL,
+            specific_user TEXT NOT NULL,
+            workflow_context TEXT NOT NULL,
+            why_this_now TEXT NOT NULL,
+            merged_product_concept TEXT NOT NULL,
+            synthesis_rationale TEXT NOT NULL,
+            mvp_scope TEXT NOT NULL DEFAULT '[]',
+            first_milestones TEXT NOT NULL DEFAULT '[]',
+            validation_plan TEXT NOT NULL,
+            risks TEXT NOT NULL DEFAULT '[]',
+            source_idea_ids TEXT NOT NULL DEFAULT '[]',
+            design_status TEXT NOT NULL DEFAULT 'draft',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE design_brief_sources (
+            brief_id TEXT NOT NULL,
+            idea_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            rank INTEGER NOT NULL,
+            created_at TEXT NOT NULL
+        );
     """)
     conn.execute(
         """INSERT INTO insights (id, category, title, summary, confidence, domains, created_at)
@@ -201,6 +230,36 @@ def max_db():
                '{"domain": "devtools", "validated_gaps": ["ins-1"]}',
                '2025-05-02T12:00:00+00:00'
            )"""
+    )
+    conn.execute(
+        """INSERT INTO design_briefs (
+               id, title, domain, theme, readiness_score, lead_idea_id,
+               buyer, specific_user, workflow_context, why_this_now,
+               merged_product_concept, synthesis_rationale, mvp_scope,
+               first_milestones, validation_plan, risks, source_idea_ids,
+               design_status, created_at, updated_at
+           )
+           VALUES (
+               'dbf-1', 'API Monitor', 'devtools',
+               'agent security evaluation', 86.0, 'bu-1',
+               'VP Engineering', 'platform engineer',
+               'post-deploy API verification',
+               'API reliability budgets are under pressure',
+               'A focused API verification suite for release workflows',
+               'Combines reviewed ideas around monitoring and validation',
+               '["CLI smoke runner", "Failure summary"]',
+               '["Interview platform teams", "Ship prototype"]',
+               'Test with 10 platform teams in 2 weeks',
+               '["Crowded monitoring market"]',
+               '["bu-1"]',
+               'draft',
+               '2025-05-04T00:00:00+00:00',
+               '2025-05-04T00:00:00+00:00'
+           )"""
+    )
+    conn.execute(
+        """INSERT INTO design_brief_sources (brief_id, idea_id, role, rank, created_at)
+           VALUES ('dbf-1', 'bu-1', 'lead', 0, '2025-05-04T00:00:00+00:00')"""
     )
     conn.commit()
     conn.close()
@@ -343,7 +402,7 @@ class TestMaxAdapter:
 
     def test_ingest_buildable_units_with_edges(self, max_db: str):
         adapter = MaxAdapter(db_path=max_db)
-        result = adapter.ingest()
+        result = adapter.ingest(entity_types=["buildable_unit"])
         ideas = [u for u in result.units if u.content_type == "idea"]
         assert len(ideas) == 1
         assert ideas[0].metadata["review_state"] == "approved"
@@ -354,12 +413,36 @@ class TestMaxAdapter:
         assert ideas[0].metadata["critique_dimensions"]["buyer_clarity"] == 0.9
         assert ideas[0].metadata["evidence_pack"]["domain"] == "devtools"
         assert ideas[0].utility_score == 0.82
-        assert "review:approved" in ideas[0].tags
+        assert "review-approved" in ideas[0].tags
         assert "approved" in ideas[0].tags
         assert len(result.edges) == 1
         assert result.edges[0].relation == "inspires"
         assert result.edges[0].from_unit_id == "ins-1"
         assert result.edges[0].to_unit_id == "bu-1"
+
+    def test_ingest_design_briefs_with_source_edges(self, max_db: str):
+        adapter = MaxAdapter(db_path=max_db)
+        result = adapter.ingest(entity_types=["design_brief"])
+        assert len(result.units) == 1
+        brief = result.units[0]
+        assert brief.content_type == "design_brief"
+        assert brief.source_entity_type == "design_brief"
+        assert brief.title == "API Monitor - Design Brief"
+        assert brief.metadata["brief_title"] == "API Monitor"
+        assert brief.metadata["lead_idea_id"] == "bu-1"
+        assert brief.metadata["source_idea_ids"] == ["bu-1"]
+        assert brief.metadata["mvp_scope"] == ["CLI smoke runner", "Failure summary"]
+        assert brief.utility_score == 0.86
+        assert "design-brief" in brief.tags
+        assert "theme-agent-security-evaluation" in brief.tags
+
+        assert len(result.edges) == 1
+        edge = result.edges[0]
+        assert edge.from_unit_id == "dbf-1"
+        assert edge.to_unit_id == "bu-1"
+        assert edge.relation == "derives_from"
+        assert edge.metadata["from_entity_type"] == "design_brief"
+        assert edge.metadata["to_entity_type"] == "buildable_unit"
 
 
 class TestPresenceAdapter:
@@ -390,7 +473,7 @@ class TestMeAdapter:
 class TestRegistry:
     def test_list_adapters(self):
         adapters = list_adapters()
-        assert set(adapters) == {"forty_two", "max", "presence", "me"}
+        assert set(adapters) == {"forty_two", "max", "presence", "me", "kindle", "sota"}
 
     def test_get_adapter(self):
         adapter = get_adapter("me", config_path="/tmp/test.yaml")
