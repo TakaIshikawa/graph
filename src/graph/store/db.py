@@ -6,10 +6,14 @@ import json
 import sqlite3
 import uuid
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from graph.store.migrations import ensure_schema
 from graph.types.enums import EdgeSource
 from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
+
+if TYPE_CHECKING:
+    from graph.adapters.base import IngestResult
 
 
 def _new_id() -> str:
@@ -288,8 +292,6 @@ class Store:
 
         Returns stats dict with units_inserted, units_skipped, edges_inserted.
         """
-        from graph.adapters.base import IngestResult  # noqa: F811
-
         units_inserted = 0
         units_skipped = 0
 
@@ -304,6 +306,7 @@ class Store:
                 # Update existing unit
                 unit.id = existing.id
                 self.insert_unit(unit)  # UPSERT
+                self.fts_index_unit(unit)
                 source_to_graph_id[unit.source_id] = existing.id
                 units_skipped += 1
             else:

@@ -42,6 +42,7 @@ def _do_ingest(
     store: Store,
     project: str = "all",
     entity_type: str | None = None,
+    full: bool = False,
 ) -> dict:
     """Core ingest logic. Returns total stats dict."""
     projects = ["forty_two", "max", "presence", "me"] if project == "all" else [project]
@@ -52,12 +53,14 @@ def _do_ingest(
     for proj in projects:
         adapter = _get_adapter_for_project(proj)
         since = None
-        for et in adapter.entity_types:
-            s = store.get_sync_state(proj, et)
-            if s and (since is None or s.last_sync_at < since.last_sync_at):
-                since = s
+        if not full:
+            for et in adapter.entity_types:
+                s = store.get_sync_state(proj, et)
+                if s and (since is None or s.last_sync_at < since.last_sync_at):
+                    since = s
 
-        typer.echo(f"Ingesting from {proj}...")
+        mode = "full backfill" if full else "incremental"
+        typer.echo(f"Ingesting from {proj} ({mode})...")
         result = adapter.ingest(since=since, entity_types=entity_types)
         stats = store.ingest(result, proj)
 
@@ -94,10 +97,15 @@ def _do_ingest(
 def ingest(
     project: str = typer.Argument("all", help="Source project or 'all'"),
     entity_type: str | None = typer.Option(None, "--type", "-t", help="Specific entity type"),
+    full: bool = typer.Option(
+        False,
+        "--full",
+        help="Ignore sync state and re-upsert all matching source items",
+    ),
 ) -> None:
     """Ingest knowledge from source projects."""
     store = _get_store()
-    _do_ingest(store, project=project, entity_type=entity_type)
+    _do_ingest(store, project=project, entity_type=entity_type, full=full)
     store.close()
 
 
@@ -221,6 +229,59 @@ def search(
 
 
 @app.command()
+def ideas(
+    review_state: str | None = typer.Option(
+        None,
+        "--review-state",
+        help="Filter max ideas by review state, e.g. approved, rejected, unreviewed",
+    ),
+    approved: bool = typer.Option(
+        False,
+        "--approved",
+        help="Shortcut for --review-state approved",
+    ),
+    domain: str | None = typer.Option(None, "--domain", help="Filter by idea domain"),
+    limit: int = typer.Option(20, "--limit", "-n", help="Max results"),
+) -> None:
+    """List max ideas stored in the graph with review metadata."""
+    store = _get_store()
+    wanted_review_state = "approved" if approved else review_state
+
+    found = []
+    for unit in store.get_all_units(limit=100000):
+        if unit.source_project != "max" or unit.source_entity_type != "buildable_unit":
+            continue
+        metadata = unit.metadata
+        if wanted_review_state and metadata.get("review_state") != wanted_review_state:
+            continue
+        if domain and metadata.get("domain") != domain:
+            continue
+        found.append(unit)
+        if len(found) >= limit:
+            break
+
+    if not found:
+        typer.echo("No matching ideas found.")
+        store.close()
+        return
+
+    for unit in found:
+        metadata = unit.metadata
+        typer.echo(f"\n[{metadata.get('review_state', 'unknown')}] {unit.title}")
+        typer.echo(f"  ID: {unit.id} | Source: {unit.source_id}")
+        typer.echo(f"  Domain: {metadata.get('domain') or '-'} | Tags: {', '.join(unit.tags)}")
+        buyer = metadata.get("buyer")
+        if buyer:
+            typer.echo(f"  Buyer: {buyer}")
+        reason = metadata.get("feedback_reason")
+        if reason:
+            typer.echo(f"  Review reason: {reason}")
+        typer.echo(f"  {unit.content[:160]}...")
+
+    store.close()
+
+
+@app.command()
 def stats() -> None:
     """Show graph statistics."""
     from graph.graph.service import GraphService
@@ -234,10 +295,10 @@ def stats() -> None:
     typer.echo(f"Edges: {s['edges']}")
     typer.echo(f"Components: {s['components']}")
     typer.echo(f"Density: {s['density']}")
-    typer.echo(f"\nBy project:")
+    typer.echo("\nBy project:")
     for proj, count in s["by_project"].items():
         typer.echo(f"  {proj}: {count}")
-    typer.echo(f"\nBy content type:")
+    typer.echo("\nBy content type:")
     for ct, count in s["by_content_type"].items():
         typer.echo(f"  {ct}: {count}")
 
@@ -541,6 +602,11 @@ def sync(
     ),
     batch_size: int = typer.Option(5, "--batch-size", "-b", help="Embedding batch size"),
     delay: float = typer.Option(21.0, "--delay", help="Seconds between embedding batches"),
+    full_ingest: bool = typer.Option(
+        False,
+        "--full-ingest",
+        help="Ignore sync state during the ingest step",
+    ),
 ) -> None:
     """Full sync pipeline: ingest -> embed -> export to Obsidian."""
     store = _get_store()
@@ -548,7 +614,7 @@ def sync(
     typer.echo("=== Graph Sync ===\n")
 
     typer.echo("Step 1/3: Ingesting from all sources...")
-    _do_ingest(store, project="all")
+    _do_ingest(store, project="all", full=full_ingest)
 
     typer.echo("\nStep 2/3: Embedding new units...")
     _do_embed(store, batch_size=batch_size, delay=delay)

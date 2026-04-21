@@ -40,14 +40,33 @@ def _get_adapter(name: str):
 
 
 def _unit_to_dict(unit: KnowledgeUnit) -> dict:
+    review_metadata = {}
+    if unit.source_project == SourceProject.MAX and unit.source_entity_type == "buildable_unit":
+        review_metadata = {
+            key: unit.metadata.get(key)
+            for key in [
+                "review_state",
+                "feedback_outcome",
+                "feedback_reason",
+                "reviewed_at",
+                "is_approved",
+                "graph_labels",
+                "buyer",
+                "validation_plan",
+                "domain",
+            ]
+            if unit.metadata.get(key) is not None
+        }
     return {
         "id": unit.id,
+        "source_id": unit.source_id,
         "source_project": unit.source_project,
         "source_entity_type": unit.source_entity_type,
         "title": unit.title,
         "content": unit.content[:500],
         "content_type": unit.content_type,
         "tags": unit.tags,
+        "metadata": review_metadata,
         "confidence": unit.confidence,
         "utility_score": unit.utility_score,
         "created_at": str(unit.created_at),
@@ -67,6 +86,11 @@ async def list_tools() -> list[Tool]:
                         "type": "string",
                         "enum": ["forty_two", "max", "presence", "me", "all"],
                         "description": "Source project to ingest from, or 'all'",
+                    },
+                    "full": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Ignore sync state and re-upsert all matching source items",
                     },
                 },
                 "required": ["project"],
@@ -89,6 +113,15 @@ async def list_tools() -> list[Tool]:
                         "type": "string",
                         "enum": ["insight", "finding", "idea", "artifact", "metadata"],
                         "description": "Filter by content type",
+                    },
+                    "review_state": {
+                        "type": "string",
+                        "enum": ["approved", "rejected", "unreviewed"],
+                        "description": "Filter max ideas by review state",
+                    },
+                    "tag": {
+                        "type": "string",
+                        "description": "Require an exact graph tag",
                     },
                     "mode": {
                         "type": "string",
@@ -235,6 +268,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     try:
         if name == "ingest":
             project = arguments["project"]
+            full = arguments.get("full", False)
             projects = (
                 ["forty_two", "max", "presence", "me"]
                 if project == "all"
@@ -245,10 +279,11 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             for proj in projects:
                 adapter = _get_adapter(proj)
                 since = None
-                for et in adapter.entity_types:
-                    s = store.get_sync_state(proj, et)
-                    if s and (since is None or s.last_sync_at < since.last_sync_at):
-                        since = s
+                if not full:
+                    for et in adapter.entity_types:
+                        s = store.get_sync_state(proj, et)
+                        if s and (since is None or s.last_sync_at < since.last_sync_at):
+                            since = s
 
                 result = adapter.ingest(since=since)
                 stats = store.ingest(result, proj)
@@ -274,6 +309,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             mode = arguments.get("mode", "fulltext")
             source_project = arguments.get("source_project")
             content_type = arguments.get("content_type")
+            review_state = arguments.get("review_state")
+            tag = arguments.get("tag")
 
             if mode == "fulltext":
                 fts_results = store.fts_search(query, limit=limit)
@@ -284,6 +321,10 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                         if source_project and unit.source_project != source_project:
                             continue
                         if content_type and unit.content_type != content_type:
+                            continue
+                        if review_state and unit.metadata.get("review_state") != review_state:
+                            continue
+                        if tag and tag not in unit.tags:
                             continue
                         results.append(_unit_to_dict(unit))
                 return [TextContent(type="text", text=json.dumps(results))]
@@ -312,6 +353,10 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
                 results = []
                 for unit, score in pairs:
+                    if review_state and unit.metadata.get("review_state") != review_state:
+                        continue
+                    if tag and tag not in unit.tags:
+                        continue
                     d = _unit_to_dict(unit)
                     d["score"] = round(score, 4)
                     results.append(d)

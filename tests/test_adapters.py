@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import sqlite3
 import tempfile
@@ -110,10 +109,24 @@ def max_db():
             title TEXT NOT NULL,
             one_liner TEXT NOT NULL,
             category TEXT NOT NULL,
+            domain TEXT DEFAULT '',
             ideation_mode TEXT DEFAULT 'direct',
             problem TEXT NOT NULL,
             solution TEXT NOT NULL,
             target_users TEXT DEFAULT 'both',
+            specific_user TEXT DEFAULT '',
+            buyer TEXT DEFAULT '',
+            workflow_context TEXT DEFAULT '',
+            current_workaround TEXT DEFAULT '',
+            why_now TEXT DEFAULT '',
+            validation_plan TEXT DEFAULT '',
+            first_10_customers TEXT DEFAULT '',
+            domain_risks TEXT DEFAULT '[]',
+            evidence_rationale TEXT DEFAULT '',
+            novelty_score REAL DEFAULT 0.0,
+            usefulness_score REAL DEFAULT 0.0,
+            quality_score REAL DEFAULT 0.0,
+            rejection_tags TEXT DEFAULT '[]',
             value_proposition TEXT NOT NULL,
             inspiring_insights TEXT DEFAULT '[]',
             evidence_signals TEXT DEFAULT '[]',
@@ -124,14 +137,70 @@ def max_db():
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
+        CREATE TABLE evaluations (
+            buildable_unit_id TEXT PRIMARY KEY,
+            overall_score REAL NOT NULL DEFAULT 0.0,
+            recommendation TEXT NOT NULL DEFAULT 'maybe'
+        );
+        CREATE TABLE feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            buildable_unit_id TEXT NOT NULL,
+            outcome TEXT NOT NULL,
+            reason TEXT NOT NULL DEFAULT '',
+            dimension_values TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            approval_score INTEGER DEFAULT NULL
+        );
+        CREATE TABLE idea_critiques (
+            id TEXT PRIMARY KEY,
+            buildable_unit_id TEXT NOT NULL,
+            dimensions TEXT NOT NULL DEFAULT '{}',
+            reasoning TEXT NOT NULL DEFAULT '',
+            rejection_tags TEXT NOT NULL DEFAULT '[]',
+            evidence_pack TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL
+        );
     """)
     conn.execute(
         """INSERT INTO insights (id, category, title, summary, confidence, domains, created_at)
            VALUES ('ins-1', 'pain_point', 'API monitoring gap', 'Most teams lack proper API monitoring', 0.8, '["devtools","monitoring"]', '2025-05-01T00:00:00+00:00')"""
     )
     conn.execute(
-        """INSERT INTO buildable_units (id, title, one_liner, category, problem, solution, value_proposition, inspiring_insights, status, created_at, updated_at)
-           VALUES ('bu-1', 'API Monitor', 'Lightweight API health checker', 'cli_tool', 'No simple API monitoring', 'CLI tool for API health', 'Save debugging time', '["ins-1"]', 'evaluated', '2025-05-02T00:00:00+00:00', '2025-05-02T00:00:00+00:00')"""
+        """INSERT INTO buildable_units (
+               id, title, one_liner, category, domain, problem, solution,
+               specific_user, buyer, workflow_context, validation_plan,
+               value_proposition, inspiring_insights, status,
+               novelty_score, usefulness_score, quality_score,
+               created_at, updated_at
+           )
+           VALUES (
+               'bu-1', 'API Monitor', 'Lightweight API health checker',
+               'cli_tool', 'devtools', 'No simple API monitoring',
+               'CLI tool for API health', 'platform engineer', 'VP Engineering',
+               'post-deploy API verification', 'Interview 10 platform teams',
+               'Save debugging time', '["ins-1"]', 'evaluated',
+               0.7, 0.8, 7.5,
+               '2025-05-02T00:00:00+00:00', '2025-05-02T00:00:00+00:00'
+           )"""
+    )
+    conn.execute(
+        """INSERT INTO evaluations (buildable_unit_id, overall_score, recommendation)
+           VALUES ('bu-1', 82.0, 'yes')"""
+    )
+    conn.execute(
+        """INSERT INTO feedback (buildable_unit_id, outcome, reason, created_at, approval_score)
+           VALUES ('bu-1', 'approved', 'strong buyer clarity', '2025-05-03T00:00:00+00:00', 4)"""
+    )
+    conn.execute(
+        """INSERT INTO idea_critiques (id, buildable_unit_id, dimensions, reasoning, rejection_tags, evidence_pack, created_at)
+           VALUES (
+               'crit-1', 'bu-1',
+               '{"buyer_clarity": 0.9, "specificity": 0.8}',
+               'Specific workflow and buyer',
+               '[]',
+               '{"domain": "devtools", "validated_gaps": ["ins-1"]}',
+               '2025-05-02T12:00:00+00:00'
+           )"""
     )
     conn.commit()
     conn.close()
@@ -277,6 +346,16 @@ class TestMaxAdapter:
         result = adapter.ingest()
         ideas = [u for u in result.units if u.content_type == "idea"]
         assert len(ideas) == 1
+        assert ideas[0].metadata["review_state"] == "approved"
+        assert ideas[0].metadata["feedback_outcome"] == "approved"
+        assert ideas[0].metadata["feedback_reason"] == "strong buyer clarity"
+        assert ideas[0].metadata["is_approved"] is True
+        assert ideas[0].metadata["buyer"] == "VP Engineering"
+        assert ideas[0].metadata["critique_dimensions"]["buyer_clarity"] == 0.9
+        assert ideas[0].metadata["evidence_pack"]["domain"] == "devtools"
+        assert ideas[0].utility_score == 0.82
+        assert "review:approved" in ideas[0].tags
+        assert "approved" in ideas[0].tags
         assert len(result.edges) == 1
         assert result.edges[0].relation == "inspires"
         assert result.edges[0].from_unit_id == "ins-1"
