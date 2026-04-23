@@ -6,6 +6,7 @@ import os
 import tempfile
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from graph.cli.main import app
@@ -26,6 +27,24 @@ class StoreProxy:
 
     def close(self) -> None:
         return None
+
+
+class MockEmbeddingProvider:
+    """Mock provider that returns deterministic embeddings based on content."""
+
+    def embed(self, text: str) -> list[float]:
+        words = text.lower().split()
+        vec = [0.0] * 8
+        for w in words:
+            h = hash(w) % 8
+            vec[h] += 0.1
+        norm = sum(x * x for x in vec) ** 0.5
+        if norm > 0:
+            vec = [x / norm for x in vec]
+        return vec
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        return [self.embed(t) for t in texts]
 
 
 def _make_store() -> Store:
@@ -96,6 +115,73 @@ def _populate_graph(store: Store) -> tuple[str, str, str, str]:
     return a.id, b.id, c.id, d.id
 
 
+def _populate_search_graph(store: Store) -> None:
+    from graph.rag.search import RAGService
+
+    provider = MockEmbeddingProvider()
+    rag_service = RAGService(store, provider)
+
+    units = [
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="approved",
+            source_entity_type="insight",
+            title="Solar approved insight",
+            content="Solar energy storage market growth",
+            content_type=ContentType.INSIGHT,
+            metadata={"review_state": "approved"},
+            tags=["energy", "solar"],
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="rejected",
+            source_entity_type="insight",
+            title="Solar rejected insight",
+            content="Solar energy storage market risk",
+            content_type=ContentType.INSIGHT,
+            metadata={"review_state": "rejected"},
+            tags=["energy", "solar"],
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="wrong-tag",
+            source_entity_type="insight",
+            title="Solar research insight",
+            content="Solar energy storage market research",
+            content_type=ContentType.INSIGHT,
+            metadata={"review_state": "approved"},
+            tags=["research", "solar"],
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="wrong-type",
+            source_entity_type="design_brief",
+            title="Solar approved brief",
+            content="Solar energy storage market brief",
+            content_type=ContentType.DESIGN_BRIEF,
+            metadata={"review_state": "approved"},
+            tags=["energy", "solar"],
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="other-project",
+            source_entity_type="knowledge_node",
+            title="Solar forty two note",
+            content="Solar energy storage market note",
+            content_type=ContentType.FINDING,
+            tags=["energy", "solar"],
+        ),
+    ]
+
+    ids = []
+    for unit in units:
+        inserted = store.insert_unit(unit)
+        store.fts_index_unit(inserted)
+        ids.append(inserted.id)
+
+    rag_service.embed_batch_and_store(ids)
+
+
 def _cleanup_db(path: str) -> None:
     db_path = Path(path)
     for candidate in (
@@ -153,6 +239,66 @@ def test_shortest_path_command_reports_no_path(monkeypatch):
 
         assert result.exit_code == 0
         assert "No path found between the selected units." in result.output
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_search_command_preserves_default_format(monkeypatch):
+    store = _make_store()
+    _populate_search_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    monkeypatch.setattr("graph.rag.embeddings.get_embedding_provider", lambda *args, **kwargs: MockEmbeddingProvider())
+
+    try:
+        result = runner.invoke(app, ["search", "solar", "--mode", "fulltext", "--limit", "1"])
+
+        assert result.exit_code == 0
+        assert "[max] Solar approved insight" in result.output
+        assert "ID:" in result.output
+        assert "Type:" in result.output
+        assert "Tags:" in result.output
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("mode", ["fulltext", "semantic", "hybrid"])
+def test_search_command_applies_filters_in_all_modes(monkeypatch, mode):
+    store = _make_store()
+    _populate_search_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    monkeypatch.setattr("graph.rag.embeddings.get_embedding_provider", lambda *args, **kwargs: MockEmbeddingProvider())
+
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "search",
+                "solar",
+                "--mode",
+                mode,
+                "--limit",
+                "10",
+                "--source-project",
+                "max",
+                "--content-type",
+                "insight",
+                "--tag",
+                "energy",
+                "--review-state",
+                "approved",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert "[max] Solar approved insight" in result.output
+        assert "Solar rejected insight" not in result.output
+        assert "Solar research insight" not in result.output
+        assert "Solar approved brief" not in result.output
+        assert "Solar forty two note" not in result.output
     finally:
         store.close()
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
