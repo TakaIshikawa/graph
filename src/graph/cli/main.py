@@ -308,6 +308,53 @@ def stats() -> None:
 
 
 @app.command()
+def path(
+    from_id: str = typer.Argument(..., help="Starting knowledge unit ID"),
+    to_id: str = typer.Argument(..., help="Target knowledge unit ID"),
+) -> None:
+    """Show the shortest path between two knowledge units."""
+    from graph.graph.service import GraphService
+
+    store = _get_store()
+    gs = GraphService(store)
+    gs.rebuild()
+
+    from_unit = store.get_unit(from_id)
+    to_unit = store.get_unit(to_id)
+    missing_ids = []
+    if from_unit is None:
+        missing_ids.append(from_id)
+    if to_unit is None:
+        missing_ids.append(to_id)
+
+    if missing_ids:
+        if len(missing_ids) == 1:
+            typer.echo(f"Error: unit not found: {missing_ids[0]}")
+        else:
+            typer.echo(f"Error: units not found: {missing_ids[0]}, {missing_ids[1]}")
+        store.close()
+        raise typer.Exit(code=1)
+
+    path_ids = gs.shortest_path(from_id, to_id)
+    if path_ids is None:
+        typer.echo(f"Error: no path found between {from_id} and {to_id}.")
+        store.close()
+        raise typer.Exit(code=1)
+
+    typer.echo(f"Shortest path ({len(path_ids)} nodes):")
+    for idx, unit_id in enumerate(path_ids, 1):
+        unit = store.get_unit(unit_id)
+        if unit is None:
+            typer.echo(f"Error: path references missing unit {unit_id}.")
+            store.close()
+            raise typer.Exit(code=1)
+        typer.echo(f"{idx}. [{unit.source_project}] {unit.title}")
+        typer.echo(f"   ID: {unit.id}")
+
+    store.close()
+
+
+@app.command()
 def serve() -> None:
     """Start the MCP server (stdio transport)."""
     import asyncio
