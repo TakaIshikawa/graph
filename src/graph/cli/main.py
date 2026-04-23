@@ -46,6 +46,92 @@ def _format_unit_label(unit) -> str:
     return f"[{unit.source_project}] {unit.title}"
 
 
+def _unit_matches_search_filters(
+    unit,
+    *,
+    source_project: str | None = None,
+    content_type: str | None = None,
+    tag: str | None = None,
+    review_state: str | None = None,
+) -> bool:
+    if source_project and str(unit.source_project) != source_project:
+        return False
+    if content_type and str(unit.content_type) != content_type:
+        return False
+    if tag and tag not in unit.tags:
+        return False
+    if review_state and unit.metadata.get("review_state") != review_state:
+        return False
+    return True
+
+
+def _search_fulltext_with_filters(
+    store: Store,
+    query: str,
+    *,
+    limit: int,
+    source_project: str | None = None,
+    content_type: str | None = None,
+    tag: str | None = None,
+    review_state: str | None = None,
+) -> list:
+    fetch_limit = max(limit, 20)
+
+    while True:
+        results = store.fts_search(query, limit=fetch_limit)
+        filtered = []
+        for r in results:
+            unit = store.get_unit(r["unit_id"])
+            if unit and _unit_matches_search_filters(
+                unit,
+                source_project=source_project,
+                content_type=content_type,
+                tag=tag,
+                review_state=review_state,
+            ):
+                filtered.append(unit)
+                if len(filtered) >= limit:
+                    return filtered
+
+        if len(results) < fetch_limit:
+            return filtered
+
+        fetch_limit *= 2
+
+
+def _search_scored_with_filters(
+    fetch_results,
+    query: str,
+    *,
+    limit: int,
+    source_project: str | None = None,
+    content_type: str | None = None,
+    tag: str | None = None,
+    review_state: str | None = None,
+) -> list[tuple[object, float]]:
+    fetch_limit = max(limit, 20)
+
+    while True:
+        pairs = fetch_results(query, fetch_limit)
+        filtered = []
+        for unit, score in pairs:
+            if _unit_matches_search_filters(
+                unit,
+                source_project=source_project,
+                content_type=content_type,
+                tag=tag,
+                review_state=review_state,
+            ):
+                filtered.append((unit, score))
+                if len(filtered) >= limit:
+                    return filtered
+
+        if len(pairs) < fetch_limit:
+            return filtered
+
+        fetch_limit *= 2
+
+
 def _do_ingest(
     store: Store,
     project: str = "all",
@@ -186,24 +272,43 @@ def search(
     query: str = typer.Argument(..., help="Search query"),
     limit: int = typer.Option(10, "--limit", "-n", help="Max results"),
     mode: str = typer.Option("fulltext", "--mode", "-m", help="Search mode: fulltext | semantic | hybrid"),
-    project: str | None = typer.Option(None, "--project", "-p", help="Filter by source project"),
+    source_project: str | None = typer.Option(
+        None,
+        "--source-project",
+        "--project",
+        "-p",
+        help="Filter by source project",
+    ),
+    content_type: str | None = typer.Option(None, "--content-type", help="Filter by content type"),
+    tag: str | None = typer.Option(None, "--tag", help="Require an exact tag"),
+    review_state: str | None = typer.Option(
+        None,
+        "--review-state",
+        help="Filter by review state metadata",
+    ),
 ) -> None:
     """Search knowledge units."""
     store = _get_store()
 
     if mode == "fulltext":
-        results = store.fts_search(query, limit=limit)
+        results = _search_fulltext_with_filters(
+            store,
+            query,
+            limit=limit,
+            source_project=source_project,
+            content_type=content_type,
+            tag=tag,
+            review_state=review_state,
+        )
         if not results:
             typer.echo("No results found.")
             store.close()
             return
-        for r in results:
-            unit = store.get_unit(r["unit_id"])
-            if unit and (project is None or unit.source_project == project):
-                typer.echo(f"\n[{unit.source_project}] {unit.title}")
-                typer.echo(f"  ID: {unit.id}")
-                typer.echo(f"  Type: {unit.content_type} | Tags: {', '.join(unit.tags)}")
-                typer.echo(f"  {unit.content[:120]}...")
+        for unit in results:
+            typer.echo(f"\n[{unit.source_project}] {unit.title}")
+            typer.echo(f"  ID: {unit.id}")
+            typer.echo(f"  Type: {unit.content_type} | Tags: {', '.join(unit.tags)}")
+            typer.echo(f"  {unit.content[:120]}...")
     elif mode in ("semantic", "hybrid"):
         from graph.rag.embeddings import get_embedding_provider
         from graph.rag.search import RAGService
@@ -216,11 +321,25 @@ def search(
         rag = RAGService(store, provider)
 
         if mode == "semantic":
-            pairs = rag.search(
-                query, limit=limit, source_project=project, min_similarity=0.3
+            pairs = _search_scored_with_filters(
+                lambda q, fetch_limit: rag.search(q, limit=fetch_limit, min_similarity=0.3),
+                query,
+                limit=limit,
+                source_project=source_project,
+                content_type=content_type,
+                tag=tag,
+                review_state=review_state,
             )
         else:
-            pairs = rag.hybrid_search(query, limit=limit)
+            pairs = _search_scored_with_filters(
+                lambda q, fetch_limit: rag.hybrid_search(q, limit=fetch_limit),
+                query,
+                limit=limit,
+                source_project=source_project,
+                content_type=content_type,
+                tag=tag,
+                review_state=review_state,
+            )
 
         if not pairs:
             typer.echo("No results found.")
@@ -228,8 +347,6 @@ def search(
             return
 
         for unit, score in pairs:
-            if project and unit.source_project != project:
-                continue
             typer.echo(f"\n[{unit.source_project}] {unit.title}  (score: {score:.3f})")
             typer.echo(f"  ID: {unit.id}")
             typer.echo(f"  Type: {unit.content_type} | Tags: {', '.join(unit.tags)}")
