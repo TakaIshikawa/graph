@@ -10,6 +10,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
 from graph.config import settings
+from graph.cli.main import _do_export_obsidian
 from graph.graph.service import GraphService
 from graph.store.db import Store
 from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
@@ -297,6 +298,30 @@ async def list_tools() -> list[Tool]:
             name="sync_status",
             description="Inspect sync freshness for each supported source/entity pair before ingesting.",
             inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="export_obsidian",
+            description="Export the knowledge graph to an Obsidian vault as markdown notes and index.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "vault_path": {
+                        "type": "string",
+                        "description": "Path to the Obsidian vault root",
+                        "default": "/Users/taka/ObsidianVaults/note",
+                    },
+                    "folder": {
+                        "type": "string",
+                        "description": "Subfolder within the vault",
+                        "default": "Graph",
+                    },
+                    "clean": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Remove the export folder before writing notes",
+                    },
+                },
+            },
         ),
         Tool(
             name="stats",
@@ -600,6 +625,18 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             gs = GraphService(store)
             gs.rebuild()
             return [TextContent(type="text", text=json.dumps(gs.stats()))]
+
+        elif name == "export_obsidian":
+            vault_path = arguments.get("vault_path", "/Users/taka/ObsidianVaults/note")
+            folder = arguments.get("folder", "Graph")
+            clean = arguments.get("clean", False)
+            written = _do_export_obsidian(
+                store,
+                vault_path=vault_path,
+                folder=folder,
+                clean=clean,
+            )
+            return [TextContent(type="text", text=json.dumps({"notes_written": written}))]
 
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
