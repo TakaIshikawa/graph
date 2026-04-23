@@ -40,6 +40,10 @@ def _get_adapter_for_project(name: str):
     return factory()
 
 
+def _format_unit_label(unit) -> str:
+    return f"[{unit.source_project}] {unit.title}"
+
+
 def _do_ingest(
     store: Store,
     project: str = "all",
@@ -368,6 +372,60 @@ def neighbors(
     typer.echo(f"  Edges ({len(result['edges'])}):")
     for e in result["edges"]:
         typer.echo(f"    {e['from'][:8]}... --{e['relation']}--> {e['to'][:8]}...")
+
+    store.close()
+
+
+@app.command(name="shortest-path")
+def shortest_path(
+    from_id: str = typer.Argument(..., help="Start unit ID"),
+    to_id: str = typer.Argument(..., help="End unit ID"),
+) -> None:
+    """Show the shortest path between two units."""
+    from graph.graph.service import GraphService
+
+    store = _get_store()
+    gs = GraphService(store)
+    gs.rebuild()
+
+    missing = []
+    if not gs.G.has_node(from_id):
+        missing.append(f"source unit not found: {from_id}")
+    if not gs.G.has_node(to_id):
+        missing.append(f"target unit not found: {to_id}")
+    if missing:
+        typer.echo("Error: " + "; ".join(missing) + ".")
+        store.close()
+        return
+
+    path = gs.shortest_path(from_id, to_id)
+    if path is None:
+        typer.echo("No path found between the selected units.")
+        store.close()
+        return
+
+    path_units = []
+    for nid in path:
+        unit = store.get_unit(nid)
+        if unit:
+            path_units.append(unit)
+
+    typer.echo(f"Shortest path ({len(path_units)} nodes):")
+    for idx, unit in enumerate(path_units, 1):
+        typer.echo(f"  {idx}. {_format_unit_label(unit)}")
+        typer.echo(f"     ID: {unit.id}")
+
+    if len(path_units) > 1:
+        typer.echo("  Edges:")
+        for left, right in zip(path_units, path_units[1:], strict=False):
+            edge = gs.G.get_edge_data(left.id, right.id) or gs.G.get_edge_data(
+                right.id, left.id
+            )
+            relation = edge.get("relation") if edge else "related_to"
+            typer.echo(
+                f"    {_format_unit_label(left)} --{relation}--> "
+                f"{_format_unit_label(right)}"
+            )
 
     store.close()
 
