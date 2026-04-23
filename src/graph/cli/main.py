@@ -24,6 +24,7 @@ def _get_adapter_for_project(name: str):
     from graph.adapters.max_adapter import MaxAdapter
     from graph.adapters.me import MeAdapter
     from graph.adapters.presence import PresenceAdapter
+    from graph.adapters.sota import SOTAAdapter
 
     mapping = {
         "forty_two": lambda: FortyTwoAdapter(db_path=settings.forty_two_db),
@@ -33,6 +34,7 @@ def _get_adapter_for_project(name: str):
         ),
         "me": lambda: MeAdapter(config_path=settings.me_config),
         "kindle": lambda: KindleAdapter(db_path=settings.kindle_db),
+        "sota": lambda: SOTAAdapter(db_path=settings.sota_db),
     }
     factory = mapping.get(name)
     if factory is None:
@@ -51,7 +53,11 @@ def _do_ingest(
     full: bool = False,
 ) -> dict:
     """Core ingest logic. Returns total stats dict."""
-    projects = ["forty_two", "max", "presence", "me", "kindle"] if project == "all" else [project]
+    projects = (
+        ["forty_two", "max", "presence", "me", "kindle", "sota"]
+        if project == "all"
+        else [project]
+    )
     entity_types = [entity_type] if entity_type else None
 
     total_stats = {"units_inserted": 0, "units_skipped": 0, "edges_inserted": 0}
@@ -326,7 +332,7 @@ def sync_status() -> None:
     """Show last sync timestamps per source project."""
     store = _get_store()
 
-    projects = ["forty_two", "max", "presence", "me"]
+    projects = ["forty_two", "max", "presence", "me", "sota"]
     for proj in projects:
         adapter = _get_adapter_for_project(proj)
         typer.echo(f"\n{proj}:")
