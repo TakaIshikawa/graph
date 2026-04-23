@@ -18,7 +18,7 @@ from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 server = Server("graph")
 
-SUPPORTED_SYNC_PROJECTS = ["forty_two", "max", "presence", "me"]
+SUPPORTED_SYNC_PROJECTS = ["forty_two", "max", "presence", "me", "kindle"]
 
 
 def _get_store() -> Store:
@@ -27,6 +27,7 @@ def _get_store() -> Store:
 
 def _get_adapter(name: str):
     from graph.adapters.forty_two import FortyTwoAdapter
+    from graph.adapters.kindle import KindleAdapter
     from graph.adapters.max_adapter import MaxAdapter
     from graph.adapters.me import MeAdapter
     from graph.adapters.presence import PresenceAdapter
@@ -38,6 +39,7 @@ def _get_adapter(name: str):
             db_path=settings.presence_db, min_score=settings.content_min_score
         ),
         "me": lambda: MeAdapter(config_path=settings.me_config),
+        "kindle": lambda: KindleAdapter(db_path=settings.kindle_db),
     }
     return mapping[name]()
 
@@ -125,7 +127,7 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "project": {
                         "type": "string",
-                        "enum": ["forty_two", "max", "presence", "me", "all"],
+                        "enum": ["forty_two", "max", "presence", "me", "kindle", "all"],
                         "description": "Source project to ingest from, or 'all'",
                     },
                     "full": {
@@ -147,7 +149,7 @@ async def list_tools() -> list[Tool]:
                     "limit": {"type": "integer", "default": 10},
                     "source_project": {
                         "type": "string",
-                        "enum": ["forty_two", "max", "presence", "me"],
+                        "enum": ["forty_two", "max", "presence", "me", "kindle"],
                         "description": "Filter by source project",
                     },
                     "content_type": {
@@ -340,7 +342,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             project = arguments["project"]
             full = arguments.get("full", False)
             projects = (
-                ["forty_two", "max", "presence", "me"]
+                ["forty_two", "max", "presence", "me", "kindle"]
                 if project == "all"
                 else [project]
             )

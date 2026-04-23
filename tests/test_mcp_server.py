@@ -34,6 +34,12 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(
     )
 
     tools = asyncio.run(mcp_server.list_tools())
+    ingest_tool = next(tool for tool in tools if tool.name == "ingest")
+    assert "kindle" in ingest_tool.inputSchema["properties"]["project"]["enum"]
+
+    search_tool = next(tool for tool in tools if tool.name == "search")
+    assert "kindle" in search_tool.inputSchema["properties"]["source_project"]["enum"]
+
     assert any(tool.name == "sync_status" for tool in tools)
 
     response = asyncio.run(mcp_server.call_tool("sync_status", {}))
@@ -68,7 +74,19 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(
         "last_source_id": None,
         "items_synced": 0,
     }
-
+    kindle_missing = next(
+        item
+        for item in statuses
+        if item["source_project"] == "kindle" and item["source_entity_type"] == "book"
+    )
+    assert kindle_missing == {
+        "source_project": "kindle",
+        "source_entity_type": "book",
+        "has_sync_state": False,
+        "last_sync_at": None,
+        "last_source_id": None,
+        "items_synced": 0,
+    }
 
 def test_export_obsidian_tool_exports_same_vault_structure_as_cli(
     tmp_path, monkeypatch

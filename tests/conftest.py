@@ -5,12 +5,13 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
-VENV_SITE_PACKAGES = ROOT / ".venv" / "lib" / "python3.12" / "site-packages"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
 
-for path in (SRC, VENV_SITE_PACKAGES):
+venv_site_packages = sorted(ROOT.glob(".venv/lib/python*/site-packages"))
+for path in reversed(venv_site_packages):
     path_str = str(path)
     if path.exists() and path_str not in sys.path:
         sys.path.insert(0, path_str)
