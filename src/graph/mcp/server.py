@@ -17,6 +17,8 @@ from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 server = Server("graph")
 
+SUPPORTED_SYNC_PROJECTS = ["forty_two", "max", "presence", "me"]
+
 
 def _get_store() -> Store:
     return Store(settings.database_url)
@@ -37,6 +39,44 @@ def _get_adapter(name: str):
         "me": lambda: MeAdapter(config_path=settings.me_config),
     }
     return mapping[name]()
+
+
+def _supported_sync_targets() -> list[tuple[str, str]]:
+    targets: list[tuple[str, str]] = []
+    for project in SUPPORTED_SYNC_PROJECTS:
+        adapter = _get_adapter(project)
+        for entity_type in adapter.entity_types:
+            targets.append((project, entity_type))
+    return targets
+
+
+def _sync_state_to_dict(
+    source_project: str,
+    source_entity_type: str,
+    state: SyncState | None,
+) -> dict:
+    if state is None:
+        return {
+            "source_project": source_project,
+            "source_entity_type": source_entity_type,
+            "has_sync_state": False,
+            "last_sync_at": None,
+            "last_source_id": None,
+            "items_synced": 0,
+        }
+
+    last_sync_at = state.last_sync_at
+    if last_sync_at is not None and hasattr(last_sync_at, "isoformat"):
+        last_sync_at = last_sync_at.isoformat()
+
+    return {
+        "source_project": source_project,
+        "source_entity_type": source_entity_type,
+        "has_sync_state": True,
+        "last_sync_at": last_sync_at,
+        "last_source_id": state.last_source_id,
+        "items_synced": state.items_synced,
+    }
 
 
 def _unit_to_dict(unit: KnowledgeUnit) -> dict:
@@ -252,6 +292,11 @@ async def list_tools() -> list[Tool]:
                 },
                 "required": ["from_unit_id", "to_unit_id", "relation"],
             },
+        ),
+        Tool(
+            name="sync_status",
+            description="Inspect sync freshness for each supported source/entity pair before ingesting.",
+            inputSchema={"type": "object", "properties": {}},
         ),
         Tool(
             name="stats",
@@ -506,6 +551,15 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             gs.rebuild()
             connections = gs.cross_project_connections()
             return [TextContent(type="text", text=json.dumps(connections))]
+
+        elif name == "sync_status":
+            statuses = []
+            for source_project, source_entity_type in _supported_sync_targets():
+                state = store.get_sync_state(source_project, source_entity_type)
+                statuses.append(
+                    _sync_state_to_dict(source_project, source_entity_type, state)
+                )
+            return [TextContent(type="text", text=json.dumps({"sync_states": statuses}))]
 
         elif name == "add_unit":
             unit = KnowledgeUnit(
