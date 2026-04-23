@@ -414,6 +414,71 @@ def ideas(
     store.close()
 
 
+@app.command(name="design-briefs")
+def design_briefs(
+    status: str | None = typer.Option(None, "--status", help="Filter by design brief status"),
+    domain: str | None = typer.Option(None, "--domain", help="Filter by brief domain"),
+    limit: int = typer.Option(20, "--limit", "-n", help="Max results"),
+) -> None:
+    """List max design briefs stored in the graph."""
+    store = _get_store()
+
+    found = []
+    for unit in store.get_all_units(limit=100000):
+        if unit.source_project != "max" or unit.source_entity_type != "design_brief":
+            continue
+
+        metadata = unit.metadata
+        brief_status = metadata.get("design_status") or metadata.get("status")
+        if status and str(brief_status or "").lower() != status.lower():
+            continue
+        if domain and metadata.get("domain") != domain:
+            continue
+
+        found.append(unit)
+        if len(found) >= limit:
+            break
+
+    if not found:
+        typer.echo("No matching design briefs found.")
+        store.close()
+        return
+
+    for unit in found:
+        metadata = unit.metadata
+        readiness_score = metadata.get("readiness_score")
+        brief_status = metadata.get("design_status") or metadata.get("status")
+        lead_idea_id = metadata.get("lead_idea_id")
+        source_idea_ids = metadata.get("source_idea_ids") or []
+        first_milestones = metadata.get("first_milestones") or []
+
+        typer.echo(f"\n[{brief_status or 'unknown'}] {unit.title}")
+        typer.echo(f"  ID: {unit.id} | Source: {unit.source_id}")
+        typer.echo(
+            f"  Domain: {metadata.get('domain') or '-'} | Theme: {metadata.get('theme') or '-'}"
+        )
+        typer.echo(
+            f"  Readiness: {readiness_score if readiness_score is not None else '-'}"
+        )
+        typer.echo(f"  Status: {brief_status or '-'}")
+        typer.echo(
+            f"  Lead idea: {lead_idea_id or '-'} | Source ideas: "
+            f"{', '.join(source_idea_ids) if source_idea_ids else '-'}"
+        )
+
+        validation_plan = metadata.get("validation_plan")
+        if validation_plan:
+            typer.echo(f"  Validation plan: {validation_plan}")
+        if first_milestones:
+            typer.echo("  First milestones:")
+            for milestone in first_milestones:
+                typer.echo(f"    - {milestone}")
+
+        typer.echo(f"  {unit.content[:160]}...")
+
+    store.close()
+
+
 @app.command()
 def stats() -> None:
     """Show graph statistics."""

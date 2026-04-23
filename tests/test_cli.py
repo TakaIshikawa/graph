@@ -182,6 +182,66 @@ def _populate_search_graph(store: Store) -> None:
     rag_service.embed_batch_and_store(ids)
 
 
+def _populate_design_briefs(store: Store) -> None:
+    briefs = [
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="brief-1",
+            source_entity_type="design_brief",
+            title="Ops workflow brief",
+            content="Brief content one",
+            content_type=ContentType.DESIGN_BRIEF,
+            metadata={
+                "domain": "devtools",
+                "theme": "workflow",
+                "readiness_score": 82,
+                "lead_idea_id": "idea-lead-1",
+                "source_idea_ids": ["idea-a", "idea-b"],
+                "design_status": "draft",
+                "validation_plan": "Interview 5 ops teams and validate workflow fit.",
+                "first_milestones": ["Draft interview guide", "Run first pilot"],
+            },
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="brief-2",
+            source_entity_type="design_brief",
+            title="Platform expansion brief",
+            content="Brief content two",
+            content_type=ContentType.DESIGN_BRIEF,
+            metadata={
+                "domain": "platform",
+                "theme": "scale",
+                "readiness_score": 64,
+                "lead_idea_id": "idea-lead-2",
+                "source_idea_ids": ["idea-c"],
+                "design_status": "review",
+                "validation_plan": "Validate platform constraints with infrastructure stakeholders.",
+                "first_milestones": ["Map constraints", "Propose rollout"],
+            },
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="brief-3",
+            source_entity_type="design_brief",
+            title="Ignored external brief",
+            content="Should not appear",
+            content_type=ContentType.DESIGN_BRIEF,
+            metadata={
+                "domain": "devtools",
+                "theme": "workflow",
+                "readiness_score": 99,
+                "lead_idea_id": "idea-x",
+                "source_idea_ids": ["idea-y"],
+                "design_status": "draft",
+            },
+        ),
+    ]
+
+    for brief in briefs:
+        store.insert_unit(brief)
+
+
 def _cleanup_db(path: str) -> None:
     db_path = Path(path)
     for candidate in (
@@ -259,6 +319,52 @@ def test_search_command_preserves_default_format(monkeypatch):
         assert "ID:" in result.output
         assert "Type:" in result.output
         assert "Tags:" in result.output
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_design_briefs_command_prints_readable_fields(monkeypatch):
+    store = _make_store()
+    _populate_design_briefs(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(app, ["design-briefs"])
+
+        assert result.exit_code == 0
+        assert "[draft] Ops workflow brief" in result.output
+        assert "Domain: devtools | Theme: workflow" in result.output
+        assert "Readiness: 82" in result.output
+        assert "Lead idea: idea-lead-1 | Source ideas: idea-a, idea-b" in result.output
+        assert "Validation plan: Interview 5 ops teams" in result.output
+        assert "First milestones:" in result.output
+        assert "Ignored external brief" not in result.output
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize(
+    ("args", "expected_title", "unexpected_title"),
+    [
+        (["--domain", "devtools"], "Ops workflow brief", "Platform expansion brief"),
+        (["--status", "review"], "Platform expansion brief", "Ops workflow brief"),
+    ],
+)
+def test_design_briefs_command_applies_filters(monkeypatch, args, expected_title, unexpected_title):
+    store = _make_store()
+    _populate_design_briefs(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(app, ["design-briefs", *args, "--limit", "1"])
+
+        assert result.exit_code == 0
+        assert expected_title in result.output
+        assert unexpected_title not in result.output
     finally:
         store.close()
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]

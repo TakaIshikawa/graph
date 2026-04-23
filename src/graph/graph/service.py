@@ -97,8 +97,41 @@ class GraphService:
         """Top nodes by PageRank."""
         if not self.G.nodes:
             return []
-        pr = nx.pagerank(self.G, weight="weight")
-        sorted_pr = sorted(pr.items(), key=lambda x: x[1], reverse=True)
+
+        # Keep this dependency-free so the CLI/test environment does not require
+        # NumPy/SciPy C extensions just to rank a small graph.
+        nodes = list(self.G.nodes)
+        n = len(nodes)
+        if n == 1:
+            return [(nodes[0], 1.0)]
+
+        damping = 0.85
+        ranks = {node: 1.0 / n for node in nodes}
+
+        for _ in range(100):
+            sink_rank = sum(ranks[node] for node in nodes if self.G.out_degree(node) == 0)
+            base_rank = (1.0 - damping) / n
+            sink_share = damping * sink_rank / n
+            new_ranks = {node: base_rank + sink_share for node in nodes}
+
+            for node in nodes:
+                out_edges = list(self.G.out_edges(node, data=True))
+                if not out_edges:
+                    continue
+                total_weight = sum(float(data.get("weight", 1.0)) for _, _, data in out_edges)
+                if total_weight <= 0:
+                    continue
+                share = damping * ranks[node]
+                for _, target, data in out_edges:
+                    weight = float(data.get("weight", 1.0))
+                    new_ranks[target] += share * (weight / total_weight)
+
+            delta = sum(abs(new_ranks[node] - ranks[node]) for node in nodes)
+            ranks = new_ranks
+            if delta < 1e-12:
+                break
+
+        sorted_pr = sorted(ranks.items(), key=lambda x: x[1], reverse=True)
         return sorted_pr[:limit]
 
     def get_bridges(self, limit: int = 10) -> list[tuple[str, float]]:
