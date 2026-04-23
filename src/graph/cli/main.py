@@ -46,6 +46,10 @@ def _format_unit_label(unit) -> str:
     return f"[{unit.source_project}] {unit.title}"
 
 
+def _format_project_pair(projects: list[str]) -> str:
+    return f"{projects[0]} <-> {projects[1]}"
+
+
 def _unit_matches_search_filters(
     unit,
     *,
@@ -635,6 +639,58 @@ def central(
                 f"[{unit.source_project}] {unit.title} "
                 f"(PageRank: {score:.6f})"
             )
+
+    store.close()
+
+
+@app.command()
+def bridges(
+    limit: int = typer.Option(10, "--limit", "-n", help="Max results"),
+) -> None:
+    """Find bridge knowledge units."""
+    from graph.graph.service import GraphService
+
+    store = _get_store()
+    gs = GraphService(store)
+    gs.rebuild()
+
+    found = gs.get_bridges(limit=limit)
+    if not found:
+        typer.echo("No nodes found.")
+        store.close()
+        return
+
+    for nid, score in found:
+        unit = store.get_unit(nid)
+        if unit:
+            typer.echo(
+                f"[{unit.source_project}] {unit.title} "
+                f"(betweenness: {score:.6f})"
+            )
+
+    store.close()
+
+
+@app.command(name="cross-project")
+def cross_project() -> None:
+    """Summarize cross-project connections."""
+    from graph.graph.service import GraphService
+
+    store = _get_store()
+    gs = GraphService(store)
+    gs.rebuild()
+
+    found = gs.cross_project_connections()
+    if not found:
+        typer.echo("No cross-project connections found.")
+        store.close()
+        return
+
+    typer.echo("Cross-project connections:")
+    for item in found:
+        typer.echo(
+            f"  {_format_project_pair(item['projects'])}: {item['edge_count']} edges"
+        )
 
     store.close()
 

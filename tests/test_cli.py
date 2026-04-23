@@ -264,6 +264,64 @@ def test_search_command_preserves_default_format(monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_bridges_command_prints_readable_units_and_rebuilds(monkeypatch):
+    from graph.graph.service import GraphService
+
+    store = _make_store()
+    _populate_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    original_rebuild = GraphService.rebuild
+    calls = []
+
+    def tracking_rebuild(self):
+        calls.append(True)
+        return original_rebuild(self)
+
+    monkeypatch.setattr(GraphService, "rebuild", tracking_rebuild)
+
+    try:
+        result = runner.invoke(app, ["bridges", "--limit", "2"])
+
+        assert result.exit_code == 0
+        assert calls == [True]
+        assert "[forty_two] Node B" in result.output
+        assert "betweenness:" in result.output
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_cross_project_command_summarizes_project_pairs(monkeypatch):
+    from graph.graph.service import GraphService
+
+    store = _make_store()
+    _populate_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    original_rebuild = GraphService.rebuild
+    calls = []
+
+    def tracking_rebuild(self):
+        calls.append(True)
+        return original_rebuild(self)
+
+    monkeypatch.setattr(GraphService, "rebuild", tracking_rebuild)
+
+    try:
+        result = runner.invoke(app, ["cross-project"])
+
+        assert result.exit_code == 0
+        assert calls == [True]
+        assert "Cross-project connections:" in result.output
+        assert "forty_two <-> max: 1 edges" in result.output
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 @pytest.mark.parametrize("mode", ["fulltext", "semantic", "hybrid"])
 def test_search_command_applies_filters_in_all_modes(monkeypatch, mode):
     store = _make_store()
