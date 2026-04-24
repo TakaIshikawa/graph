@@ -701,6 +701,84 @@ class TestGraphService:
         assert "n0 -->|builds_on| n1" in text
         assert "inspires" not in text
 
+    def test_export_cytoscape_writes_elements_json_and_caps_whole_graph(
+        self, populated_store: Store, tmp_path
+    ):
+        a = populated_store.get_unit_by_source("forty_two", "a", "knowledge_node")
+        b = populated_store.get_unit_by_source("forty_two", "b", "knowledge_node")
+        output_path = tmp_path / "graph.cy.json"
+
+        gs = GraphService(populated_store)
+        stats = gs.export_cytoscape(output_path, limit=4)
+        payload = json.loads(output_path.read_text())
+
+        assert stats == {
+            "path": str(output_path),
+            "node_count": 4,
+            "edge_count": 2,
+            "mode": "whole_graph",
+            "capped": False,
+        }
+        assert set(payload["elements"]) == {"nodes", "edges"}
+        node_data = {node["data"]["id"]: node["data"] for node in payload["elements"]["nodes"]}
+        assert a.id in node_data
+        assert b.id in node_data
+        assert node_data[a.id]["label"] == "Node A"
+        assert node_data[a.id]["title"] == "Node A"
+        assert node_data[a.id]["source_project"] == "forty_two"
+        assert node_data[a.id]["content_type"] == "insight"
+        assert node_data[a.id]["tags"] == []
+        assert node_data[a.id]["utility_score"] == 0.9
+        assert node_data[a.id]["confidence"] is None
+        assert node_data[a.id]["created_at"]
+        assert node_data[a.id]["updated_at"]
+
+        assert len(payload["elements"]["edges"]) == 2
+        edge_data = next(
+            edge["data"]
+            for edge in payload["elements"]["edges"]
+            if edge["data"]["relation"] == "builds_on"
+        )
+        assert edge_data["id"]
+        assert edge_data["source"] == a.id
+        assert edge_data["target"] == b.id
+        assert edge_data["relation"] == "builds_on"
+        assert edge_data["weight"] == 0.75
+        assert edge_data["edge_source"] == "manual"
+        assert edge_data["created_at"]
+
+        capped_stats = gs.export_cytoscape(tmp_path / "capped.cy.json", limit=2)
+        assert capped_stats["node_count"] == 2
+        assert capped_stats["capped"] is True
+
+    def test_export_cytoscape_neighborhood_respects_unit_and_depth_cap(
+        self, populated_store: Store, tmp_path
+    ):
+        a = populated_store.get_unit_by_source("forty_two", "a", "knowledge_node")
+        d = populated_store.get_unit_by_source("presence", "d", "knowledge_item")
+        output_path = tmp_path / "neighborhood.cy.json"
+
+        gs = GraphService(populated_store)
+        gs.rebuild()
+        stats = gs.export_cytoscape(output_path, unit_id=a.id, depth=9)
+        payload = json.loads(output_path.read_text())
+
+        assert stats == {
+            "path": str(output_path),
+            "node_count": 3,
+            "edge_count": 2,
+            "mode": "neighborhood",
+            "capped": False,
+            "depth": 3,
+            "center_unit_id": a.id,
+        }
+        node_ids = {node["data"]["id"] for node in payload["elements"]["nodes"]}
+        assert d.id not in node_ids
+        assert {edge["data"]["relation"] for edge in payload["elements"]["edges"]} == {
+            "builds_on",
+            "inspires",
+        }
+
     def test_export_neighborhood_writes_capped_local_json(
         self, populated_store: Store, tmp_path
     ):

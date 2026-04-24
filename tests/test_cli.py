@@ -793,6 +793,51 @@ def test_export_mermaid_command_writes_markdown_and_supports_neighborhood(tmp_pa
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_export_cytoscape_command_writes_json_and_emits_json_stats(tmp_path, monkeypatch):
+    store = _make_store()
+    a_id, b_id, c_id, d_id = _populate_graph(store)
+    export_path = tmp_path / "graph.cy.json"
+
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    result = runner.invoke(
+        app,
+        [
+            "export-cytoscape",
+            str(export_path),
+            "--unit-id",
+            a_id,
+            "--depth",
+            "9",
+            "--json",
+        ],
+    )
+
+    try:
+        assert result.exit_code == 0
+        stats = json.loads(result.output)
+        assert stats == {
+            "path": str(export_path),
+            "node_count": 3,
+            "edge_count": 2,
+            "mode": "neighborhood",
+            "capped": False,
+            "depth": 3,
+            "center_unit_id": a_id,
+        }
+        payload = json.loads(export_path.read_text())
+        node_ids = {node["data"]["id"] for node in payload["elements"]["nodes"]}
+        assert node_ids == {a_id, b_id, c_id}
+        assert d_id not in node_ids
+        edge_data = {edge["data"]["relation"]: edge["data"] for edge in payload["elements"]["edges"]}
+        assert edge_data["builds_on"]["source"] == a_id
+        assert edge_data["builds_on"]["target"] == b_id
+        assert edge_data["builds_on"]["edge_source"] == "inferred"
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_export_neighborhood_command_writes_local_json_and_caps_depth(tmp_path, monkeypatch):
     store = _make_store()
     a_id, _, _, d_id = _populate_graph(store)

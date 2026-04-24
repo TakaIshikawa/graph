@@ -2396,6 +2396,59 @@ def test_export_mermaid_tool_returns_path_counts_and_capped_flag(tmp_path, monke
     assert c not in text
 
 
+def test_export_cytoscape_tool_returns_path_counts_and_writes_elements(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    cytoscape_path = tmp_path / "graph.cy.json"
+
+    store = Store(str(db_path))
+    a, b, c = _populate_backlinks_graph(store)
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.PRESENCE,
+            source_id="isolated",
+            source_entity_type="knowledge_item",
+            title="Isolated",
+            content="Outside the export cap",
+        )
+    )
+    store.close()
+
+    tools = asyncio.run(mcp_server.list_tools())
+    export_tool = next(tool for tool in tools if tool.name == "export_cytoscape")
+    assert export_tool.inputSchema["properties"]["limit"]["default"] == 100
+    assert export_tool.inputSchema["properties"]["depth"]["maximum"] == 3
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "export_cytoscape",
+            {
+                "path": str(cytoscape_path),
+                "unit_id": a,
+                "depth": 9,
+            },
+        )
+    )
+    payload = json.loads(response[0].text)
+
+    assert payload == {
+        "path": str(cytoscape_path),
+        "node_count": 3,
+        "edge_count": 2,
+        "mode": "neighborhood",
+        "capped": False,
+        "depth": 3,
+        "center_unit_id": a,
+    }
+    exported = json.loads(cytoscape_path.read_text())
+    assert {node["data"]["id"] for node in exported["elements"]["nodes"]} == {a, b, c}
+    edge_data = {edge["data"]["relation"]: edge["data"] for edge in exported["elements"]["edges"]}
+    assert edge_data["builds_on"]["id"]
+    assert edge_data["builds_on"]["source"] == a
+    assert edge_data["builds_on"]["target"] == b
+    assert edge_data["builds_on"]["edge_source"] == "manual"
+
+
 def test_export_neighborhood_tool_returns_path_counts_and_writes_json(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     export_path = tmp_path / "neighborhood.json"

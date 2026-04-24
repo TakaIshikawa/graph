@@ -453,6 +453,102 @@ class GraphService:
             stats["center_unit_id"] = unit_id
         return stats
 
+    def export_cytoscape(
+        self,
+        path: str | Path,
+        *,
+        unit_id: str | None = None,
+        depth: int = 1,
+        limit: int = 100,
+    ) -> dict:
+        """Write Cytoscape.js elements JSON and return export stats."""
+        output_path = Path(path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        capped_limit = max(1, int(limit))
+
+        if unit_id is not None:
+            payload = self.build_neighborhood_export(unit_id, depth=depth)
+            units = sorted(payload["units"], key=lambda unit: unit["id"])
+            selected_ids = {unit["id"] for unit in units}
+            edges = [
+                edge
+                for edge in payload["edges"]
+                if edge["from_unit_id"] in selected_ids and edge["to_unit_id"] in selected_ids
+            ]
+            mode = "neighborhood"
+            capped = False
+            depth_used = payload["depth"]
+        else:
+            all_units = sorted(self.store.get_all_units(limit=1000000000), key=lambda unit: unit.id)
+            units = [self._unit_export_data(unit) for unit in all_units[:capped_limit]]
+            selected_ids = {unit["id"] for unit in units}
+            edges = [
+                self._edge_export_data(edge)
+                for edge in sorted(
+                    self.store.get_all_edges(),
+                    key=lambda edge: (
+                        edge.from_unit_id,
+                        edge.to_unit_id,
+                        str(edge.relation),
+                        edge.id,
+                    ),
+                )
+                if edge.from_unit_id in selected_ids and edge.to_unit_id in selected_ids
+            ]
+            mode = "whole_graph"
+            capped = len(all_units) > len(units)
+            depth_used = None
+
+        elements = {
+            "nodes": [
+                {
+                    "data": {
+                        "id": unit["id"],
+                        "label": unit["title"],
+                        "title": unit["title"],
+                        "source_project": unit["source_project"],
+                        "content_type": unit["content_type"],
+                        "tags": unit["tags"],
+                        "utility_score": unit["utility_score"],
+                        "confidence": unit["confidence"],
+                        "created_at": unit["created_at"],
+                        "updated_at": unit["updated_at"],
+                    }
+                }
+                for unit in units
+            ],
+            "edges": [
+                {
+                    "data": {
+                        "id": edge["id"],
+                        "source": edge["from_unit_id"],
+                        "target": edge["to_unit_id"],
+                        "relation": edge["relation"],
+                        "weight": edge["weight"],
+                        "edge_source": edge["source"],
+                        "created_at": edge["created_at"],
+                    }
+                }
+                for edge in edges
+            ],
+        }
+        output_path.write_text(
+            json.dumps({"elements": elements}, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+        stats = {
+            "path": str(output_path),
+            "node_count": len(units),
+            "edge_count": len(edges),
+            "mode": mode,
+            "capped": capped,
+        }
+        if unit_id is not None:
+            stats["depth"] = depth_used
+            stats["center_unit_id"] = unit_id
+        return stats
+
     def export_turtle(
         self, path: str | Path, base_uri: str = "https://graph.local/unit/"
     ) -> dict:

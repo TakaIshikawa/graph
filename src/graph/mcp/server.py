@@ -14,6 +14,7 @@ from graph.cli.main import (
     _backlinks_payload,
     _do_context_pack,
     _do_delete_edge,
+    _do_export_cytoscape,
     _do_export_graphml,
     _do_export_json,
     _do_export_mermaid,
@@ -1332,6 +1333,35 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="export_cytoscape",
+            description="Export a capped graph view or focused unit neighborhood as Cytoscape.js elements JSON.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Destination Cytoscape JSON file path",
+                    },
+                    "unit_id": {
+                        "type": "string",
+                        "description": "Optional center knowledge unit ID",
+                    },
+                    "depth": {
+                        "type": "integer",
+                        "default": 1,
+                        "maximum": 3,
+                        "description": "Traversal depth when unit_id is provided",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "default": 100,
+                        "description": "Maximum nodes to export",
+                    },
+                },
+                "required": ["path"],
+            },
+        ),
+        Tool(
             name="export_turtle",
             description="Export the graph to RDF Turtle for linked-data tools.",
             inputSchema={
@@ -2255,6 +2285,23 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         elif name == "export_mermaid":
             try:
                 stats = _do_export_mermaid(
+                    store,
+                    arguments["path"],
+                    unit_id=arguments.get("unit_id"),
+                    depth=arguments.get("depth", 1),
+                    limit=arguments.get("limit", 100),
+                )
+            except ValueError as exc:
+                try:
+                    payload = json.loads(str(exc))
+                except json.JSONDecodeError:
+                    payload = {"error": "export_failed", "message": str(exc)}
+                return [TextContent(type="text", text=json.dumps(payload))]
+            return [TextContent(type="text", text=json.dumps(stats))]
+
+        elif name == "export_cytoscape":
+            try:
+                stats = _do_export_cytoscape(
                     store,
                     arguments["path"],
                     unit_id=arguments.get("unit_id"),
