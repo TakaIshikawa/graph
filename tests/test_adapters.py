@@ -22,7 +22,9 @@ from graph.adapters.me import MeAdapter
 from graph.adapters.opml import OpmlAdapter
 from graph.adapters.presence import PresenceAdapter
 from graph.adapters.registry import get_adapter, list_adapters
+from graph.adapters.text import TextAdapter
 from graph.store.db import Store
+from graph.types.models import SyncState
 
 
 @pytest.fixture
@@ -525,6 +527,75 @@ class TestMarkdownAdapter:
         assert result.edges == []
 
 
+class TestTextAdapter:
+    def test_ingest_text_documents_recursively_with_titles_and_metadata(self, tmp_path):
+        nested = tmp_path / "notes" / "nested"
+        nested.mkdir(parents=True)
+        first = tmp_path / "notes" / "draft.txt"
+        second = nested / "transcript.txt"
+        first.write_text("\n  Draft Title  \nBody search phrase.\n", encoding="utf-8")
+        second.write_text("Transcript Title\nSecond body.\n", encoding="utf-8")
+        (nested / "skip.md").write_text("Not plain text.\n", encoding="utf-8")
+
+        result = TextAdapter(root_path=str(tmp_path / "notes")).ingest()
+
+        assert [unit.source_id for unit in result.units] == [
+            "draft.txt",
+            "nested/transcript.txt",
+        ]
+        by_source = {unit.source_id: unit for unit in result.units}
+        draft = by_source["draft.txt"]
+        assert draft.source_project == "me"
+        assert draft.source_entity_type == "text_document"
+        assert draft.title == "Draft Title"
+        assert draft.content == "\n  Draft Title  \nBody search phrase.\n"
+        assert draft.metadata == {
+            "path": "draft.txt",
+            "file_size": first.stat().st_size,
+        }
+        assert draft.created_at.tzinfo is not None
+        assert by_source["nested/transcript.txt"].title == "Transcript Title"
+        assert result.edges == []
+
+    def test_empty_missing_and_non_directory_roots_return_empty_result(self, tmp_path):
+        empty = TextAdapter(root_path=str(tmp_path)).ingest()
+        missing = TextAdapter(root_path=str(tmp_path / "missing")).ingest()
+        file_root = tmp_path / "file.txt"
+        file_root.write_text("Root file.\n", encoding="utf-8")
+        non_directory = TextAdapter(root_path=str(file_root)).ingest()
+
+        assert empty.units == []
+        assert missing.units == []
+        assert non_directory.units == []
+
+    def test_title_falls_back_to_file_stem_and_sync_skips_old_files(self, tmp_path):
+        old_path = tmp_path / "old.txt"
+        new_path = tmp_path / "untitled.txt"
+        old_path.write_text("Old Title\n", encoding="utf-8")
+        new_path.write_text("\n\n   \n", encoding="utf-8")
+        os.utime(old_path, (1_700_000_000, 1_700_000_000))
+        os.utime(new_path, (1_700_100_000, 1_700_100_000))
+
+        result = TextAdapter(root_path=str(tmp_path)).ingest(
+            since=SyncState(
+                source_project="text",
+                source_entity_type="text_document",
+                last_sync_at=datetime.fromtimestamp(1_700_050_000, tz=timezone.utc),
+            )
+        )
+
+        assert [unit.source_id for unit in result.units] == ["untitled.txt"]
+        assert result.units[0].title == "untitled"
+
+    def test_entity_type_filter_skips_text_documents(self, tmp_path):
+        (tmp_path / "note.txt").write_text("Note\n", encoding="utf-8")
+
+        result = TextAdapter(root_path=str(tmp_path)).ingest(entity_types=["markdown_note"])
+
+        assert result.units == []
+        assert result.edges == []
+
+
 class TestFeedAdapter:
     def test_ingest_rss_items_with_stable_metadata_and_tags(self, tmp_path):
         feed = tmp_path / "research.xml"
@@ -897,6 +968,7 @@ class TestRegistry:
             "csv",
             "jsonl",
             "opml",
+            "text",
         }
 
     def test_get_adapter(self):
@@ -908,6 +980,9 @@ class TestRegistry:
 
         opml_adapter = get_adapter("opml", path="/tmp/test.opml")
         assert opml_adapter.name == "opml"
+
+        text_adapter = get_adapter("text", root_path="/tmp/text")
+        assert text_adapter.name == "text"
 
     def test_unknown_adapter(self):
         with pytest.raises(KeyError):

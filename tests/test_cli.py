@@ -1379,6 +1379,48 @@ def test_ingest_opml_command_uses_configured_path_and_inserts_edges(tmp_path, mo
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_ingest_text_command_uses_configured_root_and_indexes_fulltext(tmp_path, monkeypatch):
+    root = tmp_path / "text"
+    nested = root / "nested"
+    nested.mkdir(parents=True)
+    note = nested / "transcript.txt"
+    note.write_text("Transcript Heading\nPlain text search phrase.\n", encoding="utf-8")
+
+    store = _make_store()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    monkeypatch.setattr("graph.cli.main.settings.text_root", str(root))
+
+    try:
+        result = runner.invoke(app, ["ingest", "text"])
+
+        assert result.exit_code == 0
+        assert "Ingesting from text" in result.output
+        assert "text: 1 new" in result.output
+        unit = store.get_unit_by_source("me", "nested/transcript.txt", "text_document")
+        assert unit is not None
+        assert unit.title == "Transcript Heading"
+        assert unit.content == "Transcript Heading\nPlain text search phrase.\n"
+        assert unit.metadata == {
+            "path": "nested/transcript.txt",
+            "file_size": note.stat().st_size,
+        }
+        sync_state = store.get_sync_state("text", "text_document")
+        assert sync_state is not None
+        assert sync_state.items_synced == 1
+
+        search = runner.invoke(
+            app,
+            ["search", "Plain text", "--mode", "fulltext", "--limit", "1"],
+        )
+
+        assert search.exit_code == 0
+        assert "Transcript Heading" in search.output
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_shortest_path_command_prints_readable_path(monkeypatch):
     store = _make_store()
     a_id, _, c_id, _ = _populate_graph(store)

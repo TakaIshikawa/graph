@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     opml_path: str = ""
     me_config: str = ""
     markdown_root: str = ""
+    text_root: str = ""
     obsidian_vault_path: str = "/Users/taka/ObsidianVaults/note"
 
     embedding_provider: str = "voyage"

@@ -15,6 +15,7 @@ from graph.adapters.me import MeAdapter
 from graph.adapters.opml import OpmlAdapter
 from graph.adapters.presence import PresenceAdapter
 from graph.adapters.sota import SOTAAdapter
+from graph.adapters.text import TextAdapter
 
 _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "forty_two": FortyTwoAdapter,
@@ -29,6 +30,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "csv": CsvAdapter,
     "jsonl": JsonlAdapter,
     "opml": OpmlAdapter,
+    "text": TextAdapter,
 }
 
 

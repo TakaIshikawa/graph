@@ -32,6 +32,7 @@ SUPPORTED_SYNC_PROJECTS = [
     "csv",
     "jsonl",
     "opml",
+    "text",
 ]
 
 
@@ -52,6 +53,7 @@ def _get_adapter_for_project(name: str):
     from graph.adapters.opml import OpmlAdapter
     from graph.adapters.presence import PresenceAdapter
     from graph.adapters.sota import SOTAAdapter
+    from graph.adapters.text import TextAdapter
 
     mapping = {
         "forty_two": lambda: FortyTwoAdapter(db_path=settings.forty_two_db),
@@ -68,6 +70,7 @@ def _get_adapter_for_project(name: str):
         "csv": lambda: CsvAdapter(path=settings.csv_path),
         "jsonl": lambda: JsonlAdapter(path=settings.jsonl_path),
         "opml": lambda: OpmlAdapter(path=settings.opml_path),
+        "text": lambda: TextAdapter(root_path=settings.text_root),
     }
     factory = mapping.get(name)
     if factory is None:
@@ -1360,6 +1363,7 @@ def _do_ingest(
             "csv",
             "jsonl",
             "opml",
+            "text",
         ]
         if project == "all"
         else [project]
