@@ -1527,3 +1527,90 @@ def test_queries_cli_save_list_run_and_delete(monkeypatch):
     finally:
         store.close()
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_update_and_delete_unit_cli_json_reindexes_and_cleans_edges(monkeypatch):
+    store = _make_store()
+    manual = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="manual-1",
+            source_entity_type="manual",
+            title="Original solar note",
+            content="Original solar content",
+            metadata={"owner": "me", "review_state": "draft"},
+            tags=["solar"],
+        )
+    )
+    neighbor = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="manual-2",
+            source_entity_type="manual",
+            title="Neighbor",
+            content="Neighbor content",
+        )
+    )
+    store.fts_index_unit(manual)
+    store.fts_index_unit(neighbor)
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=manual.id,
+            to_unit_id=neighbor.id,
+            relation=EdgeRelation.RELATES_TO,
+        )
+    )
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        update_result = runner.invoke(
+            app,
+            [
+                "update-unit",
+                manual.id,
+                "--title",
+                "Updated battery note",
+                "--content",
+                "Updated battery content",
+                "--content-type",
+                "finding",
+                "--tag",
+                "battery",
+                "--metadata-json",
+                '{"review_state":"approved","priority":"high"}',
+                "--json",
+            ],
+        )
+
+        assert update_result.exit_code == 0
+        payload = json.loads(update_result.output)
+        assert payload["updated"] is True
+        assert payload["unit"]["title"] == "Updated battery note"
+        assert payload["unit"]["content_type"] == "finding"
+        assert payload["unit"]["tags"] == ["solar", "battery"]
+        assert payload["unit"]["metadata"] == {
+            "owner": "me",
+            "priority": "high",
+            "review_state": "approved",
+        }
+
+        assert store.fts_search("battery")[0]["unit_id"] == manual.id
+        assert store.fts_search("Original") == []
+
+        delete_result = runner.invoke(
+            app, ["delete-unit", manual.id, "--yes", "--json"]
+        )
+
+        assert delete_result.exit_code == 0
+        assert json.loads(delete_result.output) == {
+            "unit_id": manual.id,
+            "deleted": True,
+            "edges_deleted": 1,
+        }
+        assert store.get_unit(manual.id) is None
+        assert store.get_all_edges() == []
+        assert store.fts_search("battery") == []
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]

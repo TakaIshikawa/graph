@@ -20,7 +20,9 @@ from graph.cli.main import (
     _do_export_turtle,
     _do_import_json,
     _do_infer_edges,
+    _do_delete_unit,
     _do_search,
+    _do_update_unit,
     _search_filters_dict,
 )
 from graph.graph.service import GraphService
@@ -462,6 +464,47 @@ async def list_tools() -> list[Tool]:
                     },
                 },
                 "required": ["title", "content"],
+            },
+        ),
+        Tool(
+            name="update_unit",
+            description="Update a manually maintained knowledge unit and refresh full-text search.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "unit_id": {"type": "string", "description": "Knowledge unit ID"},
+                    "title": {"type": "string", "description": "Replacement title"},
+                    "content": {"type": "string", "description": "Replacement content"},
+                    "content_type": {
+                        "type": "string",
+                        "enum": [content_type.value for content_type in ContentType],
+                        "description": "Replacement content type",
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "default": [],
+                        "description": "Tags to append without removing existing tags",
+                    },
+                    "metadata": {
+                        "type": "object",
+                        "additionalProperties": True,
+                        "default": {},
+                        "description": "Metadata keys to merge into existing metadata",
+                    },
+                },
+                "required": ["unit_id"],
+            },
+        ),
+        Tool(
+            name="delete_unit",
+            description="Delete a knowledge unit, its full-text row, and related edges.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "unit_id": {"type": "string", "description": "Knowledge unit ID"},
+                },
+                "required": ["unit_id"],
             },
         ),
         Tool(
@@ -1012,6 +1055,29 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             inserted = store.insert_unit(unit)
             store.fts_index_unit(inserted)
             return [TextContent(type="text", text=json.dumps(_unit_to_dict(inserted)))]
+
+        elif name == "update_unit":
+            try:
+                payload = _do_update_unit(
+                    store,
+                    arguments["unit_id"],
+                    title=arguments.get("title"),
+                    content=arguments.get("content"),
+                    content_type=arguments.get("content_type"),
+                    tags=arguments.get("tags", []),
+                    metadata=arguments.get("metadata", {}),
+                )
+            except ValueError as exc:
+                payload = {
+                    "unit_id": arguments.get("unit_id"),
+                    "updated": False,
+                    "error": str(exc),
+                }
+            return [TextContent(type="text", text=json.dumps(payload, default=str))]
+
+        elif name == "delete_unit":
+            payload = _do_delete_unit(store, arguments["unit_id"])
+            return [TextContent(type="text", text=json.dumps(payload))]
 
         elif name == "add_edge":
             edge = KnowledgeEdge(

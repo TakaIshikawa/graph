@@ -179,6 +179,79 @@ class Store:
         )
         self.conn.commit()
 
+    def update_unit_fields(
+        self,
+        unit_id: str,
+        *,
+        title: str | None = None,
+        content: str | None = None,
+        content_type: str | None = None,
+        tags: list[str] | None = None,
+        metadata: dict | None = None,
+    ) -> KnowledgeUnit | None:
+        unit = self.get_unit(unit_id)
+        if unit is None:
+            return None
+
+        if title is not None:
+            unit.title = title
+        if content is not None:
+            unit.content = content
+        if content_type is not None:
+            unit.content_type = content_type
+        if tags:
+            for tag in tags:
+                if tag not in unit.tags:
+                    unit.tags.append(tag)
+        if metadata:
+            unit.metadata = {**unit.metadata, **metadata}
+
+        now = _utcnow_iso()
+        self.conn.execute(
+            """UPDATE knowledge_units
+               SET title = ?,
+                   content = ?,
+                   content_type = ?,
+                   metadata = ?,
+                   tags = ?,
+                   updated_at = ?
+               WHERE id = ?""",
+            (
+                unit.title,
+                unit.content,
+                unit.content_type,
+                json.dumps(unit.metadata),
+                json.dumps(unit.tags),
+                now,
+                unit.id,
+            ),
+        )
+        self.conn.commit()
+        updated = self.get_unit(unit_id)
+        if updated is not None:
+            self.fts_index_unit(updated)
+        return updated
+
+    def delete_unit(self, unit_id: str) -> dict:
+        unit = self.get_unit(unit_id)
+        if unit is None:
+            return {"unit_id": unit_id, "deleted": False, "edges_deleted": 0}
+
+        edge_cursor = self.conn.execute(
+            "DELETE FROM edges WHERE from_unit_id = ? OR to_unit_id = ?",
+            (unit_id, unit_id),
+        )
+        self.conn.execute("DELETE FROM knowledge_fts WHERE unit_id = ?", (unit_id,))
+        unit_cursor = self.conn.execute(
+            "DELETE FROM knowledge_units WHERE id = ?", (unit_id,)
+        )
+        self.conn.commit()
+        return {
+            "unit_id": unit_id,
+            "deleted": unit_cursor.rowcount > 0,
+            "edges_deleted": edge_cursor.rowcount,
+        }
+
     # --- JSON import/export ---
 
     def export_json(self) -> dict:

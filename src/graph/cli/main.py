@@ -10,6 +10,7 @@ import typer
 
 from graph.config import settings
 from graph.store.db import Store
+from graph.types.enums import ContentType
 from graph.types.models import SyncState
 
 app = typer.Typer(name="graph", help="Personal Knowledge Graph — aggregate, connect, retrieve")
@@ -241,11 +242,69 @@ def _do_import_json(store: Store, path: str | Path) -> dict:
     return {"path": str(input_path), **stats}
 
 
+def _parse_metadata_json(value: str | dict | None) -> dict:
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ValueError("--metadata-json must be a valid JSON object.") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError("--metadata-json must be a valid JSON object.")
+    return parsed
+
+
+def _do_update_unit(
+    store: Store,
+    unit_id: str,
+    *,
+    title: str | None = None,
+    content: str | None = None,
+    content_type: str | None = None,
+    tags: list[str] | None = None,
+    metadata: dict | str | None = None,
+) -> dict:
+    if content_type is not None:
+        content_type = ContentType(content_type).value
+    metadata_updates = _parse_metadata_json(metadata)
+    updated = store.update_unit_fields(
+        unit_id,
+        title=title,
+        content=content,
+        content_type=content_type,
+        tags=tags,
+        metadata=metadata_updates,
+    )
+    if updated is None:
+        return {
+            "unit_id": unit_id,
+            "updated": False,
+            "error": "unit_not_found",
+            "message": f"Unit not found: {unit_id}",
+        }
+    return {"unit_id": unit_id, "updated": True, "unit": _unit_to_json(updated)}
+
+
+def _do_delete_unit(store: Store, unit_id: str) -> dict:
+    stats = store.delete_unit(unit_id)
+    if not stats["deleted"]:
+        stats["error"] = "unit_not_found"
+        stats["message"] = f"Unit not found: {unit_id}"
+    return stats
+
+
 def _unit_to_json(unit, *, score: float | None = None, include_content: bool = True) -> dict:
     created_at = (
         unit.created_at.isoformat()
         if isinstance(unit.created_at, datetime)
         else str(unit.created_at)
+    )
+    updated_at = (
+        unit.updated_at.isoformat()
+        if isinstance(unit.updated_at, datetime)
+        else str(unit.updated_at)
     )
     data = {
         "id": unit.id,
@@ -257,6 +316,7 @@ def _unit_to_json(unit, *, score: float | None = None, include_content: bool = T
         "tags": unit.tags,
         "metadata": unit.metadata,
         "created_at": created_at,
+        "updated_at": updated_at,
     }
     if include_content:
         data["content"] = unit.content
@@ -943,6 +1003,93 @@ def infer_edges(
         )
 
     store.close()
+
+
+@app.command(name="update-unit")
+def update_unit(
+    unit_id: str = typer.Argument(..., help="Knowledge unit ID"),
+    title: str | None = typer.Option(None, "--title", help="Replace the unit title"),
+    content: str | None = typer.Option(None, "--content", help="Replace the unit content"),
+    content_type: str | None = typer.Option(
+        None,
+        "--content-type",
+        help="Replace the content type",
+    ),
+    tag: list[str] = typer.Option(
+        [],
+        "--tag",
+        help="Append a tag. Repeat to add multiple tags.",
+    ),
+    metadata_json: str | None = typer.Option(
+        None,
+        "--metadata-json",
+        help="Merge a JSON object into existing metadata",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Update a manually maintained knowledge unit."""
+    store = _get_store()
+    try:
+        payload = _do_update_unit(
+            store,
+            unit_id,
+            title=title,
+            content=content,
+            content_type=content_type,
+            tags=tag,
+            metadata=metadata_json,
+        )
+    except ValueError as exc:
+        if json_output:
+            _json_echo({"unit_id": unit_id, "updated": False, "error": str(exc)})
+            return
+        raise typer.BadParameter(str(exc)) from exc
+    finally:
+        store.close()
+
+    if payload.get("error"):
+        if json_output:
+            _json_echo(payload)
+            return
+        typer.echo(payload["message"])
+        raise typer.Exit(code=1)
+
+    if json_output:
+        _json_echo(payload)
+        return
+
+    unit = payload["unit"]
+    typer.echo(f"Updated unit {unit['id']}: {unit['title']}")
+
+
+@app.command(name="delete-unit")
+def delete_unit(
+    unit_id: str = typer.Argument(..., help="Knowledge unit ID"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Delete without prompting"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Delete a knowledge unit, its FTS row, and related edges."""
+    if not yes:
+        typer.confirm(f"Delete unit {unit_id} and its related edges?", abort=True)
+
+    store = _get_store()
+    payload = _do_delete_unit(store, unit_id)
+    store.close()
+
+    if payload.get("error"):
+        if json_output:
+            _json_echo(payload)
+            return
+        typer.echo(payload["message"])
+        raise typer.Exit(code=1)
+
+    if json_output:
+        _json_echo(payload)
+        return
+
+    typer.echo(
+        f"Deleted unit {unit_id}; removed {payload['edges_deleted']} related edges."
+    )
 
 
 @app.command()

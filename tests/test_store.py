@@ -116,6 +116,40 @@ class TestUnitCRUD:
         assert store.count_units(source_project="forty_two") == 1
         assert store.count_units(source_project="max") == 1
 
+    def test_update_unit_fields_merges_metadata_tags_and_reindexes_fts(
+        self, store: Store, sample_unit: KnowledgeUnit
+    ):
+        sample_unit.metadata = {"review_state": "draft", "owner": "me"}
+        sample_unit.tags = ["energy"]
+        inserted = store.insert_unit(sample_unit)
+        store.fts_index_unit(inserted)
+        original = store.get_unit(inserted.id)
+
+        updated = store.update_unit_fields(
+            inserted.id,
+            title="Battery sizing note",
+            content="Battery storage sizing replaces old solar panel content.",
+            content_type="idea",
+            tags=["battery", "energy"],
+            metadata={"review_state": "approved", "priority": "high"},
+        )
+
+        assert updated is not None
+        assert updated.title == "Battery sizing note"
+        assert updated.content_type == ContentType.IDEA
+        assert updated.tags == ["energy", "battery"]
+        assert updated.metadata == {
+            "review_state": "approved",
+            "owner": "me",
+            "priority": "high",
+        }
+        assert str(updated.updated_at) != str(original.updated_at)
+        assert store.fts_search("battery")[0]["unit_id"] == inserted.id
+        assert store.fts_search("monocrystalline") == []
+
+    def test_update_unit_fields_missing_unit(self, store: Store):
+        assert store.update_unit_fields("missing", title="Nope") is None
+
 
 class TestEdgeCRUD:
     def test_insert_and_get_edges(self, store: Store):
@@ -222,6 +256,48 @@ class TestEdgeCRUD:
         store.insert_edge(edge)
         store.insert_edge(edge)  # duplicate
         assert len(store.get_all_edges()) == 1
+
+    def test_delete_unit_removes_fts_row_and_related_edges(self, store: Store):
+        u1 = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.ME,
+                source_id="manual-1",
+                source_entity_type="manual",
+                title="Manual solar note",
+                content="Solar content to delete",
+            )
+        )
+        u2 = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.ME,
+                source_id="manual-2",
+                source_entity_type="manual",
+                title="Manual battery note",
+                content="Battery content",
+            )
+        )
+        store.fts_index_unit(u1)
+        store.fts_index_unit(u2)
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=u1.id,
+                to_unit_id=u2.id,
+                relation=EdgeRelation.RELATES_TO,
+            )
+        )
+
+        stats = store.delete_unit(u1.id)
+
+        assert stats == {"unit_id": u1.id, "deleted": True, "edges_deleted": 1}
+        assert store.get_unit(u1.id) is None
+        assert store.get_all_edges() == []
+        assert store.fts_search("solar") == []
+        assert store.fts_search("battery")[0]["unit_id"] == u2.id
+        assert store.delete_unit(u1.id) == {
+            "unit_id": u1.id,
+            "deleted": False,
+            "edges_deleted": 0,
+        }
 
 
 class TestBacklinks:

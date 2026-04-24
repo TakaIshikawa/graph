@@ -477,6 +477,93 @@ def test_saved_query_tools_create_list_run_and_delete(tmp_path, monkeypatch):
     }
 
 
+def test_update_and_delete_unit_tools_reindex_and_clean_edges(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    manual = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="manual-1",
+            source_entity_type="manual",
+            title="Original solar note",
+            content="Original solar content",
+            metadata={"owner": "me", "review_state": "draft"},
+            tags=["solar"],
+        )
+    )
+    neighbor = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="manual-2",
+            source_entity_type="manual",
+            title="Neighbor",
+            content="Neighbor content",
+        )
+    )
+    store.fts_index_unit(manual)
+    store.fts_index_unit(neighbor)
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=manual.id,
+            to_unit_id=neighbor.id,
+            relation=EdgeRelation.RELATES_TO,
+        )
+    )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    tool_names = {tool.name for tool in tools}
+    assert {"update_unit", "delete_unit"} <= tool_names
+
+    update_response = asyncio.run(
+        mcp_server.call_tool(
+            "update_unit",
+            {
+                "unit_id": manual.id,
+                "title": "Updated battery note",
+                "content": "Updated battery content",
+                "content_type": "finding",
+                "tags": ["battery"],
+                "metadata": {"review_state": "approved", "priority": "high"},
+            },
+        )
+    )
+    payload = json.loads(update_response[0].text)
+    assert payload["updated"] is True
+    assert payload["unit"]["title"] == "Updated battery note"
+    assert payload["unit"]["metadata"] == {
+        "owner": "me",
+        "priority": "high",
+        "review_state": "approved",
+    }
+
+    verify = Store(str(db_path))
+    try:
+        assert verify.fts_search("battery")[0]["unit_id"] == manual.id
+        assert verify.fts_search("Original") == []
+    finally:
+        verify.close()
+
+    delete_response = asyncio.run(
+        mcp_server.call_tool("delete_unit", {"unit_id": manual.id})
+    )
+    assert json.loads(delete_response[0].text) == {
+        "unit_id": manual.id,
+        "deleted": True,
+        "edges_deleted": 1,
+    }
+
+    verify = Store(str(db_path))
+    try:
+        assert verify.get_unit(manual.id) is None
+        assert verify.get_all_edges() == []
+        assert verify.fts_search("battery") == []
+    finally:
+        verify.close()
+
+
 def test_backlinks_tool_returns_expanded_json_filters_and_missing_error(
     tmp_path, monkeypatch
 ):
