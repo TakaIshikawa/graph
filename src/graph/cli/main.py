@@ -13,6 +13,8 @@ from graph.store.db import Store
 from graph.types.models import SyncState
 
 app = typer.Typer(name="graph", help="Personal Knowledge Graph — aggregate, connect, retrieve")
+queries_app = typer.Typer(help="Save and run repeatable graph searches")
+app.add_typer(queries_app, name="queries")
 
 
 def _get_store() -> Store:
@@ -193,6 +195,127 @@ def _search_scored_with_filters(
             return filtered
 
         fetch_limit *= 2
+
+
+def _search_filters_dict(
+    *,
+    source_project: str | None = None,
+    content_type: str | None = None,
+    tag: str | None = None,
+    review_state: str | None = None,
+) -> dict:
+    return {
+        key: value
+        for key, value in {
+            "source_project": source_project,
+            "content_type": content_type,
+            "tag": tag,
+            "review_state": review_state,
+        }.items()
+        if value is not None
+    }
+
+
+def _validate_search_mode(mode: str) -> None:
+    if mode not in ("fulltext", "semantic", "hybrid"):
+        raise ValueError(f"Unknown mode: {mode}. Use fulltext, semantic, or hybrid.")
+
+
+def _do_search(
+    store: Store,
+    query: str,
+    *,
+    limit: int = 10,
+    mode: str = "fulltext",
+    filters: dict | None = None,
+) -> dict:
+    _validate_search_mode(mode)
+    filters = filters or {}
+
+    if mode == "fulltext":
+        results = _search_fulltext_with_filters(
+            store,
+            query,
+            limit=limit,
+            source_project=filters.get("source_project"),
+            content_type=filters.get("content_type"),
+            tag=filters.get("tag"),
+            review_state=filters.get("review_state"),
+        )
+        return {
+            "query": query,
+            "mode": mode,
+            "results": [_unit_to_json(unit) for unit in results],
+        }
+
+    from graph.rag.embeddings import get_embedding_provider
+    from graph.rag.search import RAGService
+
+    provider = get_embedding_provider(
+        settings.embedding_provider,
+        settings.embedding_api_key,
+        settings.embedding_model,
+    )
+    rag = RAGService(store, provider)
+
+    if mode == "semantic":
+        pairs = _search_scored_with_filters(
+            lambda q, fetch_limit: rag.search(q, limit=fetch_limit, min_similarity=0.3),
+            query,
+            limit=limit,
+            source_project=filters.get("source_project"),
+            content_type=filters.get("content_type"),
+            tag=filters.get("tag"),
+            review_state=filters.get("review_state"),
+        )
+    else:
+        pairs = _search_scored_with_filters(
+            lambda q, fetch_limit: rag.hybrid_search(q, limit=fetch_limit),
+            query,
+            limit=limit,
+            source_project=filters.get("source_project"),
+            content_type=filters.get("content_type"),
+            tag=filters.get("tag"),
+            review_state=filters.get("review_state"),
+        )
+
+    return {
+        "query": query,
+        "mode": mode,
+        "results": [_unit_to_json(unit, score=score) for unit, score in pairs],
+    }
+
+
+def _render_search_payload(payload: dict, *, json_output: bool) -> None:
+    if "error" in payload:
+        if json_output:
+            _json_echo(payload)
+        else:
+            typer.echo(payload["error"])
+        return
+
+    results = payload["results"]
+    if json_output:
+        _json_echo(payload)
+        return
+
+    if not results:
+        typer.echo("No results found.")
+        return
+
+    for result in results:
+        if "score" in result:
+            typer.echo(
+                f"\n[{result['source_project']}] {result['title']}  "
+                f"(score: {result['score']:.3f})"
+            )
+        else:
+            typer.echo(f"\n[{result['source_project']}] {result['title']}")
+        typer.echo(f"  ID: {result['id']}")
+        typer.echo(
+            f"  Type: {result['content_type']} | Tags: {', '.join(result['tags'])}"
+        )
+        typer.echo(f"  {result.get('content', '')[:120]}...")
 
 
 def _do_ingest(
@@ -448,107 +571,163 @@ def search(
 ) -> None:
     """Search knowledge units."""
     store = _get_store()
-
-    if mode == "fulltext":
-        results = _search_fulltext_with_filters(
+    try:
+        payload = _do_search(
             store,
             query,
             limit=limit,
+            mode=mode,
+            filters=_search_filters_dict(
+                source_project=source_project,
+                content_type=content_type,
+                tag=tag,
+                review_state=review_state,
+            ),
+        )
+    except ValueError as exc:
+        payload = {
+            "error": str(exc),
+            "valid_modes": ["fulltext", "semantic", "hybrid"],
+        }
+
+    _render_search_payload(payload, json_output=json_output)
+    store.close()
+
+
+@queries_app.command(name="save")
+def save_query(
+    name: str = typer.Argument(..., help="Saved query name"),
+    query: str = typer.Argument(..., help="Search query"),
+    limit: int = typer.Option(10, "--limit", "-n", help="Max results"),
+    mode: str = typer.Option("fulltext", "--mode", "-m", help="Search mode: fulltext | semantic | hybrid"),
+    source_project: str | None = typer.Option(
+        None,
+        "--source-project",
+        "--project",
+        "-p",
+        help="Filter by source project",
+    ),
+    content_type: str | None = typer.Option(None, "--content-type", help="Filter by content type"),
+    tag: str | None = typer.Option(None, "--tag", help="Require an exact tag"),
+    review_state: str | None = typer.Option(
+        None,
+        "--review-state",
+        help="Filter by review state metadata",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Save a reusable search query."""
+    try:
+        _validate_search_mode(mode)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    store = _get_store()
+    saved = store.save_query(
+        name=name,
+        query=query,
+        mode=mode,
+        limit=limit,
+        filters=_search_filters_dict(
             source_project=source_project,
             content_type=content_type,
             tag=tag,
             review_state=review_state,
-        )
-        if not results:
-            if json_output:
-                _json_echo({"query": query, "mode": mode, "results": []})
-                store.close()
-                return
-            typer.echo("No results found.")
-            store.close()
-            return
-        if json_output:
-            _json_echo(
-                {
-                    "query": query,
-                    "mode": mode,
-                    "results": [_unit_to_json(unit) for unit in results],
-                }
-            )
-            store.close()
-            return
-        for unit in results:
-            typer.echo(f"\n[{unit.source_project}] {unit.title}")
-            typer.echo(f"  ID: {unit.id}")
-            typer.echo(f"  Type: {unit.content_type} | Tags: {', '.join(unit.tags)}")
-            typer.echo(f"  {unit.content[:120]}...")
-    elif mode in ("semantic", "hybrid"):
-        from graph.rag.embeddings import get_embedding_provider
-        from graph.rag.search import RAGService
-
-        provider = get_embedding_provider(
-            settings.embedding_provider,
-            settings.embedding_api_key,
-            settings.embedding_model,
-        )
-        rag = RAGService(store, provider)
-
-        if mode == "semantic":
-            pairs = _search_scored_with_filters(
-                lambda q, fetch_limit: rag.search(q, limit=fetch_limit, min_similarity=0.3),
-                query,
-                limit=limit,
-                source_project=source_project,
-                content_type=content_type,
-                tag=tag,
-                review_state=review_state,
-            )
-        else:
-            pairs = _search_scored_with_filters(
-                lambda q, fetch_limit: rag.hybrid_search(q, limit=fetch_limit),
-                query,
-                limit=limit,
-                source_project=source_project,
-                content_type=content_type,
-                tag=tag,
-                review_state=review_state,
-            )
-
-        if not pairs:
-            if json_output:
-                _json_echo({"query": query, "mode": mode, "results": []})
-                store.close()
-                return
-            typer.echo("No results found.")
-            store.close()
-            return
-
-        if json_output:
-            _json_echo(
-                {
-                    "query": query,
-                    "mode": mode,
-                    "results": [
-                        _unit_to_json(unit, score=score) for unit, score in pairs
-                    ],
-                }
-            )
-            store.close()
-            return
-
-        for unit, score in pairs:
-            typer.echo(f"\n[{unit.source_project}] {unit.title}  (score: {score:.3f})")
-            typer.echo(f"  ID: {unit.id}")
-            typer.echo(f"  Type: {unit.content_type} | Tags: {', '.join(unit.tags)}")
-            typer.echo(f"  {unit.content[:120]}...")
-    else:
-        if json_output:
-            _json_echo({"error": f"Unknown mode: {mode}", "valid_modes": ["fulltext", "semantic", "hybrid"]})
-            store.close()
-            return
-        typer.echo(f"Unknown mode: {mode}. Use fulltext, semantic, or hybrid.")
-
+        ),
+    )
     store.close()
+
+    if json_output:
+        _json_echo(saved)
+        return
+    typer.echo(f"Saved query '{name}' ({mode}, limit {limit}).")
+
+
+@queries_app.command(name="list")
+def list_queries(
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """List saved queries."""
+    store = _get_store()
+    queries = store.list_saved_queries()
+    store.close()
+
+    if json_output:
+        _json_echo({"queries": queries})
+        return
+
+    if not queries:
+        typer.echo("No saved queries.")
+        return
+
+    for saved in queries:
+        filters = ", ".join(
+            f"{key}={value}" for key, value in saved["filters"].items()
+        )
+        suffix = f" | {filters}" if filters else ""
+        typer.echo(
+            f"{saved['name']}: {saved['query']} "
+            f"({saved['mode']}, limit {saved['limit']}){suffix}"
+        )
+
+
+@queries_app.command(name="run")
+def run_query(
+    name: str = typer.Argument(..., help="Saved query name"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Run a saved query."""
+    store = _get_store()
+    saved = store.get_saved_query(name)
+    if not saved:
+        store.close()
+        if json_output:
+            _json_echo({"error": f"Saved query not found: {name}", "name": name})
+            return
+        typer.echo(f"Saved query not found: {name}")
+        raise typer.Exit(code=1)
+
+    try:
+        payload = _do_search(
+            store,
+            saved["query"],
+            limit=saved["limit"],
+            mode=saved["mode"],
+            filters=saved["filters"],
+        )
+    except ValueError as exc:
+        payload = {
+            "error": str(exc),
+            "valid_modes": ["fulltext", "semantic", "hybrid"],
+        }
+
+    _render_search_payload(payload, json_output=json_output)
+    store.close()
+
+
+@queries_app.command(name="delete")
+def delete_query(
+    name: str = typer.Argument(..., help="Saved query name"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Delete a saved query."""
+    store = _get_store()
+    deleted = store.delete_saved_query(name)
+    store.close()
+
+    payload = {"name": name, "deleted": deleted}
+    if not deleted:
+        payload["error"] = f"Saved query not found: {name}"
+
+    if json_output:
+        _json_echo(payload)
+        return
+
+    if deleted:
+        typer.echo(f"Deleted saved query '{name}'.")
+        return
+    typer.echo(f"Saved query not found: {name}")
+    raise typer.Exit(code=1)
 
 
 @app.command()

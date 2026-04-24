@@ -62,6 +62,16 @@ CREATE TABLE IF NOT EXISTS sync_state (
     PRIMARY KEY(source_project, source_entity_type)
 );
 
+CREATE TABLE IF NOT EXISTS saved_queries (
+    name TEXT PRIMARY KEY,
+    query TEXT NOT NULL,
+    mode TEXT NOT NULL DEFAULT 'fulltext',
+    "limit" INTEGER NOT NULL DEFAULT 10,
+    filters TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts
     USING fts5(unit_id UNINDEXED, title, content, tags);
 """

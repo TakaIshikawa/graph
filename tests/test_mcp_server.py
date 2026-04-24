@@ -222,6 +222,106 @@ def test_ingest_all_includes_sota_and_search_can_filter_sota(tmp_path, monkeypat
     assert [result["source_project"] for result in results] == ["sota"]
     assert results[0]["title"] == "SOTA Transformer Paper"
 
+
+def test_saved_query_tools_create_list_run_and_delete(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    keep = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="approved",
+            source_entity_type="insight",
+            title="Solar approved insight",
+            content="Solar energy storage market growth",
+            content_type=ContentType.INSIGHT,
+            metadata={"review_state": "approved"},
+            tags=["energy", "solar"],
+        )
+    )
+    skip = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="rejected",
+            source_entity_type="insight",
+            title="Solar rejected insight",
+            content="Solar energy storage market risk",
+            content_type=ContentType.INSIGHT,
+            metadata={"review_state": "rejected"},
+            tags=["energy", "solar"],
+        )
+    )
+    store.fts_index_unit(keep)
+    store.fts_index_unit(skip)
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    tool_names = {tool.name for tool in tools}
+    assert {"save_query", "list_queries", "run_query", "delete_query"} <= tool_names
+
+    save_response = asyncio.run(
+        mcp_server.call_tool(
+            "save_query",
+            {
+                "name": "approved-solar",
+                "query": "solar",
+                "mode": "fulltext",
+                "limit": 5,
+                "filters": {
+                    "source_project": "max",
+                    "content_type": "insight",
+                    "tag": "energy",
+                    "review_state": "approved",
+                },
+            },
+        )
+    )
+    saved = json.loads(save_response[0].text)
+    assert saved["name"] == "approved-solar"
+    assert saved["filters"]["review_state"] == "approved"
+
+    list_response = asyncio.run(mcp_server.call_tool("list_queries", {}))
+    listed = json.loads(list_response[0].text)
+    assert [item["name"] for item in listed["queries"]] == ["approved-solar"]
+
+    run_response = asyncio.run(
+        mcp_server.call_tool("run_query", {"name": "approved-solar"})
+    )
+    payload = json.loads(run_response[0].text)
+    assert payload["saved_query"] == "approved-solar"
+    assert payload["query"] == "solar"
+    assert [result["title"] for result in payload["results"]] == [
+        "Solar approved insight"
+    ]
+
+    delete_response = asyncio.run(
+        mcp_server.call_tool("delete_query", {"name": "approved-solar"})
+    )
+    assert json.loads(delete_response[0].text) == {
+        "name": "approved-solar",
+        "deleted": True,
+    }
+
+    missing_delete = asyncio.run(
+        mcp_server.call_tool("delete_query", {"name": "approved-solar"})
+    )
+    assert json.loads(missing_delete[0].text) == {
+        "name": "approved-solar",
+        "deleted": False,
+        "error": "Saved query not found: approved-solar",
+    }
+
+    missing_run = asyncio.run(
+        mcp_server.call_tool("run_query", {"name": "approved-solar"})
+    )
+    assert json.loads(missing_run[0].text) == {
+        "name": "approved-solar",
+        "found": False,
+        "error": "Saved query not found: approved-solar",
+    }
+
+
 def test_export_obsidian_tool_exports_same_vault_structure_as_cli(
     tmp_path, monkeypatch
 ):

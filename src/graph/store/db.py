@@ -64,6 +64,18 @@ def _row_to_edge(row: sqlite3.Row) -> KnowledgeEdge:
     )
 
 
+def _row_to_saved_query(row: sqlite3.Row) -> dict:
+    return {
+        "name": row["name"],
+        "query": row["query"],
+        "mode": row["mode"],
+        "limit": row["limit"],
+        "filters": json.loads(row["filters"]),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
 class Store:
     def __init__(self, db_path: str) -> None:
         self.conn = sqlite3.connect(db_path)
@@ -283,6 +295,66 @@ class Store:
         else:
             row = self.conn.execute("SELECT COUNT(*) FROM knowledge_units").fetchone()
         return row[0]
+
+    # --- Saved queries ---
+
+    def save_query(
+        self,
+        *,
+        name: str,
+        query: str,
+        mode: str = "fulltext",
+        limit: int = 10,
+        filters: dict | None = None,
+    ) -> dict:
+        now = _utcnow_iso()
+        normalized_filters = filters or {}
+        self.conn.execute(
+            """INSERT INTO saved_queries
+               (name, query, mode, "limit", filters, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(name)
+               DO UPDATE SET
+                   query = excluded.query,
+                   mode = excluded.mode,
+                   "limit" = excluded."limit",
+                   filters = excluded.filters,
+                   updated_at = excluded.updated_at
+            """,
+            (
+                name,
+                query,
+                mode,
+                limit,
+                json.dumps(normalized_filters, sort_keys=True),
+                now,
+                now,
+            ),
+        )
+        self.conn.commit()
+        saved = self.get_saved_query(name)
+        if saved is None:
+            raise RuntimeError(f"Saved query was not written: {name}")
+        return saved
+
+    def get_saved_query(self, name: str) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM saved_queries WHERE name = ?", (name,)
+        ).fetchone()
+        return _row_to_saved_query(row) if row else None
+
+    def list_saved_queries(self) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM saved_queries ORDER BY name"
+        ).fetchall()
+        return [_row_to_saved_query(row) for row in rows]
+
+    def delete_saved_query(self, name: str) -> bool:
+        cursor = self.conn.execute(
+            "DELETE FROM saved_queries WHERE name = ?", (name,)
+        )
+        self.conn.commit()
+        return cursor.rowcount > 0
 
     # --- Edge CRUD ---
 

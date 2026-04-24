@@ -15,6 +15,7 @@ from graph.cli.main import (
     _do_export_obsidian,
     _do_import_json,
     _do_infer_edges,
+    _do_search,
 )
 from graph.graph.service import GraphService
 from graph.store.db import Store
@@ -181,6 +182,58 @@ async def list_tools() -> list[Tool]:
                     },
                 },
                 "required": ["query"],
+            },
+        ),
+        Tool(
+            name="save_query",
+            description="Save a reusable graph search recipe with mode, limit, and filters.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Saved query name"},
+                    "query": {"type": "string", "description": "Search query"},
+                    "mode": {
+                        "type": "string",
+                        "enum": ["hybrid", "semantic", "fulltext"],
+                        "default": "fulltext",
+                        "description": "Search mode",
+                    },
+                    "limit": {"type": "integer", "default": 10},
+                    "filters": {
+                        "type": "object",
+                        "description": "Structured filters such as source_project, content_type, tag, review_state",
+                        "additionalProperties": True,
+                        "default": {},
+                    },
+                },
+                "required": ["name", "query"],
+            },
+        ),
+        Tool(
+            name="list_queries",
+            description="List saved graph search recipes.",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="run_query",
+            description="Run a saved graph search recipe.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Saved query name"},
+                },
+                "required": ["name"],
+            },
+        ),
+        Tool(
+            name="delete_query",
+            description="Delete a saved graph search recipe.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Saved query name"},
+                },
+                "required": ["name"],
             },
         ),
         Tool(
@@ -482,60 +535,74 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             query = arguments["query"]
             limit = arguments.get("limit", 10)
             mode = arguments.get("mode", "fulltext")
-            source_project = arguments.get("source_project")
-            content_type = arguments.get("content_type")
-            review_state = arguments.get("review_state")
-            tag = arguments.get("tag")
+            filters = {
+                key: value
+                for key, value in {
+                    "source_project": arguments.get("source_project"),
+                    "content_type": arguments.get("content_type"),
+                    "review_state": arguments.get("review_state"),
+                    "tag": arguments.get("tag"),
+                }.items()
+                if value is not None
+            }
+            payload = _do_search(
+                store,
+                query,
+                limit=limit,
+                mode=mode,
+                filters=filters,
+            )
+            return [TextContent(type="text", text=json.dumps(payload["results"]))]
 
-            if mode == "fulltext":
-                fts_results = store.fts_search(query, limit=limit)
-                results = []
-                for r in fts_results:
-                    unit = store.get_unit(r["unit_id"])
-                    if unit:
-                        if source_project and unit.source_project != source_project:
-                            continue
-                        if content_type and unit.content_type != content_type:
-                            continue
-                        if review_state and unit.metadata.get("review_state") != review_state:
-                            continue
-                        if tag and tag not in unit.tags:
-                            continue
-                        results.append(_unit_to_dict(unit))
-                return [TextContent(type="text", text=json.dumps(results))]
+        elif name == "save_query":
+            saved = store.save_query(
+                name=arguments["name"],
+                query=arguments["query"],
+                mode=arguments.get("mode", "fulltext"),
+                limit=arguments.get("limit", 10),
+                filters=arguments.get("filters", {}),
+            )
+            return [TextContent(type="text", text=json.dumps(saved))]
 
-            else:
-                from graph.rag.embeddings import get_embedding_provider
-                from graph.rag.search import RAGService
-
-                provider = get_embedding_provider(
-                    settings.embedding_provider,
-                    settings.embedding_api_key,
-                    settings.embedding_model,
+        elif name == "list_queries":
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps({"queries": store.list_saved_queries()}),
                 )
-                rag = RAGService(store, provider)
+            ]
 
-                if mode == "semantic":
-                    pairs = rag.search(
-                        query,
-                        limit=limit,
-                        source_project=source_project,
-                        content_type=content_type,
-                        min_similarity=0.3,
+        elif name == "run_query":
+            saved = store.get_saved_query(arguments["name"])
+            if not saved:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(
+                            {
+                                "name": arguments["name"],
+                                "found": False,
+                                "error": f"Saved query not found: {arguments['name']}",
+                            }
+                        ),
                     )
-                else:
-                    pairs = rag.hybrid_search(query, limit=limit)
+                ]
+            payload = _do_search(
+                store,
+                saved["query"],
+                limit=saved["limit"],
+                mode=saved["mode"],
+                filters=saved["filters"],
+            )
+            payload["saved_query"] = saved["name"]
+            return [TextContent(type="text", text=json.dumps(payload))]
 
-                results = []
-                for unit, score in pairs:
-                    if review_state and unit.metadata.get("review_state") != review_state:
-                        continue
-                    if tag and tag not in unit.tags:
-                        continue
-                    d = _unit_to_dict(unit)
-                    d["score"] = round(score, 4)
-                    results.append(d)
-                return [TextContent(type="text", text=json.dumps(results))]
+        elif name == "delete_query":
+            deleted = store.delete_saved_query(arguments["name"])
+            payload = {"name": arguments["name"], "deleted": deleted}
+            if not deleted:
+                payload["error"] = f"Saved query not found: {arguments['name']}"
+            return [TextContent(type="text", text=json.dumps(payload))]
 
         elif name == "get_unit":
             unit = store.get_unit(arguments["unit_id"])

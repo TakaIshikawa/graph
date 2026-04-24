@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import tempfile
 from pathlib import Path
 
@@ -282,6 +283,64 @@ class TestSyncState:
         fetched = store.get_sync_state("max", "insight")
         assert fetched is not None
         assert fetched.items_synced == 8
+
+
+class TestSavedQueries:
+    def test_schema_creates_saved_queries_for_existing_database(self, tmp_path):
+        db_path = tmp_path / "existing.db"
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
+            conn.execute("INSERT INTO schema_version (version) VALUES (1)")
+            conn.commit()
+        finally:
+            conn.close()
+
+        store = Store(str(db_path))
+        try:
+            row = store.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'saved_queries'"
+            ).fetchone()
+            assert row is not None
+        finally:
+            store.close()
+
+    def test_saved_query_crud(self, store: Store):
+        saved = store.save_query(
+            name="approved-solar",
+            query="solar",
+            mode="hybrid",
+            limit=5,
+            filters={"source_project": "max", "review_state": "approved"},
+        )
+
+        assert saved["name"] == "approved-solar"
+        assert saved["query"] == "solar"
+        assert saved["mode"] == "hybrid"
+        assert saved["limit"] == 5
+        assert saved["filters"] == {
+            "source_project": "max",
+            "review_state": "approved",
+        }
+        assert store.get_saved_query("approved-solar") == saved
+        assert store.list_saved_queries() == [saved]
+
+        updated = store.save_query(
+            name="approved-solar",
+            query="battery",
+            mode="fulltext",
+            limit=2,
+            filters={"tag": "energy"},
+        )
+
+        assert updated["query"] == "battery"
+        assert updated["mode"] == "fulltext"
+        assert updated["limit"] == 2
+        assert updated["filters"] == {"tag": "energy"}
+        assert len(store.list_saved_queries()) == 1
+        assert store.delete_saved_query("approved-solar") is True
+        assert store.get_saved_query("approved-solar") is None
+        assert store.delete_saved_query("approved-solar") is False
 
 
 class TestEmbedding:

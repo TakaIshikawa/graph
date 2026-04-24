@@ -874,3 +874,80 @@ def test_search_command_applies_filters_in_all_modes(monkeypatch, mode):
     finally:
         store.close()
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_queries_cli_save_list_run_and_delete(monkeypatch):
+    store = _make_store()
+    _populate_search_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    monkeypatch.setattr("graph.rag.embeddings.get_embedding_provider", lambda *args, **kwargs: MockEmbeddingProvider())
+
+    try:
+        save_result = runner.invoke(
+            app,
+            [
+                "queries",
+                "save",
+                "approved-solar",
+                "solar",
+                "--mode",
+                "fulltext",
+                "--limit",
+                "10",
+                "--source-project",
+                "max",
+                "--content-type",
+                "insight",
+                "--tag",
+                "energy",
+                "--review-state",
+                "approved",
+                "--json",
+            ],
+        )
+
+        assert save_result.exit_code == 0
+        saved = json.loads(save_result.output)
+        assert saved["name"] == "approved-solar"
+        assert saved["filters"] == {
+            "content_type": "insight",
+            "review_state": "approved",
+            "source_project": "max",
+            "tag": "energy",
+        }
+
+        list_result = runner.invoke(app, ["queries", "list", "--json"])
+
+        assert list_result.exit_code == 0
+        assert json.loads(list_result.output)["queries"][0]["name"] == "approved-solar"
+
+        run_result = runner.invoke(app, ["queries", "run", "approved-solar", "--json"])
+
+        assert run_result.exit_code == 0
+        payload = json.loads(run_result.output)
+        assert payload["query"] == "solar"
+        assert payload["mode"] == "fulltext"
+        assert [result["title"] for result in payload["results"]] == [
+            "Solar approved insight"
+        ]
+
+        delete_result = runner.invoke(app, ["queries", "delete", "approved-solar", "--json"])
+
+        assert delete_result.exit_code == 0
+        assert json.loads(delete_result.output) == {
+            "deleted": True,
+            "name": "approved-solar",
+        }
+
+        missing_delete = runner.invoke(app, ["queries", "delete", "approved-solar", "--json"])
+
+        assert missing_delete.exit_code == 0
+        assert json.loads(missing_delete.output) == {
+            "deleted": False,
+            "error": "Saved query not found: approved-solar",
+            "name": "approved-solar",
+        }
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
