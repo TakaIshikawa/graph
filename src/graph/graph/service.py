@@ -1316,3 +1316,34 @@ class GraphService:
                 )
             ),
         }
+
+    def integrity_audit(self, *, repair_fts: bool = False, limit: int = 20) -> dict:
+        """Audit persisted graph tables for consistency issues."""
+        repair = None
+        if repair_fts:
+            repair = self.store.repair_fts_index_integrity()
+
+        categories = {
+            "dangling_edges": self.store.find_dangling_edges(limit=limit),
+            "self_loop_edges": self.store.find_self_loop_edges(limit=limit),
+            "duplicate_edge_triples": self.store.find_duplicate_edge_triples(limit=limit),
+            "units_missing_fts_rows": self.store.find_units_missing_fts_rows(limit=limit),
+            "stale_fts_rows": self.store.find_stale_fts_rows(limit=limit),
+            "invalid_json_rows": self.store.find_invalid_json_rows(limit=limit),
+            "blank_units": self.store.find_blank_units(limit=limit),
+        }
+        issue_count = sum(category["count"] for category in categories.values())
+        payload = {
+            "issue_count": issue_count,
+            "has_issues": issue_count > 0,
+            "categories": categories,
+            "repair": repair
+            or {
+                "requested": False,
+                "fts_rows_inserted": 0,
+                "fts_rows_deleted": 0,
+            },
+        }
+        if repair is not None:
+            payload["repair"]["requested"] = True
+        return payload

@@ -1041,3 +1041,68 @@ class TestGraphService:
             "https://example.com/docs",
             "https://example.com/home",
         }
+
+
+def test_integrity_audit_returns_zero_for_indexed_clean_graph(store: Store):
+    first = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="clean-a",
+            source_entity_type="insight",
+            title="Clean A",
+            content="Indexed clean content",
+        )
+    )
+    second = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="clean-b",
+            source_entity_type="insight",
+            title="Clean B",
+            content="Also indexed content",
+        )
+    )
+    store.fts_index_unit(first)
+    store.fts_index_unit(second)
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=first.id,
+            to_unit_id=second.id,
+            relation=EdgeRelation.RELATES_TO,
+        )
+    )
+
+    result = GraphService(store).integrity_audit()
+
+    assert result["issue_count"] == 0
+    assert result["has_issues"] is False
+    assert all(category["count"] == 0 for category in result["categories"].values())
+
+
+def test_integrity_audit_repairs_only_fts_drift(store: Store):
+    unit = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="missing-fts",
+            source_entity_type="insight",
+            title="Missing FTS",
+            content="Repairable search row",
+        )
+    )
+    store.conn.execute(
+        "INSERT INTO knowledge_fts (unit_id, title, content, tags) VALUES (?, ?, ?, ?)",
+        ("deleted-unit", "Deleted", "stale content", "stale"),
+    )
+    store.conn.commit()
+
+    result = GraphService(store).integrity_audit(repair_fts=True)
+
+    assert result["repair"] == {
+        "fts_rows_inserted": 1,
+        "fts_rows_deleted": 1,
+        "requested": True,
+    }
+    assert result["categories"]["units_missing_fts_rows"]["count"] == 0
+    assert result["categories"]["stale_fts_rows"]["count"] == 0
+    assert store.get_unit(unit.id) is not None
+    assert store.fts_search("Repairable")[0]["unit_id"] == unit.id

@@ -567,6 +567,67 @@ class TestFTS:
         assert results[0]["unit_id"] == inserted.id
         assert results[0]["snippet"]
 
+    def test_integrity_helpers_find_and_repair_fts_drift(
+        self, store: Store, sample_unit: KnowledgeUnit
+    ):
+        missing = store.insert_unit(sample_unit)
+        store.conn.execute(
+            "INSERT INTO knowledge_fts (unit_id, title, content, tags) VALUES (?, ?, ?, ?)",
+            ("deleted-unit", "Deleted", "stale content", "stale"),
+        )
+        store.conn.commit()
+
+        assert store.find_units_missing_fts_rows()["count"] == 1
+        assert store.find_stale_fts_rows()["count"] == 1
+
+        repair = store.repair_fts_index_integrity()
+
+        assert repair == {"fts_rows_inserted": 1, "fts_rows_deleted": 1}
+        assert store.find_units_missing_fts_rows()["count"] == 0
+        assert store.find_stale_fts_rows()["count"] == 0
+        assert store.fts_search("monocrystalline")[0]["unit_id"] == missing.id
+
+    def test_integrity_helpers_find_structural_issues(
+        self, store: Store, sample_unit: KnowledgeUnit
+    ):
+        unit = store.insert_unit(sample_unit)
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=unit.id,
+                to_unit_id=unit.id,
+                relation=EdgeRelation.RELATES_TO,
+            )
+        )
+        store.conn.execute("PRAGMA foreign_keys=OFF")
+        store.conn.execute(
+            """INSERT INTO edges
+               (id, from_unit_id, to_unit_id, relation, weight, source, metadata, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "dangling-edge",
+                unit.id,
+                "missing-unit",
+                EdgeRelation.RELATES_TO.value,
+                1.0,
+                EdgeSource.MANUAL.value,
+                "{}",
+                "2026-01-01T00:00:00+00:00",
+            ),
+        )
+        store.conn.execute(
+            "UPDATE knowledge_units SET metadata = ?, title = ? WHERE id = ?",
+            ("{bad json", "   ", unit.id),
+        )
+        store.conn.commit()
+        store.conn.execute("PRAGMA foreign_keys=ON")
+
+        assert store.find_dangling_edges()["examples"][0]["edge_id"] == "dangling-edge"
+        assert store.find_self_loop_edges()["count"] == 1
+        assert store.find_invalid_json_rows()["count"] == 1
+        blank = store.find_blank_units()["examples"][0]
+        assert blank["unit_id"] == unit.id
+        assert blank["blank_title"] is True
+
 
 class TestSyncState:
     def test_upsert_and_get(self, store: Store):

@@ -2344,6 +2344,48 @@ def test_update_and_delete_unit_cli_json_reindexes_and_cleans_edges(monkeypatch)
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_integrity_cli_json_reports_and_repairs_fts(monkeypatch):
+    store = _make_store()
+    unit = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="audit",
+            source_entity_type="insight",
+            title="Audit target",
+            content="Search drift",
+        )
+    )
+    store.conn.execute(
+        "INSERT INTO knowledge_fts (unit_id, title, content, tags) VALUES (?, ?, ?, ?)",
+        ("deleted-unit", "Deleted", "stale content", "stale"),
+    )
+    store.conn.commit()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(app, ["integrity", "--json"])
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["categories"]["units_missing_fts_rows"]["count"] == 1
+        assert payload["categories"]["stale_fts_rows"]["count"] == 1
+
+        repaired = runner.invoke(app, ["integrity", "--json", "--repair-fts"])
+
+        assert repaired.exit_code == 0
+        repaired_payload = json.loads(repaired.output)
+        assert repaired_payload["repair"]["requested"] is True
+        assert repaired_payload["repair"]["fts_rows_inserted"] == 1
+        assert repaired_payload["repair"]["fts_rows_deleted"] == 1
+        assert repaired_payload["categories"]["units_missing_fts_rows"]["count"] == 0
+        assert repaired_payload["categories"]["stale_fts_rows"]["count"] == 0
+        assert store.get_unit(unit.id) is not None
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_edge_management_cli_json_lists_updates_and_deletes(monkeypatch):
     store = _make_store()
     center = store.insert_unit(

@@ -1175,6 +1175,18 @@ def _do_infer_edges(
     )
 
 
+def _do_integrity_audit(
+    store: Store,
+    *,
+    repair_fts: bool = False,
+    limit: int = 20,
+) -> dict:
+    from graph.graph.service import GraphService
+
+    gs = GraphService(store)
+    return gs.integrity_audit(repair_fts=repair_fts, limit=limit)
+
+
 @app.command()
 def embed(
     project: str | None = typer.Option(None, "--project", "-p", help="Filter by source project"),
@@ -1993,6 +2005,36 @@ def stats(
         typer.echo(f"  {ct}: {count}")
 
     store.close()
+
+
+@app.command()
+def integrity(
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+    repair_fts: bool = typer.Option(
+        False,
+        "--repair-fts",
+        help="Restore missing FTS rows and remove stale FTS rows",
+    ),
+    limit: int = typer.Option(20, "--limit", help="Maximum examples per audit category"),
+) -> None:
+    """Audit graph table integrity."""
+    store = _get_store()
+    payload = _do_integrity_audit(store, repair_fts=repair_fts, limit=limit)
+    store.close()
+
+    if json_output:
+        _json_echo(payload)
+        return
+
+    typer.echo(f"Issues: {payload['issue_count']}")
+    for name, category in payload["categories"].items():
+        typer.echo(f"  {name}: {category['count']}")
+    if payload["repair"]["requested"]:
+        typer.echo(
+            "FTS repair: "
+            f"{payload['repair']['fts_rows_inserted']} inserted, "
+            f"{payload['repair']['fts_rows_deleted']} deleted"
+        )
 
 
 @app.command()

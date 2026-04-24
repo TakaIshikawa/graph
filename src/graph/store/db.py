@@ -743,6 +743,250 @@ class Store:
         self.conn.commit()
         return {"edge_id": edge_id, "deleted": cursor.rowcount > 0}
 
+    # --- Integrity audit helpers ---
+
+    def find_dangling_edges(self, *, limit: int = 20) -> dict:
+        row = self.conn.execute(
+            """SELECT COUNT(*) AS count
+               FROM edges e
+               LEFT JOIN knowledge_units from_unit ON from_unit.id = e.from_unit_id
+               LEFT JOIN knowledge_units to_unit ON to_unit.id = e.to_unit_id
+               WHERE from_unit.id IS NULL OR to_unit.id IS NULL"""
+        ).fetchone()
+        rows = self.conn.execute(
+            """SELECT e.id, e.from_unit_id, e.to_unit_id, e.relation,
+                      from_unit.id IS NULL AS missing_from,
+                      to_unit.id IS NULL AS missing_to
+               FROM edges e
+               LEFT JOIN knowledge_units from_unit ON from_unit.id = e.from_unit_id
+               LEFT JOIN knowledge_units to_unit ON to_unit.id = e.to_unit_id
+               WHERE from_unit.id IS NULL OR to_unit.id IS NULL
+               ORDER BY e.created_at DESC, e.id
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return {
+            "count": row["count"] or 0,
+            "examples": [
+                {
+                    "edge_id": r["id"],
+                    "from_unit_id": r["from_unit_id"],
+                    "to_unit_id": r["to_unit_id"],
+                    "relation": r["relation"],
+                    "missing_from": bool(r["missing_from"]),
+                    "missing_to": bool(r["missing_to"]),
+                }
+                for r in rows
+            ],
+        }
+
+    def find_self_loop_edges(self, *, limit: int = 20) -> dict:
+        row = self.conn.execute(
+            "SELECT COUNT(*) AS count FROM edges WHERE from_unit_id = to_unit_id"
+        ).fetchone()
+        rows = self.conn.execute(
+            """SELECT id, from_unit_id, to_unit_id, relation
+               FROM edges
+               WHERE from_unit_id = to_unit_id
+               ORDER BY created_at DESC, id
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return {
+            "count": row["count"] or 0,
+            "examples": [
+                {
+                    "edge_id": r["id"],
+                    "unit_id": r["from_unit_id"],
+                    "relation": r["relation"],
+                }
+                for r in rows
+            ],
+        }
+
+    def find_duplicate_edge_triples(self, *, limit: int = 20) -> dict:
+        row = self.conn.execute(
+            """SELECT COUNT(*) AS count
+               FROM (
+                   SELECT 1
+                   FROM edges
+                   GROUP BY from_unit_id, to_unit_id, relation
+                   HAVING COUNT(*) > 1
+               )"""
+        ).fetchone()
+        rows = self.conn.execute(
+            """SELECT from_unit_id, to_unit_id, relation, COUNT(*) AS duplicate_count,
+                      json_group_array(id) AS edge_ids
+               FROM edges
+               GROUP BY from_unit_id, to_unit_id, relation
+               HAVING COUNT(*) > 1
+               ORDER BY duplicate_count DESC, from_unit_id, to_unit_id, relation
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return {
+            "count": row["count"] or 0,
+            "examples": [
+                {
+                    "from_unit_id": r["from_unit_id"],
+                    "to_unit_id": r["to_unit_id"],
+                    "relation": r["relation"],
+                    "duplicate_count": r["duplicate_count"],
+                    "edge_ids": json.loads(r["edge_ids"]),
+                }
+                for r in rows
+            ],
+        }
+
+    def find_units_missing_fts_rows(self, *, limit: int = 20) -> dict:
+        row = self.conn.execute(
+            """SELECT COUNT(*) AS count
+               FROM knowledge_units u
+               LEFT JOIN knowledge_fts f ON f.unit_id = u.id
+               WHERE f.unit_id IS NULL"""
+        ).fetchone()
+        rows = self.conn.execute(
+            """SELECT u.id, u.title, u.source_project, u.source_entity_type
+               FROM knowledge_units u
+               LEFT JOIN knowledge_fts f ON f.unit_id = u.id
+               WHERE f.unit_id IS NULL
+               ORDER BY u.created_at DESC, u.id
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return {
+            "count": row["count"] or 0,
+            "examples": [
+                {
+                    "unit_id": r["id"],
+                    "title": r["title"],
+                    "source_project": r["source_project"],
+                    "source_entity_type": r["source_entity_type"],
+                }
+                for r in rows
+            ],
+        }
+
+    def find_stale_fts_rows(self, *, limit: int = 20) -> dict:
+        row = self.conn.execute(
+            """SELECT COUNT(*) AS count
+               FROM knowledge_fts f
+               LEFT JOIN knowledge_units u ON u.id = f.unit_id
+               WHERE u.id IS NULL"""
+        ).fetchone()
+        rows = self.conn.execute(
+            """SELECT f.rowid, f.unit_id, f.title
+               FROM knowledge_fts f
+               LEFT JOIN knowledge_units u ON u.id = f.unit_id
+               WHERE u.id IS NULL
+               ORDER BY f.rowid
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return {
+            "count": row["count"] or 0,
+            "examples": [
+                {"fts_rowid": r["rowid"], "unit_id": r["unit_id"], "title": r["title"]}
+                for r in rows
+            ],
+        }
+
+    def find_invalid_json_rows(self, *, limit: int = 20) -> dict:
+        row = self.conn.execute(
+            """SELECT
+                   (SELECT COUNT(*) FROM knowledge_units
+                    WHERE NOT json_valid(metadata) OR NOT json_valid(tags))
+                 + (SELECT COUNT(*) FROM edges WHERE NOT json_valid(metadata))
+                 AS count"""
+        ).fetchone()
+        rows = self.conn.execute(
+            """SELECT 'knowledge_units' AS table_name, id, NULL AS edge_id,
+                      NOT json_valid(metadata) AS invalid_metadata,
+                      NOT json_valid(tags) AS invalid_tags
+               FROM knowledge_units
+               WHERE NOT json_valid(metadata) OR NOT json_valid(tags)
+               UNION ALL
+               SELECT 'edges' AS table_name, NULL AS id, id AS edge_id,
+                      NOT json_valid(metadata) AS invalid_metadata,
+                      0 AS invalid_tags
+               FROM edges
+               WHERE NOT json_valid(metadata)
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return {
+            "count": row["count"] or 0,
+            "examples": [
+                {
+                    "table": r["table_name"],
+                    "unit_id": r["id"],
+                    "edge_id": r["edge_id"],
+                    "invalid_metadata": bool(r["invalid_metadata"]),
+                    "invalid_tags": bool(r["invalid_tags"]),
+                }
+                for r in rows
+            ],
+        }
+
+    def find_blank_units(self, *, limit: int = 20) -> dict:
+        row = self.conn.execute(
+            """SELECT COUNT(*) AS count
+               FROM knowledge_units
+               WHERE trim(title) = '' OR trim(content) = ''"""
+        ).fetchone()
+        rows = self.conn.execute(
+            """SELECT id, title, source_project, source_entity_type,
+                      trim(title) = '' AS blank_title,
+                      trim(content) = '' AS blank_content
+               FROM knowledge_units
+               WHERE trim(title) = '' OR trim(content) = ''
+               ORDER BY created_at DESC, id
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return {
+            "count": row["count"] or 0,
+            "examples": [
+                {
+                    "unit_id": r["id"],
+                    "title": r["title"],
+                    "source_project": r["source_project"],
+                    "source_entity_type": r["source_entity_type"],
+                    "blank_title": bool(r["blank_title"]),
+                    "blank_content": bool(r["blank_content"]),
+                }
+                for r in rows
+            ],
+        }
+
+    def repair_fts_index_integrity(self) -> dict:
+        stale_cursor = self.conn.execute(
+            """DELETE FROM knowledge_fts
+               WHERE unit_id NOT IN (SELECT id FROM knowledge_units)"""
+        )
+        rows = self.conn.execute(
+            """SELECT u.id, u.title, u.content, u.tags
+               FROM knowledge_units u
+               LEFT JOIN knowledge_fts f ON f.unit_id = u.id
+               WHERE f.unit_id IS NULL"""
+        ).fetchall()
+        for row in rows:
+            try:
+                tags = json.loads(row["tags"])
+            except json.JSONDecodeError:
+                tags = []
+            if not isinstance(tags, list):
+                tags = []
+            self.conn.execute(
+                "INSERT INTO knowledge_fts (unit_id, title, content, tags) VALUES (?, ?, ?, ?)",
+                (row["id"], row["title"], row["content"], " ".join(map(str, tags))),
+            )
+        self.conn.commit()
+        return {
+            "fts_rows_inserted": len(rows),
+            "fts_rows_deleted": stale_cursor.rowcount,
+        }
+
     def get_backlinks(
         self,
         unit_id: str,

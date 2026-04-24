@@ -22,6 +22,7 @@ from graph.cli.main import (
     _do_export_turtle,
     _do_import_json,
     _do_infer_edges,
+    _do_integrity_audit,
     _do_delete_unit,
     _do_rename_tag,
     _do_update_edge,
@@ -419,6 +420,25 @@ async def list_tools() -> list[Tool]:
             name="analyze_source_coverage",
             description="Summarize unit, edge, sync, and orphan coverage by source project and entity type.",
             inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="integrity_audit",
+            description="Audit persisted graph tables for dangling edges, FTS drift, invalid JSON, and blank units.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repair_fts": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Restore missing FTS rows and remove stale FTS rows only",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Maximum examples per audit category",
+                    },
+                },
+            },
         ),
         Tool(
             name="timeline",
@@ -1259,6 +1279,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         elif name == "analyze_source_coverage":
             gs = GraphService(store)
             result = gs.analyze_source_coverage()
+            return [TextContent(type="text", text=json.dumps(result))]
+
+        elif name == "integrity_audit":
+            result = _do_integrity_audit(
+                store,
+                repair_fts=arguments.get("repair_fts", False),
+                limit=arguments.get("limit", 20),
+            )
             return [TextContent(type="text", text=json.dumps(result))]
 
         elif name == "timeline":

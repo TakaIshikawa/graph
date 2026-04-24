@@ -866,6 +866,52 @@ def test_update_and_delete_unit_tools_reindex_and_clean_edges(tmp_path, monkeypa
         verify.close()
 
 
+def test_integrity_audit_tool_reports_and_repairs_fts(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    unit = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="audit",
+            source_entity_type="insight",
+            title="Audit target",
+            content="Search drift",
+        )
+    )
+    store.conn.execute(
+        "INSERT INTO knowledge_fts (unit_id, title, content, tags) VALUES (?, ?, ?, ?)",
+        ("deleted-unit", "Deleted", "stale content", "stale"),
+    )
+    store.conn.commit()
+    store.close()
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    assert "integrity_audit" in {tool.name for tool in tools}
+
+    response = asyncio.run(mcp_server.call_tool("integrity_audit", {}))
+    payload = json.loads(response[0].text)
+    assert payload["categories"]["units_missing_fts_rows"]["count"] == 1
+    assert payload["categories"]["stale_fts_rows"]["count"] == 1
+
+    repaired = asyncio.run(
+        mcp_server.call_tool("integrity_audit", {"repair_fts": True})
+    )
+    repaired_payload = json.loads(repaired[0].text)
+    assert repaired_payload["repair"]["requested"] is True
+    assert repaired_payload["repair"]["fts_rows_inserted"] == 1
+    assert repaired_payload["repair"]["fts_rows_deleted"] == 1
+    assert repaired_payload["categories"]["units_missing_fts_rows"]["count"] == 0
+    assert repaired_payload["categories"]["stale_fts_rows"]["count"] == 0
+
+    verify = Store(str(db_path))
+    try:
+        assert verify.get_unit(unit.id) is not None
+        assert verify.fts_search("Search")[0]["unit_id"] == unit.id
+    finally:
+        verify.close()
+
+
 def test_edge_management_tools_list_update_delete_and_report_errors(
     tmp_path, monkeypatch
 ):
