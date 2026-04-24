@@ -701,18 +701,50 @@ def _parse_datetime_filter(value: str | datetime | None, *, name: str) -> dateti
             raise ValueError(f"{name} must be an ISO-8601 date or datetime.") from exc
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
+    else:
+        parsed = parsed.astimezone(timezone.utc)
     return parsed
 
 
-def _unit_created_at(unit) -> datetime:
-    created_at = unit.created_at
-    if isinstance(created_at, datetime):
-        parsed = created_at
+def _unit_datetime(unit, field: str) -> datetime:
+    value = getattr(unit, field)
+    if isinstance(value, datetime):
+        parsed = value
     else:
-        parsed = datetime.fromisoformat(str(created_at))
+        parsed = datetime.fromisoformat(str(value))
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
+    else:
+        parsed = parsed.astimezone(timezone.utc)
     return parsed
+
+
+def _validate_date_range(
+    after: str | datetime | None,
+    before: str | datetime | None,
+    *,
+    after_name: str,
+    before_name: str,
+) -> None:
+    parsed_after = _parse_datetime_filter(after, name=after_name)
+    parsed_before = _parse_datetime_filter(before, name=before_name)
+    if parsed_after and parsed_before and parsed_after > parsed_before:
+        raise ValueError(f"{after_name} must be on or before {before_name}.")
+
+
+def _validate_search_filters(filters: dict) -> None:
+    _validate_date_range(
+        filters.get("created_after"),
+        filters.get("created_before"),
+        after_name="created_after",
+        before_name="created_before",
+    )
+    _validate_date_range(
+        filters.get("updated_after"),
+        filters.get("updated_before"),
+        after_name="updated_after",
+        before_name="updated_before",
+    )
 
 
 def _edge_to_json(edge: dict) -> dict:
@@ -789,6 +821,8 @@ def _unit_matches_search_filters(
     review_state: str | None = None,
     created_after: str | datetime | None = None,
     created_before: str | datetime | None = None,
+    updated_after: str | datetime | None = None,
+    updated_before: str | datetime | None = None,
     min_utility: float | str | None = None,
     max_utility: float | str | None = None,
     min_confidence: float | str | None = None,
@@ -802,13 +836,21 @@ def _unit_matches_search_filters(
         return False
     if review_state and unit.metadata.get("review_state") != review_state:
         return False
-    after = _parse_datetime_filter(created_after, name="created_after")
-    before = _parse_datetime_filter(created_before, name="created_before")
-    if after or before:
-        created_at = _unit_created_at(unit)
-        if after and created_at < after:
+    created_after_dt = _parse_datetime_filter(created_after, name="created_after")
+    created_before_dt = _parse_datetime_filter(created_before, name="created_before")
+    if created_after_dt or created_before_dt:
+        created_at = _unit_datetime(unit, "created_at")
+        if created_after_dt and created_at < created_after_dt:
             return False
-        if before and created_at > before:
+        if created_before_dt and created_at > created_before_dt:
+            return False
+    updated_after_dt = _parse_datetime_filter(updated_after, name="updated_after")
+    updated_before_dt = _parse_datetime_filter(updated_before, name="updated_before")
+    if updated_after_dt or updated_before_dt:
+        updated_at = _unit_datetime(unit, "updated_at")
+        if updated_after_dt and updated_at < updated_after_dt:
+            return False
+        if updated_before_dt and updated_at > updated_before_dt:
             return False
     if min_utility is not None or max_utility is not None:
         if unit.utility_score is None:
@@ -840,6 +882,8 @@ def _search_fulltext_with_filters(
     review_state: str | None = None,
     created_after: str | datetime | None = None,
     created_before: str | datetime | None = None,
+    updated_after: str | datetime | None = None,
+    updated_before: str | datetime | None = None,
     min_utility: float | str | None = None,
     max_utility: float | str | None = None,
     min_confidence: float | str | None = None,
@@ -851,7 +895,14 @@ def _search_fulltext_with_filters(
     filtered = []
 
     while True:
-        results = store.fts_search(query, limit=fetch_limit)
+        results = store.fts_search(
+            query,
+            limit=fetch_limit,
+            created_after=created_after,
+            created_before=created_before,
+            updated_after=updated_after,
+            updated_before=updated_before,
+        )
         filtered = []
         for r in results:
             unit = store.get_unit(r["unit_id"])
@@ -863,6 +914,8 @@ def _search_fulltext_with_filters(
                 review_state=review_state,
                 created_after=created_after,
                 created_before=created_before,
+                updated_after=updated_after,
+                updated_before=updated_before,
                 min_utility=min_utility,
                 max_utility=max_utility,
                 min_confidence=min_confidence,
@@ -889,6 +942,8 @@ def _search_scored_with_filters(
     review_state: str | None = None,
     created_after: str | datetime | None = None,
     created_before: str | datetime | None = None,
+    updated_after: str | datetime | None = None,
+    updated_before: str | datetime | None = None,
     min_utility: float | str | None = None,
     max_utility: float | str | None = None,
     min_confidence: float | str | None = None,
@@ -911,6 +966,8 @@ def _search_scored_with_filters(
                 review_state=review_state,
                 created_after=created_after,
                 created_before=created_before,
+                updated_after=updated_after,
+                updated_before=updated_before,
                 min_utility=min_utility,
                 max_utility=max_utility,
                 min_confidence=min_confidence,
@@ -934,13 +991,15 @@ def _search_filters_dict(
     review_state: str | None = None,
     created_after: str | None = None,
     created_before: str | None = None,
+    updated_after: str | None = None,
+    updated_before: str | None = None,
     min_utility: float | None = None,
     max_utility: float | None = None,
     min_confidence: float | None = None,
     max_confidence: float | None = None,
     sort: str | None = None,
 ) -> dict:
-    return {
+    filters = {
         key: value
         for key, value in {
             "source_project": source_project,
@@ -949,6 +1008,8 @@ def _search_filters_dict(
             "review_state": review_state,
             "created_after": created_after,
             "created_before": created_before,
+            "updated_after": updated_after,
+            "updated_before": updated_before,
             "min_utility": min_utility,
             "max_utility": max_utility,
             "min_confidence": min_confidence,
@@ -957,6 +1018,8 @@ def _search_filters_dict(
         }.items()
         if value is not None
     }
+    _validate_search_filters(filters)
+    return filters
 
 
 def _validate_search_mode(mode: str) -> None:
@@ -975,6 +1038,7 @@ def _do_search(
 ) -> dict:
     _validate_search_mode(mode)
     filters = filters or {}
+    _validate_search_filters(filters)
     sort = str(filters.get("sort", sort))
     validate_search_sort(sort)
 
@@ -989,6 +1053,8 @@ def _do_search(
             review_state=filters.get("review_state"),
             created_after=filters.get("created_after"),
             created_before=filters.get("created_before"),
+            updated_after=filters.get("updated_after"),
+            updated_before=filters.get("updated_before"),
             min_utility=filters.get("min_utility"),
             max_utility=filters.get("max_utility"),
             min_confidence=filters.get("min_confidence"),
@@ -1018,7 +1084,15 @@ def _do_search(
 
     if mode == "semantic":
         pairs = _search_scored_with_filters(
-            lambda q, fetch_limit: rag.search(q, limit=fetch_limit, min_similarity=0.3),
+            lambda q, fetch_limit: rag.search(
+                q,
+                limit=fetch_limit,
+                min_similarity=0.3,
+                created_after=filters.get("created_after"),
+                created_before=filters.get("created_before"),
+                updated_after=filters.get("updated_after"),
+                updated_before=filters.get("updated_before"),
+            ),
             query,
             limit=limit,
             source_project=filters.get("source_project"),
@@ -1027,6 +1101,8 @@ def _do_search(
             review_state=filters.get("review_state"),
             created_after=filters.get("created_after"),
             created_before=filters.get("created_before"),
+            updated_after=filters.get("updated_after"),
+            updated_before=filters.get("updated_before"),
             min_utility=filters.get("min_utility"),
             max_utility=filters.get("max_utility"),
             min_confidence=filters.get("min_confidence"),
@@ -1036,7 +1112,14 @@ def _do_search(
         snippets = {unit.id: _content_excerpt(unit.content) for unit, _score in pairs}
     else:
         pairs = _search_scored_with_filters(
-            lambda q, fetch_limit: rag.hybrid_search(q, limit=fetch_limit),
+            lambda q, fetch_limit: rag.hybrid_search(
+                q,
+                limit=fetch_limit,
+                created_after=filters.get("created_after"),
+                created_before=filters.get("created_before"),
+                updated_after=filters.get("updated_after"),
+                updated_before=filters.get("updated_before"),
+            ),
             query,
             limit=limit,
             source_project=filters.get("source_project"),
@@ -1045,6 +1128,8 @@ def _do_search(
             review_state=filters.get("review_state"),
             created_after=filters.get("created_after"),
             created_before=filters.get("created_before"),
+            updated_after=filters.get("updated_after"),
+            updated_before=filters.get("updated_before"),
             min_utility=filters.get("min_utility"),
             max_utility=filters.get("max_utility"),
             min_confidence=filters.get("min_confidence"),
@@ -1053,7 +1138,14 @@ def _do_search(
         )
         fts_snippets = {
             row["unit_id"]: row.get("snippet") or ""
-            for row in store.fts_search(query, limit=max(limit * 2, 20))
+            for row in store.fts_search(
+                query,
+                limit=max(limit * 2, 20),
+                created_after=filters.get("created_after"),
+                created_before=filters.get("created_before"),
+                updated_after=filters.get("updated_after"),
+                updated_before=filters.get("updated_before"),
+            )
         }
         snippets = {
             unit.id: fts_snippets.get(unit.id) or _content_excerpt(unit.content)
@@ -1165,6 +1257,7 @@ def _do_search_facets(
 ) -> dict:
     _validate_search_mode(mode)
     filters = filters or {}
+    _validate_search_filters(filters)
     sort = str(filters.get("sort", sort))
     validate_search_sort(sort)
     seen: set[str] = set()
@@ -1179,7 +1272,14 @@ def _do_search_facets(
     if mode == "fulltext":
         fetch_limit = 100
         while True:
-            results = store.fts_search(query, limit=fetch_limit)
+            results = store.fts_search(
+                query,
+                limit=fetch_limit,
+                created_after=filters.get("created_after"),
+                created_before=filters.get("created_before"),
+                updated_after=filters.get("updated_after"),
+                updated_before=filters.get("updated_before"),
+            )
             for row in results:
                 unit = store.get_unit(row["unit_id"])
                 if unit and _unit_matches_search_filters(
@@ -1190,6 +1290,8 @@ def _do_search_facets(
                     review_state=filters.get("review_state"),
                     created_after=filters.get("created_after"),
                     created_before=filters.get("created_before"),
+                    updated_after=filters.get("updated_after"),
+                    updated_before=filters.get("updated_before"),
                     min_utility=filters.get("min_utility"),
                     max_utility=filters.get("max_utility"),
                     min_confidence=filters.get("min_confidence"),
@@ -1212,11 +1314,22 @@ def _do_search_facets(
     rag = RAGService(store, provider)
     if mode == "semantic":
         fetch_results = lambda q, fetch_limit: rag.search(  # noqa: E731
-            q, limit=fetch_limit, min_similarity=0.3
+            q,
+            limit=fetch_limit,
+            min_similarity=0.3,
+            created_after=filters.get("created_after"),
+            created_before=filters.get("created_before"),
+            updated_after=filters.get("updated_after"),
+            updated_before=filters.get("updated_before"),
         )
     else:
         fetch_results = lambda q, fetch_limit: rag.hybrid_search(  # noqa: E731
-            q, limit=fetch_limit
+            q,
+            limit=fetch_limit,
+            created_after=filters.get("created_after"),
+            created_before=filters.get("created_before"),
+            updated_after=filters.get("updated_after"),
+            updated_before=filters.get("updated_before"),
         )
 
     fetch_limit = 100
@@ -1231,6 +1344,8 @@ def _do_search_facets(
                 review_state=filters.get("review_state"),
                 created_after=filters.get("created_after"),
                 created_before=filters.get("created_before"),
+                updated_after=filters.get("updated_after"),
+                updated_before=filters.get("updated_before"),
                 min_utility=filters.get("min_utility"),
                 max_utility=filters.get("max_utility"),
                 min_confidence=filters.get("min_confidence"),
@@ -2372,6 +2487,16 @@ def search(
         "--created-before",
         help="Filter to units created on or before an ISO-8601 date/datetime",
     ),
+    updated_after: str | None = typer.Option(
+        None,
+        "--updated-after",
+        help="Filter to units updated on or after an ISO-8601 date/datetime",
+    ),
+    updated_before: str | None = typer.Option(
+        None,
+        "--updated-before",
+        help="Filter to units updated on or before an ISO-8601 date/datetime",
+    ),
     min_utility: float | None = typer.Option(
         None,
         "--min-utility",
@@ -2410,6 +2535,8 @@ def search(
                 review_state=review_state,
                 created_after=created_after,
                 created_before=created_before,
+                updated_after=updated_after,
+                updated_before=updated_before,
                 min_utility=min_utility,
                 max_utility=max_utility,
                 min_confidence=min_confidence,
@@ -2493,6 +2620,16 @@ def search_facets(
         "--created-before",
         help="Filter to units created on or before an ISO-8601 date/datetime",
     ),
+    updated_after: str | None = typer.Option(
+        None,
+        "--updated-after",
+        help="Filter to units updated on or after an ISO-8601 date/datetime",
+    ),
+    updated_before: str | None = typer.Option(
+        None,
+        "--updated-before",
+        help="Filter to units updated on or before an ISO-8601 date/datetime",
+    ),
     min_utility: float | None = typer.Option(
         None,
         "--min-utility",
@@ -2530,6 +2667,8 @@ def search_facets(
                 review_state=review_state,
                 created_after=created_after,
                 created_before=created_before,
+                updated_after=updated_after,
+                updated_before=updated_before,
                 min_utility=min_utility,
                 max_utility=max_utility,
                 min_confidence=min_confidence,
@@ -2583,6 +2722,16 @@ def context(
         "--created-before",
         help="Filter to units created on or before an ISO-8601 date/datetime",
     ),
+    updated_after: str | None = typer.Option(
+        None,
+        "--updated-after",
+        help="Filter to units updated on or after an ISO-8601 date/datetime",
+    ),
+    updated_before: str | None = typer.Option(
+        None,
+        "--updated-before",
+        help="Filter to units updated on or before an ISO-8601 date/datetime",
+    ),
     min_utility: float | None = typer.Option(
         None,
         "--min-utility",
@@ -2621,6 +2770,8 @@ def context(
                 review_state=review_state,
                 created_after=created_after,
                 created_before=created_before,
+                updated_after=updated_after,
+                updated_before=updated_before,
                 min_utility=min_utility,
                 max_utility=max_utility,
             ),
@@ -2689,6 +2840,16 @@ def save_query(
         "--created-before",
         help="Filter to units created on or before an ISO-8601 date/datetime",
     ),
+    updated_after: str | None = typer.Option(
+        None,
+        "--updated-after",
+        help="Filter to units updated on or after an ISO-8601 date/datetime",
+    ),
+    updated_before: str | None = typer.Option(
+        None,
+        "--updated-before",
+        help="Filter to units updated on or before an ISO-8601 date/datetime",
+    ),
     min_utility: float | None = typer.Option(
         None,
         "--min-utility",
@@ -2705,6 +2866,19 @@ def save_query(
     try:
         _validate_search_mode(mode)
         validate_search_sort(sort)
+        filters = _search_filters_dict(
+            source_project=source_project,
+            content_type=content_type,
+            tag=tag,
+            review_state=review_state,
+            created_after=created_after,
+            created_before=created_before,
+            updated_after=updated_after,
+            updated_before=updated_before,
+            min_utility=min_utility,
+            max_utility=max_utility,
+            sort=sort if sort != "relevance" else None,
+        )
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
 
@@ -2714,17 +2888,7 @@ def save_query(
         query=query,
         mode=mode,
         limit=limit,
-        filters=_search_filters_dict(
-            source_project=source_project,
-            content_type=content_type,
-            tag=tag,
-            review_state=review_state,
-            created_after=created_after,
-            created_before=created_before,
-            min_utility=min_utility,
-            max_utility=max_utility,
-            sort=sort if sort != "relevance" else None,
-        ),
+        filters=filters,
     )
     store.close()
 
@@ -3870,6 +4034,16 @@ def tags_apply_search(
         "--created-before",
         help="Filter to units created on or before an ISO-8601 date/datetime",
     ),
+    updated_after: str | None = typer.Option(
+        None,
+        "--updated-after",
+        help="Filter to units updated on or after an ISO-8601 date/datetime",
+    ),
+    updated_before: str | None = typer.Option(
+        None,
+        "--updated-before",
+        help="Filter to units updated on or before an ISO-8601 date/datetime",
+    ),
     min_utility: float | None = typer.Option(
         None,
         "--min-utility",
@@ -3902,6 +4076,8 @@ def tags_apply_search(
         review_state=review_state,
         created_after=created_after,
         created_before=created_before,
+        updated_after=updated_after,
+        updated_before=updated_before,
         min_utility=min_utility,
         max_utility=max_utility,
         min_confidence=min_confidence,

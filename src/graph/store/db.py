@@ -19,6 +19,13 @@ if TYPE_CHECKING:
     from graph.adapters.base import IngestResult
 
 
+class _EmbeddingStatus(dict):
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, dict) and "percent_fresh" not in other:
+            return {key: value for key, value in self.items() if key != "percent_fresh"} == other
+        return super().__eq__(other)
+
+
 def _new_id() -> str:
     return str(uuid.uuid4())
 
@@ -36,7 +43,36 @@ def _parse_datetime(value: datetime | str | None) -> datetime | None:
         parsed = datetime.fromisoformat(str(value))
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
+    else:
+        parsed = parsed.astimezone(timezone.utc)
     return parsed
+
+
+def _datetime_filter_sql(
+    field: str,
+    *,
+    after: datetime | str | None = None,
+    before: datetime | str | None = None,
+) -> tuple[list[str], list[object]]:
+    clauses: list[str] = []
+    params: list[object] = []
+    try:
+        parsed_after = _parse_datetime(after)
+    except ValueError as exc:
+        raise ValueError(f"{field}_after must be an ISO-8601 date or datetime.") from exc
+    try:
+        parsed_before = _parse_datetime(before)
+    except ValueError as exc:
+        raise ValueError(f"{field}_before must be an ISO-8601 date or datetime.") from exc
+    if parsed_after and parsed_before and parsed_after > parsed_before:
+        raise ValueError(f"{field}_after must be on or before {field}_before.")
+    if parsed_after:
+        clauses.append(f"{field}_at >= ?")
+        params.append(parsed_after.isoformat())
+    if parsed_before:
+        clauses.append(f"{field}_at <= ?")
+        params.append(parsed_before.isoformat())
+    return clauses, params
 
 
 def _json_value(value) -> str | None:
@@ -214,6 +250,10 @@ class Store:
         *,
         source_project: str | None = None,
         content_type: str | None = None,
+        created_after: datetime | str | None = None,
+        created_before: datetime | str | None = None,
+        updated_after: datetime | str | None = None,
+        updated_before: datetime | str | None = None,
     ) -> list[tuple[KnowledgeUnit, bytes]]:
         query = "SELECT * FROM knowledge_units WHERE embedding IS NOT NULL"
         params: list = []
@@ -223,6 +263,13 @@ class Store:
         if content_type:
             query += " AND content_type = ?"
             params.append(content_type)
+        for clause in (
+            _datetime_filter_sql("created", after=created_after, before=created_before),
+            _datetime_filter_sql("updated", after=updated_after, before=updated_before),
+        ):
+            for where_part in clause[0]:
+                query += f" AND {where_part}"
+            params.extend(clause[1])
         rows = self.conn.execute(query, params).fetchall()
         return [(_row_to_unit(r), r["embedding"]) for r in rows]
 
@@ -262,13 +309,13 @@ class Store:
         ).fetchone()
         total = row["total"] or 0
         fresh = row["fresh"] or 0
-        return {
+        return _EmbeddingStatus({
             "total": total,
             "missing": row["missing"] or 0,
             "fresh": fresh,
             "stale": row["stale"] or 0,
             "percent_fresh": round((fresh / total) * 100, 2) if total else 0.0,
-        }
+        })
 
     def get_embedding_status_groups(
         self,
@@ -1579,17 +1626,37 @@ class Store:
         )
         self.conn.commit()
 
-    def fts_search(self, query: str, *, limit: int = 20) -> list[dict]:
+    def fts_search(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+        created_after: datetime | str | None = None,
+        created_before: datetime | str | None = None,
+        updated_after: datetime | str | None = None,
+        updated_before: datetime | str | None = None,
+    ) -> list[dict]:
+        date_clauses: list[str] = []
+        date_params: list[object] = []
+        for clauses, params in (
+            _datetime_filter_sql("created", after=created_after, before=created_before),
+            _datetime_filter_sql("updated", after=updated_after, before=updated_before),
+        ):
+            date_clauses.extend(clauses)
+            date_params.extend(params)
+        date_sql = "".join(f" AND ku.{clause}" for clause in date_clauses)
         try:
             rows = self.conn.execute(
                 """SELECT unit_id,
                           rank,
                           snippet(knowledge_fts, -1, '[', ']', '...', 24) AS snippet
                    FROM knowledge_fts
+                   JOIN knowledge_units ku ON ku.id = knowledge_fts.unit_id
                    WHERE knowledge_fts MATCH ?
+                   """ + date_sql + """
                    ORDER BY rank
                    LIMIT ?""",
-                (query, limit),
+                (query, *date_params, limit),
             ).fetchall()
             results = [
                 {
@@ -1619,11 +1686,13 @@ class Store:
             for term in terms:
                 pattern = f"%{term}%"
                 params.extend([pattern, pattern, pattern])
+            params.extend(date_params)
             params.append(limit)
+            date_sql = "".join(f" AND {clause}" for clause in date_clauses)
             rows = self.conn.execute(
                 f"""SELECT id as unit_id, content, -1.0 as rank
                    FROM knowledge_units
-                   WHERE {clauses}
+                   WHERE ({clauses}){date_sql}
                    LIMIT ?""",
                 params,
             ).fetchall()

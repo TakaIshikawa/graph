@@ -235,6 +235,10 @@ class RAGService:
         min_similarity: float = 0.5,
         source_project: str | None = None,
         content_type: str | None = None,
+        created_after: datetime | str | None = None,
+        created_before: datetime | str | None = None,
+        updated_after: datetime | str | None = None,
+        updated_before: datetime | str | None = None,
         sort: str = "relevance",
     ) -> list[tuple[KnowledgeUnit, float]]:
         """Semantic search. Returns (unit, similarity) pairs."""
@@ -246,6 +250,10 @@ class RAGService:
         candidates = self.store.get_units_with_embeddings(
             source_project=source_project,
             content_type=content_type,
+            created_after=created_after,
+            created_before=created_before,
+            updated_after=updated_after,
+            updated_before=updated_before,
         )
 
         results = []
@@ -266,16 +274,35 @@ class RAGService:
         limit: int = 10,
         semantic_weight: float = 0.6,
         fts_weight: float = 0.4,
+        created_after: datetime | str | None = None,
+        created_before: datetime | str | None = None,
+        updated_after: datetime | str | None = None,
+        updated_before: datetime | str | None = None,
         sort: str = "relevance",
     ) -> list[tuple[KnowledgeUnit, float]]:
         """Combined semantic + full-text search."""
         validate_search_sort(sort)
         # Semantic results
-        semantic_results = self.search(query, limit=limit * 2, min_similarity=0.3)
+        semantic_results = self.search(
+            query,
+            limit=limit * 2,
+            min_similarity=0.3,
+            created_after=created_after,
+            created_before=created_before,
+            updated_after=updated_after,
+            updated_before=updated_before,
+        )
         semantic_scores = {unit.id: sim for unit, sim in semantic_results}
 
         # FTS results
-        fts_results = self.store.fts_search(query, limit=limit * 2)
+        fts_results = self.store.fts_search(
+            query,
+            limit=limit * 2,
+            created_after=created_after,
+            created_before=created_before,
+            updated_after=updated_after,
+            updated_before=updated_before,
+        )
         fts_scores: dict[str, float] = {}
         if fts_results:
             max_rank = max(abs(r["rank"]) for r in fts_results) or 1.0

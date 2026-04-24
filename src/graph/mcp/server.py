@@ -41,6 +41,7 @@ from graph.cli.main import (
     _do_update_unit,
     _list_edges_payload,
     _search_filters_dict,
+    _validate_search_filters,
     SEARCH_SORTS,
 )
 from graph.graph.service import GraphService
@@ -91,6 +92,14 @@ SEARCH_FILTER_SCHEMA = {
     "created_before": {
         "type": "string",
         "description": "Filter to units created on or before an ISO-8601 date/datetime",
+    },
+    "updated_after": {
+        "type": "string",
+        "description": "Filter to units updated on or after an ISO-8601 date/datetime",
+    },
+    "updated_before": {
+        "type": "string",
+        "description": "Filter to units updated on or before an ISO-8601 date/datetime",
     },
     "min_utility": {
         "type": "number",
@@ -381,7 +390,7 @@ async def list_tools() -> list[Tool]:
                     **SEARCH_FILTER_SCHEMA,
                     "filters": {
                         "type": "object",
-                        "description": "Structured filters such as source_project, content_type, tag, review_state, created_after, created_before, min_utility, max_utility",
+                        "description": "Structured filters such as source_project, content_type, tag, review_state, created_after, created_before, updated_after, updated_before, min_utility, max_utility",
                         "additionalProperties": True,
                         "default": {},
                     },
@@ -1321,19 +1330,21 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             query = arguments["query"]
             limit = arguments.get("limit", 10)
             mode = arguments.get("mode", "fulltext")
-            filters = _search_filters_dict(
-                source_project=arguments.get("source_project"),
-                content_type=arguments.get("content_type"),
-                review_state=arguments.get("review_state"),
-                tag=arguments.get("tag"),
-                created_after=arguments.get("created_after"),
-                created_before=arguments.get("created_before"),
-                min_utility=arguments.get("min_utility"),
-                max_utility=arguments.get("max_utility"),
-                min_confidence=arguments.get("min_confidence"),
-                max_confidence=arguments.get("max_confidence"),
-            )
             try:
+                filters = _search_filters_dict(
+                    source_project=arguments.get("source_project"),
+                    content_type=arguments.get("content_type"),
+                    review_state=arguments.get("review_state"),
+                    tag=arguments.get("tag"),
+                    created_after=arguments.get("created_after"),
+                    created_before=arguments.get("created_before"),
+                    updated_after=arguments.get("updated_after"),
+                    updated_before=arguments.get("updated_before"),
+                    min_utility=arguments.get("min_utility"),
+                    max_utility=arguments.get("max_utility"),
+                    min_confidence=arguments.get("min_confidence"),
+                    max_confidence=arguments.get("max_confidence"),
+                )
                 payload = _do_search(
                     store,
                     query,
@@ -1380,19 +1391,21 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
         elif name == "search_facets":
             query = arguments["query"]
-            filters = _search_filters_dict(
-                source_project=arguments.get("source_project"),
-                content_type=arguments.get("content_type"),
-                review_state=arguments.get("review_state"),
-                tag=arguments.get("tag"),
-                created_after=arguments.get("created_after"),
-                created_before=arguments.get("created_before"),
-                min_utility=arguments.get("min_utility"),
-                max_utility=arguments.get("max_utility"),
-                min_confidence=arguments.get("min_confidence"),
-                max_confidence=arguments.get("max_confidence"),
-            )
             try:
+                filters = _search_filters_dict(
+                    source_project=arguments.get("source_project"),
+                    content_type=arguments.get("content_type"),
+                    review_state=arguments.get("review_state"),
+                    tag=arguments.get("tag"),
+                    created_after=arguments.get("created_after"),
+                    created_before=arguments.get("created_before"),
+                    updated_after=arguments.get("updated_after"),
+                    updated_before=arguments.get("updated_before"),
+                    min_utility=arguments.get("min_utility"),
+                    max_utility=arguments.get("max_utility"),
+                    min_confidence=arguments.get("min_confidence"),
+                    max_confidence=arguments.get("max_confidence"),
+                )
                 payload = _do_search_facets(
                     store,
                     query,
@@ -1410,19 +1423,21 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
         elif name == "context_pack":
             query = arguments["query"]
-            filters = _search_filters_dict(
-                source_project=arguments.get("source_project"),
-                content_type=arguments.get("content_type"),
-                review_state=arguments.get("review_state"),
-                tag=arguments.get("tag"),
-                created_after=arguments.get("created_after"),
-                created_before=arguments.get("created_before"),
-                min_utility=arguments.get("min_utility"),
-                max_utility=arguments.get("max_utility"),
-                min_confidence=arguments.get("min_confidence"),
-                max_confidence=arguments.get("max_confidence"),
-            )
             try:
+                filters = _search_filters_dict(
+                    source_project=arguments.get("source_project"),
+                    content_type=arguments.get("content_type"),
+                    review_state=arguments.get("review_state"),
+                    tag=arguments.get("tag"),
+                    created_after=arguments.get("created_after"),
+                    created_before=arguments.get("created_before"),
+                    updated_after=arguments.get("updated_after"),
+                    updated_before=arguments.get("updated_before"),
+                    min_utility=arguments.get("min_utility"),
+                    max_utility=arguments.get("max_utility"),
+                    min_confidence=arguments.get("min_confidence"),
+                    max_confidence=arguments.get("max_confidence"),
+                )
                 payload = _do_context_pack(
                     store,
                     query,
@@ -1451,33 +1466,39 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     "valid_sorts": list(SEARCH_SORTS),
                 }
                 return [TextContent(type="text", text=json.dumps(payload))]
-            filters = dict(arguments.get("filters", {}))
-            filters.update(
-                _search_filters_dict(
-                    source_project=arguments.get("source_project"),
-                    content_type=arguments.get("content_type"),
-                    review_state=arguments.get("review_state"),
-                    tag=arguments.get("tag"),
-                    created_after=arguments.get("created_after"),
-                    created_before=arguments.get("created_before"),
-                    min_utility=arguments.get("min_utility"),
-                    max_utility=arguments.get("max_utility"),
-                    min_confidence=arguments.get("min_confidence"),
-                    max_confidence=arguments.get("max_confidence"),
-                    sort=(
-                        arguments.get("sort")
-                        if arguments.get("sort", "relevance") != "relevance"
-                        else None
-                    ),
+            try:
+                filters = dict(arguments.get("filters", {}))
+                filters.update(
+                    _search_filters_dict(
+                        source_project=arguments.get("source_project"),
+                        content_type=arguments.get("content_type"),
+                        review_state=arguments.get("review_state"),
+                        tag=arguments.get("tag"),
+                        created_after=arguments.get("created_after"),
+                        created_before=arguments.get("created_before"),
+                        updated_after=arguments.get("updated_after"),
+                        updated_before=arguments.get("updated_before"),
+                        min_utility=arguments.get("min_utility"),
+                        max_utility=arguments.get("max_utility"),
+                        min_confidence=arguments.get("min_confidence"),
+                        max_confidence=arguments.get("max_confidence"),
+                        sort=(
+                            arguments.get("sort")
+                            if arguments.get("sort", "relevance") != "relevance"
+                            else None
+                        ),
+                    )
                 )
-            )
-            saved = store.save_query(
-                name=arguments["name"],
-                query=arguments["query"],
-                mode=arguments.get("mode", "fulltext"),
-                limit=arguments.get("limit", 10),
-                filters=filters,
-            )
+                _validate_search_filters(filters)
+                saved = store.save_query(
+                    name=arguments["name"],
+                    query=arguments["query"],
+                    mode=arguments.get("mode", "fulltext"),
+                    limit=arguments.get("limit", 10),
+                    filters=filters,
+                )
+            except ValueError as exc:
+                return [TextContent(type="text", text=json.dumps({"error": str(exc)}))]
             return [TextContent(type="text", text=json.dumps(saved))]
 
         elif name == "list_queries":
@@ -1819,6 +1840,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 tag=arguments.get("tag"),
                 created_after=arguments.get("created_after"),
                 created_before=arguments.get("created_before"),
+                updated_after=arguments.get("updated_after"),
+                updated_before=arguments.get("updated_before"),
                 min_utility=arguments.get("min_utility"),
                 max_utility=arguments.get("max_utility"),
                 min_confidence=arguments.get("min_confidence"),
