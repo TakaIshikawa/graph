@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from pathlib import Path
 import re
+from urllib.parse import quote
 
 import networkx as nx
 
@@ -12,6 +13,7 @@ from graph.store.db import Store
 
 
 _NORMALIZED_TEXT_RE = re.compile(r"[^a-z0-9]+")
+_TTL_LOCAL_NAME_RE = re.compile(r"[^A-Za-z0-9_]")
 
 
 def _normalize_text(value: str) -> str:
@@ -28,6 +30,39 @@ def _counter_similarity(left: Counter[str], right: Counter[str]) -> float:
     overlap = sum((left & right).values())
     total = max(sum(left.values()), sum(right.values()))
     return overlap / total if total else 0.0
+
+
+def _turtle_literal(value: object) -> str:
+    text = str(value)
+    escaped = []
+    for char in text:
+        codepoint = ord(char)
+        if char == "\\":
+            escaped.append("\\\\")
+        elif char == '"':
+            escaped.append('\\"')
+        elif char == "\n":
+            escaped.append("\\n")
+        elif char == "\r":
+            escaped.append("\\r")
+        elif char == "\t":
+            escaped.append("\\t")
+        elif codepoint < 0x20:
+            escaped.append(f"\\u{codepoint:04X}")
+        else:
+            escaped.append(char)
+    return f'"{"".join(escaped)}"'
+
+
+def _turtle_local_name(value: object) -> str:
+    name = _TTL_LOCAL_NAME_RE.sub("_", str(value)).strip("_")
+    if not name or not re.match(r"[A-Za-z_]", name):
+        name = f"rel_{name}"
+    return name
+
+
+def _unit_uri(base_uri: str, unit_id: str) -> str:
+    return f"<{base_uri}{quote(unit_id, safe='')}>"
 
 
 class GraphService:
@@ -106,6 +141,71 @@ class GraphService:
             "path": str(output_path),
             "node_count": export_graph.number_of_nodes(),
             "edge_count": export_graph.number_of_edges(),
+        }
+
+    def export_turtle(
+        self, path: str | Path, base_uri: str = "https://graph.local/unit/"
+    ) -> dict:
+        """Write the current graph to RDF Turtle and return export stats."""
+        output_path = Path(path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        units = sorted(self.store.get_all_units(), key=lambda unit: unit.id)
+        unit_ids = {unit.id for unit in units}
+        edges = sorted(
+            (
+                edge
+                for edge in self.store.get_all_edges()
+                if edge.from_unit_id in unit_ids and edge.to_unit_id in unit_ids
+            ),
+            key=lambda edge: (edge.from_unit_id, str(edge.relation), edge.to_unit_id),
+        )
+        outgoing_edges: dict[str, list] = {}
+        for edge in edges:
+            outgoing_edges.setdefault(edge.from_unit_id, []).append(edge)
+
+        lines = [
+            "@prefix graph: <https://graph.local/schema#> .",
+            "@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .",
+            "@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .",
+            "",
+        ]
+
+        for unit in units:
+            predicates = [
+                "a graph:KnowledgeUnit",
+                f"graph:title {_turtle_literal(unit.title)}",
+                f"graph:sourceProject {_turtle_literal(unit.source_project)}",
+                f"graph:sourceId {_turtle_literal(unit.source_id)}",
+                f"graph:sourceEntityType {_turtle_literal(unit.source_entity_type)}",
+                f"graph:contentType {_turtle_literal(unit.content_type)}",
+                f"graph:contentSnippet {_turtle_literal(unit.content[:240])}",
+                f"graph:createdAt {_turtle_literal(unit.created_at.isoformat())}^^xsd:dateTime",
+            ]
+            if unit.utility_score is not None:
+                predicates.append(
+                    f"graph:utilityScore {_turtle_literal(unit.utility_score)}^^xsd:double"
+                )
+            for tag in unit.tags:
+                predicates.append(f"graph:tag {_turtle_literal(tag)}")
+            for edge in outgoing_edges.get(unit.id, []):
+                relation = _turtle_local_name(edge.relation)
+                predicates.append(
+                    f"graph:{relation} {_unit_uri(base_uri, edge.to_unit_id)}"
+                )
+
+            lines.append(_unit_uri(base_uri, unit.id))
+            for index, predicate in enumerate(predicates):
+                terminator = " ." if index == len(predicates) - 1 else " ;"
+                lines.append(f"    {predicate}{terminator}")
+            lines.append("")
+
+        output_path.write_text("\n".join(lines), encoding="utf-8")
+        return {
+            "path": str(output_path),
+            "node_count": len(units),
+            "edge_count": len(edges),
+            "base_uri": base_uri,
         }
 
     def get_neighbors(self, unit_id: str, depth: int = 1) -> dict:

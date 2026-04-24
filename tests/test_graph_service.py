@@ -262,6 +262,63 @@ class TestGraphService:
         assert edge_data["source"] == "inferred"
         assert edge_data["created_at"]
 
+    def test_export_turtle_writes_units_edges_and_escaped_literals(
+        self, store: Store, tmp_path
+    ):
+        a = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="a",
+                source_entity_type="knowledge_node",
+                title='Node "A"\nalpha',
+                content='First node with "quoted" content\nand a slash \\ marker',
+                content_type=ContentType.FINDING,
+                tags=["energy", 'solar "pv"', "line\nbreak"],
+                utility_score=0.9,
+            )
+        )
+        b = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="b",
+                source_entity_type="insight",
+                title="Node B",
+                content="Second node",
+                content_type=ContentType.INSIGHT,
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=a.id,
+                to_unit_id=b.id,
+                relation=EdgeRelation.BUILDS_ON,
+            )
+        )
+
+        output_path = tmp_path / "graph.ttl"
+        stats = GraphService(store).export_turtle(
+            output_path, base_uri="https://example.test/unit/"
+        )
+        text = output_path.read_text()
+
+        assert stats == {
+            "path": str(output_path),
+            "node_count": 2,
+            "edge_count": 1,
+            "base_uri": "https://example.test/unit/",
+        }
+        assert "@prefix graph: <https://graph.local/schema#> ." in text
+        assert f"<https://example.test/unit/{a.id}>" in text
+        assert f"<https://example.test/unit/{b.id}>" in text
+        assert 'graph:title "Node \\"A\\"\\nalpha"' in text
+        assert (
+            'graph:contentSnippet "First node with \\"quoted\\" content\\nand '
+            'a slash \\\\ marker"'
+        ) in text
+        assert 'graph:tag "solar \\"pv\\""' in text
+        assert 'graph:tag "line\\nbreak"' in text
+        assert f"graph:builds_on <https://example.test/unit/{b.id}>" in text
+
     def test_find_gaps(self, populated_store: Store):
         gs = GraphService(populated_store)
         gs.rebuild()

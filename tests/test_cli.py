@@ -430,6 +430,39 @@ def test_export_graphml_command_writes_valid_graphml(tmp_path, monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_export_turtle_command_writes_turtle_with_counts(tmp_path, monkeypatch):
+    store = _make_store()
+    a_id, b_id, _, _ = _populate_graph(store)
+    export_path = tmp_path / "graph.ttl"
+
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    result = runner.invoke(
+        app,
+        [
+            "export-turtle",
+            str(export_path),
+            "--base-uri",
+            "https://example.test/unit/",
+        ],
+    )
+
+    try:
+        assert result.exit_code == 0
+        assert export_path.exists()
+        assert "Exported 4 nodes and 2 edges" in result.output
+
+        text = export_path.read_text()
+        assert "@prefix graph: <https://graph.local/schema#> ." in text
+        assert f"<https://example.test/unit/{a_id}>" in text
+        assert 'graph:title "Node A"' in text
+        assert 'graph:tag "energy"' not in text
+        assert f"graph:builds_on <https://example.test/unit/{b_id}>" in text
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_export_report_command_writes_markdown_and_json_counts(tmp_path, monkeypatch):
     store = _make_store()
     a = store.insert_unit(

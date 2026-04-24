@@ -80,6 +80,15 @@ def _do_export_graphml(store: Store, path: str | Path) -> dict:
     return gs.export_graphml(path)
 
 
+def _do_export_turtle(
+    store: Store, path: str | Path, *, base_uri: str = "https://graph.local/unit/"
+) -> dict:
+    from graph.graph.service import GraphService
+
+    gs = GraphService(store)
+    return gs.export_turtle(path, base_uri=base_uri)
+
+
 def _do_export_report(store: Store, path: str | Path, *, limit: int = 10) -> dict:
     from graph.graph.service import GraphService
 
@@ -612,6 +621,25 @@ def export_graphml(
     """Export the graph to GraphML for external visualization tools."""
     store = _get_store()
     stats = _do_export_graphml(store, path)
+    store.close()
+    typer.echo(
+        f"Exported {stats['node_count']} nodes and "
+        f"{stats['edge_count']} edges to {stats['path']}"
+    )
+
+
+@app.command(name="export-turtle")
+def export_turtle(
+    path: Path = typer.Argument(..., help="Destination Turtle file path"),
+    base_uri: str = typer.Option(
+        "https://graph.local/unit/",
+        "--base-uri",
+        help="Base URI for exported knowledge unit IRIs",
+    ),
+) -> None:
+    """Export the graph to RDF Turtle for linked-data tools."""
+    store = _get_store()
+    stats = _do_export_turtle(store, path, base_uri=base_uri)
     store.close()
     typer.echo(
         f"Exported {stats['node_count']} nodes and "

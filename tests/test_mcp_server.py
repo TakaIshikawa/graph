@@ -726,6 +726,70 @@ def test_export_graphml_tool_returns_path_and_counts(tmp_path, monkeypatch):
     assert exported.get_edge_data(a.id, b.id)["source"] == "inferred"
 
 
+def test_export_turtle_tool_returns_path_counts_and_base_uri(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    turtle_path = tmp_path / "graph.ttl"
+
+    store = Store(str(db_path))
+    a = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="a",
+            source_entity_type="knowledge_node",
+            title='Node "A"',
+            content="First searchable node",
+            tags=["energy", "solar"],
+        )
+    )
+    b = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="b",
+            source_entity_type="insight",
+            title="Node B",
+            content="Second searchable node",
+            content_type=ContentType.INSIGHT,
+        )
+    )
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=a.id,
+            to_unit_id=b.id,
+            relation=EdgeRelation.BUILDS_ON,
+            weight=0.8,
+        )
+    )
+    store.close()
+
+    tools = asyncio.run(mcp_server.list_tools())
+    assert any(tool.name == "export_turtle" for tool in tools)
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "export_turtle",
+            {
+                "path": str(turtle_path),
+                "base_uri": "https://example.test/unit/",
+            },
+        )
+    )
+    payload = json.loads(response[0].text)
+
+    assert payload == {
+        "path": str(turtle_path),
+        "node_count": 2,
+        "edge_count": 1,
+        "base_uri": "https://example.test/unit/",
+    }
+    text = turtle_path.read_text()
+    assert "@prefix graph: <https://graph.local/schema#> ." in text
+    assert f"<https://example.test/unit/{a.id}>" in text
+    assert 'graph:title "Node \\"A\\""' in text
+    assert 'graph:tag "energy"' in text
+    assert f"graph:builds_on <https://example.test/unit/{b.id}>" in text
+
+
 def test_export_report_tool_writes_markdown_with_same_sections(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     report_path = tmp_path / "graph-report.md"

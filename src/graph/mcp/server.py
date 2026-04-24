@@ -16,6 +16,7 @@ from graph.cli.main import (
     _do_export_json,
     _do_export_obsidian,
     _do_export_report,
+    _do_export_turtle,
     _do_import_json,
     _do_infer_edges,
     _do_search,
@@ -543,6 +544,25 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="export_turtle",
+            description="Export the graph to RDF Turtle for linked-data tools.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Destination Turtle file path",
+                    },
+                    "base_uri": {
+                        "type": "string",
+                        "description": "Base URI for exported knowledge unit IRIs",
+                        "default": "https://graph.local/unit/",
+                    },
+                },
+                "required": ["path"],
+            },
+        ),
+        Tool(
             name="export_report",
             description="Export a Markdown graph health report for review and sharing.",
             inputSchema={
@@ -966,6 +986,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
         elif name == "export_graphml":
             stats = _do_export_graphml(store, arguments["path"])
+            return [TextContent(type="text", text=json.dumps(stats))]
+
+        elif name == "export_turtle":
+            stats = _do_export_turtle(
+                store,
+                arguments["path"],
+                base_uri=arguments.get("base_uri", "https://graph.local/unit/"),
+            )
             return [TextContent(type="text", text=json.dumps(stats))]
 
         elif name == "export_report":
