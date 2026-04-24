@@ -306,6 +306,7 @@ def _populate_backlinks_graph(store: Store) -> tuple[str, str, str]:
             from_unit_id=a.id,
             to_unit_id=b.id,
             relation=EdgeRelation.BUILDS_ON,
+            weight=0.75,
             source=EdgeSource.MANUAL,
             metadata={"why": "reference"},
         )
@@ -1056,6 +1057,72 @@ def test_backlinks_tool_returns_expanded_json_filters_and_missing_error(
 
     missing = asyncio.run(mcp_server.call_tool("backlinks", {"unit_id": "missing"}))
     assert json.loads(missing[0].text)["error"] == "unit_not_found"
+
+
+def test_shortest_path_tool_returns_structured_path_and_errors(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    a_id, b_id, c_id = _populate_backlinks_graph(store)
+    isolated = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.PRESENCE,
+            source_id="isolated",
+            source_entity_type="knowledge_item",
+            title="Isolated",
+            content="Outside the path",
+        )
+    )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    tool = next(tool for tool in tools if tool.name == "shortest_path")
+    assert set(tool.inputSchema["required"]) == {"from_unit_id", "to_unit_id"}
+    assert "from_unit_id" in tool.inputSchema["properties"]
+    assert "to_unit_id" in tool.inputSchema["properties"]
+
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "shortest_path",
+            {"from_unit_id": a_id, "to_unit_id": c_id},
+        )
+    )
+    payload = json.loads(response[0].text)
+    assert [unit["id"] for unit in payload["path"]] == [a_id, b_id, c_id]
+    assert [unit["title"] for unit in payload["path"]] == [
+        "Node A",
+        "Node B",
+        "Node C",
+    ]
+    assert payload["edges"][0]["relation"] == "builds_on"
+    assert payload["edges"][0]["weight"] == 0.75
+    assert payload["edges"][0]["source"] == "manual"
+    assert payload["edges"][1]["relation"] == "inspires"
+    assert payload["edges"][1]["source"] == "inferred"
+
+    missing = asyncio.run(
+        mcp_server.call_tool(
+            "shortest_path",
+            {"from_unit_id": "missing", "to_unit_id": c_id},
+        )
+    )
+    missing_payload = json.loads(missing[0].text)
+    assert missing_payload["error"] == "unit_not_found"
+    assert missing_payload["missing_unit_ids"] == ["missing"]
+    assert missing_payload["path"] == []
+    assert missing_payload["edges"] == []
+
+    disconnected = asyncio.run(
+        mcp_server.call_tool(
+            "shortest_path",
+            {"from_unit_id": a_id, "to_unit_id": isolated.id},
+        )
+    )
+    disconnected_payload = json.loads(disconnected[0].text)
+    assert disconnected_payload["error"] == "not_connected"
+    assert disconnected_payload["path"] == []
+    assert disconnected_payload["edges"] == []
 
 
 def test_export_obsidian_tool_exports_same_vault_structure_as_cli(

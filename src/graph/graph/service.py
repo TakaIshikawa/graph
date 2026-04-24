@@ -471,6 +471,76 @@ class GraphService:
         except (nx.NodeNotFound, nx.NetworkXNoPath):
             return None
 
+    def build_shortest_path_payload(self, from_unit_id: str, to_unit_id: str) -> dict:
+        """Build a structured shortest-path payload for API/MCP callers."""
+        if not self.G:
+            self.rebuild()
+
+        missing_unit_ids = [
+            unit_id
+            for unit_id in (from_unit_id, to_unit_id)
+            if unit_id not in self.G
+        ]
+        if missing_unit_ids:
+            return {
+                "from_unit_id": from_unit_id,
+                "to_unit_id": to_unit_id,
+                "path": [],
+                "edges": [],
+                "error": "unit_not_found",
+                "missing_unit_ids": missing_unit_ids,
+                "message": "One or more units were not found.",
+            }
+
+        path = self.shortest_path(from_unit_id, to_unit_id)
+        if path is None:
+            return {
+                "from_unit_id": from_unit_id,
+                "to_unit_id": to_unit_id,
+                "path": [],
+                "edges": [],
+                "error": "not_connected",
+                "message": "No path found between the selected units.",
+            }
+
+        path_units = [
+            unit
+            for unit in (self.store.get_unit(unit_id) for unit_id in path)
+            if unit is not None
+        ]
+        edges = []
+        for left_id, right_id in zip(path, path[1:], strict=False):
+            edge = self.G.get_edge_data(left_id, right_id)
+            traversal_direction = "forward"
+            if edge is None:
+                edge = self.G.get_edge_data(right_id, left_id)
+                traversal_direction = "reverse"
+            if edge is None:
+                continue
+            edge_payload = {
+                "id": edge.get("id"),
+                "from_unit_id": (
+                    left_id if traversal_direction == "forward" else right_id
+                ),
+                "to_unit_id": (
+                    right_id if traversal_direction == "forward" else left_id
+                ),
+                "relation": str(edge.get("relation", "")),
+                "weight": edge.get("weight"),
+                "source": str(edge.get("source", "")),
+                "traversal_from_unit_id": left_id,
+                "traversal_to_unit_id": right_id,
+                "traversal_direction": traversal_direction,
+            }
+            edges.append(edge_payload)
+
+        return {
+            "from_unit_id": from_unit_id,
+            "to_unit_id": to_unit_id,
+            "path": [self._unit_export_data(unit) for unit in path_units],
+            "edges": edges,
+        }
+
     def get_clusters(self, min_size: int = 3) -> list[list[str]]:
         """Find connected components / clusters."""
         if not self.G.nodes:

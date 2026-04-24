@@ -372,6 +372,21 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="shortest_path",
+            description=(
+                "Return the shortest path between two knowledge units with ordered "
+                "units and connecting edge metadata."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "from_unit_id": {"type": "string"},
+                    "to_unit_id": {"type": "string"},
+                },
+                "required": ["from_unit_id", "to_unit_id"],
+            },
+        ),
+        Tool(
             name="analyze_clusters",
             description="Find clusters of related knowledge in the graph.",
             inputSchema={
@@ -1193,6 +1208,15 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     path_details.append({"id": n.id, "title": n.title, "source_project": n.source_project})
 
             return [TextContent(type="text", text=json.dumps({"path": path_details}))]
+
+        elif name == "shortest_path":
+            gs = GraphService(store)
+            gs.rebuild()
+            payload = gs.build_shortest_path_payload(
+                arguments["from_unit_id"],
+                arguments["to_unit_id"],
+            )
+            return [TextContent(type="text", text=json.dumps(payload, default=str))]
 
         elif name == "analyze_clusters":
             gs = GraphService(store)

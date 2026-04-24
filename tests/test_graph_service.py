@@ -12,7 +12,7 @@ import pytest
 
 from graph.graph.service import GraphService
 from graph.store.db import Store
-from graph.types.enums import ContentType, EdgeRelation, SourceProject
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
 from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
@@ -76,6 +76,8 @@ def populated_store(store: Store):
             from_unit_id=a.id,
             to_unit_id=b.id,
             relation=EdgeRelation.BUILDS_ON,
+            weight=0.75,
+            source=EdgeSource.MANUAL,
         )
     )
     store.insert_edge(
@@ -372,6 +374,61 @@ class TestGraphService:
         d = populated_store.get_unit_by_source("presence", "d", "knowledge_item")
         path = gs.shortest_path(a.id, d.id)
         assert path is None
+
+    def test_build_shortest_path_payload_includes_ordered_units_and_edges(
+        self, populated_store: Store
+    ):
+        gs = GraphService(populated_store)
+        gs.rebuild()
+
+        a = populated_store.get_unit_by_source("forty_two", "a", "knowledge_node")
+        b = populated_store.get_unit_by_source("forty_two", "b", "knowledge_node")
+        c = populated_store.get_unit_by_source("max", "c", "insight")
+
+        payload = gs.build_shortest_path_payload(a.id, c.id)
+
+        assert [unit["id"] for unit in payload["path"]] == [a.id, b.id, c.id]
+        assert [unit["title"] for unit in payload["path"]] == [
+            "Node A",
+            "Node B",
+            "Node C",
+        ]
+        assert payload["edges"][0] == {
+            "id": payload["edges"][0]["id"],
+            "from_unit_id": a.id,
+            "to_unit_id": b.id,
+            "relation": "builds_on",
+            "weight": 0.75,
+            "source": "manual",
+            "traversal_from_unit_id": a.id,
+            "traversal_to_unit_id": b.id,
+            "traversal_direction": "forward",
+        }
+        assert payload["edges"][1]["from_unit_id"] == b.id
+        assert payload["edges"][1]["to_unit_id"] == c.id
+        assert payload["edges"][1]["relation"] == "inspires"
+        assert payload["edges"][1]["weight"] == 1.0
+        assert payload["edges"][1]["source"] == "inferred"
+
+    def test_build_shortest_path_payload_reports_missing_and_disconnected_units(
+        self, populated_store: Store
+    ):
+        gs = GraphService(populated_store)
+        gs.rebuild()
+
+        a = populated_store.get_unit_by_source("forty_two", "a", "knowledge_node")
+        d = populated_store.get_unit_by_source("presence", "d", "knowledge_item")
+
+        missing = gs.build_shortest_path_payload("missing", d.id)
+        assert missing["error"] == "unit_not_found"
+        assert missing["missing_unit_ids"] == ["missing"]
+        assert missing["path"] == []
+        assert missing["edges"] == []
+
+        disconnected = gs.build_shortest_path_payload(a.id, d.id)
+        assert disconnected["error"] == "not_connected"
+        assert disconnected["path"] == []
+        assert disconnected["edges"] == []
 
     def test_clusters(self, populated_store: Store):
         gs = GraphService(populated_store)
