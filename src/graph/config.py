@@ -9,6 +9,14 @@ load_dotenv()
 class Settings(BaseSettings):
     database_url: str = "graph.db"
 
+    forty_two_db: str = ""
+    max_db: str = ""
+    presence_db: str = ""
+    kindle_db: str = ""
+    sota_db: str = ""
+    me_config: str = ""
+    obsidian_vault_path: str = "/Users/taka/ObsidianVaults/note"
+
     embedding_provider: str = "voyage"
     embedding_model: str = "voyage-3-lite"
     embedding_api_key: str = ""

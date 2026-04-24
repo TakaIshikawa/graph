@@ -75,6 +75,19 @@ GRAPH_EMBEDDING_PROVIDER=voyage
 GRAPH_EMBEDDING_MODEL=voyage-3-lite
 ```
 
+Optional source and export paths can also be configured in `.env`:
+
+```env
+GRAPH_DATABASE_URL=graph.db
+GRAPH_FORTY_TWO_DB=/path/to/forty-two/forty_two.db
+GRAPH_MAX_DB=/path/to/max/max.db
+GRAPH_PRESENCE_DB=/path/to/presence/presence.db
+GRAPH_KINDLE_DB=/path/to/supabooks/supabooks.db
+GRAPH_SOTA_DB=/path/to/sota/sota.db
+GRAPH_ME_CONFIG=/path/to/me/config/projects.yaml
+GRAPH_OBSIDIAN_VAULT_PATH=/path/to/obsidian/vault
+```
+
 ### Getting API Keys
 
 - **Voyage AI**: Sign up at https://www.voyageai.com
@@ -276,6 +289,8 @@ graph embed [--project name] [--batch-size 5] [--delay 21.0]
 ```bash
 graph export-obsidian [--vault /path/to/vault] [--folder Graph]
 ```
+
+If `--vault` is omitted, Graph writes to `GRAPH_OBSIDIAN_VAULT_PATH`.
 
 ### Example-Specific Commands
 

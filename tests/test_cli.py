@@ -253,6 +253,31 @@ def _cleanup_db(path: str) -> None:
         candidate.unlink(missing_ok=True)
 
 
+def test_export_obsidian_uses_configured_vault_default(tmp_path, monkeypatch):
+    store = _make_store()
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="a",
+            source_entity_type="knowledge_node",
+            title="Node A",
+            content="First node",
+        )
+    )
+    proxy = StoreProxy(store)
+    vault_path = tmp_path / "configured-vault"
+
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    monkeypatch.setattr("graph.cli.main.settings.obsidian_vault_path", str(vault_path))
+
+    result = runner.invoke(app, ["export-obsidian"])
+
+    assert result.exit_code == 0
+    assert (vault_path / "Graph" / "forty_two" / "Node A.md").exists()
+    assert f"to {vault_path / 'Graph'}" in result.output
+    _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_shortest_path_command_prints_readable_path(monkeypatch):
     store = _make_store()
     a_id, _, c_id, _ = _populate_graph(store)

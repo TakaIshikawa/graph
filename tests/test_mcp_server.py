@@ -272,3 +272,43 @@ def test_export_obsidian_tool_exports_same_vault_structure_as_cli(
     assert "# Knowledge Graph Index" in index
     assert "## forty_two (1)" in index
     assert "## max (1)" in index
+
+
+def test_export_obsidian_tool_uses_configured_vault_default(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="a",
+            source_entity_type="knowledge_node",
+            title="Node A",
+            content="First node",
+        )
+    )
+    store.close()
+
+    vault_path = tmp_path / "configured-vault"
+    monkeypatch.setattr(
+        mcp_server,
+        "_get_store",
+        lambda: Store(str(db_path)),
+    )
+    monkeypatch.setattr(mcp_server.settings, "obsidian_vault_path", str(vault_path))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    export_tool = next(tool for tool in tools if tool.name == "export_obsidian")
+    assert export_tool.inputSchema["properties"]["vault_path"]["default"] == str(vault_path)
+
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "export_obsidian",
+            {
+                "folder": "Graph",
+                "clean": True,
+            },
+        )
+    )
+
+    assert json.loads(response[0].text) == {"notes_written": 1}
+    assert (vault_path / "Graph" / "forty_two" / "Node A.md").exists()

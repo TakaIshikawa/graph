@@ -1043,7 +1043,7 @@ def cross_project(
 
 def _do_export_obsidian(
     store: Store,
-    vault_path: str = "/Users/taka/ObsidianVaults/note",
+    vault_path: str | None = None,
     folder: str = "Graph",
     clean: bool = False,
 ) -> int:
@@ -1052,6 +1052,7 @@ def _do_export_obsidian(
     import shutil
     from pathlib import Path
 
+    vault_path = vault_path or settings.obsidian_vault_path
     output_dir = Path(vault_path) / folder
     if clean and output_dir.exists():
         shutil.rmtree(output_dir)
@@ -1162,8 +1163,8 @@ def _do_export_obsidian(
 
 @app.command(name="export-obsidian")
 def export_obsidian(
-    vault_path: str = typer.Option(
-        "/Users/taka/ObsidianVaults/note",
+    vault_path: str | None = typer.Option(
+        None,
         "--vault",
         "-v",
         help="Path to Obsidian vault",
@@ -1179,8 +1180,8 @@ def export_obsidian(
 
 @app.command()
 def sync(
-    vault_path: str = typer.Option(
-        "/Users/taka/ObsidianVaults/note",
+    vault_path: str | None = typer.Option(
+        None,
         "--vault",
         "-v",
         help="Path to Obsidian vault",

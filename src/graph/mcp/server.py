@@ -312,7 +312,7 @@ async def list_tools() -> list[Tool]:
                     "vault_path": {
                         "type": "string",
                         "description": "Path to the Obsidian vault root",
-                        "default": "/Users/taka/ObsidianVaults/note",
+                        "default": settings.obsidian_vault_path,
                     },
                     "folder": {
                         "type": "string",
@@ -627,7 +627,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return [TextContent(type="text", text=json.dumps(gs.stats()))]
 
         elif name == "export_obsidian":
-            vault_path = arguments.get("vault_path", "/Users/taka/ObsidianVaults/note")
+            vault_path = arguments.get("vault_path") or settings.obsidian_vault_path
             folder = arguments.get("folder", "Graph")
             clean = arguments.get("clean", False)
             written = _do_export_obsidian(
