@@ -1025,6 +1025,58 @@ class TestSavedQueries:
         assert store.get_saved_query("approved-solar") is None
         assert store.delete_saved_query("approved-solar") is False
 
+    def test_saved_query_export_import_round_trip_and_updates_by_name(self, tmp_path):
+        source = Store(str(tmp_path / "source.db"))
+        target = Store(str(tmp_path / "target.db"))
+        try:
+            source.save_query(
+                name="approved-solar",
+                query="solar",
+                mode="hybrid",
+                limit=5,
+                filters={"source_project": "max", "review_state": "approved"},
+            )
+            source.save_query(
+                name="battery",
+                query="battery storage",
+                mode="fulltext",
+                limit=3,
+                filters={"tag": "energy"},
+            )
+
+            payload = source.export_saved_queries()
+
+            assert payload["schema_version"] == 1
+            assert [query["name"] for query in payload["queries"]] == [
+                "approved-solar",
+                "battery",
+            ]
+
+            target.save_query(
+                name="approved-solar",
+                query="outdated",
+                mode="semantic",
+                limit=1,
+                filters={"tag": "old"},
+            )
+
+            stats = target.import_saved_queries(payload)
+
+            assert stats == {"inserted": 1, "updated": 1, "skipped": 0}
+            assert target.list_saved_queries() == payload["queries"]
+            assert target.import_saved_queries(payload) == {
+                "inserted": 0,
+                "updated": 0,
+                "skipped": 2,
+            }
+        finally:
+            source.close()
+            target.close()
+
+    def test_saved_query_import_rejects_invalid_schema_version(self, store: Store):
+        with pytest.raises(ValueError, match="Unsupported saved queries schema_version 999"):
+            store.import_saved_queries({"schema_version": 999, "queries": []})
+
 
 class TestEmbedding:
     def test_update_and_get_embeddings(self, store: Store, sample_unit: KnowledgeUnit):

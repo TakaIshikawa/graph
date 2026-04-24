@@ -19,10 +19,12 @@ from graph.cli.main import (
     _do_export_mermaid,
     _do_export_neighborhood,
     _do_export_obsidian,
+    _do_export_queries,
     _do_export_report,
     _do_export_turtle,
     _do_apply_tags_to_search,
     _do_import_json,
+    _do_import_queries,
     _do_infer_edges,
     _do_integrity_audit,
     _do_delete_unit,
@@ -390,6 +392,34 @@ async def list_tools() -> list[Tool]:
             name="list_queries",
             description="List saved graph search recipes.",
             inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="export_queries",
+            description="Export saved graph search recipes to a portable JSON file.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Destination saved queries JSON path",
+                    },
+                },
+                "required": ["path"],
+            },
+        ),
+        Tool(
+            name="import_queries",
+            description="Import saved graph search recipes from a portable JSON file.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Source saved queries JSON path",
+                    },
+                },
+                "required": ["path"],
+            },
         ),
         Tool(
             name="run_query",
@@ -1439,6 +1469,22 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     text=json.dumps({"queries": store.list_saved_queries()}),
                 )
             ]
+
+        elif name == "export_queries":
+            stats = _do_export_queries(store, arguments["path"])
+            return [TextContent(type="text", text=json.dumps(stats))]
+
+        elif name == "import_queries":
+            try:
+                stats = _do_import_queries(store, arguments["path"])
+            except ValueError as exc:
+                payload = {
+                    "error": "import_failed",
+                    "message": str(exc),
+                    "path": arguments["path"],
+                }
+                return [TextContent(type="text", text=json.dumps(payload))]
+            return [TextContent(type="text", text=json.dumps(stats))]
 
         elif name == "run_query":
             saved = store.get_saved_query(arguments["name"])

@@ -873,6 +873,75 @@ def test_saved_query_tools_create_list_run_and_delete(tmp_path, monkeypatch):
     }
 
 
+def test_saved_query_import_export_tools_round_trip(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    export_path = tmp_path / "queries.json"
+    store = Store(str(db_path))
+    store.save_query(
+        name="approved-solar",
+        query="solar",
+        mode="hybrid",
+        limit=5,
+        filters={"source_project": "max", "review_state": "approved"},
+    )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    tool_names = {tool.name for tool in tools}
+    assert {"export_queries", "import_queries"} <= tool_names
+
+    export_response = asyncio.run(
+        mcp_server.call_tool("export_queries", {"path": str(export_path)})
+    )
+    export_payload = json.loads(export_response[0].text)
+    assert export_payload["exported"] == 1
+    assert export_payload["schema_version"] == 1
+    exported = json.loads(export_path.read_text())
+    assert exported["queries"][0]["query"] == "solar"
+    assert exported["queries"][0]["mode"] == "hybrid"
+    assert exported["queries"][0]["limit"] == 5
+    assert exported["queries"][0]["filters"] == {
+        "source_project": "max",
+        "review_state": "approved",
+    }
+
+    update_store = Store(str(db_path))
+    update_store.save_query(
+        name="approved-solar",
+        query="outdated",
+        mode="semantic",
+        limit=1,
+        filters={"tag": "old"},
+    )
+    update_store.close()
+
+    import_response = asyncio.run(
+        mcp_server.call_tool("import_queries", {"path": str(export_path)})
+    )
+    assert json.loads(import_response[0].text) == {
+        "inserted": 0,
+        "path": str(export_path),
+        "skipped": 0,
+        "updated": 1,
+    }
+
+    second_response = asyncio.run(
+        mcp_server.call_tool("import_queries", {"path": str(export_path)})
+    )
+    assert json.loads(second_response[0].text)["skipped"] == 1
+
+    invalid_path = tmp_path / "invalid-queries.json"
+    invalid_path.write_text(json.dumps({"schema_version": 999, "queries": []}))
+    invalid_response = asyncio.run(
+        mcp_server.call_tool("import_queries", {"path": str(invalid_path)})
+    )
+    invalid_payload = json.loads(invalid_response[0].text)
+    assert invalid_payload["error"] == "import_failed"
+    assert "Unsupported saved queries schema_version 999" in invalid_payload["message"]
+
+
 def test_search_facets_tool_returns_parseable_json(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))

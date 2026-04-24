@@ -364,6 +364,25 @@ def _do_import_json(store: Store, path: str | Path) -> dict:
     return {"path": str(input_path), **stats}
 
 
+def _do_export_queries(store: Store, path: str | Path) -> dict:
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = store.export_saved_queries()
+    output_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    return {
+        "path": str(output_path),
+        "schema_version": payload["schema_version"],
+        "exported": len(payload["queries"]),
+    }
+
+
+def _do_import_queries(store: Store, path: str | Path) -> dict:
+    input_path = Path(path)
+    payload = json.loads(input_path.read_text())
+    stats = store.import_saved_queries(payload)
+    return {"path": str(input_path), **stats}
+
+
 def _parse_metadata_json(value: str | dict | None) -> dict:
     if value is None:
         return {}
@@ -2628,6 +2647,53 @@ def list_queries(
         typer.echo(
             f"{saved['name']}: {saved['query']} ({saved['mode']}, limit {saved['limit']}){suffix}"
         )
+
+
+@queries_app.command(name="export")
+def export_queries(
+    path: Path = typer.Argument(..., help="Destination saved queries JSON path"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Export saved queries to a portable JSON file."""
+    store = _get_store()
+    stats = _do_export_queries(store, path)
+    store.close()
+
+    if json_output:
+        _json_echo(stats)
+        return
+
+    typer.echo(f"Exported {stats['exported']} saved queries to {stats['path']}")
+
+
+@queries_app.command(name="import")
+def import_queries(
+    path: Path = typer.Argument(..., help="Source saved queries JSON path"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Import saved queries from a portable JSON file."""
+    store = _get_store()
+    try:
+        stats = _do_import_queries(store, path)
+    except ValueError as exc:
+        store.close()
+        payload = {"error": "import_failed", "message": str(exc), "path": str(path)}
+        if json_output:
+            _json_echo(payload)
+        else:
+            typer.echo(payload["message"])
+        raise typer.Exit(code=1) from exc
+    store.close()
+
+    if json_output:
+        _json_echo(stats)
+        return
+
+    typer.echo(
+        f"Imported {stats['inserted']} saved queries, updated "
+        f"{stats['updated']} saved queries, skipped {stats['skipped']} saved queries "
+        f"from {stats['path']}"
+    )
 
 
 @queries_app.command(name="run")

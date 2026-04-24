@@ -3173,6 +3173,80 @@ def test_queries_cli_save_list_run_and_delete(monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_queries_cli_export_and_import_json_round_trip(tmp_path, monkeypatch):
+    store = _make_store()
+    proxy = StoreProxy(store)
+    export_path = tmp_path / "queries.json"
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        store.save_query(
+            name="approved-solar",
+            query="solar",
+            mode="hybrid",
+            limit=5,
+            filters={"source_project": "max", "review_state": "approved"},
+        )
+
+        export_result = runner.invoke(app, ["queries", "export", str(export_path), "--json"])
+
+        assert export_result.exit_code == 0
+        export_payload = json.loads(export_result.output)
+        assert export_payload["exported"] == 1
+        assert export_payload["schema_version"] == 1
+        exported = json.loads(export_path.read_text())
+        assert exported["schema_version"] == 1
+        assert exported["queries"][0]["filters"] == {
+            "source_project": "max",
+            "review_state": "approved",
+        }
+
+        store.save_query(
+            name="approved-solar",
+            query="outdated",
+            mode="semantic",
+            limit=1,
+            filters={"tag": "old"},
+        )
+
+        import_result = runner.invoke(app, ["queries", "import", str(export_path), "--json"])
+
+        assert import_result.exit_code == 0
+        assert json.loads(import_result.output) == {
+            "inserted": 0,
+            "path": str(export_path),
+            "skipped": 0,
+            "updated": 1,
+        }
+        saved = store.get_saved_query("approved-solar")
+        assert saved is not None
+        assert saved["query"] == "solar"
+        assert saved["mode"] == "hybrid"
+        assert saved["limit"] == 5
+        assert saved["filters"] == {
+            "source_project": "max",
+            "review_state": "approved",
+        }
+
+        second_import = runner.invoke(app, ["queries", "import", str(export_path), "--json"])
+
+        assert second_import.exit_code == 0
+        assert json.loads(second_import.output)["skipped"] == 1
+
+        invalid_path = tmp_path / "invalid.json"
+        invalid_path.write_text(json.dumps({"schema_version": 999, "queries": []}))
+
+        invalid_result = runner.invoke(app, ["queries", "import", str(invalid_path), "--json"])
+
+        assert invalid_result.exit_code == 1
+        invalid_payload = json.loads(invalid_result.output)
+        assert invalid_payload["error"] == "import_failed"
+        assert "Unsupported saved queries schema_version 999" in invalid_payload["message"]
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_update_and_delete_unit_cli_json_reindexes_and_cleans_edges(monkeypatch):
     store = _make_store()
     manual = store.insert_unit(

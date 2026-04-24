@@ -13,6 +13,8 @@ from graph.store.migrations import SCHEMA_VERSION, ensure_schema
 from graph.types.enums import EdgeSource
 from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
+SAVED_QUERIES_SCHEMA_VERSION = 1
+
 if TYPE_CHECKING:
     from graph.adapters.base import IngestResult
 
@@ -872,6 +874,96 @@ class Store:
     def list_saved_queries(self) -> list[dict]:
         rows = self.conn.execute("SELECT * FROM saved_queries ORDER BY name").fetchall()
         return [_row_to_saved_query(row) for row in rows]
+
+    def export_saved_queries(self) -> dict:
+        """Return a JSON-serializable saved query backup."""
+        return {
+            "schema_version": SAVED_QUERIES_SCHEMA_VERSION,
+            "exported_at": _utcnow_iso(),
+            "queries": self.list_saved_queries(),
+        }
+
+    def import_saved_queries(self, payload: dict) -> dict:
+        """Import saved queries idempotently by name."""
+        schema_version = payload.get("schema_version")
+        if schema_version != SAVED_QUERIES_SCHEMA_VERSION:
+            raise ValueError(
+                f"Unsupported saved queries schema_version {schema_version!r}; "
+                f"expected {SAVED_QUERIES_SCHEMA_VERSION}"
+            )
+
+        queries = payload.get("queries", [])
+        if not isinstance(queries, list):
+            raise ValueError("Saved queries payload must contain a queries array")
+
+        inserted = 0
+        updated = 0
+        skipped = 0
+
+        for data in queries:
+            if not isinstance(data, dict):
+                raise ValueError("Each saved query must be a JSON object")
+            name = data.get("name")
+            query = data.get("query")
+            if not name or not query:
+                raise ValueError("Each saved query must include name and query")
+
+            filters = data.get("filters") or {}
+            if not isinstance(filters, dict):
+                raise ValueError(f"Saved query {name!r} filters must be a JSON object")
+
+            existing = self.get_saved_query(name)
+            now = _utcnow_iso()
+            imported = {
+                "name": name,
+                "query": query,
+                "mode": data.get("mode", "fulltext"),
+                "limit": data.get("limit", 10),
+                "filters": filters,
+                "created_at": data.get("created_at") or (existing["created_at"] if existing else now),
+                "updated_at": data.get("updated_at")
+                or data.get("created_at")
+                or (existing["updated_at"] if existing else now),
+            }
+
+            if existing == imported:
+                skipped += 1
+                continue
+
+            self.conn.execute(
+                """INSERT INTO saved_queries
+                   (name, query, mode, "limit", filters, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(name)
+                   DO UPDATE SET
+                       query = excluded.query,
+                       mode = excluded.mode,
+                       "limit" = excluded."limit",
+                       filters = excluded.filters,
+                       created_at = excluded.created_at,
+                       updated_at = excluded.updated_at
+                """,
+                (
+                    imported["name"],
+                    imported["query"],
+                    imported["mode"],
+                    imported["limit"],
+                    json.dumps(imported["filters"], sort_keys=True),
+                    imported["created_at"],
+                    imported["updated_at"],
+                ),
+            )
+            if existing:
+                updated += 1
+            else:
+                inserted += 1
+
+        self.conn.commit()
+        return {
+            "inserted": inserted,
+            "updated": updated,
+            "skipped": skipped,
+        }
 
     def delete_saved_query(self, name: str) -> bool:
         cursor = self.conn.execute("DELETE FROM saved_queries WHERE name = ?", (name,))
