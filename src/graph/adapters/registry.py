@@ -5,6 +5,7 @@ from __future__ import annotations
 from graph.adapters.base import SourceAdapter
 from graph.adapters.forty_two import FortyTwoAdapter
 from graph.adapters.kindle import KindleAdapter
+from graph.adapters.markdown import MarkdownAdapter
 from graph.adapters.max_adapter import MaxAdapter
 from graph.adapters.me import MeAdapter
 from graph.adapters.presence import PresenceAdapter
@@ -15,6 +16,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "max": MaxAdapter,
     "presence": PresenceAdapter,
     "me": MeAdapter,
+    "markdown": MarkdownAdapter,
     "kindle": KindleAdapter,
     "sota": SOTAAdapter,
 }

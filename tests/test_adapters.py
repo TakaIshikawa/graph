@@ -10,6 +10,7 @@ import pytest
 import yaml
 
 from graph.adapters.forty_two import FortyTwoAdapter
+from graph.adapters.markdown import MarkdownAdapter
 from graph.adapters.max_adapter import MaxAdapter
 from graph.adapters.me import MeAdapter
 from graph.adapters.presence import PresenceAdapter
@@ -470,10 +471,64 @@ class TestMeAdapter:
         assert "ai-agents" in result.units[0].tags
 
 
+class TestMarkdownAdapter:
+    def test_ingest_markdown_notes_with_front_matter_tags_and_wikilinks(self, tmp_path):
+        (tmp_path / "Some Note.md").write_text(
+            "---\n"
+            "title: Custom Title\n"
+            "tags:\n"
+            "  - front\n"
+            "  - research\n"
+            "---\n"
+            "Body with #inline, #nested/tag. Links to [[Other Note]] and [[Missing]].\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "Other Note.md").write_text(
+            "Other body with #other! and [[Custom Title|alias]].\n",
+            encoding="utf-8",
+        )
+
+        result = MarkdownAdapter(root_path=str(tmp_path)).ingest()
+
+        assert [unit.source_id for unit in result.units] == [
+            "Other Note.md",
+            "Some Note.md",
+        ]
+        by_source = {unit.source_id: unit for unit in result.units}
+        assert by_source["Some Note.md"].source_project == "me"
+        assert by_source["Some Note.md"].source_entity_type == "markdown_note"
+        assert by_source["Some Note.md"].title == "Custom Title"
+        assert by_source["Some Note.md"].content.startswith("Body with")
+        assert by_source["Some Note.md"].tags == ["front", "research", "inline", "nested/tag"]
+        assert by_source["Other Note.md"].title == "Other Note"
+        assert by_source["Other Note.md"].tags == ["other"]
+
+        assert {(edge.from_unit_id, edge.to_unit_id) for edge in result.edges} == {
+            ("Some Note.md", "Other Note.md"),
+            ("Other Note.md", "Some Note.md"),
+        }
+        assert all(edge.relation == "relates_to" for edge in result.edges)
+        assert all(edge.metadata["to_entity_type"] == "markdown_note" for edge in result.edges)
+
+    def test_missing_markdown_root_returns_empty_result(self, tmp_path):
+        result = MarkdownAdapter(root_path=str(tmp_path / "missing")).ingest()
+
+        assert result.units == []
+        assert result.edges == []
+
+
 class TestRegistry:
     def test_list_adapters(self):
         adapters = list_adapters()
-        assert set(adapters) == {"forty_two", "max", "presence", "me", "kindle", "sota"}
+        assert set(adapters) == {
+            "forty_two",
+            "max",
+            "presence",
+            "me",
+            "markdown",
+            "kindle",
+            "sota",
+        }
 
     def test_get_adapter(self):
         adapter = get_adapter("me", config_path="/tmp/test.yaml")

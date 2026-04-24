@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,7 @@ from typer.testing import CliRunner
 from graph.cli.main import app
 from graph.store.db import Store
 from graph.types.enums import ContentType, EdgeRelation, SourceProject
-from graph.types.models import KnowledgeEdge, KnowledgeUnit
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 runner = CliRunner()
@@ -320,6 +321,85 @@ def test_json_export_and_import_commands_round_trip(tmp_path, monkeypatch):
         target.close()
         _cleanup_db(source._test_db_path)  # type: ignore[attr-defined]
         _cleanup_db(target._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_ingest_markdown_command_uses_configured_root(tmp_path, monkeypatch):
+    notes = tmp_path / "notes"
+    notes.mkdir()
+    (notes / "Alpha.md").write_text("Alpha links to [[Beta]] #cli.\n", encoding="utf-8")
+    (notes / "Beta.md").write_text("---\ntitle: Beta\n---\nBeta body.\n", encoding="utf-8")
+
+    store = _make_store()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    monkeypatch.setattr("graph.cli.main.settings.markdown_root", str(notes))
+
+    try:
+        result = runner.invoke(app, ["ingest", "markdown"])
+
+        assert result.exit_code == 0
+        assert "Ingesting from markdown" in result.output
+        assert "markdown: 2 new" in result.output
+
+        alpha = store.get_unit_by_source("me", "Alpha.md", "markdown_note")
+        beta = store.get_unit_by_source("me", "Beta.md", "markdown_note")
+        assert alpha is not None
+        assert beta is not None
+        assert alpha.tags == ["cli"]
+        assert beta.title == "Beta"
+        edges = store.get_all_edges()
+        assert len(edges) == 1
+        assert edges[0].from_unit_id == alpha.id
+        assert edges[0].to_unit_id == beta.id
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_ingest_markdown_incremental_links_to_existing_note(tmp_path, monkeypatch):
+    notes = tmp_path / "notes"
+    notes.mkdir()
+    alpha_path = notes / "Alpha.md"
+    beta_path = notes / "Beta.md"
+    alpha_path.write_text("Alpha links to [[Beta]].\n", encoding="utf-8")
+    beta_path.write_text("Beta body.\n", encoding="utf-8")
+    os.utime(beta_path, (1_700_000_000, 1_700_000_000))
+    os.utime(alpha_path, (1_700_100_000, 1_700_100_000))
+
+    store = _make_store()
+    beta = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="Beta.md",
+            source_entity_type="markdown_note",
+            title="Beta",
+            content="Beta body.",
+        )
+    )
+    store.upsert_sync_state(
+        SyncState(
+            source_project="markdown",
+            source_entity_type="markdown_note",
+            last_sync_at=datetime.fromtimestamp(1_700_050_000, tz=timezone.utc),
+        )
+    )
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    monkeypatch.setattr("graph.cli.main.settings.markdown_root", str(notes))
+
+    try:
+        result = runner.invoke(app, ["ingest", "markdown"])
+
+        assert result.exit_code == 0
+        alpha = store.get_unit_by_source("me", "Alpha.md", "markdown_note")
+        assert alpha is not None
+        edges = store.get_all_edges()
+        assert len(edges) == 1
+        assert edges[0].from_unit_id == alpha.id
+        assert edges[0].to_unit_id == beta.id
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
 def test_shortest_path_command_prints_readable_path(monkeypatch):

@@ -22,6 +22,7 @@ def _get_store() -> Store:
 def _get_adapter_for_project(name: str):
     from graph.adapters.forty_two import FortyTwoAdapter
     from graph.adapters.kindle import KindleAdapter
+    from graph.adapters.markdown import MarkdownAdapter
     from graph.adapters.max_adapter import MaxAdapter
     from graph.adapters.me import MeAdapter
     from graph.adapters.presence import PresenceAdapter
@@ -34,6 +35,7 @@ def _get_adapter_for_project(name: str):
             db_path=settings.presence_db, min_score=settings.content_min_score
         ),
         "me": lambda: MeAdapter(config_path=settings.me_config),
+        "markdown": lambda: MarkdownAdapter(root_path=settings.markdown_root),
         "kindle": lambda: KindleAdapter(db_path=settings.kindle_db),
         "sota": lambda: SOTAAdapter(db_path=settings.sota_db),
     }
@@ -201,7 +203,7 @@ def _do_ingest(
 ) -> dict:
     """Core ingest logic. Returns total stats dict."""
     projects = (
-        ["forty_two", "max", "presence", "me", "kindle", "sota"]
+        ["forty_two", "max", "presence", "me", "markdown", "kindle", "sota"]
         if project == "all"
         else [project]
     )

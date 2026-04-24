@@ -433,6 +433,7 @@ class Store:
         # Remap and insert edges
         edges_inserted = 0
         for edge in result.edges:
+            edge_source_project = edge.metadata.get("source_project", source_project)
             # Resolve source-local IDs to graph IDs
             from_id = source_to_graph_id.get(edge.from_unit_id)
             to_id = source_to_graph_id.get(edge.to_unit_id)
@@ -440,13 +441,13 @@ class Store:
             if not from_id:
                 # Try finding in existing graph data
                 from_unit = self.get_unit_by_source(
-                    source_project, edge.from_unit_id, self._guess_entity_type(edge, "from")
+                    edge_source_project, edge.from_unit_id, self._guess_entity_type(edge, "from")
                 )
                 from_id = from_unit.id if from_unit else None
 
             if not to_id:
                 to_unit = self.get_unit_by_source(
-                    source_project, edge.to_unit_id, self._guess_entity_type(edge, "to")
+                    edge_source_project, edge.to_unit_id, self._guess_entity_type(edge, "to")
                 )
                 to_id = to_unit.id if to_unit else None
 
@@ -464,11 +465,11 @@ class Store:
 
     def _guess_entity_type(self, edge: KnowledgeEdge, direction: str) -> str:
         """Guess entity type for edge resolution based on source metadata."""
+        explicit_type = edge.metadata.get(f"{direction}_entity_type")
+        if explicit_type:
+            return explicit_type
         source_project = edge.metadata.get("source_project", "")
         if source_project == "max":
-            explicit_type = edge.metadata.get(f"{direction}_entity_type")
-            if explicit_type:
-                return explicit_type
             return "insight" if direction == "from" else "buildable_unit"
         if source_project == "forty_two" or edge.source == EdgeSource.SOURCE:
             return "knowledge_node"

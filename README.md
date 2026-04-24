@@ -85,6 +85,7 @@ GRAPH_PRESENCE_DB=/path/to/presence/presence.db
 GRAPH_KINDLE_DB=/path/to/supabooks/supabooks.db
 GRAPH_SOTA_DB=/path/to/sota/sota.db
 GRAPH_ME_CONFIG=/path/to/me/config/projects.yaml
+GRAPH_MARKDOWN_ROOT=/path/to/markdown/notes
 GRAPH_OBSIDIAN_VAULT_PATH=/path/to/obsidian/vault
 ```
 
@@ -107,6 +108,9 @@ graph stats
 # Search knowledge
 graph search "your query" --mode fulltext
 graph search "your query" --mode semantic --limit 5
+
+# Ingest a folder of Markdown notes
+graph ingest markdown
 
 # Generate embeddings
 graph embed --batch-size 5
@@ -243,7 +247,31 @@ The `src/graph/adapters/` directory contains example adapter implementations fro
 ### Available Example Adapters
 
 - `base.py` - Base adapter interface (extend this for custom adapters)
+- `markdown.py` - First-party local Markdown folder adapter
 - `forty_two.py`, `max_adapter.py`, `presence.py`, `me.py`, `kindle.py`, `sota.py` - Example implementations
+
+## Markdown Notes
+
+Set `GRAPH_MARKDOWN_ROOT` to a folder of `.md` files, then run:
+
+```bash
+graph ingest markdown
+```
+
+Markdown files are read recursively. Each file becomes a `markdown_note` unit in the `me` source project with a stable `source_id` based on its path relative to `GRAPH_MARKDOWN_ROOT`. Optional YAML front matter is supported:
+
+```markdown
+---
+title: My Note Title
+tags:
+  - research
+  - systems
+---
+
+Body text with #inline-tags and [[Other Note]] wikilinks.
+```
+
+The adapter uses the front matter `title` when present, otherwise the filename stem. Tags come from front matter plus inline `#tags`, and wikilinks create `relates_to` graph edges when the linked target note exists.
 
 ## MCP Server
 
