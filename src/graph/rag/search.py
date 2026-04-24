@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 from graph.rag.embeddings import (
     EmbeddingProvider,
@@ -15,6 +15,15 @@ from graph.store.db import Store
 from graph.types.enums import EdgeRelation, EdgeSource
 from graph.types.models import KnowledgeEdge
 from graph.types.models import KnowledgeUnit
+
+SEARCH_SORTS = (
+    "relevance",
+    "created_at_desc",
+    "created_at_asc",
+    "updated_at_desc",
+    "utility_desc",
+    "confidence_desc",
+)
 
 
 def _iso(value) -> str:
@@ -38,6 +47,61 @@ def _consume_budget(text: str, remaining_budget: int) -> str:
 
 def _content_excerpt(text: str, length: int = 500) -> str:
     return _truncate_to_budget(text, length)
+
+
+def validate_search_sort(sort: str) -> str:
+    if sort not in SEARCH_SORTS:
+        valid = ", ".join(SEARCH_SORTS)
+        raise ValueError(f"Unknown sort: {sort}. Use one of: {valid}.")
+    return sort
+
+
+def _sort_datetime(value) -> datetime:
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        parsed = datetime.fromisoformat(str(value))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def sort_search_results(results: list, sort: str) -> list:
+    """Sort result tuples whose first item is a KnowledgeUnit."""
+    validate_search_sort(sort)
+    if sort == "relevance":
+        return results
+
+    def unit(item):
+        return item[0]
+
+    if sort == "created_at_desc":
+        return sorted(results, key=lambda item: (_sort_datetime(unit(item).created_at), unit(item).id), reverse=True)
+    if sort == "created_at_asc":
+        return sorted(results, key=lambda item: (_sort_datetime(unit(item).created_at), unit(item).id))
+    if sort == "updated_at_desc":
+        return sorted(results, key=lambda item: (_sort_datetime(unit(item).updated_at), unit(item).id), reverse=True)
+    if sort == "utility_desc":
+        return sorted(
+            results,
+            key=lambda item: (
+                unit(item).utility_score is not None,
+                unit(item).utility_score if unit(item).utility_score is not None else float("-inf"),
+                unit(item).id,
+            ),
+            reverse=True,
+        )
+    if sort == "confidence_desc":
+        return sorted(
+            results,
+            key=lambda item: (
+                unit(item).confidence is not None,
+                unit(item).confidence if unit(item).confidence is not None else float("-inf"),
+                unit(item).id,
+            ),
+            reverse=True,
+        )
+    return results
 
 
 def _unit_matches_filters(
@@ -171,8 +235,10 @@ class RAGService:
         min_similarity: float = 0.5,
         source_project: str | None = None,
         content_type: str | None = None,
+        sort: str = "relevance",
     ) -> list[tuple[KnowledgeUnit, float]]:
         """Semantic search. Returns (unit, similarity) pairs."""
+        validate_search_sort(sort)
         if self.provider is None:
             raise RuntimeError("Embedding provider is required for semantic search")
         query_embedding = self.provider.embed(query)
@@ -190,6 +256,7 @@ class RAGService:
                 results.append((unit, sim))
 
         results.sort(key=lambda x: x[1], reverse=True)
+        results = sort_search_results(results, sort)
         return results[:limit]
 
     def hybrid_search(
@@ -199,8 +266,10 @@ class RAGService:
         limit: int = 10,
         semantic_weight: float = 0.6,
         fts_weight: float = 0.4,
+        sort: str = "relevance",
     ) -> list[tuple[KnowledgeUnit, float]]:
         """Combined semantic + full-text search."""
+        validate_search_sort(sort)
         # Semantic results
         semantic_results = self.search(query, limit=limit * 2, min_similarity=0.3)
         semantic_scores = {unit.id: sim for unit, sim in semantic_results}
@@ -225,11 +294,12 @@ class RAGService:
         combined.sort(key=lambda x: x[1], reverse=True)
 
         results = []
-        for uid, score in combined[:limit]:
+        for uid, score in combined:
             unit = self.store.get_unit(uid)
             if unit:
                 results.append((unit, score))
-        return results
+        results = sort_search_results(results, sort)
+        return results[:limit]
 
     def similar_units(
         self,
@@ -415,6 +485,7 @@ class RAGService:
         return {
             "query": search_payload.get("query"),
             "mode": search_payload.get("mode"),
+            "sort": search_payload.get("sort", "relevance"),
             "filters": search_payload.get("filters", {}),
             "ranked_units": ranked_units,
             "neighbors": list(neighbor_units.values()),
@@ -426,6 +497,7 @@ class RAGService:
                 "neighbor_depth": capped_depth,
                 "neighbor_depth_cap": 2,
                 "result_count": len(ranked_units),
+                "sort": search_payload.get("sort", "relevance"),
             },
         }
 

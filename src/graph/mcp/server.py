@@ -38,6 +38,7 @@ from graph.cli.main import (
     _do_update_unit,
     _list_edges_payload,
     _search_filters_dict,
+    SEARCH_SORTS,
 )
 from graph.graph.service import GraphService
 from graph.store.db import Store
@@ -245,6 +246,12 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "query": {"type": "string", "description": "Search query"},
                     "limit": {"type": "integer", "default": 10},
+                    "sort": {
+                        "type": "string",
+                        "enum": list(SEARCH_SORTS),
+                        "default": "relevance",
+                        "description": "Result ordering",
+                    },
                     **SEARCH_FILTER_SCHEMA,
                     "mode": {
                         "type": "string",
@@ -294,6 +301,12 @@ async def list_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "Search query"},
+                    "sort": {
+                        "type": "string",
+                        "enum": list(SEARCH_SORTS),
+                        "default": "relevance",
+                        "description": "Accepted for parity with search; facets are count summaries.",
+                    },
                     **SEARCH_FILTER_SCHEMA,
                     "mode": {
                         "type": "string",
@@ -313,6 +326,12 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "query": {"type": "string", "description": "Search query"},
                     "limit": {"type": "integer", "default": 10},
+                    "sort": {
+                        "type": "string",
+                        "enum": list(SEARCH_SORTS),
+                        "default": "relevance",
+                        "description": "Result ordering",
+                    },
                     **SEARCH_FILTER_SCHEMA,
                     "mode": {
                         "type": "string",
@@ -350,6 +369,12 @@ async def list_tools() -> list[Tool]:
                         "description": "Search mode",
                     },
                     "limit": {"type": "integer", "default": 10},
+                    "sort": {
+                        "type": "string",
+                        "enum": list(SEARCH_SORTS),
+                        "default": "relevance",
+                        "description": "Sort order saved with the query filters",
+                    },
                     **SEARCH_FILTER_SCHEMA,
                     "filters": {
                         "type": "object",
@@ -1260,13 +1285,24 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 min_confidence=arguments.get("min_confidence"),
                 max_confidence=arguments.get("max_confidence"),
             )
-            payload = _do_search(
-                store,
-                query,
-                limit=limit,
-                mode=mode,
-                filters=filters,
-            )
+            try:
+                payload = _do_search(
+                    store,
+                    query,
+                    limit=limit,
+                    mode=mode,
+                    filters=filters,
+                    sort=arguments.get("sort", "relevance"),
+                )
+            except ValueError as exc:
+                payload = {
+                    "error": str(exc),
+                    "valid_modes": ["fulltext", "semantic", "hybrid"],
+                    "valid_sorts": list(SEARCH_SORTS),
+                }
+                return [TextContent(type="text", text=json.dumps(payload))]
+            if arguments.get("sort") is not None:
+                return [TextContent(type="text", text=json.dumps(payload))]
             return [TextContent(type="text", text=json.dumps(payload["results"]))]
 
         elif name == "pinned_units":
@@ -1308,12 +1344,20 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 min_confidence=arguments.get("min_confidence"),
                 max_confidence=arguments.get("max_confidence"),
             )
-            payload = _do_search_facets(
-                store,
-                query,
-                mode=arguments.get("mode", "fulltext"),
-                filters=filters,
-            )
+            try:
+                payload = _do_search_facets(
+                    store,
+                    query,
+                    mode=arguments.get("mode", "fulltext"),
+                    filters=filters,
+                    sort=arguments.get("sort", "relevance"),
+                )
+            except ValueError as exc:
+                payload = {
+                    "error": str(exc),
+                    "valid_modes": ["fulltext", "semantic", "hybrid"],
+                    "valid_sorts": list(SEARCH_SORTS),
+                }
             return [TextContent(type="text", text=json.dumps(payload))]
 
         elif name == "context_pack":
@@ -1330,18 +1374,35 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 min_confidence=arguments.get("min_confidence"),
                 max_confidence=arguments.get("max_confidence"),
             )
-            payload = _do_context_pack(
-                store,
-                query,
-                limit=arguments.get("limit", 10),
-                mode=arguments.get("mode", "fulltext"),
-                filters=filters,
-                char_budget=arguments.get("char_budget", 4000),
-                neighbor_depth=arguments.get("neighbor_depth", 1),
-            )
+            try:
+                payload = _do_context_pack(
+                    store,
+                    query,
+                    limit=arguments.get("limit", 10),
+                    mode=arguments.get("mode", "fulltext"),
+                    filters=filters,
+                    sort=arguments.get("sort", "relevance"),
+                    char_budget=arguments.get("char_budget", 4000),
+                    neighbor_depth=arguments.get("neighbor_depth", 1),
+                )
+            except ValueError as exc:
+                payload = {
+                    "error": str(exc),
+                    "valid_modes": ["fulltext", "semantic", "hybrid"],
+                    "valid_sorts": list(SEARCH_SORTS),
+                }
             return [TextContent(type="text", text=json.dumps(payload))]
 
         elif name == "save_query":
+            if arguments.get("sort", "relevance") not in SEARCH_SORTS:
+                payload = {
+                    "error": (
+                        f"Unknown sort: {arguments.get('sort')}. "
+                        f"Use one of: {', '.join(SEARCH_SORTS)}."
+                    ),
+                    "valid_sorts": list(SEARCH_SORTS),
+                }
+                return [TextContent(type="text", text=json.dumps(payload))]
             filters = dict(arguments.get("filters", {}))
             filters.update(
                 _search_filters_dict(
@@ -1355,6 +1416,11 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     max_utility=arguments.get("max_utility"),
                     min_confidence=arguments.get("min_confidence"),
                     max_confidence=arguments.get("max_confidence"),
+                    sort=(
+                        arguments.get("sort")
+                        if arguments.get("sort", "relevance") != "relevance"
+                        else None
+                    ),
                 )
             )
             saved = store.save_query(
@@ -1389,13 +1455,20 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                         ),
                     )
                 ]
-            payload = _do_search(
-                store,
-                saved["query"],
-                limit=saved["limit"],
-                mode=saved["mode"],
-                filters=saved["filters"],
-            )
+            try:
+                payload = _do_search(
+                    store,
+                    saved["query"],
+                    limit=saved["limit"],
+                    mode=saved["mode"],
+                    filters=saved["filters"],
+                )
+            except ValueError as exc:
+                payload = {
+                    "error": str(exc),
+                    "valid_modes": ["fulltext", "semantic", "hybrid"],
+                    "valid_sorts": list(SEARCH_SORTS),
+                }
             payload["saved_query"] = saved["name"]
             return [TextContent(type="text", text=json.dumps(payload))]
 

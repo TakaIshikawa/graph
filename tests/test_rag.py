@@ -194,6 +194,84 @@ class TestRAGService:
         assert len(results) > 0
         assert all(isinstance(sim, float) for _, sim in results)
 
+    def test_semantic_search_can_sort_by_created_at_desc(
+        self, store: Store, rag_service: RAGService
+    ):
+        older = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="older",
+                source_entity_type="insight",
+                title="Solar older",
+                content="Solar storage",
+                content_type=ContentType.INSIGHT,
+                created_at="2026-04-20T00:00:00+00:00",
+            )
+        )
+        newer = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="newer",
+                source_entity_type="insight",
+                title="Solar newer",
+                content="Solar storage",
+                content_type=ContentType.INSIGHT,
+                created_at="2026-04-24T00:00:00+00:00",
+            )
+        )
+        rag_service.embed_batch_and_store([older.id, newer.id])
+
+        results = rag_service.search(
+            "solar storage",
+            min_similarity=0.0,
+            sort="created_at_desc",
+        )
+
+        assert [unit.source_id for unit, _score in results[:2]] == ["newer", "older"]
+
+    def test_hybrid_search_utility_sort_puts_missing_values_last(
+        self, store: Store, rag_service: RAGService
+    ):
+        high = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="high",
+                source_entity_type="insight",
+                title="Solar high utility",
+                content="Solar utility",
+                content_type=ContentType.INSIGHT,
+                utility_score=0.9,
+            )
+        )
+        missing = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="missing",
+                source_entity_type="insight",
+                title="Solar missing utility",
+                content="Solar utility",
+                content_type=ContentType.INSIGHT,
+            )
+        )
+        low = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="low",
+                source_entity_type="insight",
+                title="Solar low utility",
+                content="Solar utility",
+                content_type=ContentType.INSIGHT,
+                utility_score=0.2,
+            )
+        )
+        for unit in [high, missing, low]:
+            store.fts_index_unit(unit)
+        rag_service.embed_batch_and_store([high.id, missing.id, low.id])
+
+        results = rag_service.hybrid_search("solar", sort="utility_desc")
+
+        assert [unit.source_id for unit, _score in results] == ["high", "low", "missing"]
+
     def test_similar_units_uses_stored_seed_embedding_without_provider(self, store: Store):
         seed = store.insert_unit(
             KnowledgeUnit(

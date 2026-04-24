@@ -424,6 +424,7 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_pa
     assert search_tool.inputSchema["properties"]["created_after"]["type"] == "string"
     assert search_tool.inputSchema["properties"]["min_utility"]["type"] == "number"
     assert search_tool.inputSchema["properties"]["min_confidence"]["type"] == "number"
+    assert "created_at_desc" in search_tool.inputSchema["properties"]["sort"]["enum"]
     search_facets_tool = next(tool for tool in tools if tool.name == "search_facets")
     assert search_facets_tool.inputSchema["properties"]["tag"]["type"] == "string"
     assert search_facets_tool.inputSchema["properties"]["mode"]["enum"] == [
@@ -434,6 +435,7 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_pa
     save_query_tool = next(tool for tool in tools if tool.name == "save_query")
     assert save_query_tool.inputSchema["properties"]["created_before"]["type"] == "string"
     assert save_query_tool.inputSchema["properties"]["max_utility"]["type"] == "number"
+    assert "utility_desc" in save_query_tool.inputSchema["properties"]["sort"]["enum"]
 
     assert any(tool.name == "sync_status" for tool in tools)
 
@@ -794,6 +796,7 @@ def test_saved_query_tools_create_list_run_and_delete(tmp_path, monkeypatch):
                 "query": "solar",
                 "mode": "fulltext",
                 "limit": 5,
+                "sort": "created_at_desc",
                 "created_before": "2026-04-23T00:00:00+00:00",
                 "max_utility": 0.93,
                 "filters": {
@@ -814,6 +817,7 @@ def test_saved_query_tools_create_list_run_and_delete(tmp_path, monkeypatch):
     assert saved["filters"]["created_before"] == "2026-04-23T00:00:00+00:00"
     assert saved["filters"]["min_utility"] == 0.9
     assert saved["filters"]["max_utility"] == 0.93
+    assert saved["filters"]["sort"] == "created_at_desc"
 
     list_response = asyncio.run(mcp_server.call_tool("list_queries", {}))
     listed = json.loads(list_response[0].text)
@@ -823,6 +827,7 @@ def test_saved_query_tools_create_list_run_and_delete(tmp_path, monkeypatch):
     payload = json.loads(run_response[0].text)
     assert payload["saved_query"] == "approved-solar"
     assert payload["query"] == "solar"
+    assert payload["sort"] == "created_at_desc"
     assert payload["filters"] == saved["filters"]
     assert [result["title"] for result in payload["results"]] == ["Solar approved insight"]
 
@@ -836,12 +841,16 @@ def test_saved_query_tools_create_list_run_and_delete(tmp_path, monkeypatch):
                 "created_before": "2026-04-23T00:00:00+00:00",
                 "min_utility": 0.9,
                 "max_utility": 0.93,
+                "sort": "created_at_desc",
             },
         )
     )
-    search_results = json.loads(search_response[0].text)
-    assert [result["title"] for result in search_results] == ["Solar approved insight"]
-    assert search_results[0]["snippet"]
+    search_payload = json.loads(search_response[0].text)
+    assert search_payload["sort"] == "created_at_desc"
+    assert [result["title"] for result in search_payload["results"]] == [
+        "Solar approved insight"
+    ]
+    assert search_payload["results"][0]["snippet"]
 
     delete_response = asyncio.run(mcp_server.call_tool("delete_query", {"name": "approved-solar"}))
     assert json.loads(delete_response[0].text) == {
@@ -976,6 +985,24 @@ def test_search_tool_hybrid_results_include_scores_and_snippets(tmp_path, monkey
     assert results[0]["snippet"]
 
 
+def test_search_tool_invalid_sort_returns_clear_error(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "search",
+            {"query": "solar", "mode": "fulltext", "sort": "newest"},
+        )
+    )
+    payload = json.loads(response[0].text)
+    assert "Unknown sort: newest" in payload["error"]
+    assert "created_at_desc" in payload["valid_sorts"]
+
+
 def test_context_pack_tool_returns_filtered_results_and_graph_context(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))
@@ -1037,6 +1064,7 @@ def test_context_pack_tool_returns_filtered_results_and_graph_context(tmp_path, 
                 "query": "solar",
                 "mode": "fulltext",
                 "source_project": "max",
+                "sort": "updated_at_desc",
                 "limit": 5,
                 "neighbor_depth": 2,
                 "char_budget": 35,
@@ -1044,6 +1072,8 @@ def test_context_pack_tool_returns_filtered_results_and_graph_context(tmp_path, 
         )
     )
     payload = json.loads(response[0].text)
+    assert payload["sort"] == "updated_at_desc"
+    assert payload["metadata"]["sort"] == "updated_at_desc"
     assert [unit["id"] for unit in payload["ranked_units"]] == [center.id]
     assert payload["filters"] == {"source_project": "max"}
     assert payload["neighbors"][0]["id"] == neighbor.id

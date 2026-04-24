@@ -2882,6 +2882,105 @@ def test_search_command_emits_active_date_and_utility_filters_in_json(monkeypatc
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_search_command_sorts_fulltext_by_created_at_desc(monkeypatch):
+    store = _make_store()
+    _populate_search_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "search",
+                "solar",
+                "--mode",
+                "fulltext",
+                "--limit",
+                "3",
+                "--sort",
+                "created_at_desc",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["sort"] == "created_at_desc"
+        assert payload["metadata"]["sort"] == "created_at_desc"
+        assert [item["title"] for item in payload["results"]] == [
+            "Solar approved brief",
+            "Solar rejected insight",
+            "Solar approved insight",
+        ]
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_search_command_utility_sort_places_missing_values_last(monkeypatch):
+    store = _make_store()
+    _populate_search_graph(store)
+    missing = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="missing-utility",
+            source_entity_type="insight",
+            title="Solar missing utility",
+            content="Solar energy storage market missing utility",
+            content_type=ContentType.INSIGHT,
+            tags=["solar"],
+            created_at=datetime.fromisoformat("2026-04-25T00:00:00+00:00"),
+        )
+    )
+    store.fts_index_unit(missing)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "search",
+                "solar",
+                "--mode",
+                "fulltext",
+                "--limit",
+                "6",
+                "--sort",
+                "utility_desc",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert [item["title"] for item in payload["results"]][-1] == "Solar missing utility"
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_search_command_invalid_sort_emits_clear_json_error(monkeypatch):
+    store = _make_store()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(
+            app,
+            ["search", "solar", "--sort", "newest", "--json"],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert "Unknown sort: newest" in payload["error"]
+        assert "created_at_desc" in payload["valid_sorts"]
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_search_facets_command_emits_fulltext_json(monkeypatch):
     store = _make_store()
     _populate_search_graph(store)
@@ -3017,6 +3116,8 @@ def test_queries_cli_save_list_run_and_delete(monkeypatch):
                 "0.9",
                 "--max-utility",
                 "0.93",
+                "--sort",
+                "utility_desc",
                 "--json",
             ],
         )
@@ -3032,6 +3133,7 @@ def test_queries_cli_save_list_run_and_delete(monkeypatch):
             "min_utility": 0.9,
             "review_state": "approved",
             "source_project": "max",
+            "sort": "utility_desc",
             "tag": "energy",
         }
 
@@ -3046,6 +3148,7 @@ def test_queries_cli_save_list_run_and_delete(monkeypatch):
         payload = json.loads(run_result.output)
         assert payload["query"] == "solar"
         assert payload["mode"] == "fulltext"
+        assert payload["sort"] == "utility_desc"
         assert payload["filters"] == saved["filters"]
         assert [result["title"] for result in payload["results"]] == ["Solar approved insight"]
 

@@ -9,6 +9,7 @@ from pathlib import Path
 import typer
 
 from graph.config import settings
+from graph.rag.search import SEARCH_SORTS, sort_search_results, validate_search_sort
 from graph.store.db import Store
 from graph.types.enums import ContentType, EdgeRelation, EdgeSource
 from graph.types.models import SyncState
@@ -824,8 +825,11 @@ def _search_fulltext_with_filters(
     max_utility: float | str | None = None,
     min_confidence: float | str | None = None,
     max_confidence: float | str | None = None,
+    sort: str = "relevance",
 ) -> list[tuple[object, str]]:
+    validate_search_sort(sort)
     fetch_limit = max(limit, 20)
+    filtered = []
 
     while True:
         results = store.fts_search(query, limit=fetch_limit)
@@ -846,11 +850,11 @@ def _search_fulltext_with_filters(
                 max_confidence=max_confidence,
             ):
                 filtered.append((unit, r.get("snippet") or _content_excerpt(unit.content)))
-                if len(filtered) >= limit:
+                if sort == "relevance" and len(filtered) >= limit:
                     return filtered
 
         if len(results) < fetch_limit:
-            return filtered
+            return sort_search_results(filtered, sort)[:limit]
 
         fetch_limit *= 2
 
@@ -870,8 +874,11 @@ def _search_scored_with_filters(
     max_utility: float | str | None = None,
     min_confidence: float | str | None = None,
     max_confidence: float | str | None = None,
+    sort: str = "relevance",
 ) -> list[tuple[object, float]]:
+    validate_search_sort(sort)
     fetch_limit = max(limit, 20)
+    filtered = []
 
     while True:
         pairs = fetch_results(query, fetch_limit)
@@ -891,11 +898,11 @@ def _search_scored_with_filters(
                 max_confidence=max_confidence,
             ):
                 filtered.append((unit, score))
-                if len(filtered) >= limit:
+                if sort == "relevance" and len(filtered) >= limit:
                     return filtered
 
         if len(pairs) < fetch_limit:
-            return filtered
+            return sort_search_results(filtered, sort)[:limit]
 
         fetch_limit *= 2
 
@@ -912,6 +919,7 @@ def _search_filters_dict(
     max_utility: float | None = None,
     min_confidence: float | None = None,
     max_confidence: float | None = None,
+    sort: str | None = None,
 ) -> dict:
     return {
         key: value
@@ -926,6 +934,7 @@ def _search_filters_dict(
             "max_utility": max_utility,
             "min_confidence": min_confidence,
             "max_confidence": max_confidence,
+            "sort": sort,
         }.items()
         if value is not None
     }
@@ -943,9 +952,12 @@ def _do_search(
     limit: int = 10,
     mode: str = "fulltext",
     filters: dict | None = None,
+    sort: str = "relevance",
 ) -> dict:
     _validate_search_mode(mode)
     filters = filters or {}
+    sort = str(filters.get("sort", sort))
+    validate_search_sort(sort)
 
     if mode == "fulltext":
         results = _search_fulltext_with_filters(
@@ -962,11 +974,14 @@ def _do_search(
             max_utility=filters.get("max_utility"),
             min_confidence=filters.get("min_confidence"),
             max_confidence=filters.get("max_confidence"),
+            sort=sort,
         )
         payload = {
             "query": query,
             "mode": mode,
+            "sort": sort,
             "results": [_unit_to_json(unit, snippet=snippet) for unit, snippet in results],
+            "metadata": {"sort": sort},
         }
         if filters:
             payload["filters"] = filters
@@ -997,6 +1012,7 @@ def _do_search(
             max_utility=filters.get("max_utility"),
             min_confidence=filters.get("min_confidence"),
             max_confidence=filters.get("max_confidence"),
+            sort=sort,
         )
         snippets = {unit.id: _content_excerpt(unit.content) for unit, _score in pairs}
     else:
@@ -1014,6 +1030,7 @@ def _do_search(
             max_utility=filters.get("max_utility"),
             min_confidence=filters.get("min_confidence"),
             max_confidence=filters.get("max_confidence"),
+            sort=sort,
         )
         fts_snippets = {
             row["unit_id"]: row.get("snippet") or ""
@@ -1027,9 +1044,11 @@ def _do_search(
     payload = {
         "query": query,
         "mode": mode,
+        "sort": sort,
         "results": [
             _unit_to_json(unit, score=score, snippet=snippets.get(unit.id)) for unit, score in pairs
         ],
+        "metadata": {"sort": sort},
     }
     if filters:
         payload["filters"] = filters
@@ -1082,6 +1101,7 @@ def _facet_payload_from_units(
     units: list[object],
     *,
     filters: dict | None = None,
+    sort: str = "relevance",
 ) -> dict:
     facets = {
         "source_project": {},
@@ -1106,8 +1126,10 @@ def _facet_payload_from_units(
     payload = {
         "query": query,
         "mode": mode,
+        "sort": sort,
         "total_matches": len(units),
         "facets": {facet_name: _sorted_counts(counts) for facet_name, counts in facets.items()},
+        "metadata": {"sort": sort},
     }
     if filters:
         payload["filters"] = filters
@@ -1120,9 +1142,12 @@ def _do_search_facets(
     *,
     mode: str = "fulltext",
     filters: dict | None = None,
+    sort: str = "relevance",
 ) -> dict:
     _validate_search_mode(mode)
     filters = filters or {}
+    sort = str(filters.get("sort", sort))
+    validate_search_sort(sort)
     seen: set[str] = set()
     units = []
 
@@ -1155,7 +1180,7 @@ def _do_search_facets(
             if len(results) < fetch_limit:
                 break
             fetch_limit *= 2
-        return _facet_payload_from_units(query, mode, units, filters=filters)
+        return _facet_payload_from_units(query, mode, units, filters=filters, sort=sort)
 
     from graph.rag.embeddings import get_embedding_provider
     from graph.rag.search import RAGService
@@ -1197,7 +1222,7 @@ def _do_search_facets(
             break
         fetch_limit *= 2
 
-    return _facet_payload_from_units(query, mode, units, filters=filters)
+    return _facet_payload_from_units(query, mode, units, filters=filters, sort=sort)
 
 
 def _do_context_pack(
@@ -1207,6 +1232,7 @@ def _do_context_pack(
     limit: int = 10,
     mode: str = "fulltext",
     filters: dict | None = None,
+    sort: str = "relevance",
     char_budget: int = 4000,
     neighbor_depth: int = 1,
 ) -> dict:
@@ -1218,6 +1244,7 @@ def _do_context_pack(
         limit=limit,
         mode=mode,
         filters=filters,
+        sort=sort,
     )
     rag = RAGService(store, provider=None)
     return rag.context_pack(
@@ -2187,6 +2214,11 @@ def search(
     mode: str = typer.Option(
         "fulltext", "--mode", "-m", help="Search mode: fulltext | semantic | hybrid"
     ),
+    sort: str = typer.Option(
+        "relevance",
+        "--sort",
+        help="Sort order: relevance | created_at_desc | created_at_asc | updated_at_desc | utility_desc | confidence_desc",
+    ),
     source_project: str | None = typer.Option(
         None,
         "--source-project",
@@ -2241,6 +2273,7 @@ def search(
             query,
             limit=limit,
             mode=mode,
+            sort=sort,
             filters=_search_filters_dict(
                 source_project=source_project,
                 content_type=content_type,
@@ -2258,6 +2291,7 @@ def search(
         payload = {
             "error": str(exc),
             "valid_modes": ["fulltext", "semantic", "hybrid"],
+            "valid_sorts": list(SEARCH_SORTS),
         }
 
     _render_search_payload(payload, json_output=json_output)
@@ -2300,6 +2334,11 @@ def search_facets(
     query: str = typer.Argument(..., help="Search query"),
     mode: str = typer.Option(
         "fulltext", "--mode", "-m", help="Search mode: fulltext | semantic | hybrid"
+    ),
+    sort: str = typer.Option(
+        "relevance",
+        "--sort",
+        help="Accepted for parity with search; facets are count summaries.",
     ),
     source_project: str | None = typer.Option(
         None,
@@ -2354,6 +2393,7 @@ def search_facets(
             store,
             query,
             mode=mode,
+            sort=sort,
             filters=_search_filters_dict(
                 source_project=source_project,
                 content_type=content_type,
@@ -2371,6 +2411,7 @@ def search_facets(
         payload = {
             "error": str(exc),
             "valid_modes": ["fulltext", "semantic", "hybrid"],
+            "valid_sorts": list(SEARCH_SORTS),
         }
 
     _render_search_facets_payload(payload, json_output=json_output)
@@ -2383,6 +2424,11 @@ def context(
     limit: int = typer.Option(10, "--limit", "-n", help="Max ranked units"),
     mode: str = typer.Option(
         "fulltext", "--mode", "-m", help="Search mode: fulltext | semantic | hybrid"
+    ),
+    sort: str = typer.Option(
+        "relevance",
+        "--sort",
+        help="Sort order for ranked units",
     ),
     source_project: str | None = typer.Option(
         None,
@@ -2438,6 +2484,7 @@ def context(
             query,
             limit=limit,
             mode=mode,
+            sort=sort,
             filters=_search_filters_dict(
                 source_project=source_project,
                 content_type=content_type,
@@ -2455,6 +2502,7 @@ def context(
         payload = {
             "error": str(exc),
             "valid_modes": ["fulltext", "semantic", "hybrid"],
+            "valid_sorts": list(SEARCH_SORTS),
         }
     finally:
         store.close()
@@ -2482,6 +2530,11 @@ def save_query(
     limit: int = typer.Option(10, "--limit", "-n", help="Max results"),
     mode: str = typer.Option(
         "fulltext", "--mode", "-m", help="Search mode: fulltext | semantic | hybrid"
+    ),
+    sort: str = typer.Option(
+        "relevance",
+        "--sort",
+        help="Sort order saved with the query filters",
     ),
     source_project: str | None = typer.Option(
         None,
@@ -2522,6 +2575,7 @@ def save_query(
     """Save a reusable search query."""
     try:
         _validate_search_mode(mode)
+        validate_search_sort(sort)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
 
@@ -2540,6 +2594,7 @@ def save_query(
             created_before=created_before,
             min_utility=min_utility,
             max_utility=max_utility,
+            sort=sort if sort != "relevance" else None,
         ),
     )
     store.close()
