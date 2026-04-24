@@ -2712,7 +2712,8 @@ def test_rename_tag_command_dry_run_json_and_execute(monkeypatch):
         dry_run = runner.invoke(
             app,
             [
-                "rename-tag",
+                "tags",
+                "rename",
                 "ai_agent",
                 "ai-agent",
                 "--source-project",
@@ -2727,16 +2728,19 @@ def test_rename_tag_command_dry_run_json_and_execute(monkeypatch):
         assert dry_run.exit_code == 0
         dry_payload = json.loads(dry_run.output)
         assert dry_payload["dry_run"] is True
+        assert dry_payload["matched_count"] == 1
+        assert dry_payload["updated_count"] == 1
         assert dry_payload["changed_count"] == 1
+        assert dry_payload["affected_unit_ids"]
         assert dry_payload["sample_units"][0]["title"] == "Agent underscore"
         unit = store.get_unit_by_source("max", "agent-underscore", "insight")
         assert unit is not None
         assert unit.tags == ["ai_agent"]
 
-        executed = runner.invoke(app, ["rename-tag", "ai_agent", "ai-agent"])
+        executed = runner.invoke(app, ["tags", "rename", "ai_agent", "ai-agent"])
 
         assert executed.exit_code == 0
-        assert "Updated 1 units: ai_agent -> ai-agent" in executed.output
+        assert "Updated 1 of 1 matched units: ai_agent -> ai-agent" in executed.output
         unit = store.get_unit_by_source("max", "agent-underscore", "insight")
         assert unit is not None
         assert unit.tags == ["ai-agent"]

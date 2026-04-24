@@ -497,7 +497,10 @@ class TestUnitCRUD:
         )
 
         assert dry_run["dry_run"] is True
+        assert dry_run["matched_count"] == 2
+        assert dry_run["updated_count"] == 2
         assert dry_run["changed_count"] == 2
+        assert set(dry_run["affected_unit_ids"]) == {first.id, second.id}
         assert {unit["id"] for unit in dry_run["changed_units"]} == {first.id, second.id}
         assert store.get_unit(first.id).tags == ["ai_agent", "workflow"]  # type: ignore[union-attr]
         assert str(store.get_unit(first.id).updated_at) == original_updated_at  # type: ignore[union-attr]
@@ -510,7 +513,10 @@ class TestUnitCRUD:
         )
 
         assert result["dry_run"] is False
+        assert result["matched_count"] == 2
+        assert result["updated_count"] == 2
         assert result["changed_count"] == 2
+        assert set(result["affected_unit_ids"]) == {first.id, second.id}
         assert store.get_unit(first.id).tags == ["ai-agent", "workflow"]  # type: ignore[union-attr]
         assert store.get_unit(second.id).tags == ["ai-agent", "review"]  # type: ignore[union-attr]
         assert store.get_unit(skipped.id).tags == ["ai_agent"]  # type: ignore[union-attr]

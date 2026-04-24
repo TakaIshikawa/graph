@@ -4271,6 +4271,70 @@ def tags_apply_search(
     store.close()
 
 
+@tags_app.command(name="rename")
+def tags_rename(
+    old_tag: str = typer.Argument(..., help="Exact tag to replace"),
+    new_tag: str = typer.Argument(..., help="Replacement tag"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without writing"),
+    source_project: str | None = typer.Option(
+        None,
+        "--source-project",
+        "--project",
+        "-p",
+        help="Filter by source project",
+    ),
+    content_type: str | None = typer.Option(None, "--content-type", help="Filter by content type"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Rename or merge one exact tag across matching units."""
+    store = _get_store()
+    try:
+        result = _do_rename_tag(
+            store,
+            old_tag,
+            new_tag,
+            dry_run=dry_run,
+            source_project=source_project,
+            content_type=content_type,
+        )
+    except ValueError as exc:
+        store.close()
+        if json_output:
+            _json_echo(
+                {
+                    "old_tag": old_tag,
+                    "new_tag": new_tag,
+                    "dry_run": dry_run,
+                    "matched_count": 0,
+                    "updated_count": 0,
+                    "changed_count": 0,
+                    "affected_count": 0,
+                    "affected_unit_ids": [],
+                    "changed_units": [],
+                    "affected_units": [],
+                    "sample_units": [],
+                    "error": str(exc),
+                }
+            )
+            return
+        raise typer.BadParameter(str(exc)) from exc
+
+    if json_output:
+        _json_echo(result)
+        store.close()
+        return
+
+    action = "Would update" if dry_run else "Updated"
+    typer.echo(
+        f"{action} {result['updated_count']} of {result['matched_count']} matched units: "
+        f"{result['old_tag']} -> {result['new_tag']}"
+    )
+    for unit in result["sample_units"]:
+        typer.echo(f"  [{unit['source_project']}] {unit['title']}")
+        typer.echo(f"    ID: {unit['id']} | Tags: {', '.join(unit['new_tags'])}")
+    store.close()
+
+
 @app.command(name="tag-synonyms")
 def tag_synonyms(
     limit: int = typer.Option(20, "--limit", "-n", help="Max synonym groups"),
@@ -4329,46 +4393,14 @@ def rename_tag(
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
     """Rename or merge one exact tag across matching units."""
-    store = _get_store()
-    try:
-        result = _do_rename_tag(
-            store,
-            old_tag,
-            new_tag,
-            dry_run=dry_run,
-            source_project=source_project,
-            content_type=content_type,
-        )
-    except ValueError as exc:
-        store.close()
-        if json_output:
-            _json_echo(
-                {
-                    "old_tag": old_tag,
-                    "new_tag": new_tag,
-                    "dry_run": dry_run,
-                    "changed_count": 0,
-                    "changed_units": [],
-                    "sample_units": [],
-                    "error": str(exc),
-                }
-            )
-            return
-        raise typer.BadParameter(str(exc)) from exc
-
-    if json_output:
-        _json_echo(result)
-        store.close()
-        return
-
-    action = "Would update" if dry_run else "Updated"
-    typer.echo(
-        f"{action} {result['changed_count']} units: {result['old_tag']} -> {result['new_tag']}"
+    tags_rename(
+        old_tag=old_tag,
+        new_tag=new_tag,
+        dry_run=dry_run,
+        source_project=source_project,
+        content_type=content_type,
+        json_output=json_output,
     )
-    for unit in result["sample_units"]:
-        typer.echo(f"  [{unit['source_project']}] {unit['title']}")
-        typer.echo(f"    ID: {unit['id']} | Tags: {', '.join(unit['new_tags'])}")
-    store.close()
 
 
 @app.command(name="links")

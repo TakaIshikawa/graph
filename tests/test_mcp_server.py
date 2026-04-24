@@ -2653,7 +2653,10 @@ def test_rename_tag_tool_dry_run_and_execute_match_service_counts(tmp_path, monk
     )
     dry_payload = json.loads(dry_response[0].text)
     assert dry_payload["dry_run"] is True
+    assert dry_payload["matched_count"] == 1
+    assert dry_payload["updated_count"] == 1
     assert dry_payload["changed_count"] == 1
+    assert dry_payload["affected_unit_ids"]
     assert dry_payload["sample_units"][0]["title"] == "Agent underscore"
 
     store = Store(str(db_path))
@@ -2675,7 +2678,10 @@ def test_rename_tag_tool_dry_run_and_execute_match_service_counts(tmp_path, monk
     )
     execute_payload = json.loads(execute_response[0].text)
     assert execute_payload["dry_run"] is False
+    assert execute_payload["matched_count"] == dry_payload["matched_count"]
+    assert execute_payload["updated_count"] == dry_payload["updated_count"]
     assert execute_payload["changed_count"] == dry_payload["changed_count"]
+    assert execute_payload["affected_unit_ids"] == dry_payload["affected_unit_ids"]
     assert execute_payload["sample_units"] == dry_payload["sample_units"]
 
     store = Store(str(db_path))

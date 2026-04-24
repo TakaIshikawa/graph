@@ -835,10 +835,12 @@ class Store:
         ).fetchall()
         units = [_row_to_unit(row) for row in rows]
 
+        matched_units: list[KnowledgeUnit] = []
         changed: list[tuple[KnowledgeUnit, list[str]]] = []
         for unit in units:
             if old_tag not in unit.tags:
                 continue
+            matched_units.append(unit)
 
             renamed_tags: list[str] = []
             for tag in unit.tags:
@@ -884,8 +886,13 @@ class Store:
             "old_tag": old_tag,
             "new_tag": new_tag,
             "dry_run": dry_run,
+            "matched_count": len(matched_units),
+            "updated_count": len(changed_units),
             "changed_count": len(changed_units),
+            "affected_count": len(changed_units),
+            "affected_unit_ids": [unit["id"] for unit in changed_units],
             "changed_units": changed_units,
+            "affected_units": changed_units,
             "filters": {
                 "source_project": source_project,
                 "content_type": content_type,
