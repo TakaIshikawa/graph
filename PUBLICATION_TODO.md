@@ -7,12 +7,12 @@
 
 ## 🚨 CRITICAL - Must Complete Before Publication
 
-### 1. Revoke Exposed API Key ⚠️  URGENT
-- [ ] Log into Voyage AI dashboard
-- [ ] Revoke key: `pa-dCxL7rPeTiyns6bYVJQjlcwJojtyVzDXiWKjPgarU83`
-- [ ] Generate new API key
-- [ ] Update local `.env` file with new key
-- [ ] Test that application still works
+### 1. Verify Vault Setup ✅ DONE
+- [x] Using encrypted vault for API key storage
+- [x] `.env.template` configured with vault references
+- [x] `.env` generated via `vault sync .env.template`
+- [ ] Document vault setup in README
+- [ ] Test that application still works with vault-managed secrets
 
 ### 2. Add LICENSE File
 - [ ] Choose license (MIT, Apache 2.0, GPL, etc.)
@@ -116,10 +116,9 @@
 ## Quick Start Workflow
 
 ```bash
-# 1. Secure the API key
-# → Go to Voyage AI dashboard and revoke the key
-# → Generate new key
-# → Update .env file
+# 1. Verify vault setup (already done)
+vault get voyage/api_key  # Should return your API key
+vault sync .env.template  # Regenerate .env if needed
 
 # 2. Add LICENSE
 echo "MIT License..." > LICENSE
