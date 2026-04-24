@@ -50,6 +50,42 @@ def _format_project_pair(projects: list[str]) -> str:
     return f"{projects[0]} <-> {projects[1]}"
 
 
+def _json_echo(payload: object) -> None:
+    typer.echo(json.dumps(payload, default=str, sort_keys=True))
+
+
+def _unit_to_json(unit, *, score: float | None = None, include_content: bool = True) -> dict:
+    data = {
+        "id": unit.id,
+        "source_project": str(unit.source_project),
+        "source_id": unit.source_id,
+        "source_entity_type": unit.source_entity_type,
+        "title": unit.title,
+        "content_type": str(unit.content_type),
+        "tags": unit.tags,
+        "metadata": unit.metadata,
+    }
+    if include_content:
+        data["content"] = unit.content
+    if unit.confidence is not None:
+        data["confidence"] = unit.confidence
+    if unit.utility_score is not None:
+        data["utility_score"] = unit.utility_score
+    if score is not None:
+        data["score"] = score
+    return data
+
+
+def _edge_to_json(edge: dict) -> dict:
+    return {
+        "id": edge.get("id"),
+        "from_unit_id": edge.get("from"),
+        "to_unit_id": edge.get("to"),
+        "relation": str(edge.get("relation")),
+        "weight": edge.get("weight"),
+    }
+
+
 def _unit_matches_search_filters(
     unit,
     *,
@@ -290,6 +326,7 @@ def search(
         "--review-state",
         help="Filter by review state metadata",
     ),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
     """Search knowledge units."""
     store = _get_store()
@@ -305,7 +342,21 @@ def search(
             review_state=review_state,
         )
         if not results:
+            if json_output:
+                _json_echo({"query": query, "mode": mode, "results": []})
+                store.close()
+                return
             typer.echo("No results found.")
+            store.close()
+            return
+        if json_output:
+            _json_echo(
+                {
+                    "query": query,
+                    "mode": mode,
+                    "results": [_unit_to_json(unit) for unit in results],
+                }
+            )
             store.close()
             return
         for unit in results:
@@ -346,7 +397,24 @@ def search(
             )
 
         if not pairs:
+            if json_output:
+                _json_echo({"query": query, "mode": mode, "results": []})
+                store.close()
+                return
             typer.echo("No results found.")
+            store.close()
+            return
+
+        if json_output:
+            _json_echo(
+                {
+                    "query": query,
+                    "mode": mode,
+                    "results": [
+                        _unit_to_json(unit, score=score) for unit, score in pairs
+                    ],
+                }
+            )
             store.close()
             return
 
@@ -356,6 +424,10 @@ def search(
             typer.echo(f"  Type: {unit.content_type} | Tags: {', '.join(unit.tags)}")
             typer.echo(f"  {unit.content[:120]}...")
     else:
+        if json_output:
+            _json_echo({"error": f"Unknown mode: {mode}", "valid_modes": ["fulltext", "semantic", "hybrid"]})
+            store.close()
+            return
         typer.echo(f"Unknown mode: {mode}. Use fulltext, semantic, or hybrid.")
 
     store.close()
@@ -375,6 +447,7 @@ def ideas(
     ),
     domain: str | None = typer.Option(None, "--domain", help="Filter by idea domain"),
     limit: int = typer.Option(20, "--limit", "-n", help="Max results"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
     """List max ideas stored in the graph with review metadata."""
     store = _get_store()
@@ -394,7 +467,16 @@ def ideas(
             break
 
     if not found:
+        if json_output:
+            _json_echo({"results": []})
+            store.close()
+            return
         typer.echo("No matching ideas found.")
+        store.close()
+        return
+
+    if json_output:
+        _json_echo({"results": [_unit_to_json(unit) for unit in found]})
         store.close()
         return
 
@@ -419,6 +501,7 @@ def design_briefs(
     status: str | None = typer.Option(None, "--status", help="Filter by design brief status"),
     domain: str | None = typer.Option(None, "--domain", help="Filter by brief domain"),
     limit: int = typer.Option(20, "--limit", "-n", help="Max results"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
     """List max design briefs stored in the graph."""
     store = _get_store()
@@ -440,7 +523,16 @@ def design_briefs(
             break
 
     if not found:
+        if json_output:
+            _json_echo({"results": []})
+            store.close()
+            return
         typer.echo("No matching design briefs found.")
+        store.close()
+        return
+
+    if json_output:
+        _json_echo({"results": [_unit_to_json(unit) for unit in found]})
         store.close()
         return
 
@@ -480,7 +572,9 @@ def design_briefs(
 
 
 @app.command()
-def stats() -> None:
+def stats(
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
     """Show graph statistics."""
     from graph.graph.service import GraphService
 
@@ -488,6 +582,11 @@ def stats() -> None:
     gs = GraphService(store)
     gs.rebuild()
     s = gs.stats()
+
+    if json_output:
+        _json_echo(s)
+        store.close()
+        return
 
     typer.echo(f"Nodes: {s['nodes']}")
     typer.echo(f"Edges: {s['edges']}")
@@ -514,11 +613,33 @@ def serve() -> None:
 
 
 @app.command(name="sync-status")
-def sync_status() -> None:
+def sync_status(
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
     """Show last sync timestamps per source project."""
     store = _get_store()
 
     projects = ["forty_two", "max", "presence", "me", "sota"]
+    if json_output:
+        statuses = []
+        for proj in projects:
+            adapter = _get_adapter_for_project(proj)
+            for et in adapter.entity_types:
+                state = store.get_sync_state(proj, et)
+                statuses.append(
+                    {
+                        "source_project": proj,
+                        "source_entity_type": et,
+                        "last_sync_at": state.last_sync_at if state else None,
+                        "last_source_id": state.last_source_id if state else None,
+                        "items_synced": state.items_synced if state else 0,
+                        "synced": state is not None,
+                    }
+                )
+        _json_echo({"results": statuses})
+        store.close()
+        return
+
     for proj in projects:
         adapter = _get_adapter_for_project(proj)
         typer.echo(f"\n{proj}:")
@@ -536,6 +657,7 @@ def sync_status() -> None:
 def neighbors(
     unit_id: str = typer.Argument(..., help="Unit ID"),
     depth: int = typer.Option(1, "--depth", "-d", help="Traversal depth (max 3)"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
     """Show a unit's neighborhood."""
     from graph.graph.service import GraphService
@@ -548,11 +670,31 @@ def neighbors(
     result = gs.get_neighbors(unit_id, depth=depth)
 
     if result["center"] is None:
+        if json_output:
+            _json_echo({"center": None, "neighbors": [], "edges": [], "error": "unit_not_found"})
+            store.close()
+            return
         typer.echo(f"Unit {unit_id} not found in graph.")
         store.close()
         return
 
     center_unit = store.get_unit(unit_id)
+    if json_output:
+        _json_echo(
+            {
+                "center": _unit_to_json(center_unit) if center_unit else None,
+                "neighbors": [
+                    _unit_to_json(unit)
+                    for unit in (store.get_unit(nid) for nid in result["neighbors"])
+                    if unit
+                ],
+                "edges": [_edge_to_json(edge) for edge in result["edges"]],
+                "depth": depth,
+            }
+        )
+        store.close()
+        return
+
     typer.echo(f"Center: [{center_unit.source_project}] {center_unit.title}")
     typer.echo(f"  Neighbors ({len(result['neighbors'])}):")
 
@@ -572,6 +714,7 @@ def neighbors(
 def shortest_path(
     from_id: str = typer.Argument(..., help="Start unit ID"),
     to_id: str = typer.Argument(..., help="End unit ID"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
     """Show the shortest path between two units."""
     from graph.graph.service import GraphService
@@ -586,12 +729,20 @@ def shortest_path(
     if not gs.G.has_node(to_id):
         missing.append(f"target unit not found: {to_id}")
     if missing:
+        if json_output:
+            _json_echo({"path": [], "edges": [], "error": missing})
+            store.close()
+            return
         typer.echo("Error: " + "; ".join(missing) + ".")
         store.close()
         return
 
     path = gs.shortest_path(from_id, to_id)
     if path is None:
+        if json_output:
+            _json_echo({"path": [], "edges": [], "error": "no_path"})
+            store.close()
+            return
         typer.echo("No path found between the selected units.")
         store.close()
         return
@@ -601,6 +752,39 @@ def shortest_path(
         unit = store.get_unit(nid)
         if unit:
             path_units.append(unit)
+
+    if json_output:
+        edges = []
+        for left, right in zip(path_units, path_units[1:], strict=False):
+            edge = gs.G.get_edge_data(left.id, right.id)
+            direction = "forward"
+            from_unit_id = left.id
+            to_unit_id = right.id
+            if edge is None:
+                edge = gs.G.get_edge_data(right.id, left.id)
+                direction = "reverse"
+                from_unit_id = right.id
+                to_unit_id = left.id
+            edges.append(
+                {
+                    "id": edge.get("id") if edge else None,
+                    "from_unit_id": from_unit_id,
+                    "to_unit_id": to_unit_id,
+                    "relation": str(edge.get("relation")) if edge else "related_to",
+                    "weight": edge.get("weight") if edge else None,
+                    "traversal_direction": direction,
+                }
+            )
+        _json_echo(
+            {
+                "from_unit_id": from_id,
+                "to_unit_id": to_id,
+                "path": [_unit_to_json(unit) for unit in path_units],
+                "edges": edges,
+            }
+        )
+        store.close()
+        return
 
     typer.echo(f"Shortest path ({len(path_units)} nodes):")
     for idx, unit in enumerate(path_units, 1):
@@ -625,6 +809,7 @@ def shortest_path(
 @app.command()
 def clusters(
     min_size: int = typer.Option(3, "--min-size", help="Minimum cluster size"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
     """Find knowledge clusters."""
     from graph.graph.service import GraphService
@@ -635,7 +820,31 @@ def clusters(
 
     found = gs.get_clusters(min_size=min_size)
     if not found:
+        if json_output:
+            _json_echo({"results": []})
+            store.close()
+            return
         typer.echo("No clusters found.")
+        store.close()
+        return
+
+    if json_output:
+        _json_echo(
+            {
+                "results": [
+                    {
+                        "index": i,
+                        "size": len(cluster),
+                        "units": [
+                            _unit_to_json(unit)
+                            for unit in (store.get_unit(nid) for nid in cluster)
+                            if unit
+                        ],
+                    }
+                    for i, cluster in enumerate(found, 1)
+                ]
+            }
+        )
         store.close()
         return
 
@@ -654,6 +863,7 @@ def clusters(
 @app.command()
 def gaps(
     limit: int = typer.Option(20, "--limit", "-n", help="Max results"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
     """Identify under-connected knowledge areas."""
     from graph.graph.service import GraphService
@@ -664,7 +874,27 @@ def gaps(
 
     found = gs.find_gaps()[:limit]
     if not found:
+        if json_output:
+            _json_echo({"results": []})
+            store.close()
+            return
         typer.echo("No gaps found.")
+        store.close()
+        return
+
+    if json_output:
+        results = []
+        for gap in found:
+            unit = store.get_unit(gap["unit_id"])
+            results.append(
+                {
+                    "gap_type": gap["gap_type"],
+                    "score": gap["score"],
+                    "reason": gap["reason"],
+                    "unit": _unit_to_json(unit) if unit else None,
+                }
+            )
+        _json_echo({"results": results})
         store.close()
         return
 
@@ -683,6 +913,7 @@ def gaps(
 @app.command()
 def central(
     limit: int = typer.Option(10, "--limit", "-n", help="Max results"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
     """Find the most central knowledge units."""
     from graph.graph.service import GraphService
@@ -693,7 +924,26 @@ def central(
 
     found = gs.get_central_nodes(limit=limit)
     if not found:
+        if json_output:
+            _json_echo({"results": []})
+            store.close()
+            return
         typer.echo("No nodes found.")
+        store.close()
+        return
+
+    if json_output:
+        _json_echo(
+            {
+                "results": [
+                    {"unit": _unit_to_json(unit), "score": score}
+                    for unit, score in (
+                        (store.get_unit(nid), score) for nid, score in found
+                    )
+                    if unit
+                ]
+            }
+        )
         store.close()
         return
 
@@ -711,6 +961,7 @@ def central(
 @app.command()
 def bridges(
     limit: int = typer.Option(10, "--limit", "-n", help="Max results"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
     """Find bridge knowledge units."""
     from graph.graph.service import GraphService
@@ -721,7 +972,26 @@ def bridges(
 
     found = gs.get_bridges(limit=limit)
     if not found:
+        if json_output:
+            _json_echo({"results": []})
+            store.close()
+            return
         typer.echo("No nodes found.")
+        store.close()
+        return
+
+    if json_output:
+        _json_echo(
+            {
+                "results": [
+                    {"unit": _unit_to_json(unit), "score": score}
+                    for unit, score in (
+                        (store.get_unit(nid), score) for nid, score in found
+                    )
+                    if unit
+                ]
+            }
+        )
         store.close()
         return
 
@@ -737,7 +1007,9 @@ def bridges(
 
 
 @app.command(name="cross-project")
-def cross_project() -> None:
+def cross_project(
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
     """Summarize cross-project connections."""
     from graph.graph.service import GraphService
 
@@ -747,7 +1019,16 @@ def cross_project() -> None:
 
     found = gs.cross_project_connections()
     if not found:
+        if json_output:
+            _json_echo({"results": []})
+            store.close()
+            return
         typer.echo("No cross-project connections found.")
+        store.close()
+        return
+
+    if json_output:
+        _json_echo({"results": found})
         store.close()
         return
 

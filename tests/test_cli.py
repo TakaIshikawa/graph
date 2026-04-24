@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -272,6 +273,25 @@ def test_shortest_path_command_prints_readable_path(monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_shortest_path_command_emits_json_with_edge_relations(monkeypatch):
+    store = _make_store()
+    a_id, _, c_id, _ = _populate_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(app, ["shortest-path", a_id, c_id, "--json"])
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert [unit["title"] for unit in payload["path"]] == ["Node A", "Node B", "Node C"]
+        assert [edge["relation"] for edge in payload["edges"]] == ["builds_on", "inspires"]
+        assert payload["edges"][0]["from_unit_id"] == a_id
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_shortest_path_command_reports_missing_units(monkeypatch):
     store = _make_store()
     _, _, c_id, _ = _populate_graph(store)
@@ -324,6 +344,30 @@ def test_search_command_preserves_default_format(monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_search_command_emits_semantic_json_with_scores(monkeypatch):
+    store = _make_store()
+    _populate_search_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    monkeypatch.setattr("graph.rag.embeddings.get_embedding_provider", lambda *args, **kwargs: MockEmbeddingProvider())
+
+    try:
+        result = runner.invoke(
+            app,
+            ["search", "solar", "--mode", "semantic", "--limit", "1", "--json"],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["mode"] == "semantic"
+        assert payload["results"][0]["title"].startswith("Solar")
+        assert payload["results"][0]["source_project"] == "max"
+        assert isinstance(payload["results"][0]["score"], float)
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_design_briefs_command_prints_readable_fields(monkeypatch):
     store = _make_store()
     _populate_design_briefs(store)
@@ -341,6 +385,28 @@ def test_design_briefs_command_prints_readable_fields(monkeypatch):
         assert "Validation plan: Interview 5 ops teams" in result.output
         assert "First milestones:" in result.output
         assert "Ignored external brief" not in result.output
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_design_briefs_command_emits_json_metadata(monkeypatch):
+    store = _make_store()
+    _populate_design_briefs(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(app, ["design-briefs", "--domain", "devtools", "--json"])
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert len(payload["results"]) == 1
+        brief = payload["results"][0]
+        assert brief["title"] == "Ops workflow brief"
+        assert brief["content_type"] == "design_brief"
+        assert brief["metadata"]["readiness_score"] == 82
+        assert brief["metadata"]["source_idea_ids"] == ["idea-a", "idea-b"]
     finally:
         store.close()
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
@@ -399,6 +465,25 @@ def test_bridges_command_prints_readable_units_and_rebuilds(monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_neighbors_command_emits_json_with_edge_relations(monkeypatch):
+    store = _make_store()
+    _, b_id, _, _ = _populate_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(app, ["neighbors", b_id, "--json"])
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["center"]["title"] == "Node B"
+        assert {neighbor["title"] for neighbor in payload["neighbors"]} == {"Node A", "Node C"}
+        assert {edge["relation"] for edge in payload["edges"]} == {"builds_on", "inspires"}
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_cross_project_command_summarizes_project_pairs(monkeypatch):
     from graph.graph.service import GraphService
 
@@ -423,6 +508,35 @@ def test_cross_project_command_summarizes_project_pairs(monkeypatch):
         assert calls == [True]
         assert "Cross-project connections:" in result.output
         assert "forty_two <-> max: 1 edges" in result.output
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_analytics_commands_emit_parseable_json(monkeypatch):
+    store = _make_store()
+    _populate_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        stats_result = runner.invoke(app, ["stats", "--json"])
+        bridges_result = runner.invoke(app, ["bridges", "--limit", "1", "--json"])
+        cross_project_result = runner.invoke(app, ["cross-project", "--json"])
+
+        assert stats_result.exit_code == 0
+        assert json.loads(stats_result.output)["nodes"] == 4
+
+        assert bridges_result.exit_code == 0
+        bridge_payload = json.loads(bridges_result.output)
+        assert bridge_payload["results"][0]["unit"]["title"] == "Node B"
+        assert "score" in bridge_payload["results"][0]
+
+        assert cross_project_result.exit_code == 0
+        cross_project_payload = json.loads(cross_project_result.output)
+        assert cross_project_payload["results"] == [
+            {"edge_count": 1, "projects": ["forty_two", "max"]}
+        ]
     finally:
         store.close()
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
