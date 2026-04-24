@@ -9,3 +9,12 @@ build/
 .ruff_cache/
 .pytest_cache/
 logs/
+
+# Vim swap files
+*.swp
+*.swo
+.*.sw?
+
+# Publication clearance
+clearance-report/
+.clearance/AI_PROVIDER_REVIEW.md
