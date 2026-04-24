@@ -10,12 +10,14 @@ import typer
 
 from graph.config import settings
 from graph.store.db import Store
-from graph.types.enums import ContentType
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource
 from graph.types.models import SyncState
 
 app = typer.Typer(name="graph", help="Personal Knowledge Graph — aggregate, connect, retrieve")
 queries_app = typer.Typer(help="Save and run repeatable graph searches")
 app.add_typer(queries_app, name="queries")
+edges_app = typer.Typer(help="List and edit graph edges")
+app.add_typer(edges_app, name="edges")
 
 
 def _get_store() -> Store:
@@ -296,6 +298,107 @@ def _do_delete_unit(store: Store, unit_id: str) -> dict:
     if not stats["deleted"]:
         stats["error"] = "unit_not_found"
         stats["message"] = f"Unit not found: {unit_id}"
+    return stats
+
+
+def _edge_summary_payload(store: Store, edge, center_unit_id: str | None = None) -> dict:
+    direction = None
+    neighbor_id = None
+    if center_unit_id is not None:
+        if edge.from_unit_id == center_unit_id:
+            direction = "outgoing"
+            neighbor_id = edge.to_unit_id
+        elif edge.to_unit_id == center_unit_id:
+            direction = "incoming"
+            neighbor_id = edge.from_unit_id
+
+    payload = _knowledge_edge_to_json(edge)
+    if direction is not None:
+        payload["direction"] = direction
+    if neighbor_id is not None:
+        neighbor = store.get_unit(neighbor_id)
+        payload["neighbor"] = (
+            _unit_to_json(neighbor, include_content=False) if neighbor else None
+        )
+    return payload
+
+
+def _list_edges_payload(
+    store: Store,
+    unit_id: str,
+    *,
+    direction: str = "both",
+    relation: str | None = None,
+) -> dict:
+    center = store.get_unit(unit_id)
+    if center is None:
+        return {
+            "unit_id": unit_id,
+            "center": None,
+            "edges": [],
+            "error": "unit_not_found",
+            "message": f"Unit not found: {unit_id}",
+        }
+
+    if direction not in ("incoming", "outgoing", "both"):
+        raise ValueError("direction must be incoming, outgoing, or both")
+    if relation is not None:
+        relation = EdgeRelation(relation).value
+
+    edges = []
+    for edge in store.get_edges_for_unit(unit_id):
+        edge_direction = "outgoing" if edge.from_unit_id == unit_id else "incoming"
+        if direction != "both" and edge_direction != direction:
+            continue
+        if relation is not None and str(edge.relation) != relation:
+            continue
+        edges.append(_edge_summary_payload(store, edge, center_unit_id=unit_id))
+
+    return {
+        "unit_id": unit_id,
+        "center": _unit_to_json(center, include_content=False),
+        "edges": edges,
+        "direction": direction,
+        "relation": relation,
+    }
+
+
+def _do_update_edge(
+    store: Store,
+    edge_id: str,
+    *,
+    relation: str | None = None,
+    weight: float | None = None,
+    source: str | None = None,
+    metadata: dict | str | None = None,
+) -> dict:
+    if relation is not None:
+        relation = EdgeRelation(relation).value
+    if source is not None:
+        source = EdgeSource(source).value
+    metadata_updates = _parse_metadata_json(metadata)
+    updated = store.update_edge_fields(
+        edge_id,
+        relation=relation,
+        weight=weight,
+        source=source,
+        metadata=metadata_updates,
+    )
+    if updated is None:
+        return {
+            "edge_id": edge_id,
+            "updated": False,
+            "error": "edge_not_found",
+            "message": f"Edge not found: {edge_id}",
+        }
+    return {"edge_id": edge_id, "updated": True, "edge": _knowledge_edge_to_json(updated)}
+
+
+def _do_delete_edge(store: Store, edge_id: str) -> dict:
+    stats = store.delete_edge(edge_id)
+    if not stats["deleted"]:
+        stats["error"] = "edge_not_found"
+        stats["message"] = f"Edge not found: {edge_id}"
     return stats
 
 
@@ -1177,6 +1280,140 @@ def delete_unit(
     typer.echo(
         f"Deleted unit {unit_id}; removed {payload['edges_deleted']} related edges."
     )
+
+
+@edges_app.command(name="list")
+def list_edges(
+    unit_id: str = typer.Argument(..., help="Knowledge unit ID"),
+    direction: str = typer.Option(
+        "both",
+        "--direction",
+        help="Edge direction: incoming | outgoing | both",
+    ),
+    relation: str | None = typer.Option(None, "--relation", help="Filter by edge relation"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """List a unit's incoming and outgoing edges."""
+    store = _get_store()
+    try:
+        payload = _list_edges_payload(
+            store,
+            unit_id,
+            direction=direction,
+            relation=relation,
+        )
+    except ValueError as exc:
+        if json_output:
+            _json_echo({"unit_id": unit_id, "edges": [], "error": str(exc)})
+            return
+        raise typer.BadParameter(str(exc)) from exc
+    finally:
+        store.close()
+
+    if payload.get("error"):
+        if json_output:
+            _json_echo(payload)
+            return
+        typer.echo(payload["message"])
+        raise typer.Exit(code=1)
+
+    if json_output:
+        _json_echo(payload)
+        return
+
+    center = payload["center"]
+    typer.echo(f"Center: [{center['source_project']}] {center['title']}")
+    if not payload["edges"]:
+        typer.echo("No edges found.")
+        return
+    for edge in payload["edges"]:
+        neighbor = edge.get("neighbor") or {}
+        typer.echo(
+            f"  {edge['direction']}: {edge['id']} "
+            f"{edge['from_unit_id'][:8]}... --{edge['relation']}--> "
+            f"{edge['to_unit_id'][:8]}... "
+            f"(weight: {edge['weight']}, source: {edge['source']})"
+        )
+        if neighbor:
+            typer.echo(
+                f"    Neighbor: [{neighbor['source_project']}] "
+                f"{neighbor['title']} ({neighbor['id'][:8]}...)"
+            )
+
+
+@app.command(name="update-edge")
+def update_edge(
+    edge_id: str = typer.Argument(..., help="Edge ID"),
+    relation: str | None = typer.Option(None, "--relation", help="Replace the edge relation"),
+    weight: float | None = typer.Option(None, "--weight", help="Replace the edge weight"),
+    source: str | None = typer.Option(None, "--source", help="Replace the edge source"),
+    metadata_json: str | None = typer.Option(
+        None,
+        "--metadata-json",
+        help="Merge a JSON object into existing edge metadata",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Update a graph edge by ID."""
+    store = _get_store()
+    try:
+        payload = _do_update_edge(
+            store,
+            edge_id,
+            relation=relation,
+            weight=weight,
+            source=source,
+            metadata=metadata_json,
+        )
+    except ValueError as exc:
+        if json_output:
+            _json_echo({"edge_id": edge_id, "updated": False, "error": str(exc)})
+            return
+        raise typer.BadParameter(str(exc)) from exc
+    finally:
+        store.close()
+
+    if payload.get("error"):
+        if json_output:
+            _json_echo(payload)
+            return
+        typer.echo(payload["message"])
+        raise typer.Exit(code=1)
+
+    if json_output:
+        _json_echo(payload)
+        return
+
+    edge = payload["edge"]
+    typer.echo(f"Updated edge {edge['id']}: {edge['relation']}")
+
+
+@app.command(name="delete-edge")
+def delete_edge(
+    edge_id: str = typer.Argument(..., help="Edge ID"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Delete without prompting"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Delete a graph edge by ID."""
+    if not yes:
+        typer.confirm(f"Delete edge {edge_id}?", abort=True)
+
+    store = _get_store()
+    payload = _do_delete_edge(store, edge_id)
+    store.close()
+
+    if payload.get("error"):
+        if json_output:
+            _json_echo(payload)
+            return
+        typer.echo(payload["message"])
+        raise typer.Exit(code=1)
+
+    if json_output:
+        _json_echo(payload)
+        return
+
+    typer.echo(f"Deleted edge {edge_id}.")
 
 
 @app.command()

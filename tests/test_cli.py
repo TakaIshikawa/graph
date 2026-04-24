@@ -2081,3 +2081,99 @@ def test_update_and_delete_unit_cli_json_reindexes_and_cleans_edges(monkeypatch)
     finally:
         store.close()
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_edge_management_cli_json_lists_updates_and_deletes(monkeypatch):
+    store = _make_store()
+    center = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="manual-1",
+            source_entity_type="manual",
+            title="Center",
+            content="Center content",
+        )
+    )
+    neighbor = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="manual-2",
+            source_entity_type="manual",
+            title="Neighbor",
+            content="Neighbor content",
+        )
+    )
+    edge = store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=center.id,
+            to_unit_id=neighbor.id,
+            relation=EdgeRelation.RELATES_TO,
+            source=EdgeSource.INFERRED,
+            metadata={"old": "value"},
+        )
+    )
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        list_result = runner.invoke(app, ["edges", "list", center.id, "--json"])
+        assert list_result.exit_code == 0
+        list_payload = json.loads(list_result.output)
+        assert list_payload["center"]["title"] == "Center"
+        assert list_payload["edges"][0]["id"] == edge.id
+        assert list_payload["edges"][0]["direction"] == "outgoing"
+        assert list_payload["edges"][0]["relation"] == "relates_to"
+        assert list_payload["edges"][0]["source"] == "inferred"
+        assert list_payload["edges"][0]["metadata"] == {"old": "value"}
+        assert list_payload["edges"][0]["neighbor"]["title"] == "Neighbor"
+
+        update_result = runner.invoke(
+            app,
+            [
+                "update-edge",
+                edge.id,
+                "--relation",
+                "inspires",
+                "--weight",
+                "0.5",
+                "--source",
+                "manual",
+                "--metadata-json",
+                '{"new":"value"}',
+                "--json",
+            ],
+        )
+        assert update_result.exit_code == 0
+        update_payload = json.loads(update_result.output)
+        assert update_payload["updated"] is True
+        assert update_payload["edge"]["relation"] == "inspires"
+        assert update_payload["edge"]["weight"] == 0.5
+        assert update_payload["edge"]["source"] == "manual"
+        assert update_payload["edge"]["metadata"] == {"old": "value", "new": "value"}
+
+        backlinks = store.get_backlinks(neighbor.id)
+        assert backlinks["links"][0]["relation"] == "inspires"
+
+        delete_result = runner.invoke(app, ["delete-edge", edge.id, "--yes", "--json"])
+        assert delete_result.exit_code == 0
+        assert json.loads(delete_result.output) == {
+            "edge_id": edge.id,
+            "deleted": True,
+        }
+        assert store.get_unit(center.id) is not None
+        assert store.get_unit(neighbor.id) is not None
+        assert store.get_all_edges() == []
+
+        missing_result = runner.invoke(app, ["delete-edge", "missing", "--yes", "--json"])
+        assert missing_result.exit_code == 0
+        assert json.loads(missing_result.output)["error"] == "edge_not_found"
+
+        invalid_result = runner.invoke(
+            app,
+            ["update-edge", edge.id, "--relation", "invalid", "--json"],
+        )
+        assert invalid_result.exit_code == 0
+        assert "invalid" in json.loads(invalid_result.output)["error"]
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]

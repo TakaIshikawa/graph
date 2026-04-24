@@ -257,6 +257,64 @@ class TestEdgeCRUD:
         store.insert_edge(edge)  # duplicate
         assert len(store.get_all_edges()) == 1
 
+    def test_get_update_and_delete_edge_by_id(self, store: Store):
+        u1 = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="n1",
+                source_entity_type="knowledge_node",
+                title="Unit 1",
+                content="Content 1",
+            )
+        )
+        u2 = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="n2",
+                source_entity_type="knowledge_node",
+                title="Unit 2",
+                content="Content 2",
+            )
+        )
+        edge = store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=u1.id,
+                to_unit_id=u2.id,
+                relation=EdgeRelation.BUILDS_ON,
+                source=EdgeSource.INFERRED,
+                metadata={"old": "value"},
+            )
+        )
+
+        fetched = store.get_edge(edge.id)
+        assert fetched is not None
+        assert fetched.id == edge.id
+
+        updated = store.update_edge_fields(
+            edge.id,
+            relation="inspires",
+            weight=0.4,
+            source="manual",
+            metadata={"new": "value"},
+        )
+
+        assert updated is not None
+        assert updated.relation == EdgeRelation.INSPIRES
+        assert updated.weight == 0.4
+        assert updated.source == EdgeSource.MANUAL
+        assert updated.metadata == {"old": "value", "new": "value"}
+        backlink = store.get_backlinks(u2.id)["links"][0]
+        assert backlink["edge"].id == edge.id
+        assert backlink["relation"] == "inspires"
+        assert backlink["edge"].weight == 0.4
+        assert store.update_edge_fields("missing", relation="relates_to") is None
+
+        assert store.delete_edge(edge.id) == {"edge_id": edge.id, "deleted": True}
+        assert store.get_unit(u1.id) is not None
+        assert store.get_unit(u2.id) is not None
+        assert store.get_all_edges() == []
+        assert store.delete_edge(edge.id) == {"edge_id": edge.id, "deleted": False}
+
     def test_delete_unit_removes_fts_row_and_related_edges(self, store: Store):
         u1 = store.insert_unit(
             KnowledgeUnit(

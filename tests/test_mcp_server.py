@@ -690,6 +690,105 @@ def test_update_and_delete_unit_tools_reindex_and_clean_edges(tmp_path, monkeypa
         verify.close()
 
 
+def test_edge_management_tools_list_update_delete_and_report_errors(
+    tmp_path, monkeypatch
+):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    center = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="manual-1",
+            source_entity_type="manual",
+            title="Center",
+            content="Center content",
+        )
+    )
+    neighbor = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="manual-2",
+            source_entity_type="manual",
+            title="Neighbor",
+            content="Neighbor content",
+        )
+    )
+    edge = store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=center.id,
+            to_unit_id=neighbor.id,
+            relation=EdgeRelation.RELATES_TO,
+            source=EdgeSource.INFERRED,
+            metadata={"old": "value"},
+        )
+    )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    tool_names = {tool.name for tool in tools}
+    assert {"list_edges", "update_edge", "delete_edge"} <= tool_names
+
+    listed = asyncio.run(mcp_server.call_tool("list_edges", {"unit_id": center.id}))
+    list_payload = json.loads(listed[0].text)
+    assert list_payload["edges"][0]["id"] == edge.id
+    assert list_payload["edges"][0]["direction"] == "outgoing"
+    assert list_payload["edges"][0]["relation"] == "relates_to"
+    assert list_payload["edges"][0]["source"] == "inferred"
+    assert list_payload["edges"][0]["metadata"] == {"old": "value"}
+    assert list_payload["edges"][0]["neighbor"]["title"] == "Neighbor"
+
+    updated = asyncio.run(
+        mcp_server.call_tool(
+            "update_edge",
+            {
+                "edge_id": edge.id,
+                "relation": "inspires",
+                "weight": 0.25,
+                "source": "manual",
+                "metadata": {"new": "value"},
+            },
+        )
+    )
+    update_payload = json.loads(updated[0].text)
+    assert update_payload["updated"] is True
+    assert update_payload["edge"]["relation"] == "inspires"
+    assert update_payload["edge"]["weight"] == 0.25
+    assert update_payload["edge"]["source"] == "manual"
+    assert update_payload["edge"]["metadata"] == {"old": "value", "new": "value"}
+
+    verify = Store(str(db_path))
+    try:
+        assert verify.get_backlinks(neighbor.id)["links"][0]["relation"] == "inspires"
+    finally:
+        verify.close()
+
+    invalid = asyncio.run(
+        mcp_server.call_tool(
+            "update_edge",
+            {"edge_id": edge.id, "relation": "invalid"},
+        )
+    )
+    assert "invalid" in json.loads(invalid[0].text)["error"]
+
+    deleted = asyncio.run(mcp_server.call_tool("delete_edge", {"edge_id": edge.id}))
+    assert json.loads(deleted[0].text) == {"edge_id": edge.id, "deleted": True}
+
+    missing = asyncio.run(mcp_server.call_tool("delete_edge", {"edge_id": edge.id}))
+    missing_payload = json.loads(missing[0].text)
+    assert missing_payload["deleted"] is False
+    assert missing_payload["error"] == "edge_not_found"
+
+    verify = Store(str(db_path))
+    try:
+        assert verify.get_unit(center.id) is not None
+        assert verify.get_unit(neighbor.id) is not None
+        assert verify.get_all_edges() == []
+    finally:
+        verify.close()
+
+
 def test_backlinks_tool_returns_expanded_json_filters_and_missing_error(
     tmp_path, monkeypatch
 ):

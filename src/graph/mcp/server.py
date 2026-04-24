@@ -12,6 +12,7 @@ from mcp.types import TextContent, Tool
 from graph.config import settings
 from graph.cli.main import (
     _backlinks_payload,
+    _do_delete_edge,
     _do_export_graphml,
     _do_export_json,
     _do_export_neighborhood,
@@ -21,8 +22,10 @@ from graph.cli.main import (
     _do_import_json,
     _do_infer_edges,
     _do_delete_unit,
+    _do_update_edge,
     _do_search,
     _do_update_unit,
+    _list_edges_payload,
     _search_filters_dict,
 )
 from graph.graph.service import GraphService
@@ -575,6 +578,66 @@ async def list_tools() -> list[Tool]:
                     "weight": {"type": "number", "default": 1.0},
                 },
                 "required": ["from_unit_id", "to_unit_id", "relation"],
+            },
+        ),
+        Tool(
+            name="list_edges",
+            description="List incoming and outgoing edges for one knowledge unit with neighbor summaries.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "unit_id": {"type": "string", "description": "Knowledge unit ID"},
+                    "direction": {
+                        "type": "string",
+                        "enum": ["incoming", "outgoing", "both"],
+                        "default": "both",
+                    },
+                    "relation": {
+                        "type": "string",
+                        "enum": [r.value for r in EdgeRelation],
+                        "description": "Filter by edge relation",
+                    },
+                },
+                "required": ["unit_id"],
+            },
+        ),
+        Tool(
+            name="update_edge",
+            description="Update an edge by ID.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "edge_id": {"type": "string", "description": "Edge ID"},
+                    "relation": {
+                        "type": "string",
+                        "enum": [r.value for r in EdgeRelation],
+                        "description": "Replacement edge relation",
+                    },
+                    "weight": {"type": "number", "description": "Replacement weight"},
+                    "source": {
+                        "type": "string",
+                        "enum": [s.value for s in EdgeSource],
+                        "description": "Replacement edge source",
+                    },
+                    "metadata": {
+                        "type": "object",
+                        "additionalProperties": True,
+                        "default": {},
+                        "description": "Metadata keys to merge into existing metadata",
+                    },
+                },
+                "required": ["edge_id"],
+            },
+        ),
+        Tool(
+            name="delete_edge",
+            description="Delete an edge by ID.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "edge_id": {"type": "string", "description": "Edge ID"},
+                },
+                "required": ["edge_id"],
             },
         ),
         Tool(
@@ -1149,13 +1212,22 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return [TextContent(type="text", text=json.dumps(payload))]
 
         elif name == "add_edge":
-            edge = KnowledgeEdge(
-                from_unit_id=arguments["from_unit_id"],
-                to_unit_id=arguments["to_unit_id"],
-                relation=EdgeRelation(arguments["relation"]),
-                weight=arguments.get("weight", 1.0),
-                source=EdgeSource.MANUAL,
-            )
+            try:
+                edge = KnowledgeEdge(
+                    from_unit_id=arguments["from_unit_id"],
+                    to_unit_id=arguments["to_unit_id"],
+                    relation=EdgeRelation(arguments["relation"]),
+                    weight=arguments.get("weight", 1.0),
+                    source=EdgeSource.MANUAL,
+                )
+            except ValueError as exc:
+                payload = {
+                    "inserted": False,
+                    "error": str(exc),
+                    "from_unit_id": arguments.get("from_unit_id"),
+                    "to_unit_id": arguments.get("to_unit_id"),
+                }
+                return [TextContent(type="text", text=json.dumps(payload))]
             inserted = store.insert_edge(edge)
             return [
                 TextContent(
@@ -1168,6 +1240,44 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     }),
                 )
             ]
+
+        elif name == "list_edges":
+            try:
+                payload = _list_edges_payload(
+                    store,
+                    arguments["unit_id"],
+                    direction=arguments.get("direction", "both"),
+                    relation=arguments.get("relation"),
+                )
+            except ValueError as exc:
+                payload = {
+                    "unit_id": arguments.get("unit_id"),
+                    "edges": [],
+                    "error": str(exc),
+                }
+            return [TextContent(type="text", text=json.dumps(payload, default=str))]
+
+        elif name == "update_edge":
+            try:
+                payload = _do_update_edge(
+                    store,
+                    arguments["edge_id"],
+                    relation=arguments.get("relation"),
+                    weight=arguments.get("weight"),
+                    source=arguments.get("source"),
+                    metadata=arguments.get("metadata", {}),
+                )
+            except ValueError as exc:
+                payload = {
+                    "edge_id": arguments.get("edge_id"),
+                    "updated": False,
+                    "error": str(exc),
+                }
+            return [TextContent(type="text", text=json.dumps(payload, default=str))]
+
+        elif name == "delete_edge":
+            payload = _do_delete_edge(store, arguments["edge_id"])
+            return [TextContent(type="text", text=json.dumps(payload))]
 
         elif name == "infer_edges":
             result = _do_infer_edges(

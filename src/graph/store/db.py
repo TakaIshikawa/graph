@@ -559,12 +559,63 @@ class Store:
         rows = self.conn.execute("SELECT * FROM edges").fetchall()
         return [_row_to_edge(r) for r in rows]
 
+    def get_edge(self, edge_id: str) -> KnowledgeEdge | None:
+        row = self.conn.execute("SELECT * FROM edges WHERE id = ?", (edge_id,)).fetchone()
+        return _row_to_edge(row) if row else None
+
     def get_edges_for_unit(self, unit_id: str) -> list[KnowledgeEdge]:
         rows = self.conn.execute(
-            "SELECT * FROM edges WHERE from_unit_id = ? OR to_unit_id = ?",
+            """SELECT * FROM edges
+               WHERE from_unit_id = ? OR to_unit_id = ?
+               ORDER BY created_at DESC, id""",
             (unit_id, unit_id),
         ).fetchall()
         return [_row_to_edge(r) for r in rows]
+
+    def update_edge_fields(
+        self,
+        edge_id: str,
+        *,
+        relation: str | None = None,
+        weight: float | None = None,
+        source: str | None = None,
+        metadata: dict | None = None,
+    ) -> KnowledgeEdge | None:
+        edge = self.get_edge(edge_id)
+        if edge is None:
+            return None
+
+        if relation is not None:
+            edge.relation = relation
+        if weight is not None:
+            edge.weight = weight
+        if source is not None:
+            edge.source = source
+        if metadata:
+            edge.metadata = {**edge.metadata, **metadata}
+
+        self.conn.execute(
+            """UPDATE edges
+               SET relation = ?,
+                   weight = ?,
+                   source = ?,
+                   metadata = ?
+               WHERE id = ?""",
+            (
+                edge.relation,
+                edge.weight,
+                edge.source,
+                json.dumps(edge.metadata),
+                edge.id,
+            ),
+        )
+        self.conn.commit()
+        return self.get_edge(edge_id)
+
+    def delete_edge(self, edge_id: str) -> dict:
+        cursor = self.conn.execute("DELETE FROM edges WHERE id = ?", (edge_id,))
+        self.conn.commit()
+        return {"edge_id": edge_id, "deleted": cursor.rowcount > 0}
 
     def get_backlinks(
         self,
