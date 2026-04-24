@@ -2066,6 +2066,54 @@ def test_analyze_tags_tool_returns_summary_and_detail_json(tmp_path, monkeypatch
     ]
 
 
+def test_tag_graph_tool_exposes_filters_and_returns_json_payload(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    _populate_tags_graph(store)
+    store.close()
+
+    monkeypatch.setattr(
+        mcp_server,
+        "_get_store",
+        lambda: Store(str(db_path)),
+    )
+
+    tools = asyncio.run(mcp_server.list_tools())
+    tag_graph_tool = next(tool for tool in tools if tool.name == "tag_graph")
+    assert "source_project" in tag_graph_tool.inputSchema["properties"]
+    assert "content_type" in tag_graph_tool.inputSchema["properties"]
+    assert "min_count" in tag_graph_tool.inputSchema["properties"]
+
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "tag_graph",
+            {
+                "source_project": "max",
+                "content_type": "insight",
+                "min_count": 2,
+                "limit": 5,
+            },
+        )
+    )
+    payload = json.loads(response[0].text)
+
+    assert payload["nodes"] == [
+        {"id": "energy", "tag": "energy", "unit_count": 2},
+        {"id": "storage", "tag": "storage", "unit_count": 2},
+    ]
+    assert [
+        (edge["source"], edge["target"], edge["co_occurrence_count"])
+        for edge in payload["edges"]
+    ] == [("energy", "storage", 2)]
+    assert payload["edges"][0]["representative_unit_ids"]
+    assert payload["filters"] == {
+        "source_project": "max",
+        "content_type": "insight",
+        "min_count": 2,
+        "limit": 5,
+    }
+
+
 def test_timeline_tool_matches_service_schema_and_validates_inputs(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))

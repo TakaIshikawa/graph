@@ -905,6 +905,50 @@ class TestGraphService:
             "Battery storage",
         }
 
+    def test_tag_graph_returns_deterministic_nodes_edges_and_representatives(
+        self, tagged_store: Store
+    ):
+        gs = GraphService(tagged_store)
+        result = gs.tag_graph(min_count=2, limit=10)
+
+        assert result["nodes"] == [
+            {"id": "energy", "tag": "energy", "unit_count": 3},
+            {"id": "solar", "tag": "solar", "unit_count": 2},
+            {"id": "storage", "tag": "storage", "unit_count": 2},
+        ]
+        assert [
+            (edge["source"], edge["target"], edge["co_occurrence_count"])
+            for edge in result["edges"]
+        ] == [
+            ("energy", "solar", 2),
+            ("energy", "storage", 2),
+        ]
+        assert all(edge["representative_unit_ids"] for edge in result["edges"])
+        assert result["filters"] == {
+            "source_project": None,
+            "content_type": None,
+            "min_count": 2,
+            "limit": 10,
+        }
+
+    def test_tag_graph_applies_filters_and_limit(self, tagged_store: Store):
+        gs = GraphService(tagged_store)
+        result = gs.tag_graph(
+            source_project="max",
+            content_type="insight",
+            min_count=2,
+            limit=1,
+        )
+
+        assert result["nodes"] == [
+            {"id": "energy", "tag": "energy", "unit_count": 2},
+            {"id": "storage", "tag": "storage", "unit_count": 2},
+        ]
+        assert [
+            (edge["source"], edge["target"], edge["co_occurrence_count"])
+            for edge in result["edges"]
+        ] == [("energy", "storage", 2)]
+
     def test_suggest_tag_synonyms_groups_variants_and_is_read_only(
         self, tag_synonym_store: Store
     ):

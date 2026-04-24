@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
+from itertools import combinations
 import html
 import json
 from pathlib import Path
@@ -944,6 +945,75 @@ class GraphService:
 
         tags.sort(key=lambda item: (-item["count"], item["tag"]))
         return {"tags": tags[:limit], "filters": filters}
+
+    def tag_graph(
+        self,
+        *,
+        source_project: str | None = None,
+        content_type: str | None = None,
+        min_count: int = 1,
+        limit: int = 20,
+    ) -> dict:
+        """Build a tag co-occurrence graph from filtered knowledge units."""
+        if min_count < 1:
+            raise ValueError("min_count must be greater than or equal to 1.")
+        if limit < 0:
+            raise ValueError("limit must be greater than or equal to 0.")
+
+        units = [
+            unit
+            for unit in self.store.get_all_units(limit=1000000000)
+            if (source_project is None or str(unit.source_project) == source_project)
+            and (content_type is None or str(unit.content_type) == content_type)
+        ]
+
+        node_counts: Counter[str] = Counter()
+        unit_ids_by_pair: dict[tuple[str, str], set[str]] = {}
+        for unit in units:
+            unit_tags = sorted(
+                {str(unit_tag).strip() for unit_tag in unit.tags if str(unit_tag).strip()}
+            )
+            node_counts.update(unit_tags)
+            for left, right in combinations(unit_tags, 2):
+                unit_ids_by_pair.setdefault((left, right), set()).add(unit.id)
+
+        candidate_edges = [
+            {
+                "source": left,
+                "target": right,
+                "tags": [left, right],
+                "co_occurrence_count": len(unit_ids),
+                "representative_unit_ids": sorted(unit_ids),
+            }
+            for (left, right), unit_ids in unit_ids_by_pair.items()
+            if len(unit_ids) >= min_count
+        ]
+        candidate_edges.sort(
+            key=lambda edge: (
+                -edge["co_occurrence_count"],
+                edge["source"],
+                edge["target"],
+            )
+        )
+        edges = candidate_edges[:limit]
+
+        graph_tags = {edge["source"] for edge in edges} | {edge["target"] for edge in edges}
+        nodes = [
+            {"id": tag, "tag": tag, "unit_count": node_counts[tag]}
+            for tag in graph_tags
+        ]
+        nodes.sort(key=lambda node: (-node["unit_count"], node["tag"]))
+
+        return {
+            "nodes": nodes,
+            "edges": edges,
+            "filters": {
+                "source_project": source_project,
+                "content_type": content_type,
+                "min_count": min_count,
+                "limit": limit,
+            },
+        }
 
     def analyze_timeline(
         self,

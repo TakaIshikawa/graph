@@ -2398,6 +2398,41 @@ def test_tags_command_detail_applies_filters_and_co_occurrences(monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_tag_graph_command_emits_json_and_readable_top_pairs(monkeypatch):
+    store = _make_store()
+    _populate_tags_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(app, ["tag-graph", "--min-count", "2", "--limit", "2", "--json"])
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert [node["tag"] for node in payload["nodes"]] == [
+            "energy",
+            "solar",
+            "storage",
+        ]
+        assert [
+            (edge["source"], edge["target"], edge["co_occurrence_count"])
+            for edge in payload["edges"]
+        ] == [
+            ("energy", "solar", 2),
+            ("energy", "storage", 2),
+        ]
+        assert all(edge["representative_unit_ids"] for edge in payload["edges"])
+
+        readable = runner.invoke(app, ["tag-graph", "--min-count", "2", "--limit", "1"])
+        assert readable.exit_code == 0
+        assert "Top tag pairs:" in readable.output
+        assert "energy <-> solar: 2 units" in readable.output
+        assert "Representative units:" in readable.output
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_tag_synonyms_command_emits_json_and_readable_output(monkeypatch):
     store = _make_store()
     _populate_tag_synonym_graph(store)

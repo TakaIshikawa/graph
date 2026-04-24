@@ -485,6 +485,27 @@ def _do_rename_tag(
     )
 
 
+def _do_tag_graph(
+    store: Store,
+    *,
+    source_project: str | None = None,
+    content_type: str | None = None,
+    min_count: int = 1,
+    limit: int = 20,
+) -> dict:
+    if content_type is not None:
+        content_type = ContentType(content_type).value
+    from graph.graph.service import GraphService
+
+    gs = GraphService(store)
+    return gs.tag_graph(
+        source_project=source_project,
+        content_type=content_type,
+        min_count=min_count,
+        limit=limit,
+    )
+
+
 def _do_delete_unit(store: Store, unit_id: str) -> dict:
     stats = store.delete_unit(unit_id)
     if not stats["deleted"]:
@@ -3518,6 +3539,61 @@ def tags(
         typer.echo(f"  {item['tag']}: {item['count']}")
         typer.echo(f"    Projects: {projects or '-'}")
         typer.echo(f"    Content types: {content_types or '-'}")
+
+    store.close()
+
+
+@app.command(name="tag-graph")
+def tag_graph(
+    limit: int = typer.Option(20, "--limit", "-n", help="Max tag pairs to return"),
+    min_count: int = typer.Option(
+        1,
+        "--min-count",
+        help="Minimum co-occurrence count required for a tag pair",
+    ),
+    source_project: str | None = typer.Option(
+        None,
+        "--source-project",
+        "--project",
+        "-p",
+        help="Filter by source project",
+    ),
+    content_type: str | None = typer.Option(None, "--content-type", help="Filter by content type"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Analyze tag co-occurrence as a weighted graph."""
+    store = _get_store()
+    try:
+        result = _do_tag_graph(
+            store,
+            source_project=source_project,
+            content_type=content_type,
+            min_count=min_count,
+            limit=limit,
+        )
+    except ValueError as exc:
+        store.close()
+        raise typer.BadParameter(str(exc)) from exc
+
+    if json_output:
+        _json_echo(result)
+        store.close()
+        return
+
+    edges = result["edges"]
+    if not edges:
+        typer.echo("No tag co-occurrences found.")
+        store.close()
+        return
+
+    typer.echo("Top tag pairs:")
+    for edge in edges:
+        representatives = ", ".join(edge["representative_unit_ids"])
+        typer.echo(
+            f"  {edge['source']} <-> {edge['target']}: "
+            f"{edge['co_occurrence_count']} units"
+        )
+        typer.echo(f"    Representative units: {representatives or '-'}")
 
     store.close()
 

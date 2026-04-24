@@ -29,6 +29,7 @@ from graph.cli.main import (
     _do_pin_unit,
     _do_pinned_units,
     _do_rename_tag,
+    _do_tag_graph,
     _do_unpin_unit,
     _do_update_edge,
     _do_search,
@@ -597,6 +598,38 @@ async def list_tools() -> list[Tool]:
                     "tag": {
                         "type": "string",
                         "description": "Show detail for one exact tag",
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="tag_graph",
+            description="Return a weighted tag co-occurrence graph with node unit counts and representative unit ids for each pair.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "default": 20},
+                    "min_count": {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Minimum co-occurrence count required for a tag pair",
+                    },
+                    "source_project": {
+                        "type": "string",
+                        "enum": SUPPORTED_SYNC_PROJECTS,
+                        "description": "Filter by source project",
+                    },
+                    "content_type": {
+                        "type": "string",
+                        "enum": [
+                            "insight",
+                            "finding",
+                            "idea",
+                            "design_brief",
+                            "artifact",
+                            "metadata",
+                        ],
+                        "description": "Filter by content type",
                     },
                 },
             },
@@ -1600,6 +1633,16 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 limit=arguments.get("limit", 20),
                 source_project=arguments.get("source_project"),
                 content_type=arguments.get("content_type"),
+            )
+            return [TextContent(type="text", text=json.dumps(result))]
+
+        elif name == "tag_graph":
+            result = _do_tag_graph(
+                store,
+                source_project=arguments.get("source_project"),
+                content_type=arguments.get("content_type"),
+                min_count=arguments.get("min_count", 1),
+                limit=arguments.get("limit", 20),
             )
             return [TextContent(type="text", text=json.dumps(result))]
 
