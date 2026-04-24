@@ -565,6 +565,90 @@ class TestGraphService:
         assert 'graph:tag "line\\nbreak"' in text
         assert f"graph:builds_on <https://example.test/unit/{b.id}>" in text
 
+    def test_export_mermaid_escapes_labels_and_caps_whole_graph(
+        self, store: Store, tmp_path
+    ):
+        a = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="a",
+                source_entity_type="knowledge_node",
+                title='Node "A" | alpha\nnext',
+                content="First node",
+            )
+        )
+        b = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="b",
+                source_entity_type="insight",
+                title="Node B",
+                content="Second node",
+            )
+        )
+        store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.PRESENCE,
+                source_id="c",
+                source_entity_type="knowledge_item",
+                title="Node C",
+                content="Third node",
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=a.id,
+                to_unit_id=b.id,
+                relation=EdgeRelation.BUILDS_ON,
+            )
+        )
+
+        output_path = tmp_path / "graph.md"
+        graph_service = GraphService(store)
+        stats = graph_service.export_mermaid(output_path, limit=3)
+        text = output_path.read_text()
+
+        assert stats == {
+            "path": str(output_path),
+            "node_count": 3,
+            "edge_count": 1,
+            "capped": False,
+        }
+        assert text.startswith("```mermaid\ngraph TD\n")
+        assert '["Node &quot;A&quot; &#124; alpha next"]' in text
+        assert "-->|builds_on|" in text
+        assert '"A" | alpha\nnext' not in text
+
+        capped_path = tmp_path / "capped.md"
+        capped_stats = graph_service.export_mermaid(capped_path, limit=2)
+        assert capped_stats["node_count"] == 2
+        assert capped_stats["capped"] is True
+
+    def test_export_mermaid_neighborhood_respects_depth_cap_and_limit(
+        self, populated_store: Store, tmp_path
+    ):
+        a = populated_store.get_unit_by_source("forty_two", "a", "knowledge_node")
+        output_path = tmp_path / "neighborhood.md"
+
+        gs = GraphService(populated_store)
+        gs.rebuild()
+        stats = gs.export_mermaid(output_path, unit_id=a.id, depth=9, limit=2)
+        text = output_path.read_text()
+
+        assert stats == {
+            "path": str(output_path),
+            "node_count": 2,
+            "edge_count": 1,
+            "capped": True,
+            "depth": 3,
+            "center_unit_id": a.id,
+        }
+        assert 'n0["Node A"]' in text
+        assert 'n1["Node B"]' in text
+        assert "Node C" not in text
+        assert "n0 -->|builds_on| n1" in text
+        assert "inspires" not in text
+
     def test_export_neighborhood_writes_capped_local_json(
         self, populated_store: Store, tmp_path
     ):

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
+import html
 import json
 from pathlib import Path
 import re
@@ -21,6 +22,7 @@ _EXTERNAL_URL_RE = re.compile(r"https?://[^\s<>\"]+", re.IGNORECASE)
 _TRAILING_URL_PUNCTUATION = ".,;:!?)]}'\""
 _TIMELINE_BUCKETS = {"day", "week", "month", "year"}
 _TIMELINE_FIELDS = {"created_at", "ingested_at", "updated_at"}
+_MERMAID_WHITESPACE_RE = re.compile(r"\s+")
 _EDGE_SUGGESTION_STOPWORDS = {
     "a",
     "an",
@@ -145,6 +147,11 @@ def _external_url_domain(url: str) -> str | None:
 
 def _json_value(value: object) -> object:
     return value.isoformat() if hasattr(value, "isoformat") else value
+
+
+def _mermaid_label(value: object) -> str:
+    text = _MERMAID_WHITESPACE_RE.sub(" ", str(value)).strip()
+    return html.escape(text, quote=True).replace("|", "&#124;")
 
 
 def _metadata_strings(value: object, path: str = "metadata") -> list[tuple[str, str]]:
@@ -315,6 +322,84 @@ class GraphService:
             "node_count": export_graph.number_of_nodes(),
             "edge_count": export_graph.number_of_edges(),
         }
+
+    def export_mermaid(
+        self,
+        path: str | Path,
+        *,
+        unit_id: str | None = None,
+        depth: int = 1,
+        limit: int = 100,
+    ) -> dict:
+        """Write a Markdown Mermaid graph block and return export stats."""
+        output_path = Path(path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        capped_limit = max(1, int(limit))
+
+        if unit_id is not None:
+            payload = self.build_neighborhood_export(unit_id, depth=depth)
+            center_id = payload["center"]["id"] if payload["center"] else unit_id
+            units_by_id = {unit["id"]: unit for unit in payload["units"]}
+            distances = nx.single_source_shortest_path_length(
+                self.G.to_undirected(), center_id, cutoff=payload["depth"]
+            )
+            ordered_ids = sorted(
+                units_by_id,
+                key=lambda found_id: (distances.get(found_id, payload["depth"] + 1), found_id),
+            )
+            selected_ids = set(ordered_ids[:capped_limit])
+            units = [
+                units_by_id[found_id] for found_id in ordered_ids if found_id in selected_ids
+            ]
+            edges = [
+                edge
+                for edge in payload["edges"]
+                if edge["from_unit_id"] in selected_ids and edge["to_unit_id"] in selected_ids
+            ]
+            capped = len(payload["units"]) > len(units)
+            depth_used = payload["depth"]
+        else:
+            all_units = sorted(self.store.get_all_units(limit=1000000000), key=lambda unit: unit.id)
+            units = [self._unit_export_data(unit) for unit in all_units[:capped_limit]]
+            selected_ids = {unit["id"] for unit in units}
+            edges = [
+                self._edge_export_data(edge)
+                for edge in sorted(
+                    self.store.get_all_edges(),
+                    key=lambda edge: (
+                        edge.from_unit_id,
+                        edge.to_unit_id,
+                        str(edge.relation),
+                        edge.id,
+                    ),
+                )
+                if edge.from_unit_id in selected_ids and edge.to_unit_id in selected_ids
+            ]
+            capped = len(all_units) > len(units)
+            depth_used = None
+
+        aliases = {unit["id"]: f"n{index}" for index, unit in enumerate(units)}
+        lines = ["```mermaid", "graph TD"]
+        for unit in units:
+            lines.append(f'    {aliases[unit["id"]]}["{_mermaid_label(unit["title"])}"]')
+        for edge in edges:
+            from_alias = aliases[edge["from_unit_id"]]
+            to_alias = aliases[edge["to_unit_id"]]
+            relation = _mermaid_label(edge["relation"])
+            lines.append(f"    {from_alias} -->|{relation}| {to_alias}")
+        lines.extend(["```", ""])
+
+        output_path.write_text("\n".join(lines), encoding="utf-8")
+        stats = {
+            "path": str(output_path),
+            "node_count": len(units),
+            "edge_count": len(edges),
+            "capped": capped,
+        }
+        if unit_id is not None:
+            stats["depth"] = depth_used
+            stats["center_unit_id"] = unit_id
+        return stats
 
     def export_turtle(
         self, path: str | Path, base_uri: str = "https://graph.local/unit/"

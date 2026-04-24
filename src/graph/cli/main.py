@@ -95,6 +95,21 @@ def _do_export_graphml(store: Store, path: str | Path) -> dict:
     return gs.export_graphml(path)
 
 
+def _do_export_mermaid(
+    store: Store,
+    path: str | Path,
+    *,
+    unit_id: str | None = None,
+    depth: int = 1,
+    limit: int = 100,
+) -> dict:
+    from graph.graph.service import GraphService
+
+    gs = GraphService(store)
+    gs.rebuild()
+    return gs.export_mermaid(path, unit_id=unit_id, depth=depth, limit=limit)
+
+
 def _do_export_turtle(
     store: Store, path: str | Path, *, base_uri: str = "https://graph.local/unit/"
 ) -> dict:
@@ -1300,6 +1315,52 @@ def export_graphml(
     typer.echo(
         f"Exported {stats['node_count']} nodes and "
         f"{stats['edge_count']} edges to {stats['path']}"
+    )
+
+
+@app.command(name="export-mermaid")
+def export_mermaid(
+    path: Path = typer.Argument(..., help="Destination Markdown file path"),
+    unit_id: str | None = typer.Option(
+        None,
+        "--unit-id",
+        help="Center unit ID for a focused neighborhood export",
+    ),
+    depth: int = typer.Option(1, "--depth", "-d", help="Traversal depth (1-3; max 3)"),
+    limit: int = typer.Option(100, "--limit", "-n", help="Maximum nodes to export"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Export a Mermaid Markdown graph for lightweight visualization."""
+    store = _get_store()
+    try:
+        stats = _do_export_mermaid(
+            store,
+            path,
+            unit_id=unit_id,
+            depth=depth,
+            limit=limit,
+        )
+    except ValueError as exc:
+        store.close()
+        try:
+            payload = json.loads(str(exc))
+        except json.JSONDecodeError:
+            payload = {"error": "export_failed", "message": str(exc)}
+        if json_output:
+            _json_echo(payload)
+        else:
+            typer.echo(payload["message"])
+        raise typer.Exit(code=1) from exc
+    store.close()
+
+    if json_output:
+        _json_echo(stats)
+        return
+
+    capped = " (capped)" if stats["capped"] else ""
+    typer.echo(
+        f"Exported {stats['node_count']} nodes and "
+        f"{stats['edge_count']} edges to {stats['path']}{capped}"
     )
 
 

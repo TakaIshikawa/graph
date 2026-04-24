@@ -685,6 +685,45 @@ def test_export_turtle_command_writes_turtle_with_counts(tmp_path, monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_export_mermaid_command_writes_markdown_and_supports_neighborhood(
+    tmp_path, monkeypatch
+):
+    store = _make_store()
+    a_id, b_id, c_id, d_id = _populate_graph(store)
+    export_path = tmp_path / "graph.md"
+
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    result = runner.invoke(
+        app,
+        [
+            "export-mermaid",
+            str(export_path),
+            "--unit-id",
+            a_id,
+            "--depth",
+            "1",
+            "--limit",
+            "10",
+        ],
+    )
+
+    try:
+        assert result.exit_code == 0
+        assert "Exported 2 nodes and 1 edges" in result.output
+        text = export_path.read_text()
+        assert text.startswith("```mermaid\ngraph TD\n")
+        assert 'n0["Node A"]' in text
+        assert 'n1["Node B"]' in text
+        assert "n0 -->|builds_on| n1" in text
+        assert c_id not in text
+        assert d_id not in text
+        assert b_id not in text
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_export_neighborhood_command_writes_local_json_and_caps_depth(
     tmp_path, monkeypatch
 ):
