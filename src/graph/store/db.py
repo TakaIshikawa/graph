@@ -459,6 +459,83 @@ class Store:
             },
         }
 
+    def apply_tags_to_units(
+        self,
+        unit_ids: list[str],
+        *,
+        add_tags: list[str] | None = None,
+        remove_tags: list[str] | None = None,
+        dry_run: bool = False,
+    ) -> dict:
+        add_tags = list(dict.fromkeys(tag.strip() for tag in (add_tags or []) if tag.strip()))
+        remove_tags = list(
+            dict.fromkeys(tag.strip() for tag in (remove_tags or []) if tag.strip())
+        )
+        if not add_tags and not remove_tags:
+            raise ValueError("At least one --add or --remove tag is required.")
+        overlap = sorted(set(add_tags) & set(remove_tags))
+        if overlap:
+            raise ValueError(
+                "Tags cannot be both added and removed: " + ", ".join(overlap)
+            )
+
+        ordered_ids = list(dict.fromkeys(unit_ids))
+        units = [unit for unit_id in ordered_ids if (unit := self.get_unit(unit_id))]
+
+        changed: list[tuple[KnowledgeUnit, list[str]]] = []
+        remove_set = set(remove_tags)
+        for unit in units:
+            next_tags = [tag for tag in unit.tags if tag not in remove_set]
+            for tag in add_tags:
+                if tag not in next_tags:
+                    next_tags.append(tag)
+            if next_tags != unit.tags:
+                changed.append((unit, next_tags))
+
+        changed_units = [
+            {
+                "id": unit.id,
+                "title": unit.title,
+                "source_project": str(unit.source_project),
+                "source_entity_type": unit.source_entity_type,
+                "content_type": str(unit.content_type),
+                "old_tags": unit.tags,
+                "new_tags": next_tags,
+            }
+            for unit, next_tags in changed
+        ]
+
+        if not dry_run and changed:
+            now = _utcnow_iso()
+            with self.conn:
+                for unit, next_tags in changed:
+                    self.conn.execute(
+                        """UPDATE knowledge_units
+                           SET tags = ?, updated_at = ?
+                           WHERE id = ?""",
+                        (json.dumps(next_tags), now, unit.id),
+                    )
+                    unit.tags = next_tags
+                    unit.updated_at = now
+                    self.conn.execute(
+                        "DELETE FROM knowledge_fts WHERE unit_id = ?", (unit.id,)
+                    )
+                    self.conn.execute(
+                        "INSERT INTO knowledge_fts (unit_id, title, content, tags) VALUES (?, ?, ?, ?)",
+                        (unit.id, unit.title, unit.content, " ".join(unit.tags)),
+                    )
+
+        return {
+            "add_tags": add_tags,
+            "remove_tags": remove_tags,
+            "dry_run": dry_run,
+            "matched_count": len(units),
+            "changed_count": len(changed_units),
+            "affected_count": len(changed_units),
+            "changed_units": changed_units,
+            "affected_units": changed_units,
+        }
+
     def delete_unit(self, unit_id: str) -> dict:
         unit = self.get_unit(unit_id)
         if unit is None:

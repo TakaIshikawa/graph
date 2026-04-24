@@ -2093,6 +2093,104 @@ def test_rename_tag_command_dry_run_json_and_execute(monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_tags_apply_search_dry_run_execute_filters_and_reindexes(monkeypatch):
+    store = _make_store()
+    _populate_search_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        dry_run = runner.invoke(
+            app,
+            [
+                "tags",
+                "apply-search",
+                "solar",
+                "--add",
+                "curated",
+                "--add",
+                "curated",
+                "--remove",
+                "energy",
+                "--mode",
+                "fulltext",
+                "--limit",
+                "10",
+                "--source-project",
+                "max",
+                "--content-type",
+                "insight",
+                "--tag",
+                "energy",
+                "--review-state",
+                "approved",
+                "--min-utility",
+                "0.9",
+                "--dry-run",
+                "--json",
+            ],
+        )
+
+        assert dry_run.exit_code == 0
+        dry_payload = json.loads(dry_run.output)
+        assert dry_payload["dry_run"] is True
+        assert dry_payload["matched_count"] == 1
+        assert dry_payload["changed_count"] == 1
+        assert dry_payload["add_tags"] == ["curated"]
+        assert dry_payload["remove_tags"] == ["energy"]
+        assert dry_payload["changed_units"][0]["old_tags"] == ["energy", "solar"]
+        assert dry_payload["changed_units"][0]["new_tags"] == ["solar", "curated"]
+        approved = store.get_unit_by_source("max", "approved", "insight")
+        assert approved is not None
+        assert approved.tags == ["energy", "solar"]
+
+        executed = runner.invoke(
+            app,
+            [
+                "tags",
+                "apply-search",
+                "solar",
+                "--add",
+                "curated",
+                "--remove",
+                "energy",
+                "--source-project",
+                "max",
+                "--content-type",
+                "insight",
+                "--tag",
+                "energy",
+                "--review-state",
+                "approved",
+                "--min-utility",
+                "0.9",
+                "--json",
+            ],
+        )
+
+        assert executed.exit_code == 0
+        payload = json.loads(executed.output)
+        assert payload["dry_run"] is False
+        assert payload["affected_count"] == 1
+        approved = store.get_unit_by_source("max", "approved", "insight")
+        rejected = store.get_unit_by_source("max", "rejected", "insight")
+        assert approved is not None
+        assert rejected is not None
+        assert approved.tags == ["solar", "curated"]
+        assert rejected.tags == ["energy", "solar"]
+        assert store.fts_search("curated")[0]["unit_id"] == approved.id
+        search_result = runner.invoke(
+            app,
+            ["search", "solar", "--tag", "curated", "--json"],
+        )
+        assert search_result.exit_code == 0
+        search_payload = json.loads(search_result.output)
+        assert [unit["id"] for unit in search_payload["results"]] == [approved.id]
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_links_command_emits_json_and_filters_by_domain(monkeypatch):
     store = _make_store()
     _populate_links_graph(store)

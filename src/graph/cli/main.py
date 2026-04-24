@@ -18,6 +18,8 @@ queries_app = typer.Typer(help="Save and run repeatable graph searches")
 app.add_typer(queries_app, name="queries")
 edges_app = typer.Typer(help="List and edit graph edges")
 app.add_typer(edges_app, name="edges")
+tags_app = typer.Typer(help="Explore and mutate graph tags", invoke_without_command=True)
+app.add_typer(tags_app, name="tags")
 
 
 def _get_store() -> Store:
@@ -846,6 +848,42 @@ def _do_search(
     if filters:
         payload["filters"] = filters
     return payload
+
+
+def _do_apply_tags_to_search(
+    store: Store,
+    query: str,
+    *,
+    add_tags: list[str] | None = None,
+    remove_tags: list[str] | None = None,
+    limit: int = 10,
+    mode: str = "fulltext",
+    filters: dict | None = None,
+    dry_run: bool = False,
+) -> dict:
+    search_payload = _do_search(
+        store,
+        query,
+        limit=limit,
+        mode=mode,
+        filters=filters,
+    )
+    unit_ids = [result["id"] for result in search_payload["results"]]
+    result = store.apply_tags_to_units(
+        unit_ids,
+        add_tags=add_tags,
+        remove_tags=remove_tags,
+        dry_run=dry_run,
+    )
+    result.update(
+        {
+            "query": query,
+            "mode": mode,
+            "limit": limit,
+            "filters": filters or {},
+        }
+    )
+    return result
 
 
 def _sorted_counts(counts: dict[str, int]) -> dict[str, int]:
@@ -3051,8 +3089,9 @@ def timeline(
     store.close()
 
 
-@app.command()
+@tags_app.callback(invoke_without_command=True)
 def tags(
+    ctx: typer.Context,
     limit: int = typer.Option(20, "--limit", "-n", help="Max tags or matching units"),
     source_project: str | None = typer.Option(
         None,
@@ -3066,6 +3105,9 @@ def tags(
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
     """Explore tag taxonomy and co-occurring topics."""
+    if ctx.invoked_subcommand is not None:
+        return
+
     from graph.graph.service import GraphService
 
     store = _get_store()
@@ -3128,6 +3170,134 @@ def tags(
         typer.echo(f"    Projects: {projects or '-'}")
         typer.echo(f"    Content types: {content_types or '-'}")
 
+    store.close()
+
+
+@tags_app.command(name="apply-search")
+def tags_apply_search(
+    query: str = typer.Argument(..., help="Search query"),
+    add_tags: list[str] = typer.Option(
+        [],
+        "--add",
+        help="Tag to add to matching units. Repeat to add multiple tags.",
+    ),
+    remove_tags: list[str] = typer.Option(
+        [],
+        "--remove",
+        help="Tag to remove from matching units. Repeat to remove multiple tags.",
+    ),
+    mode: str = typer.Option("fulltext", "--mode", "-m", help="Search mode: fulltext | semantic | hybrid"),
+    limit: int = typer.Option(10, "--limit", "-n", help="Max matching units to update"),
+    source_project: str | None = typer.Option(
+        None,
+        "--source-project",
+        "--project",
+        "-p",
+        help="Filter by source project",
+    ),
+    content_type: str | None = typer.Option(None, "--content-type", help="Filter by content type"),
+    tag: str | None = typer.Option(None, "--tag", help="Require an exact existing tag"),
+    review_state: str | None = typer.Option(
+        None,
+        "--review-state",
+        help="Filter by review state metadata",
+    ),
+    created_after: str | None = typer.Option(
+        None,
+        "--created-after",
+        help="Filter to units created on or after an ISO-8601 date/datetime",
+    ),
+    created_before: str | None = typer.Option(
+        None,
+        "--created-before",
+        help="Filter to units created on or before an ISO-8601 date/datetime",
+    ),
+    min_utility: float | None = typer.Option(
+        None,
+        "--min-utility",
+        help="Filter to units with utility score at least this value",
+    ),
+    max_utility: float | None = typer.Option(
+        None,
+        "--max-utility",
+        help="Filter to units with utility score at most this value",
+    ),
+    min_confidence: float | None = typer.Option(
+        None,
+        "--min-confidence",
+        help="Filter to units with confidence at least this value",
+    ),
+    max_confidence: float | None = typer.Option(
+        None,
+        "--max-confidence",
+        help="Filter to units with confidence at most this value",
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without writing"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Apply tag additions/removals to units matched by a search."""
+    store = _get_store()
+    filters = _search_filters_dict(
+        source_project=source_project,
+        content_type=content_type,
+        tag=tag,
+        review_state=review_state,
+        created_after=created_after,
+        created_before=created_before,
+        min_utility=min_utility,
+        max_utility=max_utility,
+        min_confidence=min_confidence,
+        max_confidence=max_confidence,
+    )
+    try:
+        result = _do_apply_tags_to_search(
+            store,
+            query,
+            add_tags=add_tags,
+            remove_tags=remove_tags,
+            limit=limit,
+            mode=mode,
+            filters=filters,
+            dry_run=dry_run,
+        )
+    except ValueError as exc:
+        store.close()
+        if json_output:
+            _json_echo(
+                {
+                    "query": query,
+                    "mode": mode,
+                    "limit": limit,
+                    "filters": filters,
+                    "add_tags": add_tags,
+                    "remove_tags": remove_tags,
+                    "dry_run": dry_run,
+                    "matched_count": 0,
+                    "changed_count": 0,
+                    "affected_count": 0,
+                    "changed_units": [],
+                    "affected_units": [],
+                    "error": str(exc),
+                }
+            )
+            return
+        raise typer.BadParameter(str(exc)) from exc
+
+    if json_output:
+        _json_echo(result)
+        store.close()
+        return
+
+    action = "Would update" if dry_run else "Updated"
+    typer.echo(
+        f"{action} {result['changed_count']} of {result['matched_count']} matched units."
+    )
+    for unit in result["changed_units"]:
+        typer.echo(f"  [{unit['source_project']}] {unit['title']}")
+        typer.echo(
+            f"    ID: {unit['id']} | Tags: {', '.join(unit['old_tags'])} -> "
+            f"{', '.join(unit['new_tags'])}"
+        )
     store.close()
 
 

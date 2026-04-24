@@ -218,6 +218,77 @@ class TestUnitCRUD:
         assert {row["unit_id"] for row in store.fts_search("ai-agent")} >= {first.id, second.id}
         assert {row["unit_id"] for row in store.fts_search("ai_agent")} == {skipped.id}
 
+    def test_apply_tags_to_units_dry_run_execute_dedupes_and_reindexes_fts(
+        self, store: Store
+    ):
+        first = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="first-bulk",
+                source_entity_type="insight",
+                title="Bulk first",
+                content="Bulk searchable content",
+                content_type=ContentType.INSIGHT,
+                tags=["energy", "solar", "old"],
+            )
+        )
+        second = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="second-bulk",
+                source_entity_type="insight",
+                title="Bulk second",
+                content="Bulk searchable content",
+                content_type=ContentType.INSIGHT,
+                tags=["energy", "curated"],
+            )
+        )
+        for unit in [first, second]:
+            store.fts_index_unit(unit)
+        original_updated_at = str(store.get_unit(first.id).updated_at)  # type: ignore[union-attr]
+
+        dry_run = store.apply_tags_to_units(
+            [first.id, first.id, second.id],
+            add_tags=["curated", "reviewed", "reviewed"],
+            remove_tags=["old"],
+            dry_run=True,
+        )
+
+        assert dry_run["dry_run"] is True
+        assert dry_run["matched_count"] == 2
+        assert dry_run["changed_count"] == 2
+        assert dry_run["changed_units"][0]["old_tags"] == ["energy", "solar", "old"]
+        assert dry_run["changed_units"][0]["new_tags"] == [
+            "energy",
+            "solar",
+            "curated",
+            "reviewed",
+        ]
+        assert store.get_unit(first.id).tags == ["energy", "solar", "old"]  # type: ignore[union-attr]
+        assert str(store.get_unit(first.id).updated_at) == original_updated_at  # type: ignore[union-attr]
+
+        result = store.apply_tags_to_units(
+            [first.id, second.id],
+            add_tags=["curated", "reviewed"],
+            remove_tags=["old"],
+        )
+
+        assert result["dry_run"] is False
+        assert result["affected_count"] == 2
+        assert store.get_unit(first.id).tags == [  # type: ignore[union-attr]
+            "energy",
+            "solar",
+            "curated",
+            "reviewed",
+        ]
+        assert store.get_unit(second.id).tags == ["energy", "curated", "reviewed"]  # type: ignore[union-attr]
+        assert str(store.get_unit(first.id).updated_at) != original_updated_at  # type: ignore[union-attr]
+        assert {row["unit_id"] for row in store.fts_search("reviewed")} == {
+            first.id,
+            second.id,
+        }
+        assert store.fts_search("old") == []
+
 
 class TestEdgeCRUD:
     def test_insert_and_get_edges(self, store: Store):

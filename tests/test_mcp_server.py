@@ -1940,6 +1940,90 @@ def test_rename_tag_tool_dry_run_and_execute_match_service_counts(
     store.close()
 
 
+def test_apply_tags_to_search_tool_returns_counts_summaries_and_updates(
+    tmp_path, monkeypatch
+):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    _populate_tags_graph(store)
+    for unit in store.get_all_units(limit=100):
+        store.fts_index_unit(unit)
+    store.close()
+
+    monkeypatch.setattr(
+        mcp_server,
+        "_get_store",
+        lambda: Store(str(db_path)),
+    )
+
+    tools = asyncio.run(mcp_server.list_tools())
+    apply_tool = next(tool for tool in tools if tool.name == "apply_tags_to_search")
+    assert apply_tool.inputSchema["properties"]["dry_run"]["default"] is False
+    assert apply_tool.inputSchema["properties"]["mode"]["default"] == "fulltext"
+    assert "source_project" in apply_tool.inputSchema["properties"]
+
+    dry_response = asyncio.run(
+        mcp_server.call_tool(
+            "apply_tags_to_search",
+            {
+                "query": "Solar",
+                "add": ["curated", "curated"],
+                "remove": ["energy"],
+                "source_project": "max",
+                "tag": "energy",
+                "dry_run": True,
+            },
+        )
+    )
+    dry_payload = json.loads(dry_response[0].text)
+    assert dry_payload["dry_run"] is True
+    assert dry_payload["matched_count"] == 1
+    assert dry_payload["affected_count"] == 1
+    assert dry_payload["add_tags"] == ["curated"]
+    assert dry_payload["affected_units"][0]["old_tags"] == [
+        "energy",
+        "solar",
+        "storage",
+    ]
+    assert dry_payload["affected_units"][0]["new_tags"] == [
+        "solar",
+        "storage",
+        "curated",
+    ]
+
+    store = Store(str(db_path))
+    unit = store.get_unit_by_source("max", "solar-storage", "insight")
+    assert unit is not None
+    assert unit.tags == ["energy", "solar", "storage"]
+    store.close()
+
+    execute_response = asyncio.run(
+        mcp_server.call_tool(
+            "apply_tags_to_search",
+            {
+                "query": "Solar",
+                "add": ["curated"],
+                "remove": ["energy"],
+                "source_project": "max",
+                "tag": "energy",
+            },
+        )
+    )
+    execute_payload = json.loads(execute_response[0].text)
+    assert execute_payload["dry_run"] is False
+    assert execute_payload["affected_count"] == dry_payload["affected_count"]
+
+    store = Store(str(db_path))
+    unit = store.get_unit_by_source("max", "solar-storage", "insight")
+    other = store.get_unit_by_source("forty_two", "solar-grid", "knowledge_node")
+    assert unit is not None
+    assert other is not None
+    assert unit.tags == ["solar", "storage", "curated"]
+    assert other.tags == ["energy", "solar", "grid"]
+    assert store.fts_search("curated")[0]["unit_id"] == unit.id
+    store.close()
+
+
 def test_analyze_duplicates_tool_returns_reasons_units_and_filters(
     tmp_path, monkeypatch
 ):

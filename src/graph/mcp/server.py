@@ -20,6 +20,7 @@ from graph.cli.main import (
     _do_export_obsidian,
     _do_export_report,
     _do_export_turtle,
+    _do_apply_tags_to_search,
     _do_import_json,
     _do_infer_edges,
     _do_integrity_audit,
@@ -625,6 +626,42 @@ async def list_tools() -> list[Tool]:
                     },
                 },
                 "required": ["old_tag", "new_tag"],
+            },
+        ),
+        Tool(
+            name="apply_tags_to_search",
+            description="Add and remove tags across units matched by a graph search, with optional dry run.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query"},
+                    "add": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "default": [],
+                        "description": "Tags to add to matching units",
+                    },
+                    "remove": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "default": [],
+                        "description": "Tags to remove from matching units",
+                    },
+                    "limit": {"type": "integer", "default": 10},
+                    "mode": {
+                        "type": "string",
+                        "enum": ["hybrid", "semantic", "fulltext"],
+                        "default": "fulltext",
+                        "description": "Search mode",
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Preview changes without writing",
+                    },
+                    **SEARCH_FILTER_SCHEMA,
+                },
+                "required": ["query"],
             },
         ),
         Tool(
@@ -1439,6 +1476,31 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 dry_run=arguments.get("dry_run", False),
                 source_project=arguments.get("source_project"),
                 content_type=arguments.get("content_type"),
+            )
+            return [TextContent(type="text", text=json.dumps(result))]
+
+        elif name == "apply_tags_to_search":
+            filters = _search_filters_dict(
+                source_project=arguments.get("source_project"),
+                content_type=arguments.get("content_type"),
+                review_state=arguments.get("review_state"),
+                tag=arguments.get("tag"),
+                created_after=arguments.get("created_after"),
+                created_before=arguments.get("created_before"),
+                min_utility=arguments.get("min_utility"),
+                max_utility=arguments.get("max_utility"),
+                min_confidence=arguments.get("min_confidence"),
+                max_confidence=arguments.get("max_confidence"),
+            )
+            result = _do_apply_tags_to_search(
+                store,
+                arguments["query"],
+                add_tags=arguments.get("add", arguments.get("add_tags", [])),
+                remove_tags=arguments.get("remove", arguments.get("remove_tags", [])),
+                limit=arguments.get("limit", 10),
+                mode=arguments.get("mode", "fulltext"),
+                filters=filters,
+                dry_run=arguments.get("dry_run", False),
             )
             return [TextContent(type="text", text=json.dumps(result))]
 
