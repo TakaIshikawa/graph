@@ -430,6 +430,105 @@ def test_export_graphml_command_writes_valid_graphml(tmp_path, monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_export_report_command_writes_markdown_and_json_counts(tmp_path, monkeypatch):
+    store = _make_store()
+    a = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="report-a",
+            source_entity_type="knowledge_node",
+            title="Report Node A",
+            content="First report node",
+            tags=["energy", "solar"],
+            utility_score=0.9,
+        )
+    )
+    b = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="report-b",
+            source_entity_type="insight",
+            title="Report Node B",
+            content="Second report node",
+            content_type=ContentType.INSIGHT,
+            tags=["energy", "storage"],
+            utility_score=0.8,
+        )
+    )
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=a.id,
+            to_unit_id=b.id,
+            relation=EdgeRelation.BUILDS_ON,
+        )
+    )
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    report_path = tmp_path / "graph-report.md"
+
+    try:
+        result = runner.invoke(
+            app,
+            ["export-report", str(report_path), "--limit", "2", "--json"],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["path"] == str(report_path)
+        assert payload["section_counts"]["central"] == 2
+        assert payload["section_counts"]["tags"] == 2
+        assert payload["section_counts"]["cross_project"] == 1
+
+        report = report_path.read_text()
+        for heading in [
+            "## Stats",
+            "## Top Central Nodes",
+            "## Bridge Nodes",
+            "## Largest Clusters",
+            "## Gap Candidates",
+            "## Top Tags",
+            "## Cross-Project Connections",
+        ]:
+            assert heading in report
+        assert "Report Node A" in report
+        assert "Report Node B" in report
+        assert "energy: 2 units" in report
+        assert "forty_two <-> max: 1 edges" in report
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_export_report_command_handles_empty_graph(tmp_path, monkeypatch):
+    store = _make_store()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    report_path = tmp_path / "empty-report.md"
+
+    try:
+        result = runner.invoke(app, ["export-report", str(report_path), "--json"])
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["section_counts"] == {
+            "stats": 1,
+            "central": 0,
+            "bridges": 0,
+            "clusters": 0,
+            "gaps": 0,
+            "tags": 0,
+            "cross_project": 0,
+        }
+        report = report_path.read_text()
+        assert "Nodes: 0" in report
+        assert "Edges: 0" in report
+        assert "## Top Tags" in report
+        assert "_None._" in report
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_ingest_markdown_command_uses_configured_root(tmp_path, monkeypatch):
     notes = tmp_path / "notes"
     notes.mkdir()

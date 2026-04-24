@@ -80,6 +80,141 @@ def _do_export_graphml(store: Store, path: str | Path) -> dict:
     return gs.export_graphml(path)
 
 
+def _do_export_report(store: Store, path: str | Path, *, limit: int = 10) -> dict:
+    from graph.graph.service import GraphService
+
+    def _line_items(items: list[str]) -> list[str]:
+        return items if items else ["_None._"]
+
+    def _unit_link(unit) -> str:
+        return f"{unit.title} ({unit.source_project}/{unit.source_entity_type})"
+
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    gs = GraphService(store)
+    gs.rebuild()
+    stats = gs.stats()
+    central = gs.get_central_nodes(limit=limit)
+    bridges = gs.get_bridges(limit=limit)
+    clusters = gs.get_clusters(min_size=1)[:limit]
+    gaps = gs.find_gaps()[:limit]
+    tags = gs.analyze_tags(limit=limit)["tags"]
+    cross_project = gs.cross_project_connections()[:limit]
+
+    lines = [
+        "# Graph Health Report",
+        "",
+        f"Generated: {datetime.now(timezone.utc).isoformat()}",
+        "",
+        "## Stats",
+        "",
+        f"- Nodes: {stats['nodes']}",
+        f"- Edges: {stats['edges']}",
+        f"- Components: {stats['components']}",
+        f"- Density: {stats['density']}",
+        "",
+        "### By Project",
+        "",
+        *_line_items(
+            [
+                f"- {project}: {count}"
+                for project, count in sorted(stats["by_project"].items())
+            ]
+        ),
+        "",
+        "### By Content Type",
+        "",
+        *_line_items(
+            [
+                f"- {content_type}: {count}"
+                for content_type, count in sorted(stats["by_content_type"].items())
+            ]
+        ),
+        "",
+        "## Top Central Nodes",
+        "",
+    ]
+
+    central_lines = []
+    for node_id, score in central:
+        unit = store.get_unit(node_id)
+        if unit:
+            central_lines.append(f"- {_unit_link(unit)} - PageRank {score:.6f}")
+    lines.extend(_line_items(central_lines))
+    lines.extend(["", "## Bridge Nodes", ""])
+
+    bridge_lines = []
+    for node_id, score in bridges:
+        unit = store.get_unit(node_id)
+        if unit:
+            bridge_lines.append(f"- {_unit_link(unit)} - Betweenness {score:.6f}")
+    lines.extend(_line_items(bridge_lines))
+    lines.extend(["", "## Largest Clusters", ""])
+
+    cluster_lines = []
+    for index, cluster in enumerate(clusters, 1):
+        titles = []
+        for node_id in cluster[:5]:
+            unit = store.get_unit(node_id)
+            if unit:
+                titles.append(_unit_link(unit))
+        suffix = f"; +{len(cluster) - 5} more" if len(cluster) > 5 else ""
+        cluster_lines.append(
+            f"- Cluster {index}: {len(cluster)} nodes - {', '.join(titles) or 'No units'}{suffix}"
+        )
+    lines.extend(_line_items(cluster_lines))
+    lines.extend(["", "## Gap Candidates", ""])
+
+    gap_lines = []
+    for gap in gaps:
+        unit = store.get_unit(gap["unit_id"])
+        if unit:
+            gap_lines.append(
+                f"- [{gap['gap_type']}] {_unit_link(unit)} - "
+                f"Score {gap['score']:.2f}; {gap['reason']}"
+            )
+    lines.extend(_line_items(gap_lines))
+    lines.extend(["", "## Top Tags", ""])
+
+    tag_lines = []
+    for item in tags:
+        projects = ", ".join(
+            f"{project}:{count}" for project, count in item["source_projects"].items()
+        )
+        content_types = ", ".join(
+            f"{content_type}:{count}"
+            for content_type, count in item["content_types"].items()
+        )
+        tag_lines.append(
+            f"- {item['tag']}: {item['count']} units "
+            f"(projects: {projects or '-'}; content types: {content_types or '-'})"
+        )
+    lines.extend(_line_items(tag_lines))
+    lines.extend(["", "## Cross-Project Connections", ""])
+
+    cross_project_lines = [
+        f"- {_format_project_pair(item['projects'])}: {item['edge_count']} edges"
+        for item in cross_project
+    ]
+    lines.extend(_line_items(cross_project_lines))
+    lines.append("")
+
+    output_path.write_text("\n".join(lines))
+    return {
+        "path": str(output_path),
+        "section_counts": {
+            "stats": 1,
+            "central": len(central_lines),
+            "bridges": len(bridge_lines),
+            "clusters": len(cluster_lines),
+            "gaps": len(gap_lines),
+            "tags": len(tag_lines),
+            "cross_project": len(cross_project_lines),
+        },
+    }
+
+
 def _do_import_json(store: Store, path: str | Path) -> dict:
     input_path = Path(path)
     payload = json.loads(input_path.read_text())
@@ -482,6 +617,24 @@ def export_graphml(
         f"Exported {stats['node_count']} nodes and "
         f"{stats['edge_count']} edges to {stats['path']}"
     )
+
+
+@app.command(name="export-report")
+def export_report(
+    path: Path = typer.Argument(..., help="Destination Markdown report path"),
+    limit: int = typer.Option(10, "--limit", "-n", help="Max items per section"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Export a Markdown graph health report."""
+    store = _get_store()
+    stats = _do_export_report(store, path, limit=limit)
+    store.close()
+
+    if json_output:
+        _json_echo(stats)
+        return
+
+    typer.echo(f"Exported graph report to {stats['path']}")
 
 
 @app.command(name="import-json")

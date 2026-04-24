@@ -726,6 +726,77 @@ def test_export_graphml_tool_returns_path_and_counts(tmp_path, monkeypatch):
     assert exported.get_edge_data(a.id, b.id)["source"] == "inferred"
 
 
+def test_export_report_tool_writes_markdown_with_same_sections(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    report_path = tmp_path / "graph-report.md"
+
+    store = Store(str(db_path))
+    a = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="report-a",
+            source_entity_type="knowledge_node",
+            title="Report Node A",
+            content="First report node",
+            tags=["energy", "solar"],
+            utility_score=0.9,
+        )
+    )
+    b = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="report-b",
+            source_entity_type="insight",
+            title="Report Node B",
+            content="Second report node",
+            content_type=ContentType.INSIGHT,
+            tags=["energy", "storage"],
+            utility_score=0.8,
+        )
+    )
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=a.id,
+            to_unit_id=b.id,
+            relation=EdgeRelation.BUILDS_ON,
+        )
+    )
+    store.close()
+
+    tools = asyncio.run(mcp_server.list_tools())
+    assert any(tool.name == "export_report" for tool in tools)
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "export_report",
+            {"path": str(report_path), "limit": 2},
+        )
+    )
+    payload = json.loads(response[0].text)
+
+    assert payload["path"] == str(report_path)
+    assert payload["section_counts"]["central"] == 2
+    assert payload["section_counts"]["tags"] == 2
+    assert payload["section_counts"]["cross_project"] == 1
+
+    report = report_path.read_text()
+    for heading in [
+        "## Stats",
+        "## Top Central Nodes",
+        "## Bridge Nodes",
+        "## Largest Clusters",
+        "## Gap Candidates",
+        "## Top Tags",
+        "## Cross-Project Connections",
+    ]:
+        assert heading in report
+    assert "Report Node A" in report
+    assert "Report Node B" in report
+    assert "energy: 2 units" in report
+    assert "forty_two <-> max: 1 edges" in report
+
+
 def test_analyze_tags_tool_returns_summary_and_detail_json(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))

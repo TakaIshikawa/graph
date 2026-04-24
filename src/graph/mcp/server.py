@@ -15,6 +15,7 @@ from graph.cli.main import (
     _do_export_graphml,
     _do_export_json,
     _do_export_obsidian,
+    _do_export_report,
     _do_import_json,
     _do_infer_edges,
     _do_search,
@@ -537,6 +538,25 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="export_report",
+            description="Export a Markdown graph health report for review and sharing.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Destination Markdown report path",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "default": 10,
+                        "description": "Max items per report section",
+                    },
+                },
+                "required": ["path"],
+            },
+        ),
+        Tool(
             name="import_json",
             description="Import a portable JSON graph backup file idempotently.",
             inputSchema={
@@ -936,6 +956,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
         elif name == "export_graphml":
             stats = _do_export_graphml(store, arguments["path"])
+            return [TextContent(type="text", text=json.dumps(stats))]
+
+        elif name == "export_report":
+            stats = _do_export_report(
+                store,
+                arguments["path"],
+                limit=arguments.get("limit", 10),
+            )
             return [TextContent(type="text", text=json.dumps(stats))]
 
         elif name == "import_json":
