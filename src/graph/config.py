@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
 
@@ -10,12 +8,6 @@ load_dotenv()
 
 class Settings(BaseSettings):
     database_url: str = "graph.db"
-
-    forty_two_db: str = str(Path("~/Project/experiments/forty-two/forty_two.db").expanduser())
-    max_db: str = str(Path("~/Project/experiments/max/max.db").expanduser())
-    presence_db: str = str(Path("~/Project/experiments/presence/presence.db").expanduser())
-    me_config: str = str(Path("~/Project/experiments/me/config/projects.yaml").expanduser())
-    kindle_db: str = str(Path("~/Project/experiments/supabooks/supabooks.db").expanduser())
 
     embedding_provider: str = "voyage"
     embedding_model: str = "voyage-3-lite"
