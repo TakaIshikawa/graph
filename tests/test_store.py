@@ -922,7 +922,7 @@ class TestBacklinks:
             )
         )
 
-        result = store.get_backlinks(u2.id)
+        result = store.get_backlinks(u2.id, direction="both")
 
         assert result["center"].id == u2.id
         assert {(link["direction"], link["unit"].title) for link in result["links"]} == {
@@ -979,7 +979,7 @@ class TestBacklinks:
         incoming_only = store.get_backlinks(center.id, direction="incoming")
         assert [link["unit"].title for link in incoming_only["links"]] == ["Incoming"]
 
-        inspires_only = store.get_backlinks(center.id, relation="inspires")
+        inspires_only = store.get_backlinks(center.id, direction="both", relation="inspires")
         assert [link["unit"].title for link in inspires_only["links"]] == ["Outgoing"]
 
         limited = store.get_backlinks(center.id, limit=1)
@@ -987,6 +987,93 @@ class TestBacklinks:
 
     def test_get_backlinks_missing_unit(self, store: Store):
         assert store.get_backlinks("missing") == {"center": None, "links": []}
+
+    def test_get_backlinks_filters_source_unit_and_orders_by_weight_then_updated_at(
+        self, store: Store
+    ):
+        base_time = datetime(2025, 1, 1, tzinfo=timezone.utc)
+        center = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="center-filtered",
+                source_entity_type="knowledge_node",
+                title="Center",
+                content="Center content",
+            )
+        )
+        older = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="older",
+                source_entity_type="insight",
+                title="Older matching source",
+                content="Older source content",
+                content_type=ContentType.INSIGHT,
+                tags=["energy"],
+                updated_at=base_time,
+            )
+        )
+        newer = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="newer",
+                source_entity_type="insight",
+                title="Newer matching source",
+                content="Newer source content",
+                content_type=ContentType.INSIGHT,
+                tags=["energy"],
+                updated_at=base_time + timedelta(days=1),
+            )
+        )
+        heavier = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="heavier",
+                source_entity_type="insight",
+                title="Heavier matching source",
+                content="Heavier source content",
+                content_type=ContentType.INSIGHT,
+                tags=["energy"],
+                updated_at=base_time - timedelta(days=1),
+            )
+        )
+        store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.PRESENCE,
+                source_id="wrong-project",
+                source_entity_type="knowledge_item",
+                title="Wrong project source",
+                content="Wrong source content",
+                content_type=ContentType.ARTIFACT,
+                tags=["energy"],
+            )
+        )
+
+        for unit, weight in ((older, 0.6), (newer, 0.6), (heavier, 0.9)):
+            store.insert_edge(
+                KnowledgeEdge(
+                    from_unit_id=unit.id,
+                    to_unit_id=center.id,
+                    relation=EdgeRelation.REFERENCES,
+                    weight=weight,
+                )
+            )
+
+        result = store.get_backlinks(
+            center.id,
+            direction="incoming",
+            relation="references",
+            source_project="max",
+            content_type="insight",
+            tag="energy",
+            limit=3,
+        )
+
+        assert [link["unit"].title for link in result["links"]] == [
+            "Heavier matching source",
+            "Newer matching source",
+            "Older matching source",
+        ]
 
 
 class TestFTS:

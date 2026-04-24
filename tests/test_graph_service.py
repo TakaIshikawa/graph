@@ -431,6 +431,57 @@ class TestGraphService:
         assert disconnected["path"] == []
         assert disconnected["edges"] == []
 
+    def test_get_backlinks_returns_incoming_source_summaries_with_filters(
+        self, store: Store
+    ):
+        target = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="target",
+                source_entity_type="knowledge_node",
+                title="Target",
+                content="Target content",
+            )
+        )
+        source = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="source",
+                source_entity_type="insight",
+                title="Source title",
+                content="Source content",
+                content_type=ContentType.INSIGHT,
+                tags=["backlink"],
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=source.id,
+                to_unit_id=target.id,
+                relation=EdgeRelation.REFERENCES,
+                weight=0.8,
+            )
+        )
+
+        payload = GraphService(store).get_backlinks(
+            target.id,
+            relation="references",
+            source_project="max",
+            content_type="insight",
+            tag="backlink",
+        )
+
+        assert payload["center"]["title"] == "Target"
+        assert payload["links"][0]["relation"] == "references"
+        assert payload["links"][0]["source_unit"]["title"] == "Source title"
+        assert payload["links"][0]["edge"]["weight"] == 0.8
+
+    def test_get_backlinks_missing_unit_returns_error(self, store: Store):
+        payload = GraphService(store).get_backlinks("missing")
+
+        assert payload["error"] == "unit_not_found"
+        assert payload["message"] == "Unit not found: missing"
+
     def test_clusters(self, populated_store: Store):
         gs = GraphService(populated_store)
         gs.rebuild()

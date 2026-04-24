@@ -484,7 +484,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="backlinks",
-            description="Return incoming and outgoing references for a knowledge unit with expanded neighbor details.",
+            description="Return references for a knowledge unit with expanded source and target unit details.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -492,12 +492,26 @@ async def list_tools() -> list[Tool]:
                     "direction": {
                         "type": "string",
                         "enum": ["incoming", "outgoing", "both"],
-                        "default": "both",
+                        "default": "incoming",
                     },
                     "relation": {
                         "type": "string",
                         "enum": [r.value for r in EdgeRelation],
                         "description": "Filter by edge relation",
+                    },
+                    "source_project": {
+                        "type": "string",
+                        "enum": SUPPORTED_SYNC_PROJECTS,
+                        "description": "Filter by source unit project",
+                    },
+                    "content_type": {
+                        "type": "string",
+                        "enum": [content_type.value for content_type in ContentType],
+                        "description": "Filter by source unit content type",
+                    },
+                    "tag": {
+                        "type": "string",
+                        "description": "Filter by source unit tag",
                     },
                     "limit": {"type": "integer", "default": 20},
                 },
@@ -1664,7 +1678,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             ]
 
         elif name == "backlinks":
-            direction = arguments.get("direction", "both")
+            direction = arguments.get("direction", "incoming")
             if direction not in ("incoming", "outgoing", "both"):
                 return [
                     TextContent(
@@ -1684,6 +1698,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 arguments["unit_id"],
                 direction=direction,
                 relation=arguments.get("relation"),
+                source_project=arguments.get("source_project"),
+                content_type=arguments.get("content_type"),
+                tag=arguments.get("tag"),
                 limit=arguments.get("limit", 20),
             )
             return [TextContent(type="text", text=json.dumps(payload, default=str))]

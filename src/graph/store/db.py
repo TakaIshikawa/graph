@@ -1786,8 +1786,11 @@ class Store:
         self,
         unit_id: str,
         *,
-        direction: str = "both",
+        direction: str = "incoming",
         relation: str | None = None,
+        source_project: str | None = None,
+        content_type: str | None = None,
+        tag: str | None = None,
         limit: int = 20,
     ) -> dict:
         center = self.get_unit(unit_id)
@@ -1830,7 +1833,16 @@ class Store:
         if relation:
             query += " AND e.relation = ?"
             query_params.append(relation)
-        query += " ORDER BY e.created_at DESC, e.id LIMIT ?"
+        if source_project:
+            query += " AND u.source_project = ?"
+            query_params.append(source_project)
+        if content_type:
+            query += " AND u.content_type = ?"
+            query_params.append(content_type)
+        if tag:
+            query += " AND EXISTS (SELECT 1 FROM json_each(u.tags) WHERE value = ?)"
+            query_params.append(tag)
+        query += " ORDER BY e.weight DESC, u.updated_at DESC, e.id LIMIT ?"
         query_params.append(limit)
 
         rows = self.conn.execute(query, query_params).fetchall()

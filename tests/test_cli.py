@@ -2262,7 +2262,7 @@ def test_backlinks_command_emits_expanded_json_and_applies_filters(monkeypatch):
     monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
 
     try:
-        result = runner.invoke(app, ["backlinks", b_id, "--json"])
+        result = runner.invoke(app, ["backlinks", b_id, "--direction", "both", "--json"])
 
         assert result.exit_code == 0
         payload = json.loads(result.output)
@@ -2275,6 +2275,9 @@ def test_backlinks_command_emits_expanded_json_and_applies_filters(monkeypatch):
             ("outgoing", "inspires", "Node C"),
         }
         assert "edge" in payload["links"][0]
+        incoming = next(link for link in payload["links"] if link["direction"] == "incoming")
+        assert incoming["source_unit"]["title"] == "Node A"
+        assert incoming["target_unit"]["title"] == "Node B"
 
         filtered = runner.invoke(
             app,
@@ -2285,6 +2288,8 @@ def test_backlinks_command_emits_expanded_json_and_applies_filters(monkeypatch):
                 "incoming",
                 "--relation",
                 "builds_on",
+                "--source-project",
+                "forty_two",
                 "--json",
             ],
         )

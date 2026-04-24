@@ -810,14 +810,24 @@ def _backlinks_payload(
     store: Store,
     unit_id: str,
     *,
-    direction: str = "both",
+    direction: str = "incoming",
     relation: str | None = None,
+    source_project: str | None = None,
+    content_type: str | None = None,
+    tag: str | None = None,
     limit: int = 20,
 ) -> dict:
+    if content_type is not None:
+        content_type = ContentType(content_type).value
+    if relation is not None:
+        relation = EdgeRelation(relation).value
     result = store.get_backlinks(
         unit_id,
         direction=direction,
         relation=relation,
+        source_project=source_project,
+        content_type=content_type,
+        tag=tag,
         limit=limit,
     )
     if result["center"] is None:
@@ -826,24 +836,38 @@ def _backlinks_payload(
             "links": [],
             "direction": direction,
             "relation": relation,
+            "source_project": source_project,
+            "content_type": content_type,
+            "tag": tag,
             "limit": limit,
             "error": "unit_not_found",
             "message": f"Unit not found: {unit_id}",
         }
 
-    return {
-        "center": _unit_to_json(result["center"], include_content=False),
-        "links": [
+    center_payload = _unit_to_json(result["center"], include_content=False)
+    links = []
+    for link in result["links"]:
+        source_unit = result["center"] if link["direction"] == "outgoing" else link["unit"]
+        target_unit = link["unit"] if link["direction"] == "outgoing" else result["center"]
+        links.append(
             {
                 "direction": link["direction"],
                 "relation": link["relation"],
                 "edge": _knowledge_edge_to_json(link["edge"]),
                 "unit": _unit_to_json(link["unit"], include_content=False),
+                "source_unit": _unit_to_json(source_unit, include_content=False),
+                "target_unit": _unit_to_json(target_unit, include_content=False),
             }
-            for link in result["links"]
-        ],
+        )
+
+    return {
+        "center": center_payload,
+        "links": links,
         "direction": direction,
         "relation": relation,
+        "source_project": source_project,
+        "content_type": content_type,
+        "tag": tag,
         "limit": limit,
     }
 
@@ -3449,11 +3473,22 @@ def freshness(
 def backlinks(
     unit_id: str = typer.Argument(..., help="Unit ID"),
     direction: str = typer.Option(
-        "both",
+        "incoming",
         "--direction",
         help="Edge direction: incoming | outgoing | both",
     ),
     relation: str | None = typer.Option(None, "--relation", help="Filter by edge relation"),
+    source_project: str | None = typer.Option(
+        None,
+        "--source-project",
+        help="Filter by source unit project",
+    ),
+    content_type: str | None = typer.Option(
+        None,
+        "--content-type",
+        help="Filter by source unit content type",
+    ),
+    tag: str | None = typer.Option(None, "--tag", help="Filter by source unit tag"),
     limit: int = typer.Option(20, "--limit", "-n", help="Max links to return"),
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
@@ -3468,8 +3503,23 @@ def backlinks(
             unit_id,
             direction=direction,
             relation=relation,
+            source_project=source_project,
+            content_type=content_type,
+            tag=tag,
             limit=limit,
         )
+    except ValueError as exc:
+        if json_output:
+            _json_echo(
+                {
+                    "center": None,
+                    "links": [],
+                    "error": "invalid_filter",
+                    "message": str(exc),
+                }
+            )
+            return
+        raise typer.BadParameter(str(exc)) from exc
     finally:
         store.close()
 

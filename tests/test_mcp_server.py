@@ -1851,8 +1851,13 @@ def test_backlinks_tool_returns_expanded_json_filters_and_missing_error(tmp_path
         "outgoing",
         "both",
     ]
+    assert "source_project" in tool.inputSchema["properties"]
+    assert "content_type" in tool.inputSchema["properties"]
+    assert "tag" in tool.inputSchema["properties"]
 
-    response = asyncio.run(mcp_server.call_tool("backlinks", {"unit_id": b_id}))
+    response = asyncio.run(
+        mcp_server.call_tool("backlinks", {"unit_id": b_id, "direction": "both"})
+    )
     payload = json.loads(response[0].text)
     assert payload["center"]["title"] == "Node B"
     assert {
@@ -1862,6 +1867,9 @@ def test_backlinks_tool_returns_expanded_json_filters_and_missing_error(tmp_path
         ("outgoing", "inspires", "Node C"),
     }
     assert any(link["edge"]["metadata"] for link in payload["links"])
+    incoming = next(link for link in payload["links"] if link["direction"] == "incoming")
+    assert incoming["source_unit"]["title"] == "Node A"
+    assert incoming["target_unit"]["title"] == "Node B"
 
     filtered = asyncio.run(
         mcp_server.call_tool(
@@ -1870,6 +1878,7 @@ def test_backlinks_tool_returns_expanded_json_filters_and_missing_error(tmp_path
                 "unit_id": b_id,
                 "direction": "outgoing",
                 "relation": "inspires",
+                "source_project": "max",
             },
         )
     )

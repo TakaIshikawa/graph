@@ -545,6 +545,59 @@ class GraphService:
             "depth": capped_depth,
         }
 
+    def get_backlinks(
+        self,
+        unit_id: str,
+        *,
+        relation: str | None = None,
+        source_project: str | None = None,
+        content_type: str | None = None,
+        tag: str | None = None,
+        limit: int = 20,
+    ) -> dict:
+        """Return incoming references to a unit with source unit summaries."""
+        result = self.store.get_backlinks(
+            unit_id,
+            direction="incoming",
+            relation=relation,
+            source_project=source_project,
+            content_type=content_type,
+            tag=tag,
+            limit=limit,
+        )
+        if result["center"] is None:
+            return {
+                "unit_id": unit_id,
+                "center": None,
+                "links": [],
+                "error": "unit_not_found",
+                "message": f"Unit not found: {unit_id}",
+            }
+
+        links = []
+        for link in result["links"]:
+            edge = link["edge"]
+            source_unit = link["unit"]
+            links.append(
+                {
+                    "relation": link["relation"],
+                    "edge": self._edge_export_data(edge),
+                    "source_unit": self._unit_export_data(source_unit),
+                }
+            )
+        return {
+            "unit_id": unit_id,
+            "center": self._unit_export_data(result["center"]),
+            "links": links,
+            "filters": {
+                "relation": relation,
+                "source_project": source_project,
+                "content_type": content_type,
+                "tag": tag,
+                "limit": max(0, limit),
+            },
+        }
+
     def export_neighborhood(
         self, unit_id: str, path: str | Path, depth: int = 1
     ) -> dict:
