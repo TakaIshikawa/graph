@@ -58,6 +58,53 @@ def _populate_tags_graph(store: Store) -> None:
         store.insert_unit(unit)
 
 
+def _populate_backlinks_graph(store: Store) -> tuple[str, str, str]:
+    a = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="a",
+            source_entity_type="knowledge_node",
+            title="Node A",
+            content="First node",
+        )
+    )
+    b = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="b",
+            source_entity_type="knowledge_node",
+            title="Node B",
+            content="Second node",
+        )
+    )
+    c = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="c",
+            source_entity_type="insight",
+            title="Node C",
+            content="Third node",
+        )
+    )
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=a.id,
+            to_unit_id=b.id,
+            relation=EdgeRelation.BUILDS_ON,
+            source=EdgeSource.MANUAL,
+            metadata={"why": "reference"},
+        )
+    )
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=b.id,
+            to_unit_id=c.id,
+            relation=EdgeRelation.INSPIRES,
+        )
+    )
+    return a.id, b.id, c.id
+
+
 def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(
     tmp_path, monkeypatch
 ):
@@ -322,6 +369,53 @@ def test_saved_query_tools_create_list_run_and_delete(tmp_path, monkeypatch):
         "found": False,
         "error": "Saved query not found: approved-solar",
     }
+
+
+def test_backlinks_tool_returns_expanded_json_filters_and_missing_error(
+    tmp_path, monkeypatch
+):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    _, b_id, _ = _populate_backlinks_graph(store)
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    tool = next(tool for tool in tools if tool.name == "backlinks")
+    assert tool.inputSchema["properties"]["direction"]["enum"] == [
+        "incoming",
+        "outgoing",
+        "both",
+    ]
+
+    response = asyncio.run(mcp_server.call_tool("backlinks", {"unit_id": b_id}))
+    payload = json.loads(response[0].text)
+    assert payload["center"]["title"] == "Node B"
+    assert {
+        (link["direction"], link["relation"], link["unit"]["title"])
+        for link in payload["links"]
+    } == {
+        ("incoming", "builds_on", "Node A"),
+        ("outgoing", "inspires", "Node C"),
+    }
+    assert any(link["edge"]["metadata"] for link in payload["links"])
+
+    filtered = asyncio.run(
+        mcp_server.call_tool(
+            "backlinks",
+            {
+                "unit_id": b_id,
+                "direction": "outgoing",
+                "relation": "inspires",
+            },
+        )
+    )
+    filtered_payload = json.loads(filtered[0].text)
+    assert [link["unit"]["title"] for link in filtered_payload["links"]] == ["Node C"]
+
+    missing = asyncio.run(mcp_server.call_tool("backlinks", {"unit_id": "missing"}))
+    assert json.loads(missing[0].text)["error"] == "unit_not_found"
 
 
 def test_export_obsidian_tool_exports_same_vault_structure_as_cli(

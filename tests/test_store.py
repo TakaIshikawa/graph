@@ -224,6 +224,119 @@ class TestEdgeCRUD:
         assert len(store.get_all_edges()) == 1
 
 
+class TestBacklinks:
+    def test_get_backlinks_expands_incoming_and_outgoing_units(self, store: Store):
+        u1 = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="n1",
+                source_entity_type="knowledge_node",
+                title="Unit 1",
+                content="Content 1",
+            )
+        )
+        u2 = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="n2",
+                source_entity_type="knowledge_node",
+                title="Unit 2",
+                content="Content 2",
+            )
+        )
+        u3 = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="i1",
+                source_entity_type="insight",
+                title="Unit 3",
+                content="Content 3",
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=u1.id,
+                to_unit_id=u2.id,
+                relation=EdgeRelation.BUILDS_ON,
+                source=EdgeSource.MANUAL,
+                metadata={"why": "supporting evidence"},
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=u2.id,
+                to_unit_id=u3.id,
+                relation=EdgeRelation.INSPIRES,
+            )
+        )
+
+        result = store.get_backlinks(u2.id)
+
+        assert result["center"].id == u2.id
+        assert {(link["direction"], link["unit"].title) for link in result["links"]} == {
+            ("incoming", "Unit 1"),
+            ("outgoing", "Unit 3"),
+        }
+        incoming = next(link for link in result["links"] if link["direction"] == "incoming")
+        assert incoming["relation"] == "builds_on"
+        assert incoming["edge"].metadata == {"why": "supporting evidence"}
+
+    def test_get_backlinks_filters_direction_relation_and_limit(self, store: Store):
+        center = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="center",
+                source_entity_type="knowledge_node",
+                title="Center",
+                content="Center content",
+            )
+        )
+        incoming = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="incoming",
+                source_entity_type="insight",
+                title="Incoming",
+                content="Incoming content",
+            )
+        )
+        outgoing = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="outgoing",
+                source_entity_type="insight",
+                title="Outgoing",
+                content="Outgoing content",
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=incoming.id,
+                to_unit_id=center.id,
+                relation=EdgeRelation.BUILDS_ON,
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=center.id,
+                to_unit_id=outgoing.id,
+                relation=EdgeRelation.INSPIRES,
+            )
+        )
+
+        incoming_only = store.get_backlinks(center.id, direction="incoming")
+        assert [link["unit"].title for link in incoming_only["links"]] == ["Incoming"]
+
+        inspires_only = store.get_backlinks(center.id, relation="inspires")
+        assert [link["unit"].title for link in inspires_only["links"]] == ["Outgoing"]
+
+        limited = store.get_backlinks(center.id, limit=1)
+        assert len(limited["links"]) == 1
+
+    def test_get_backlinks_missing_unit(self, store: Store):
+        assert store.get_backlinks("missing") == {"center": None, "links": []}
+
+
 class TestFTS:
     def test_fts_search(self, store: Store, sample_unit: KnowledgeUnit):
         inserted = store.insert_unit(sample_unit)

@@ -394,6 +394,82 @@ class Store:
         ).fetchall()
         return [_row_to_edge(r) for r in rows]
 
+    def get_backlinks(
+        self,
+        unit_id: str,
+        *,
+        direction: str = "both",
+        relation: str | None = None,
+        limit: int = 20,
+    ) -> dict:
+        center = self.get_unit(unit_id)
+        if center is None:
+            return {"center": None, "links": []}
+
+        if direction not in ("incoming", "outgoing", "both"):
+            raise ValueError("direction must be incoming, outgoing, or both")
+
+        limit = max(0, limit)
+        where = []
+        params: list = []
+        if direction in ("incoming", "both"):
+            where.append("(e.to_unit_id = ?)")
+            params.append(unit_id)
+        if direction in ("outgoing", "both"):
+            where.append("(e.from_unit_id = ?)")
+            params.append(unit_id)
+
+        query = f"""
+            SELECT
+                e.id AS edge_id,
+                e.from_unit_id,
+                e.to_unit_id,
+                e.relation,
+                e.weight,
+                e.source,
+                e.metadata AS edge_metadata,
+                e.created_at AS edge_created_at,
+                u.*
+            FROM edges e
+            JOIN knowledge_units u
+              ON u.id = CASE
+                  WHEN e.from_unit_id = ? THEN e.to_unit_id
+                  ELSE e.from_unit_id
+              END
+            WHERE ({' OR '.join(where)})
+        """
+        query_params: list = [unit_id, *params]
+        if relation:
+            query += " AND e.relation = ?"
+            query_params.append(relation)
+        query += " ORDER BY e.created_at DESC, e.id LIMIT ?"
+        query_params.append(limit)
+
+        rows = self.conn.execute(query, query_params).fetchall()
+        links = []
+        for row in rows:
+            edge = KnowledgeEdge(
+                id=row["edge_id"],
+                from_unit_id=row["from_unit_id"],
+                to_unit_id=row["to_unit_id"],
+                relation=row["relation"],
+                weight=row["weight"],
+                source=row["source"],
+                metadata=json.loads(row["edge_metadata"]),
+                created_at=row["edge_created_at"],
+            )
+            links.append(
+                {
+                    "direction": "outgoing"
+                    if row["from_unit_id"] == unit_id
+                    else "incoming",
+                    "relation": str(edge.relation),
+                    "edge": edge,
+                    "unit": _row_to_unit(row),
+                }
+            )
+        return {"center": center, "links": links}
+
     def edge_exists_between(self, left_unit_id: str, right_unit_id: str) -> bool:
         """Return true if any direct edge exists between two units in either direction."""
         row = self.conn.execute(

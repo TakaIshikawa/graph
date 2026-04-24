@@ -119,6 +119,61 @@ def _edge_to_json(edge: dict) -> dict:
     }
 
 
+def _knowledge_edge_to_json(edge) -> dict:
+    return {
+        "id": edge.id,
+        "from_unit_id": edge.from_unit_id,
+        "to_unit_id": edge.to_unit_id,
+        "relation": str(edge.relation),
+        "weight": edge.weight,
+        "source": str(edge.source),
+        "metadata": edge.metadata,
+        "created_at": edge.created_at,
+    }
+
+
+def _backlinks_payload(
+    store: Store,
+    unit_id: str,
+    *,
+    direction: str = "both",
+    relation: str | None = None,
+    limit: int = 20,
+) -> dict:
+    result = store.get_backlinks(
+        unit_id,
+        direction=direction,
+        relation=relation,
+        limit=limit,
+    )
+    if result["center"] is None:
+        return {
+            "center": None,
+            "links": [],
+            "direction": direction,
+            "relation": relation,
+            "limit": limit,
+            "error": "unit_not_found",
+            "message": f"Unit not found: {unit_id}",
+        }
+
+    return {
+        "center": _unit_to_json(result["center"], include_content=False),
+        "links": [
+            {
+                "direction": link["direction"],
+                "relation": link["relation"],
+                "edge": _knowledge_edge_to_json(link["edge"]),
+                "unit": _unit_to_json(link["unit"], include_content=False),
+            }
+            for link in result["links"]
+        ],
+        "direction": direction,
+        "relation": relation,
+        "limit": limit,
+    }
+
+
 def _unit_matches_search_filters(
     unit,
     *,
@@ -970,6 +1025,65 @@ def sync_status(
                 typer.echo(f"  {et}: never synced")
 
     store.close()
+
+
+@app.command()
+def backlinks(
+    unit_id: str = typer.Argument(..., help="Unit ID"),
+    direction: str = typer.Option(
+        "both",
+        "--direction",
+        help="Edge direction: incoming | outgoing | both",
+    ),
+    relation: str | None = typer.Option(None, "--relation", help="Filter by edge relation"),
+    limit: int = typer.Option(20, "--limit", "-n", help="Max links to return"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Show expanded incoming and outgoing references for a unit."""
+    if direction not in ("incoming", "outgoing", "both"):
+        raise typer.BadParameter("Use incoming, outgoing, or both.", param_hint="--direction")
+
+    store = _get_store()
+    try:
+        payload = _backlinks_payload(
+            store,
+            unit_id,
+            direction=direction,
+            relation=relation,
+            limit=limit,
+        )
+    finally:
+        store.close()
+
+    if payload.get("error"):
+        if json_output:
+            _json_echo(payload)
+            return
+        typer.echo(payload["message"])
+        raise typer.Exit(code=1)
+
+    if json_output:
+        _json_echo(payload)
+        return
+
+    center = payload["center"]
+    typer.echo(f"Center: [{center['source_project']}] {center['title']}")
+    if not payload["links"]:
+        typer.echo("No backlinks found.")
+        return
+
+    for link in payload["links"]:
+        unit = link["unit"]
+        edge = link["edge"]
+        arrow = "<--" if link["direction"] == "incoming" else "-->"
+        typer.echo(
+            f"  {link['direction']}: {arrow}{link['relation']} "
+            f"[{unit['source_project']}] {unit['title']} ({unit['id'][:8]}...)"
+        )
+        typer.echo(
+            f"    Edge: {edge['from_unit_id'][:8]}... -> "
+            f"{edge['to_unit_id'][:8]}... | source: {edge['source']}"
+        )
 
 
 @app.command()

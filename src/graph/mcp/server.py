@@ -11,6 +11,7 @@ from mcp.types import TextContent, Tool
 
 from graph.config import settings
 from graph.cli.main import (
+    _backlinks_payload,
     _do_export_graphml,
     _do_export_json,
     _do_export_obsidian,
@@ -256,6 +257,28 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "unit_id": {"type": "string"},
                     "depth": {"type": "integer", "default": 1, "maximum": 3},
+                },
+                "required": ["unit_id"],
+            },
+        ),
+        Tool(
+            name="backlinks",
+            description="Return incoming and outgoing references for a knowledge unit with expanded neighbor details.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "unit_id": {"type": "string", "description": "Knowledge unit ID"},
+                    "direction": {
+                        "type": "string",
+                        "enum": ["incoming", "outgoing", "both"],
+                        "default": "both",
+                    },
+                    "relation": {
+                        "type": "string",
+                        "enum": [r.value for r in EdgeRelation],
+                        "description": "Filter by edge relation",
+                    },
+                    "limit": {"type": "integer", "default": 20},
                 },
                 "required": ["unit_id"],
             },
@@ -666,6 +689,31 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     ),
                 )
             ]
+
+        elif name == "backlinks":
+            direction = arguments.get("direction", "both")
+            if direction not in ("incoming", "outgoing", "both"):
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(
+                            {
+                                "center": None,
+                                "links": [],
+                                "error": "invalid_direction",
+                                "message": "direction must be incoming, outgoing, or both",
+                            }
+                        ),
+                    )
+                ]
+            payload = _backlinks_payload(
+                store,
+                arguments["unit_id"],
+                direction=direction,
+                relation=arguments.get("relation"),
+                limit=arguments.get("limit", 20),
+            )
+            return [TextContent(type="text", text=json.dumps(payload, default=str))]
 
         elif name == "find_path":
             gs = GraphService(store)

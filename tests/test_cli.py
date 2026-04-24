@@ -747,6 +747,66 @@ def test_neighbors_command_emits_json_with_edge_relations(monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_backlinks_command_emits_expanded_json_and_applies_filters(monkeypatch):
+    store = _make_store()
+    _, b_id, _, _ = _populate_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(app, ["backlinks", b_id, "--json"])
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["center"]["title"] == "Node B"
+        assert {
+            (link["direction"], link["relation"], link["unit"]["title"])
+            for link in payload["links"]
+        } == {
+            ("incoming", "builds_on", "Node A"),
+            ("outgoing", "inspires", "Node C"),
+        }
+        assert "edge" in payload["links"][0]
+
+        filtered = runner.invoke(
+            app,
+            [
+                "backlinks",
+                b_id,
+                "--direction",
+                "incoming",
+                "--relation",
+                "builds_on",
+                "--json",
+            ],
+        )
+        filtered_payload = json.loads(filtered.output)
+        assert filtered.exit_code == 0
+        assert len(filtered_payload["links"]) == 1
+        assert filtered_payload["links"][0]["unit"]["title"] == "Node A"
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_backlinks_command_reports_missing_unit(monkeypatch):
+    store = _make_store()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(app, ["backlinks", "missing"])
+        assert result.exit_code == 1
+        assert "Unit not found: missing" in result.output
+
+        json_result = runner.invoke(app, ["backlinks", "missing", "--json"])
+        assert json_result.exit_code == 0
+        assert json.loads(json_result.output)["error"] == "unit_not_found"
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_cross_project_command_summarizes_project_pairs(monkeypatch):
     from graph.graph.service import GraphService
 
