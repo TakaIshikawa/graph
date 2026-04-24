@@ -21,6 +21,19 @@ app.add_typer(edges_app, name="edges")
 tags_app = typer.Typer(help="Explore and mutate graph tags", invoke_without_command=True)
 app.add_typer(tags_app, name="tags")
 
+SUPPORTED_SYNC_PROJECTS = [
+    "forty_two",
+    "max",
+    "presence",
+    "me",
+    "kindle",
+    "sota",
+    "bookmarks",
+    "csv",
+    "jsonl",
+    "opml",
+]
+
 
 def _get_store() -> Store:
     return Store(settings.database_url)
@@ -72,6 +85,22 @@ def _format_project_pair(projects: list[str]) -> str:
 
 def _json_echo(payload: object) -> None:
     typer.echo(json.dumps(payload, default=str, sort_keys=True))
+
+
+def _supported_sync_targets() -> list[tuple[str, str]]:
+    targets: list[tuple[str, str]] = []
+    for project in SUPPORTED_SYNC_PROJECTS:
+        adapter = _get_adapter_for_project(project)
+        for entity_type in adapter.entity_types:
+            targets.append((project, entity_type))
+    return targets
+
+
+def _do_freshness_report(store: Store, *, days: int = 7) -> dict:
+    return {
+        "days": max(0, days),
+        "results": store.freshness_report(_supported_sync_targets(), days=days),
+    }
 
 
 def _do_export_json(store: Store, path: str | Path) -> dict:
@@ -2696,38 +2725,68 @@ def sync_status(
     """Show last sync timestamps per source project."""
     store = _get_store()
 
-    projects = ["forty_two", "max", "presence", "me", "sota", "bookmarks"]
+    targets = _supported_sync_targets()
     if json_output:
         statuses = []
-        for proj in projects:
-            adapter = _get_adapter_for_project(proj)
-            for et in adapter.entity_types:
-                state = store.get_sync_state(proj, et)
-                statuses.append(
-                    {
-                        "source_project": proj,
-                        "source_entity_type": et,
-                        "last_sync_at": state.last_sync_at if state else None,
-                        "last_source_id": state.last_source_id if state else None,
-                        "items_synced": state.items_synced if state else 0,
-                        "synced": state is not None,
-                    }
-                )
+        for proj, et in targets:
+            state = store.get_sync_state(proj, et)
+            statuses.append(
+                {
+                    "source_project": proj,
+                    "source_entity_type": et,
+                    "last_sync_at": state.last_sync_at if state else None,
+                    "last_source_id": state.last_source_id if state else None,
+                    "items_synced": state.items_synced if state else 0,
+                    "synced": state is not None,
+                }
+            )
         _json_echo({"results": statuses})
         store.close()
         return
 
-    for proj in projects:
-        adapter = _get_adapter_for_project(proj)
-        typer.echo(f"\n{proj}:")
-        for et in adapter.entity_types:
-            state = store.get_sync_state(proj, et)
-            if state:
-                typer.echo(f"  {et}: last sync {state.last_sync_at} ({state.items_synced} total)")
-            else:
-                typer.echo(f"  {et}: never synced")
+    current_project = None
+    for proj, et in targets:
+        if proj != current_project:
+            typer.echo(f"\n{proj}:")
+            current_project = proj
+        state = store.get_sync_state(proj, et)
+        if state:
+            typer.echo(f"  {et}: last sync {state.last_sync_at} ({state.items_synced} total)")
+        else:
+            typer.echo(f"  {et}: never synced")
 
     store.close()
+
+
+@app.command(name="freshness")
+def freshness(
+    days: int = typer.Option(
+        7,
+        "--days",
+        min=0,
+        help="Recent ingest window and stale sync threshold in days",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Report source freshness by sync target."""
+    store = _get_store()
+    report = _do_freshness_report(store, days=days)
+    store.close()
+
+    if json_output:
+        _json_echo(report)
+        return
+
+    typer.echo(f"Source freshness ({report['days']} day window):")
+    for item in report["results"]:
+        last_sync = item["last_sync_at"] or "never"
+        age = "-" if item["age_days"] is None else f"{item['age_days']:.1f}d"
+        stale = "stale" if item["stale"] else "fresh"
+        typer.echo(
+            f"  {item['source_project']}/{item['source_entity_type']}: "
+            f"{stale}, last sync {last_sync}, age {age}, "
+            f"recent {item['recent_unit_count']}, total {item['total_unit_count']}"
+        )
 
 
 @app.command()

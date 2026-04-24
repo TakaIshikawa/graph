@@ -533,6 +533,89 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_pa
     }
 
 
+def test_freshness_report_tool_returns_counts_and_stale_status(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    now = datetime.now(timezone.utc)
+    store = Store(str(db_path))
+    recent = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="mcp-fresh-recent",
+            source_entity_type="insight",
+            title="Recent freshness unit",
+            content="Freshness content",
+        )
+    )
+    old = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="mcp-fresh-old",
+            source_entity_type="insight",
+            title="Old freshness unit",
+            content="Old freshness content",
+        )
+    )
+    store.conn.execute(
+        "UPDATE knowledge_units SET ingested_at = ? WHERE id = ?",
+        ((now - timedelta(days=3)).isoformat(), recent.id),
+    )
+    store.conn.execute(
+        "UPDATE knowledge_units SET ingested_at = ? WHERE id = ?",
+        ((now - timedelta(days=8)).isoformat(), old.id),
+    )
+    store.conn.commit()
+    store.upsert_sync_state(
+        SyncState(
+            source_project="max",
+            source_entity_type="insight",
+            last_sync_at=now - timedelta(days=8),
+            items_synced=2,
+        )
+    )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+    monkeypatch.setattr(
+        mcp_server,
+        "_get_adapter",
+        lambda name: FakeAdapter(name, {"max": ["insight"], "presence": ["knowledge_item"]}[name]),
+    )
+    monkeypatch.setattr(mcp_server, "SUPPORTED_SYNC_PROJECTS", ["max", "presence"])
+
+    tools = asyncio.run(mcp_server.list_tools())
+    freshness_tool = next(tool for tool in tools if tool.name == "freshness_report")
+    assert freshness_tool.inputSchema["properties"]["days"]["default"] == 7
+
+    seven = asyncio.run(mcp_server.call_tool("freshness_report", {"days": 7}))
+    seven_payload = json.loads(seven[0].text)
+    by_target = {
+        (item["source_project"], item["source_entity_type"]): item
+        for item in seven_payload["results"]
+    }
+    assert seven_payload["days"] == 7
+    assert by_target[("max", "insight")]["recent_unit_count"] == 1
+    assert by_target[("max", "insight")]["total_unit_count"] == 2
+    assert by_target[("max", "insight")]["last_sync_at"] is not None
+    assert by_target[("max", "insight")]["age_days"] >= 8
+    assert by_target[("max", "insight")]["stale"] is True
+    assert by_target[("presence", "knowledge_item")] == {
+        "source_project": "presence",
+        "source_entity_type": "knowledge_item",
+        "last_sync_at": None,
+        "age_days": None,
+        "recent_unit_count": 0,
+        "total_unit_count": 0,
+        "stale": True,
+    }
+
+    ten = asyncio.run(mcp_server.call_tool("freshness_report", {"days": 10}))
+    ten_payload = json.loads(ten[0].text)
+    ten_max = ten_payload["results"][0]
+    assert ten_payload["days"] == 10
+    assert ten_max["recent_unit_count"] == 2
+    assert ten_max["stale"] is False
+
+
 def test_ingest_all_includes_sota_and_search_can_filter_sota(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
 

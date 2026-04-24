@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -855,6 +856,73 @@ class TestSyncState:
         fetched = store.get_sync_state("max", "insight")
         assert fetched is not None
         assert fetched.items_synced == 8
+
+    def test_freshness_report_counts_recent_units_and_marks_stale(self, store: Store):
+        now = datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc)
+        recent = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="recent",
+                source_entity_type="insight",
+                title="Recent",
+                content="Recently ingested unit",
+            )
+        )
+        old = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="old",
+                source_entity_type="insight",
+                title="Old",
+                content="Older ingested unit",
+            )
+        )
+        store.conn.execute(
+            "UPDATE knowledge_units SET ingested_at = ? WHERE id = ?",
+            ((now - timedelta(days=3)).isoformat(), recent.id),
+        )
+        store.conn.execute(
+            "UPDATE knowledge_units SET ingested_at = ? WHERE id = ?",
+            ((now - timedelta(days=8)).isoformat(), old.id),
+        )
+        store.conn.commit()
+        store.upsert_sync_state(
+            SyncState(
+                source_project="max",
+                source_entity_type="insight",
+                last_sync_at=now - timedelta(days=8),
+                items_synced=2,
+            )
+        )
+
+        report = store.freshness_report(
+            [("max", "insight"), ("presence", "knowledge_item")],
+            days=7,
+            now=now,
+        )
+
+        assert report[0] == {
+            "source_project": "max",
+            "source_entity_type": "insight",
+            "last_sync_at": "2026-04-16T12:00:00+00:00",
+            "age_days": 8.0,
+            "recent_unit_count": 1,
+            "total_unit_count": 2,
+            "stale": True,
+        }
+        assert report[1] == {
+            "source_project": "presence",
+            "source_entity_type": "knowledge_item",
+            "last_sync_at": None,
+            "age_days": None,
+            "recent_unit_count": 0,
+            "total_unit_count": 0,
+            "stale": True,
+        }
+
+        wider_report = store.freshness_report([("max", "insight")], days=10, now=now)
+        assert wider_report[0]["recent_unit_count"] == 2
+        assert wider_report[0]["stale"] is False
 
 
 class TestSavedQueries:

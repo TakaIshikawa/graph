@@ -991,6 +991,21 @@ async def list_tools() -> list[Tool]:
             inputSchema={"type": "object", "properties": {}},
         ),
         Tool(
+            name="freshness_report",
+            description="Report source freshness, recent ingests, and stale sync targets.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "days": {
+                        "type": "integer",
+                        "default": 7,
+                        "minimum": 0,
+                        "description": "Recent ingest window and stale sync threshold in days",
+                    },
+                },
+            },
+        ),
+        Tool(
             name="export_obsidian",
             description="Export the knowledge graph to an Obsidian vault as markdown notes and index.",
             inputSchema={
@@ -1670,6 +1685,11 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 state = store.get_sync_state(source_project, source_entity_type)
                 statuses.append(_sync_state_to_dict(source_project, source_entity_type, state))
             return [TextContent(type="text", text=json.dumps({"sync_states": statuses}))]
+
+        elif name == "freshness_report":
+            days = max(0, int(arguments.get("days", 7)))
+            report = store.freshness_report(_supported_sync_targets(), days=days)
+            return [TextContent(type="text", text=json.dumps({"days": days, "results": report}))]
 
         elif name == "add_unit":
             unit = KnowledgeUnit(

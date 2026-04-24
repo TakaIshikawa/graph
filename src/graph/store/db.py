@@ -6,7 +6,7 @@ import json
 import re
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 from graph.store.migrations import SCHEMA_VERSION, ensure_schema
@@ -23,6 +23,18 @@ def _new_id() -> str:
 
 def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _parse_datetime(value: datetime | str | None) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        parsed = datetime.fromisoformat(str(value))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def _json_value(value) -> str | None:
@@ -732,15 +744,85 @@ class Store:
             "edges_skipped": edges_skipped,
         }
 
-    def count_units(self, *, source_project: str | None = None) -> int:
+    def count_units(
+        self,
+        *,
+        source_project: str | None = None,
+        source_entity_type: str | None = None,
+    ) -> int:
+        where_parts: list[str] = []
+        params: list = []
         if source_project:
-            row = self.conn.execute(
-                "SELECT COUNT(*) FROM knowledge_units WHERE source_project = ?",
-                (source_project,),
-            ).fetchone()
-        else:
-            row = self.conn.execute("SELECT COUNT(*) FROM knowledge_units").fetchone()
+            where_parts.append("source_project = ?")
+            params.append(source_project)
+        if source_entity_type:
+            where_parts.append("source_entity_type = ?")
+            params.append(source_entity_type)
+        where = " WHERE " + " AND ".join(where_parts) if where_parts else ""
+        row = self.conn.execute(f"SELECT COUNT(*) FROM knowledge_units{where}", params).fetchone()
         return row[0]
+
+    def count_units_ingested_since(
+        self,
+        since: datetime,
+        *,
+        source_project: str | None = None,
+        source_entity_type: str | None = None,
+    ) -> int:
+        where_parts = ["ingested_at >= ?"]
+        params: list = [since.isoformat()]
+        if source_project:
+            where_parts.append("source_project = ?")
+            params.append(source_project)
+        if source_entity_type:
+            where_parts.append("source_entity_type = ?")
+            params.append(source_entity_type)
+        row = self.conn.execute(
+            "SELECT COUNT(*) FROM knowledge_units WHERE " + " AND ".join(where_parts),
+            params,
+        ).fetchone()
+        return row[0]
+
+    def freshness_report(
+        self,
+        targets: list[tuple[str, str]],
+        *,
+        days: int = 7,
+        now: datetime | None = None,
+    ) -> list[dict]:
+        now = now or datetime.now(timezone.utc)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        days = max(0, days)
+        recent_since = now - timedelta(days=days)
+
+        report = []
+        for source_project, source_entity_type in targets:
+            state = self.get_sync_state(source_project, source_entity_type)
+            last_sync_at = _parse_datetime(state.last_sync_at) if state else None
+            age_days = None
+            if last_sync_at is not None:
+                age_days = max(0.0, (now - last_sync_at).total_seconds() / 86400)
+
+            report.append(
+                {
+                    "source_project": source_project,
+                    "source_entity_type": source_entity_type,
+                    "last_sync_at": last_sync_at.isoformat() if last_sync_at else None,
+                    "age_days": age_days,
+                    "recent_unit_count": self.count_units_ingested_since(
+                        recent_since,
+                        source_project=source_project,
+                        source_entity_type=source_entity_type,
+                    ),
+                    "total_unit_count": self.count_units(
+                        source_project=source_project,
+                        source_entity_type=source_entity_type,
+                    ),
+                    "stale": last_sync_at is None or age_days is None or age_days > days,
+                }
+            )
+        return report
 
     # --- Saved queries ---
 

@@ -1975,6 +1975,79 @@ def test_source_coverage_command_emits_json_matching_service(monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_freshness_command_emits_json_and_days_controls_window(monkeypatch):
+    store = _make_store()
+    now = datetime.now(timezone.utc)
+    recent = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="fresh-recent",
+            source_entity_type="insight",
+            title="Recent freshness unit",
+            content="Freshness content",
+        )
+    )
+    old = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="fresh-old",
+            source_entity_type="insight",
+            title="Old freshness unit",
+            content="Old freshness content",
+        )
+    )
+    store.conn.execute(
+        "UPDATE knowledge_units SET ingested_at = ? WHERE id = ?",
+        ((now - timedelta(days=3)).isoformat(), recent.id),
+    )
+    store.conn.execute(
+        "UPDATE knowledge_units SET ingested_at = ? WHERE id = ?",
+        ((now - timedelta(days=8)).isoformat(), old.id),
+    )
+    store.conn.commit()
+    store.upsert_sync_state(
+        SyncState(
+            source_project="max",
+            source_entity_type="insight",
+            last_sync_at=now - timedelta(days=8),
+            items_synced=2,
+        )
+    )
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    monkeypatch.setattr(
+        "graph.cli.main._supported_sync_targets",
+        lambda: [("max", "insight"), ("presence", "knowledge_item")],
+    )
+
+    try:
+        seven = runner.invoke(app, ["freshness", "--days", "7", "--json"])
+        ten = runner.invoke(app, ["freshness", "--days", "10", "--json"])
+
+        assert seven.exit_code == 0
+        seven_payload = json.loads(seven.output)
+        by_target = {
+            (item["source_project"], item["source_entity_type"]): item
+            for item in seven_payload["results"]
+        }
+        assert seven_payload["days"] == 7
+        assert by_target[("max", "insight")]["recent_unit_count"] == 1
+        assert by_target[("max", "insight")]["total_unit_count"] == 2
+        assert by_target[("max", "insight")]["stale"] is True
+        assert by_target[("presence", "knowledge_item")]["last_sync_at"] is None
+        assert by_target[("presence", "knowledge_item")]["stale"] is True
+
+        assert ten.exit_code == 0
+        ten_payload = json.loads(ten.output)
+        ten_max = ten_payload["results"][0]
+        assert ten_payload["days"] == 10
+        assert ten_max["recent_unit_count"] == 2
+        assert ten_max["stale"] is False
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_source_coverage_command_prints_readable_summary(monkeypatch):
     store = _make_store()
     _populate_graph(store)
