@@ -1,7 +1,9 @@
 [project]
 name = "graph"
 version = "0.1.0"
-description = "Personal Knowledge Graph — aggregate, connect, retrieve from sibling projects"
+description = "Personal Knowledge Graph — aggregate, connect, retrieve knowledge with semantic search"
+license = {text = "Apache-2.0"}
+readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.0",
