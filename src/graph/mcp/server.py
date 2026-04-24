@@ -63,6 +63,7 @@ SUPPORTED_SYNC_PROJECTS = [
     "me",
     "kindle",
     "sota",
+    "feed",
     "bookmarks",
     "csv",
     "jsonl",
@@ -133,6 +134,7 @@ def _get_store() -> Store:
 def _get_adapter(name: str):
     from graph.adapters.bookmarks import BookmarksAdapter
     from graph.adapters.csv_adapter import CsvAdapter
+    from graph.adapters.feed import FeedAdapter
     from graph.adapters.forty_two import FortyTwoAdapter
     from graph.adapters.html import HtmlAdapter
     from graph.adapters.jsonl_adapter import JsonlAdapter
@@ -153,6 +155,7 @@ def _get_adapter(name: str):
         "me": lambda: MeAdapter(config_path=settings.me_config),
         "kindle": lambda: KindleAdapter(db_path=settings.kindle_db),
         "sota": lambda: SOTAAdapter(db_path=settings.sota_db),
+        "feed": lambda: FeedAdapter(sources=settings.feed_sources),
         "bookmarks": lambda: BookmarksAdapter(path=settings.bookmarks_path),
         "csv": lambda: CsvAdapter(path=settings.csv_path),
         "jsonl": lambda: JsonlAdapter(path=settings.jsonl_path),

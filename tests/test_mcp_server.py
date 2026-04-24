@@ -393,6 +393,7 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_pa
         "me": ["profile"],
         "kindle": ["book", "highlight"],
         "sota": ["paper"],
+        "feed": ["feed_item"],
         "bookmarks": ["bookmark"],
         "csv": ["csv_row"],
         "jsonl": ["jsonl_record"],
@@ -410,6 +411,7 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_pa
     ingest_tool = next(tool for tool in tools if tool.name == "ingest")
     assert "kindle" in ingest_tool.inputSchema["properties"]["project"]["enum"]
     assert "sota" in ingest_tool.inputSchema["properties"]["project"]["enum"]
+    assert "feed" in ingest_tool.inputSchema["properties"]["project"]["enum"]
     assert "bookmarks" in ingest_tool.inputSchema["properties"]["project"]["enum"]
     assert "csv" in ingest_tool.inputSchema["properties"]["project"]["enum"]
     assert "jsonl" in ingest_tool.inputSchema["properties"]["project"]["enum"]
@@ -420,6 +422,7 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_pa
     search_tool = next(tool for tool in tools if tool.name == "search")
     assert "kindle" in search_tool.inputSchema["properties"]["source_project"]["enum"]
     assert "sota" in search_tool.inputSchema["properties"]["source_project"]["enum"]
+    assert "feed" in search_tool.inputSchema["properties"]["source_project"]["enum"]
     assert "bookmarks" in search_tool.inputSchema["properties"]["source_project"]["enum"]
     assert "csv" in search_tool.inputSchema["properties"]["source_project"]["enum"]
     assert "jsonl" in search_tool.inputSchema["properties"]["source_project"]["enum"]
@@ -497,6 +500,19 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_pa
     assert sota_missing == {
         "source_project": "sota",
         "source_entity_type": "paper",
+        "has_sync_state": False,
+        "last_sync_at": None,
+        "last_source_id": None,
+        "items_synced": 0,
+    }
+    feed_missing = next(
+        item
+        for item in statuses
+        if item["source_project"] == "feed" and item["source_entity_type"] == "feed_item"
+    )
+    assert feed_missing == {
+        "source_project": "feed",
+        "source_entity_type": "feed_item",
         "has_sync_state": False,
         "last_sync_at": None,
         "last_source_id": None,
@@ -805,6 +821,7 @@ def test_ingest_all_includes_sota_and_search_can_filter_sota(tmp_path, monkeypat
         "me",
         "kindle",
         "sota",
+        "feed",
         "bookmarks",
         "csv",
         "jsonl",
@@ -835,6 +852,56 @@ def test_ingest_all_includes_sota_and_search_can_filter_sota(tmp_path, monkeypat
     results = json.loads(response[0].text)
     assert [result["source_project"] for result in results] == ["sota"]
     assert results[0]["title"] == "SOTA Transformer Paper"
+
+
+def test_ingest_tool_syncs_configured_feed_fixture(tmp_path, monkeypatch):
+    feed = tmp_path / "feed.xml"
+    feed.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+          <title>MCP Feed</title>
+          <entry>
+            <id>tag:example.com,2026:mcp-feed-1</id>
+            <title>MCP local feed item</title>
+            <link href="https://example.com/mcp-feed"/>
+            <updated>2026-04-24T12:30:00Z</updated>
+            <category term="mcp"/>
+            <summary>Read through the MCP ingest tool.</summary>
+          </entry>
+        </feed>
+        """,
+        encoding="utf-8",
+    )
+    db_path = tmp_path / "graph.db"
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+    monkeypatch.setattr(mcp_server.settings, "feed_sources", str(feed))
+
+    response = asyncio.run(
+        mcp_server.call_tool("ingest", {"project": "feed", "full": True})
+    )
+    payload = json.loads(response[0].text)
+
+    assert payload == {"units_inserted": 1, "units_skipped": 0, "edges_inserted": 0}
+
+    store = Store(str(db_path))
+    try:
+        unit = store.conn.execute(
+            """SELECT * FROM knowledge_units
+               WHERE source_project = 'me' AND source_entity_type = 'feed_item'"""
+        ).fetchone()
+        assert unit is not None
+        assert unit["title"] == "MCP local feed item"
+        assert json.loads(unit["tags"]) == ["mcp"]
+        metadata = json.loads(unit["metadata"])
+        assert metadata["id"] == "tag:example.com,2026:mcp-feed-1"
+        assert metadata["link"] == "https://example.com/mcp-feed"
+
+        state = store.get_sync_state("feed", "feed_item")
+        assert state is not None
+        assert state.items_synced == 1
+    finally:
+        store.close()
 
 
 def test_extract_references_tool_returns_candidates_and_inserts_edges(tmp_path, monkeypatch):

@@ -1249,7 +1249,7 @@ def test_ingest_feed_command_uses_configured_sources(tmp_path, monkeypatch):
     monkeypatch.setattr("graph.cli.main.settings.feed_sources", str(feed))
 
     try:
-        result = runner.invoke(app, ["ingest", "feed"])
+        result = runner.invoke(app, ["ingest", "feed", "--full"])
 
         assert result.exit_code == 0
         assert "Ingesting from feed" in result.output

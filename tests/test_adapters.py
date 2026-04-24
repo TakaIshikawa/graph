@@ -1079,6 +1079,9 @@ class TestRegistry:
         html_adapter = get_adapter("html", root_path="/tmp/html")
         assert html_adapter.name == "html"
 
+        feed_adapter = get_adapter("feed", sources="/tmp/feed.xml")
+        assert feed_adapter.name == "feed"
+
     def test_unknown_adapter(self):
         with pytest.raises(KeyError):
             get_adapter("unknown")

@@ -31,6 +31,7 @@ SUPPORTED_SYNC_PROJECTS = [
     "me",
     "kindle",
     "sota",
+    "feed",
     "bookmarks",
     "csv",
     "jsonl",
