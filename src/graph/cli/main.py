@@ -1779,6 +1779,47 @@ def tags(
     store.close()
 
 
+@app.command(name="links")
+def links(
+    domain: str | None = typer.Option(None, "--domain", help="Filter by exact domain"),
+    limit: int = typer.Option(20, "--limit", "-n", help="Max domains and URLs"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Inventory external http/https links across content and metadata."""
+    from graph.graph.service import GraphService
+
+    store = _get_store()
+    gs = GraphService(store)
+    result = gs.analyze_links(domain=domain, limit=limit)
+
+    if json_output:
+        _json_echo(result)
+        store.close()
+        return
+
+    found_domains = result["domains"]
+    if not found_domains:
+        typer.echo("No external links found.")
+        store.close()
+        return
+
+    typer.echo("Top external link domains:")
+    for item in found_domains:
+        typer.echo(
+            f"  {item['domain']}: {item['count']} occurrences "
+            f"across {item['url_count']} URLs"
+        )
+        units = ", ".join(
+            f"[{unit['source_project']}] {unit['title']}"
+            for unit in item["representative_units"][:3]
+        )
+        typer.echo(f"    Units: {units or '-'}")
+        for link in item["urls"][:3]:
+            typer.echo(f"    {link['url']} ({link['count']})")
+
+    store.close()
+
+
 @app.command(name="duplicates")
 def duplicates(
     limit: int = typer.Option(20, "--limit", "-n", help="Max duplicate groups"),

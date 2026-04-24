@@ -104,6 +104,29 @@ def _populate_duplicates_graph(store: Store) -> None:
         store.insert_unit(unit)
 
 
+def _populate_links_graph(store: Store) -> None:
+    for unit in [
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="markdown-link",
+            source_entity_type="insight",
+            title="Markdown citation",
+            content="Read [docs](https://Example.com/docs).",
+            content_type=ContentType.INSIGHT,
+            metadata={"source_url": "https://meta.test/report)."},
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="duplicate-link",
+            source_entity_type="knowledge_node",
+            title="Repeated citation",
+            content="Repeated https://example.com/docs",
+            content_type=ContentType.FINDING,
+        ),
+    ]:
+        store.insert_unit(unit)
+
+
 def _populate_backlinks_graph(store: Store) -> tuple[str, str, str]:
     a = store.insert_unit(
         KnowledgeUnit(
@@ -947,6 +970,38 @@ def test_analyze_duplicates_tool_returns_reasons_units_and_filters(
         for item in payload["results"]
         for unit in item["units"]
     )
+
+
+def test_analyze_links_tool_returns_same_structured_payload(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    _populate_links_graph(store)
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    analyze_tool = next(tool for tool in tools if tool.name == "analyze_links")
+    assert "domain" in analyze_tool.inputSchema["properties"]
+    assert "limit" in analyze_tool.inputSchema["properties"]
+
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "analyze_links",
+            {"domain": "example.com", "limit": 5},
+        )
+    )
+    payload = json.loads(response[0].text)
+
+    assert payload["filters"] == {"domain": "example.com"}
+    assert payload["domains"][0]["domain"] == "example.com"
+    assert payload["domains"][0]["count"] == 2
+    assert payload["links"][0]["url"] == "https://example.com/docs"
+    assert payload["links"][0]["count"] == 2
+    assert {
+        occurrence["source_project"]
+        for occurrence in payload["links"][0]["occurrences"]
+    } == {"max", "forty_two"}
 
 
 def test_analyze_source_coverage_tool_returns_service_payload(tmp_path, monkeypatch):

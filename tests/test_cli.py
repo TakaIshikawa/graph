@@ -325,6 +325,29 @@ def _populate_duplicates_graph(store: Store) -> None:
         store.insert_unit(unit)
 
 
+def _populate_links_graph(store: Store) -> None:
+    for unit in [
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="markdown-link",
+            source_entity_type="insight",
+            title="Markdown citation",
+            content="Read [docs](https://Example.com/docs).",
+            content_type=ContentType.INSIGHT,
+            metadata={"source_url": "https://meta.test/report)."},
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="duplicate-link",
+            source_entity_type="knowledge_node",
+            title="Repeated citation",
+            content="Repeated https://example.com/docs",
+            content_type=ContentType.FINDING,
+        ),
+    ]:
+        store.insert_unit(unit)
+
+
 def _cleanup_db(path: str) -> None:
     db_path = Path(path)
     for candidate in (
@@ -1151,6 +1174,59 @@ def test_tags_command_detail_applies_filters_and_co_occurrences(monkeypatch):
             "solar",
         ]
         assert [item["count"] for item in payload["co_occurring_tags"]] == [2, 1, 1]
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_links_command_emits_json_and_filters_by_domain(monkeypatch):
+    store = _make_store()
+    _populate_links_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(
+            app,
+            ["links", "--domain", "example.com", "--limit", "5", "--json"],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["filters"] == {"domain": "example.com"}
+        assert payload["domains"][0]["domain"] == "example.com"
+        assert payload["domains"][0]["count"] == 2
+        assert payload["domains"][0]["url_count"] == 1
+        assert payload["domains"][0]["urls"] == [
+            {"url": "https://example.com/docs", "count": 2}
+        ]
+        assert {
+            unit["source_id"] for unit in payload["domains"][0]["representative_units"]
+        } == {"markdown-link", "duplicate-link"}
+        assert payload["links"][0]["url"] == "https://example.com/docs"
+        assert payload["links"][0]["count"] == 2
+        assert {item["field"] for item in payload["links"][0]["occurrences"]} == {
+            "content"
+        }
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_links_command_human_output_shows_domains_and_units(monkeypatch):
+    store = _make_store()
+    _populate_links_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(app, ["links", "--limit", "2"])
+
+        assert result.exit_code == 0
+        assert "Top external link domains:" in result.output
+        assert "example.com: 2 occurrences across 1 URLs" in result.output
+        assert "[max] Markdown citation" in result.output
+        assert "https://example.com/docs (2)" in result.output
     finally:
         store.close()
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]

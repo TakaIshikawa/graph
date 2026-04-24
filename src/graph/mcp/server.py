@@ -379,6 +379,20 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="analyze_links",
+            description="Inventory external http/https links across knowledge unit content and metadata.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "domain": {
+                        "type": "string",
+                        "description": "Filter by exact domain",
+                    },
+                    "limit": {"type": "integer", "default": 20},
+                },
+            },
+        ),
+        Tool(
             name="analyze_duplicates",
             description="Find likely duplicate knowledge units by repeated titles and near-identical content.",
             inputSchema={
@@ -896,6 +910,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 limit=arguments.get("limit", 20),
                 source_project=arguments.get("source_project"),
                 content_type=arguments.get("content_type"),
+            )
+            return [TextContent(type="text", text=json.dumps(result))]
+
+        elif name == "analyze_links":
+            gs = GraphService(store)
+            result = gs.analyze_links(
+                domain=arguments.get("domain"),
+                limit=arguments.get("limit", 20),
             )
             return [TextContent(type="text", text=json.dumps(result))]
 

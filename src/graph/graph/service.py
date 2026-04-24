@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from pathlib import Path
 import re
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import networkx as nx
 
@@ -14,6 +14,8 @@ from graph.store.db import Store
 
 _NORMALIZED_TEXT_RE = re.compile(r"[^a-z0-9]+")
 _TTL_LOCAL_NAME_RE = re.compile(r"[^A-Za-z0-9_]")
+_EXTERNAL_URL_RE = re.compile(r"https?://[^\s<>\"]+", re.IGNORECASE)
+_TRAILING_URL_PUNCTUATION = ".,;:!?)]}'\""
 
 
 def _normalize_text(value: str) -> str:
@@ -63,6 +65,36 @@ def _turtle_local_name(value: object) -> str:
 
 def _unit_uri(base_uri: str, unit_id: str) -> str:
     return f"<{base_uri}{quote(unit_id, safe='')}>"
+
+
+def _normalize_external_url(value: str) -> str | None:
+    url = value.rstrip(_TRAILING_URL_PUNCTUATION)
+    parsed = urlsplit(url)
+    if parsed.scheme.lower() not in ("http", "https") or not parsed.netloc:
+        return None
+    netloc = parsed.netloc.lower()
+    return urlunsplit((parsed.scheme.lower(), netloc, parsed.path, parsed.query, parsed.fragment))
+
+
+def _external_url_domain(url: str) -> str | None:
+    hostname = urlsplit(url).hostname
+    return hostname.lower().rstrip(".") if hostname else None
+
+
+def _metadata_strings(value: object, path: str = "metadata") -> list[tuple[str, str]]:
+    if isinstance(value, str):
+        return [(path, value)]
+    if isinstance(value, dict):
+        strings = []
+        for key, child in value.items():
+            strings.extend(_metadata_strings(child, f"{path}.{key}"))
+        return strings
+    if isinstance(value, list):
+        strings = []
+        for index, child in enumerate(value):
+            strings.extend(_metadata_strings(child, f"{path}[{index}]"))
+        return strings
+    return []
 
 
 class GraphService:
@@ -632,6 +664,106 @@ class GraphService:
             )
         )
         return {"results": results[:limit], "filters": filters}
+
+    def analyze_links(
+        self,
+        *,
+        domain: str | None = None,
+        limit: int = 20,
+    ) -> dict:
+        """Inventory external http/https links across unit content and metadata."""
+        domain_filter = domain.lower().rstrip(".") if domain else None
+        occurrences_by_url: dict[str, dict] = {}
+        occurrences_by_domain: dict[str, list[dict]] = {}
+
+        for unit in self.store.get_all_units(limit=1000000000):
+            fields = [("content", unit.content)]
+            fields.extend(_metadata_strings(unit.metadata))
+            for field, text in fields:
+                for match in _EXTERNAL_URL_RE.finditer(text):
+                    url = _normalize_external_url(match.group(0))
+                    if url is None:
+                        continue
+                    found_domain = _external_url_domain(url)
+                    if found_domain is None:
+                        continue
+                    if domain_filter and found_domain != domain_filter:
+                        continue
+
+                    occurrence = {
+                        "unit_id": unit.id,
+                        "title": unit.title,
+                        "source_project": str(unit.source_project),
+                        "source_id": unit.source_id,
+                        "source_entity_type": unit.source_entity_type,
+                        "content_type": str(unit.content_type),
+                        "field": field,
+                    }
+                    occurrences_by_domain.setdefault(found_domain, []).append(occurrence)
+                    entry = occurrences_by_url.setdefault(
+                        url,
+                        {
+                            "url": url,
+                            "domain": found_domain,
+                            "count": 0,
+                            "occurrences": [],
+                        },
+                    )
+                    entry["count"] += 1
+                    entry["occurrences"].append(occurrence)
+
+        links = sorted(
+            occurrences_by_url.values(),
+            key=lambda item: (-item["count"], item["domain"], item["url"]),
+        )
+
+        domains = []
+        for found_domain, occurrences in occurrences_by_domain.items():
+            domain_urls = [
+                item
+                for item in links
+                if item["domain"] == found_domain
+            ]
+            representative_units = []
+            seen_units = set()
+            for occurrence in occurrences:
+                unit_id = occurrence["unit_id"]
+                if unit_id in seen_units:
+                    continue
+                seen_units.add(unit_id)
+                representative_units.append(
+                    {
+                        "id": unit_id,
+                        "title": occurrence["title"],
+                        "source_project": occurrence["source_project"],
+                        "source_id": occurrence["source_id"],
+                    }
+                )
+                if len(representative_units) >= 5:
+                    break
+            domains.append(
+                {
+                    "domain": found_domain,
+                    "count": len(occurrences),
+                    "url_count": len(domain_urls),
+                    "urls": [
+                        {"url": item["url"], "count": item["count"]}
+                        for item in domain_urls[:limit]
+                    ],
+                    "representative_units": representative_units,
+                }
+            )
+
+        domains.sort(key=lambda item: (-item["count"], item["domain"]))
+        return {
+            "domains": domains[:limit],
+            "links": links[:limit],
+            "filters": {"domain": domain_filter},
+            "limit": limit,
+            "total_occurrences": sum(item["count"] for item in links),
+            "total_urls": len(links),
+            "total_domains": len(domains),
+        }
 
     def stats(self) -> dict:
         """Graph summary statistics."""

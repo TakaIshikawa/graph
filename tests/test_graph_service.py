@@ -135,6 +135,33 @@ def tagged_store(store: Store):
     return store
 
 
+@pytest.fixture
+def external_link_store(store: Store):
+    """Store with external links in content and metadata."""
+    for unit in [
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="markdown-link",
+            source_entity_type="insight",
+            title="Markdown citation",
+            content="Read [the docs](https://Example.com/docs). Also see https://other.test/path,",
+            content_type=ContentType.INSIGHT,
+            metadata={"source_url": "https://meta.test/report)."},
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="duplicate-link",
+            source_entity_type="knowledge_node",
+            title="Repeated citation",
+            content="Same citation https://example.com/docs and nested metadata.",
+            content_type=ContentType.FINDING,
+            metadata={"refs": {"homepage": "https://example.com/home"}},
+        ),
+    ]:
+        store.insert_unit(unit)
+    return store
+
+
 class TestGraphService:
     def test_rebuild(self, populated_store: Store):
         gs = GraphService(populated_store)
@@ -594,3 +621,37 @@ class TestGraphService:
             for item in result["results"]
             for unit in item["units"]
         )
+
+    def test_analyze_links_scans_content_metadata_normalizes_and_filters(
+        self, external_link_store: Store
+    ):
+        gs = GraphService(external_link_store)
+
+        result = gs.analyze_links(limit=10)
+
+        assert result["total_occurrences"] == 5
+        assert result["total_urls"] == 4
+        assert result["domains"][0]["domain"] == "example.com"
+        assert result["domains"][0]["count"] == 3
+
+        links_by_url = {item["url"]: item for item in result["links"]}
+        assert links_by_url["https://example.com/docs"]["count"] == 2
+        assert {
+            occurrence["source_project"]
+            for occurrence in links_by_url["https://example.com/docs"]["occurrences"]
+        } == {"max", "forty_two"}
+        assert "https://Example.com/docs)." not in links_by_url
+        assert "https://meta.test/report" in links_by_url
+        assert links_by_url["https://meta.test/report"]["occurrences"][0]["field"] == (
+            "metadata.source_url"
+        )
+
+        filtered = gs.analyze_links(domain="example.com", limit=10)
+
+        assert filtered["filters"] == {"domain": "example.com"}
+        assert filtered["total_occurrences"] == 3
+        assert {item["domain"] for item in filtered["links"]} == {"example.com"}
+        assert {item["url"] for item in filtered["links"]} == {
+            "https://example.com/docs",
+            "https://example.com/home",
+        }
