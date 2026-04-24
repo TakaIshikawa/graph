@@ -5,10 +5,21 @@ from __future__ import annotations
 import asyncio
 import json
 
+from graph.adapters.base import IngestResult
 from graph.mcp import server as mcp_server
 from graph.store.db import Store
 from graph.types.enums import ContentType, EdgeRelation, SourceProject
 from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
+
+
+class FakeAdapter:
+    def __init__(self, name: str, entity_types: list[str], result: IngestResult | None = None):
+        self.name = name
+        self.entity_types = entity_types
+        self.result = result or IngestResult()
+
+    def ingest(self, *, since=None, entity_types=None):
+        return self.result
 
 
 def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(
@@ -32,13 +43,28 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(
         "_get_store",
         lambda: Store(str(db_path)),
     )
+    entity_types = {
+        "forty_two": ["knowledge_node"],
+        "max": ["insight", "buildable_unit", "design_brief"],
+        "presence": ["knowledge_item", "generated_content"],
+        "me": ["profile"],
+        "kindle": ["book", "highlight"],
+        "sota": ["paper"],
+    }
+    monkeypatch.setattr(
+        mcp_server,
+        "_get_adapter",
+        lambda name: FakeAdapter(name, entity_types[name]),
+    )
 
     tools = asyncio.run(mcp_server.list_tools())
     ingest_tool = next(tool for tool in tools if tool.name == "ingest")
     assert "kindle" in ingest_tool.inputSchema["properties"]["project"]["enum"]
+    assert "sota" in ingest_tool.inputSchema["properties"]["project"]["enum"]
 
     search_tool = next(tool for tool in tools if tool.name == "search")
     assert "kindle" in search_tool.inputSchema["properties"]["source_project"]["enum"]
+    assert "sota" in search_tool.inputSchema["properties"]["source_project"]["enum"]
 
     assert any(tool.name == "sync_status" for tool in tools)
 
@@ -87,6 +113,80 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(
         "last_source_id": None,
         "items_synced": 0,
     }
+    sota_missing = next(
+        item
+        for item in statuses
+        if item["source_project"] == "sota" and item["source_entity_type"] == "paper"
+    )
+    assert sota_missing == {
+        "source_project": "sota",
+        "source_entity_type": "paper",
+        "has_sync_state": False,
+        "last_sync_at": None,
+        "last_source_id": None,
+        "items_synced": 0,
+    }
+
+
+def test_ingest_all_includes_sota_and_search_can_filter_sota(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+
+    sota_result = IngestResult()
+    sota_result.units.append(
+        KnowledgeUnit(
+            source_project=SourceProject.SOTA,
+            source_id="paper_2501.00001",
+            source_entity_type="paper",
+            title="SOTA Transformer Paper",
+            content="Transformer routing breakthrough for retrieval systems",
+            content_type=ContentType.FINDING,
+        )
+    )
+
+    calls = []
+
+    def fake_get_adapter(name: str):
+        calls.append(name)
+        if name == "sota":
+            return FakeAdapter(name, ["paper"], sota_result)
+        return FakeAdapter(name, ["placeholder"])
+
+    monkeypatch.setattr(
+        mcp_server,
+        "_get_store",
+        lambda: Store(str(db_path)),
+    )
+    monkeypatch.setattr(mcp_server, "_get_adapter", fake_get_adapter)
+
+    response = asyncio.run(
+        mcp_server.call_tool("ingest", {"project": "all", "full": True})
+    )
+    payload = json.loads(response[0].text)
+
+    assert calls == ["forty_two", "max", "presence", "me", "kindle", "sota"]
+    assert payload == {"units_inserted": 1, "units_skipped": 0, "edges_inserted": 0}
+
+    store = Store(str(db_path))
+    try:
+        state = store.get_sync_state("sota", "paper")
+        assert state is not None
+        assert state.items_synced == 1
+    finally:
+        store.close()
+
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "search",
+            {
+                "query": "Transformer",
+                "source_project": "sota",
+                "mode": "fulltext",
+            },
+        )
+    )
+    results = json.loads(response[0].text)
+    assert [result["source_project"] for result in results] == ["sota"]
+    assert results[0]["title"] == "SOTA Transformer Paper"
 
 def test_export_obsidian_tool_exports_same_vault_structure_as_cli(
     tmp_path, monkeypatch

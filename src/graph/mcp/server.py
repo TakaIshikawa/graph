@@ -18,7 +18,7 @@ from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 server = Server("graph")
 
-SUPPORTED_SYNC_PROJECTS = ["forty_two", "max", "presence", "me", "kindle"]
+SUPPORTED_SYNC_PROJECTS = ["forty_two", "max", "presence", "me", "kindle", "sota"]
 
 
 def _get_store() -> Store:
@@ -31,6 +31,7 @@ def _get_adapter(name: str):
     from graph.adapters.max_adapter import MaxAdapter
     from graph.adapters.me import MeAdapter
     from graph.adapters.presence import PresenceAdapter
+    from graph.adapters.sota import SOTAAdapter
 
     mapping = {
         "forty_two": lambda: FortyTwoAdapter(db_path=settings.forty_two_db),
@@ -40,6 +41,7 @@ def _get_adapter(name: str):
         ),
         "me": lambda: MeAdapter(config_path=settings.me_config),
         "kindle": lambda: KindleAdapter(db_path=settings.kindle_db),
+        "sota": lambda: SOTAAdapter(db_path=settings.sota_db),
     }
     return mapping[name]()
 
@@ -127,7 +129,7 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "project": {
                         "type": "string",
-                        "enum": ["forty_two", "max", "presence", "me", "kindle", "all"],
+                        "enum": [*SUPPORTED_SYNC_PROJECTS, "all"],
                         "description": "Source project to ingest from, or 'all'",
                     },
                     "full": {
@@ -149,7 +151,7 @@ async def list_tools() -> list[Tool]:
                     "limit": {"type": "integer", "default": 10},
                     "source_project": {
                         "type": "string",
-                        "enum": ["forty_two", "max", "presence", "me", "kindle"],
+                        "enum": SUPPORTED_SYNC_PROJECTS,
                         "description": "Filter by source project",
                     },
                     "content_type": {
@@ -341,11 +343,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         if name == "ingest":
             project = arguments["project"]
             full = arguments.get("full", False)
-            projects = (
-                ["forty_two", "max", "presence", "me", "kindle"]
-                if project == "all"
-                else [project]
-            )
+            projects = SUPPORTED_SYNC_PROJECTS if project == "all" else [project]
             total = {"units_inserted": 0, "units_skipped": 0, "edges_inserted": 0}
 
             for proj in projects:
