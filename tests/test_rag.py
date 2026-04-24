@@ -129,6 +129,7 @@ class TestRAGService:
         rag_service.embed_and_store(unit.id)
         results = store.get_units_with_embeddings()
         assert len(results) == 1
+        assert store.get_embedding_status()["fresh"] == 1
 
     def test_embed_batch_and_store(self, store: Store, rag_service: RAGService):
         ids = []
@@ -147,6 +148,36 @@ class TestRAGService:
         count = rag_service.embed_batch_and_store(ids)
         assert count == 3
         assert len(store.get_units_with_embeddings()) == 3
+
+    def test_embedded_unit_becomes_stale_after_content_update(
+        self, store: Store, rag_service: RAGService
+    ):
+        unit = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="stale-after-update",
+                source_entity_type="insight",
+                title="Original",
+                content="Original content",
+            )
+        )
+        rag_service.embed_and_store(unit.id)
+
+        assert store.get_embedding_status() == {
+            "total": 1,
+            "missing": 0,
+            "fresh": 1,
+            "stale": 0,
+        }
+
+        store.update_unit_fields(unit.id, content="Changed content")
+
+        assert store.get_embedding_status() == {
+            "total": 1,
+            "missing": 0,
+            "fresh": 0,
+            "stale": 1,
+        }
 
     def test_semantic_search(
         self, populated_store_with_embeddings: Store, rag_service: RAGService

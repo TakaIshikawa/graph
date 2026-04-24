@@ -884,8 +884,12 @@ def import_json_command(
 def _do_embed(
     store: Store,
     project: str | None = None,
+    content_type: str | None = None,
     batch_size: int = 5,
     delay: float = 21.0,
+    force: bool = False,
+    limit: int | None = None,
+    stale_only: bool = False,
 ) -> int:
     """Core embed logic. Returns number of units embedded."""
     import time
@@ -900,17 +904,24 @@ def _do_embed(
     )
     rag = RAGService(store, provider)
 
-    all_units = store.get_all_units()
-    embedded_ids = {unit.id for unit, _ in store.get_units_with_embeddings()}
-
     units_to_embed = [
-        u.id
-        for u in all_units
-        if u.id not in embedded_ids and (project is None or u.source_project == project)
+        unit.id
+        for unit in store.get_units_for_embedding_refresh(
+            source_project=project,
+            content_type=content_type,
+            force=force,
+            stale_only=stale_only,
+            limit=limit,
+        )
     ]
 
     if not units_to_embed:
-        typer.echo("All units already have embeddings.")
+        if force:
+            typer.echo("No units matched the embedding filters.")
+        elif stale_only:
+            typer.echo("All matching units have fresh embeddings.")
+        else:
+            typer.echo("All matching units already have embeddings.")
         return 0
 
     total_batches = (len(units_to_embed) + batch_size - 1) // batch_size
@@ -927,6 +938,23 @@ def _do_embed(
 
     typer.echo(f"Done. {total} units embedded.")
     return total
+
+
+def _do_embeddings_status(
+    store: Store,
+    *,
+    project: str | None = None,
+    content_type: str | None = None,
+) -> dict:
+    status = store.get_embedding_status(
+        source_project=project,
+        content_type=content_type,
+    )
+    if project is not None:
+        status["source_project"] = project
+    if content_type is not None:
+        status["content_type"] = content_type
+    return status
 
 
 def _do_infer_edges(
@@ -953,13 +981,58 @@ def _do_infer_edges(
 @app.command()
 def embed(
     project: str | None = typer.Option(None, "--project", "-p", help="Filter by source project"),
+    content_type: str | None = typer.Option(None, "--content-type", help="Filter by content type"),
     batch_size: int = typer.Option(5, "--batch-size", "-b", help="Batch size for API calls"),
     delay: float = typer.Option(21.0, "--delay", help="Seconds between batches (rate limit)"),
+    force: bool = typer.Option(False, "--force", help="Refresh embeddings even when they are fresh"),
+    limit: int | None = typer.Option(None, "--limit", "-n", help="Maximum units to embed"),
+    stale_only: bool = typer.Option(False, "--stale-only", help="Embed only missing or stale embeddings"),
 ) -> None:
-    """Generate embeddings for all units missing them."""
+    """Generate embeddings for units missing them."""
     store = _get_store()
-    _do_embed(store, project=project, batch_size=batch_size, delay=delay)
+    _do_embed(
+        store,
+        project=project,
+        content_type=content_type,
+        batch_size=batch_size,
+        delay=delay,
+        force=force,
+        limit=limit,
+        stale_only=stale_only,
+    )
     store.close()
+
+
+@app.command(name="embeddings-status")
+def embeddings_status(
+    project: str | None = typer.Option(None, "--project", "-p", help="Filter by source project"),
+    content_type: str | None = typer.Option(None, "--content-type", help="Filter by content type"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Report embedding freshness counts."""
+    store = _get_store()
+    status = _do_embeddings_status(
+        store,
+        project=project,
+        content_type=content_type,
+    )
+    store.close()
+
+    if json_output:
+        _json_echo(status)
+        return
+
+    filters = []
+    if project is not None:
+        filters.append(f"project={project}")
+    if content_type is not None:
+        filters.append(f"content_type={content_type}")
+    suffix = f" ({', '.join(filters)})" if filters else ""
+    typer.echo(f"Embedding status{suffix}:")
+    typer.echo(f"  Total: {status['total']}")
+    typer.echo(f"  Fresh: {status['fresh']}")
+    typer.echo(f"  Stale: {status['stale']}")
+    typer.echo(f"  Missing: {status['missing']}")
 
 
 @app.command(name="infer-edges")

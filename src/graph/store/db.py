@@ -97,9 +97,9 @@ class Store:
             """INSERT INTO knowledge_units
                (id, source_project, source_id, source_entity_type,
                 title, content, content_type, metadata, tags,
-                confidence, utility_score, embedding,
+                confidence, utility_score, embedding, embedding_updated_at,
                 created_at, ingested_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(source_project, source_id, source_entity_type)
                DO UPDATE SET
                    title = excluded.title,
@@ -122,6 +122,7 @@ class Store:
                 json.dumps(unit.tags),
                 unit.confidence,
                 unit.utility_score,
+                None,
                 None,
                 unit.created_at.isoformat()
                 if isinstance(unit.created_at, datetime)
@@ -174,10 +175,108 @@ class Store:
 
     def update_embedding(self, unit_id: str, embedding: bytes) -> None:
         self.conn.execute(
-            "UPDATE knowledge_units SET embedding = ?, updated_at = ? WHERE id = ?",
+            "UPDATE knowledge_units SET embedding = ?, embedding_updated_at = ? WHERE id = ?",
             (embedding, _utcnow_iso(), unit_id),
         )
         self.conn.commit()
+
+    def get_embedding_status(
+        self,
+        *,
+        source_project: str | None = None,
+        content_type: str | None = None,
+    ) -> dict[str, int]:
+        where, params = self._unit_filter_sql(
+            source_project=source_project,
+            content_type=content_type,
+        )
+        row = self.conn.execute(
+            f"""SELECT
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN embedding IS NULL THEN 1 ELSE 0 END) AS missing,
+                    SUM(CASE
+                        WHEN embedding IS NOT NULL
+                         AND embedding_updated_at IS NOT NULL
+                         AND embedding_updated_at >= updated_at
+                        THEN 1 ELSE 0 END) AS fresh,
+                    SUM(CASE
+                        WHEN embedding IS NOT NULL
+                         AND (embedding_updated_at IS NULL OR updated_at > embedding_updated_at)
+                        THEN 1 ELSE 0 END) AS stale
+                FROM knowledge_units
+                {where}""",
+            params,
+        ).fetchone()
+        return {
+            "total": row["total"] or 0,
+            "missing": row["missing"] or 0,
+            "fresh": row["fresh"] or 0,
+            "stale": row["stale"] or 0,
+        }
+
+    def get_units_for_embedding_refresh(
+        self,
+        *,
+        source_project: str | None = None,
+        content_type: str | None = None,
+        force: bool = False,
+        stale_only: bool = False,
+        limit: int | None = None,
+    ) -> list[KnowledgeUnit]:
+        where_parts, params = self._unit_filter_parts(
+            source_project=source_project,
+            content_type=content_type,
+        )
+        if force:
+            pass
+        elif stale_only:
+            where_parts.append(
+                """(embedding IS NULL
+                    OR embedding_updated_at IS NULL
+                    OR updated_at > embedding_updated_at)"""
+            )
+        else:
+            where_parts.append("embedding IS NULL")
+
+        query = "SELECT * FROM knowledge_units"
+        if where_parts:
+            query += " WHERE " + " AND ".join(where_parts)
+        query += " ORDER BY created_at DESC"
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(max(0, limit))
+
+        rows = self.conn.execute(query, params).fetchall()
+        return [_row_to_unit(r) for r in rows]
+
+    def _unit_filter_parts(
+        self,
+        *,
+        source_project: str | None = None,
+        content_type: str | None = None,
+    ) -> tuple[list[str], list]:
+        where_parts: list[str] = []
+        params: list = []
+        if source_project:
+            where_parts.append("source_project = ?")
+            params.append(source_project)
+        if content_type:
+            where_parts.append("content_type = ?")
+            params.append(content_type)
+        return where_parts, params
+
+    def _unit_filter_sql(
+        self,
+        *,
+        source_project: str | None = None,
+        content_type: str | None = None,
+    ) -> tuple[str, list]:
+        where_parts, params = self._unit_filter_parts(
+            source_project=source_project,
+            content_type=content_type,
+        )
+        where = "WHERE " + " AND ".join(where_parts) if where_parts else ""
+        return where, params
 
     def update_unit_fields(
         self,

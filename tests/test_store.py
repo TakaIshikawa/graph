@@ -494,6 +494,50 @@ class TestSavedQueries:
         finally:
             store.close()
 
+    def test_schema_adds_embedding_timestamp_for_existing_database(self, tmp_path):
+        db_path = tmp_path / "existing-embeddings.db"
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.executescript(
+                """
+                CREATE TABLE schema_version (version INTEGER NOT NULL);
+                INSERT INTO schema_version (version) VALUES (1);
+                CREATE TABLE knowledge_units (
+                    id TEXT PRIMARY KEY,
+                    source_project TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    source_entity_type TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    content_type TEXT NOT NULL DEFAULT 'insight',
+                    metadata TEXT NOT NULL DEFAULT '{}',
+                    tags TEXT NOT NULL DEFAULT '[]',
+                    confidence REAL,
+                    utility_score REAL,
+                    embedding BLOB,
+                    created_at TEXT NOT NULL,
+                    ingested_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(source_project, source_id, source_entity_type)
+                );
+                """
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        store = Store(str(db_path))
+        try:
+            columns = {
+                row["name"]
+                for row in store.conn.execute("PRAGMA table_info(knowledge_units)")
+            }
+            assert "embedding_updated_at" in columns
+            version = store.conn.execute("SELECT version FROM schema_version").fetchone()[0]
+            assert version == 2
+        finally:
+            store.close()
+
     def test_saved_query_crud(self, store: Store):
         saved = store.save_query(
             name="approved-solar",
@@ -535,11 +579,19 @@ class TestSavedQueries:
 class TestEmbedding:
     def test_update_and_get_embeddings(self, store: Store, sample_unit: KnowledgeUnit):
         inserted = store.insert_unit(sample_unit)
+        original = store.get_unit(inserted.id)
         import struct
 
         embedding = [0.1, 0.2, 0.3]
         blob = struct.pack(f"{len(embedding)}f", *embedding)
         store.update_embedding(inserted.id, blob)
+
+        row = store.conn.execute(
+            "SELECT embedding_updated_at, updated_at FROM knowledge_units WHERE id = ?",
+            (inserted.id,),
+        ).fetchone()
+        assert row["embedding_updated_at"] is not None
+        assert row["updated_at"] == original.updated_at.isoformat()
 
         results = store.get_units_with_embeddings()
         assert len(results) == 1
@@ -549,6 +601,49 @@ class TestEmbedding:
         assert len(restored) == 3
         assert abs(restored[0] - 0.1) < 1e-6
 
+    def test_embedding_status_counts_missing_fresh_and_stale(
+        self, store: Store, sample_unit: KnowledgeUnit
+    ):
+        fresh = store.insert_unit(sample_unit)
+        stale = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="stale",
+                source_entity_type="insight",
+                title="Stale",
+                content="Old content",
+            )
+        )
+        missing = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="missing",
+                source_entity_type="insight",
+                title="Missing",
+                content="No embedding",
+            )
+        )
+        store.update_embedding(fresh.id, b"fresh")
+        store.update_embedding(stale.id, b"stale")
+        store.update_unit_fields(stale.id, content="New content")
+
+        assert store.get_embedding_status() == {
+            "total": 3,
+            "missing": 1,
+            "fresh": 1,
+            "stale": 1,
+        }
+        assert store.get_embedding_status(source_project="max") == {
+            "total": 2,
+            "missing": 1,
+            "fresh": 0,
+            "stale": 1,
+        }
+        assert [u.id for u in store.get_units_for_embedding_refresh()] == [missing.id]
+        assert {
+            u.id for u in store.get_units_for_embedding_refresh(stale_only=True)
+        } == {stale.id, missing.id}
+
 
 class TestJsonBackup:
     def test_export_json_contains_required_top_level_fields(self, store: Store, sample_unit: KnowledgeUnit):
@@ -557,7 +652,7 @@ class TestJsonBackup:
 
         payload = store.export_json()
 
-        assert payload["schema_version"] == 1
+        assert payload["schema_version"] == 2
         assert payload["exported_at"]
         assert len(payload["units"]) == 1
         assert payload["units"][0]["id"] == inserted.id

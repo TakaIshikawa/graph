@@ -51,6 +51,15 @@ class MockEmbeddingProvider:
         return [self.embed(t) for t in texts]
 
 
+class RecordingEmbeddingProvider(MockEmbeddingProvider):
+    def __init__(self) -> None:
+        self.batch_texts: list[list[str]] = []
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        self.batch_texts.append(texts)
+        return super().embed_batch(texts)
+
+
 def _make_store() -> Store:
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
@@ -505,7 +514,7 @@ def test_json_export_and_import_commands_round_trip(tmp_path, monkeypatch):
     assert export_result.exit_code == 0
     assert export_path.exists()
     exported = json.loads(export_path.read_text())
-    assert exported["schema_version"] == 1
+    assert exported["schema_version"] == 2
     assert exported["exported_at"]
     assert len(exported["units"]) == 4
     assert len(exported["edges"]) == 2
@@ -992,6 +1001,165 @@ def test_search_command_emits_semantic_json_with_scores(monkeypatch):
         assert payload["results"][0]["title"].startswith("Solar")
         assert payload["results"][0]["source_project"] == "max"
         assert isinstance(payload["results"][0]["score"], float)
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_embeddings_status_command_emits_filtered_json(monkeypatch):
+    store = _make_store()
+    fresh = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="fresh",
+            source_entity_type="insight",
+            title="Fresh",
+            content="Fresh content",
+            content_type=ContentType.INSIGHT,
+        )
+    )
+    stale = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="stale",
+            source_entity_type="insight",
+            title="Stale",
+            content="Stale content",
+            content_type=ContentType.INSIGHT,
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="missing",
+            source_entity_type="knowledge_node",
+            title="Missing",
+            content="Missing content",
+            content_type=ContentType.FINDING,
+        )
+    )
+    store.update_embedding(fresh.id, serialize_embedding([1.0, 0.0]))
+    store.update_embedding(stale.id, serialize_embedding([1.0, 0.0]))
+    store.update_unit_fields(stale.id, content="Updated stale content")
+
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "embeddings-status",
+                "--project",
+                "max",
+                "--content-type",
+                "insight",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload == {
+            "content_type": "insight",
+            "fresh": 1,
+            "missing": 0,
+            "source_project": "max",
+            "stale": 1,
+            "total": 2,
+        }
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_embed_command_honors_limit_and_stale_only(monkeypatch):
+    store = _make_store()
+    fresh = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="fresh",
+            source_entity_type="insight",
+            title="Fresh",
+            content="Fresh content",
+        )
+    )
+    stale = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="stale",
+            source_entity_type="insight",
+            title="Stale",
+            content="Stale content",
+        )
+    )
+    missing = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="missing",
+            source_entity_type="insight",
+            title="Missing",
+            content="Missing content",
+        )
+    )
+    store.update_embedding(fresh.id, serialize_embedding([1.0, 0.0]))
+    store.update_embedding(stale.id, serialize_embedding([1.0, 0.0]))
+    store.update_unit_fields(stale.id, content="Updated stale content")
+
+    provider = RecordingEmbeddingProvider()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    monkeypatch.setattr("graph.rag.embeddings.get_embedding_provider", lambda *args, **kwargs: provider)
+
+    try:
+        result = runner.invoke(
+            app,
+            ["embed", "--stale-only", "--limit", "1", "--batch-size", "1", "--delay", "0"],
+        )
+
+        assert result.exit_code == 0
+        assert "Embedding 1 units" in result.output
+        assert sum(len(batch) for batch in provider.batch_texts) == 1
+        embedded_text = provider.batch_texts[0][0]
+        assert ("Stale" in embedded_text) or ("Missing" in embedded_text)
+        assert "Fresh" not in embedded_text
+        status = store.get_embedding_status(source_project="max")
+        assert status["fresh"] == 2
+        assert status["stale"] + status["missing"] == 1
+        assert missing.id or stale.id
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_embed_command_force_refreshes_existing_embeddings(monkeypatch):
+    store = _make_store()
+    for index in range(2):
+        unit = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id=f"force-{index}",
+                source_entity_type="insight",
+                title=f"Force {index}",
+                content=f"Force content {index}",
+            )
+        )
+        store.update_embedding(unit.id, serialize_embedding([1.0, 0.0]))
+
+    provider = RecordingEmbeddingProvider()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    monkeypatch.setattr("graph.rag.embeddings.get_embedding_provider", lambda *args, **kwargs: provider)
+
+    try:
+        result = runner.invoke(
+            app,
+            ["embed", "--force", "--limit", "1", "--batch-size", "1", "--delay", "0"],
+        )
+
+        assert result.exit_code == 0
+        assert "Embedding 1 units" in result.output
+        assert sum(len(batch) for batch in provider.batch_texts) == 1
     finally:
         store.close()
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
