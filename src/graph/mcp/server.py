@@ -48,6 +48,7 @@ from graph.cli.main import (
     _list_edges_payload,
     _search_filters_dict,
     _validate_search_filters,
+    DEFAULT_SEARCH_SNIPPET_LENGTH,
     SEARCH_SORTS,
 )
 from graph.graph.service import GraphService
@@ -270,6 +271,13 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "query": {"type": "string", "description": "Search query"},
                     "limit": {"type": "integer", "default": 10},
+                    "snippet_length": {
+                        "type": "integer",
+                        "default": DEFAULT_SEARCH_SNIPPET_LENGTH,
+                        "minimum": 1,
+                        "maximum": 2000,
+                        "description": "Maximum characters to include in each result snippet",
+                    },
                     "sort": {
                         "type": "string",
                         "enum": list(SEARCH_SORTS),
@@ -1564,6 +1572,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     mode=mode,
                     filters=filters,
                     sort=arguments.get("sort", "relevance"),
+                    snippet_length=arguments.get(
+                        "snippet_length", DEFAULT_SEARCH_SNIPPET_LENGTH
+                    ),
                 )
             except ValueError as exc:
                 payload = {

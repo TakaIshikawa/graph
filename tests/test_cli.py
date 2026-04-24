@@ -1717,6 +1717,70 @@ def test_search_command_emits_semantic_json_with_scores(monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_search_command_snippet_length_bounds_fulltext_snippet(monkeypatch):
+    store = _make_store()
+    unit = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="long-snippet",
+            source_entity_type="insight",
+            title="Long snippet",
+            content=("Opening context without the term. " * 6)
+            + "Solar storage economics improve fast.",
+            content_type=ContentType.INSIGHT,
+            tags=["energy"],
+        )
+    )
+    store.fts_index_unit(unit)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "search",
+                "storage economics",
+                "--mode",
+                "fulltext",
+                "--limit",
+                "1",
+                "--snippet-length",
+                "60",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        snippet = payload["results"][0]["snippet"]
+        assert len(snippet) <= 60
+        assert "storage economics" in snippet
+        assert snippet.startswith("...")
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_search_command_rejects_invalid_snippet_length(monkeypatch):
+    store = _make_store()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(
+            app,
+            ["search", "solar", "--snippet-length", "0", "--json"],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert "snippet_length must be between 1 and 2000" in payload["error"]
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_similar_command_emits_json_with_seed_scores_and_reason(monkeypatch):
     store = _make_store()
     _populate_search_graph(store)

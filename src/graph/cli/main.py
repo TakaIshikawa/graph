@@ -10,7 +10,14 @@ from pathlib import Path
 import typer
 
 from graph.config import settings
-from graph.rag.search import SEARCH_SORTS, sort_search_results, validate_search_sort
+from graph.rag.search import (
+    DEFAULT_SEARCH_SNIPPET_LENGTH,
+    SEARCH_SORTS,
+    build_search_snippet,
+    sort_search_results,
+    validate_search_sort,
+    validate_snippet_length,
+)
 from graph.store.db import Store
 from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
 from graph.types.models import KnowledgeUnit, SyncState
@@ -718,11 +725,8 @@ def _do_import_edges_csv(store: Store, path: str | Path, *, dry_run: bool = Fals
     return store.import_edges_csv(path, dry_run=dry_run)
 
 
-def _content_excerpt(content: str, *, length: int = 160) -> str:
-    text = " ".join((content or "").split())
-    if len(text) <= length:
-        return text
-    return text[:length].rstrip() + "..."
+def _content_excerpt(content: str, *, length: int = DEFAULT_SEARCH_SNIPPET_LENGTH) -> str:
+    return build_search_snippet(content, "", length=length)
 
 
 def _unit_to_json(
@@ -998,8 +1002,10 @@ def _search_fulltext_with_filters(
     min_confidence: float | str | None = None,
     max_confidence: float | str | None = None,
     sort: str = "relevance",
+    snippet_length: int = DEFAULT_SEARCH_SNIPPET_LENGTH,
 ) -> list[tuple[object, str]]:
     validate_search_sort(sort)
+    snippet_length = validate_snippet_length(snippet_length)
     fetch_limit = max(limit, 20)
     filtered = []
 
@@ -1030,7 +1036,12 @@ def _search_fulltext_with_filters(
                 min_confidence=min_confidence,
                 max_confidence=max_confidence,
             ):
-                filtered.append((unit, r.get("snippet") or _content_excerpt(unit.content)))
+                filtered.append(
+                    (
+                        unit,
+                        build_search_snippet(unit.content, query, length=snippet_length),
+                    )
+                )
                 if sort == "relevance" and len(filtered) >= limit:
                     return filtered
 
@@ -1144,12 +1155,14 @@ def _do_search(
     mode: str = "fulltext",
     filters: dict | None = None,
     sort: str = "relevance",
+    snippet_length: int = DEFAULT_SEARCH_SNIPPET_LENGTH,
 ) -> dict:
     _validate_search_mode(mode)
     filters = filters or {}
     _validate_search_filters(filters)
     sort = str(filters.get("sort", sort))
     validate_search_sort(sort)
+    snippet_length = validate_snippet_length(snippet_length)
 
     if mode == "fulltext":
         results = _search_fulltext_with_filters(
@@ -1169,6 +1182,7 @@ def _do_search(
             min_confidence=filters.get("min_confidence"),
             max_confidence=filters.get("max_confidence"),
             sort=sort,
+            snippet_length=snippet_length,
         )
         payload = {
             "query": query,
@@ -1218,7 +1232,10 @@ def _do_search(
             max_confidence=filters.get("max_confidence"),
             sort=sort,
         )
-        snippets = {unit.id: _content_excerpt(unit.content) for unit, _score in pairs}
+        snippets = {
+            unit.id: build_search_snippet(unit.content, query, length=snippet_length)
+            for unit, _score in pairs
+        }
     else:
         pairs = _search_scored_with_filters(
             lambda q, fetch_limit: rag.hybrid_search(
@@ -1245,19 +1262,8 @@ def _do_search(
             max_confidence=filters.get("max_confidence"),
             sort=sort,
         )
-        fts_snippets = {
-            row["unit_id"]: row.get("snippet") or ""
-            for row in store.fts_search(
-                query,
-                limit=max(limit * 2, 20),
-                created_after=filters.get("created_after"),
-                created_before=filters.get("created_before"),
-                updated_after=filters.get("updated_after"),
-                updated_before=filters.get("updated_before"),
-            )
-        }
         snippets = {
-            unit.id: fts_snippets.get(unit.id) or _content_excerpt(unit.content)
+            unit.id: build_search_snippet(unit.content, query, length=snippet_length)
             for unit, _score in pairs
         }
 
@@ -1577,7 +1583,8 @@ def _render_search_payload(payload: dict, *, json_output: bool) -> None:
             typer.echo(f"\n[{result['source_project']}] {result['title']}")
         typer.echo(f"  ID: {result['id']}")
         typer.echo(f"  Type: {result['content_type']} | Tags: {', '.join(result['tags'])}")
-        typer.echo(f"  {result.get('snippet') or result.get('content', '')[:120]}...")
+        snippet = result.get("snippet") or _content_excerpt(result.get("content", ""), length=120)
+        typer.echo(f"  {snippet}")
 
 
 def _render_similar_payload(payload: dict, *, json_output: bool) -> None:
@@ -2904,6 +2911,11 @@ def search(
         "--max-confidence",
         help="Filter to units with confidence at most this value",
     ),
+    snippet_length: int = typer.Option(
+        DEFAULT_SEARCH_SNIPPET_LENGTH,
+        "--snippet-length",
+        help="Maximum characters to include in each result snippet",
+    ),
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
     """Search knowledge units."""
@@ -2915,6 +2927,7 @@ def search(
             limit=limit,
             mode=mode,
             sort=sort,
+            snippet_length=snippet_length,
             filters=_search_filters_dict(
                 source_project=source_project,
                 content_type=content_type,
@@ -2935,6 +2948,10 @@ def search(
             "error": str(exc),
             "valid_modes": ["fulltext", "semantic", "hybrid"],
             "valid_sorts": list(SEARCH_SORTS),
+            "valid_snippet_length": {
+                "min": 1,
+                "max": 2000,
+            },
         }
 
     _render_search_payload(payload, json_output=json_output)

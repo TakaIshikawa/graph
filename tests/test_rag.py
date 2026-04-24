@@ -8,7 +8,7 @@ import tempfile
 import pytest
 
 from graph.rag.embeddings import cosine_similarity, deserialize_embedding, serialize_embedding
-from graph.rag.search import RAGService
+from graph.rag.search import RAGService, build_search_snippet, validate_snippet_length
 from graph.store.db import Store
 from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
 from graph.types.models import KnowledgeEdge, KnowledgeUnit
@@ -32,6 +32,30 @@ class MockEmbeddingProvider:
 
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
         return [self.embed(t) for t in texts]
+
+
+def test_search_snippet_prefers_query_terms_and_respects_length():
+    content = "Intro text that is not relevant. " * 6 + "Solar storage economics improve fast."
+
+    snippet = build_search_snippet(content, "storage economics", length=60)
+
+    assert len(snippet) <= 60
+    assert "storage economics" in snippet
+    assert snippet.startswith("...")
+
+
+def test_search_snippet_falls_back_when_terms_do_not_match():
+    content = "Battery market context without the requested literal words."
+
+    snippet = build_search_snippet(content, "solar", length=24)
+
+    assert len(snippet) <= 24
+    assert snippet.startswith("Battery")
+
+
+def test_validate_snippet_length_rejects_invalid_values():
+    with pytest.raises(ValueError, match="snippet_length must be between 1 and 2000"):
+        validate_snippet_length(0)
 
 
 @pytest.fixture

@@ -432,6 +432,8 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_pa
     assert search_tool.inputSchema["properties"]["created_after"]["type"] == "string"
     assert search_tool.inputSchema["properties"]["min_utility"]["type"] == "number"
     assert search_tool.inputSchema["properties"]["min_confidence"]["type"] == "number"
+    assert search_tool.inputSchema["properties"]["snippet_length"]["type"] == "integer"
+    assert search_tool.inputSchema["properties"]["snippet_length"]["minimum"] == 1
     assert "created_at_desc" in search_tool.inputSchema["properties"]["sort"]["enum"]
     search_facets_tool = next(tool for tool in tools if tool.name == "search_facets")
     assert search_facets_tool.inputSchema["properties"]["tag"]["type"] == "string"
@@ -1343,6 +1345,43 @@ def test_search_tool_hybrid_results_include_scores_and_snippets(tmp_path, monkey
     assert results[0]["title"] == "Solar hybrid insight"
     assert isinstance(results[0]["score"], float)
     assert results[0]["snippet"]
+
+
+def test_search_tool_respects_snippet_length(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    unit = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="snippet-length",
+            source_entity_type="insight",
+            title="Snippet length insight",
+            content=("Opening context without the term. " * 6)
+            + "Solar storage economics improve fast.",
+            content_type=ContentType.INSIGHT,
+            tags=["energy", "solar"],
+        )
+    )
+    store.fts_index_unit(unit)
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "search",
+            {
+                "query": "storage economics",
+                "mode": "fulltext",
+                "limit": 1,
+                "snippet_length": 60,
+            },
+        )
+    )
+    results = json.loads(response[0].text)
+    snippet = results[0]["snippet"]
+    assert len(snippet) <= 60
+    assert "storage economics" in snippet
 
 
 def test_search_tool_invalid_sort_returns_clear_error(tmp_path, monkeypatch):

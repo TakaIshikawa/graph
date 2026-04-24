@@ -24,6 +24,9 @@ SEARCH_SORTS = (
     "utility_desc",
     "confidence_desc",
 )
+DEFAULT_SEARCH_SNIPPET_LENGTH = 160
+MIN_SEARCH_SNIPPET_LENGTH = 1
+MAX_SEARCH_SNIPPET_LENGTH = 2000
 
 
 def _iso(value) -> str:
@@ -47,6 +50,89 @@ def _consume_budget(text: str, remaining_budget: int) -> str:
 
 def _content_excerpt(text: str, length: int = 500) -> str:
     return _truncate_to_budget(text, length)
+
+
+def validate_snippet_length(length: int) -> int:
+    if isinstance(length, bool):
+        raise ValueError("snippet_length must be an integer.")
+    try:
+        value = int(length)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("snippet_length must be an integer.") from exc
+    if value < MIN_SEARCH_SNIPPET_LENGTH or value > MAX_SEARCH_SNIPPET_LENGTH:
+        raise ValueError(
+            "snippet_length must be between "
+            f"{MIN_SEARCH_SNIPPET_LENGTH} and {MAX_SEARCH_SNIPPET_LENGTH}."
+        )
+    return value
+
+
+def _query_terms(query: str) -> list[str]:
+    terms = []
+    seen = set()
+    for term in re.findall(r"[\w-]+", query.lower()):
+        if term in seen:
+            continue
+        seen.add(term)
+        terms.append(term)
+    return terms
+
+
+def _snippet_window(text: str, start: int, length: int) -> str:
+    if len(text) <= length:
+        return text
+    if length <= 3:
+        return text[start : start + length]
+
+    start = max(0, min(start, len(text) - 1))
+    prefix = start > 0
+    core_budget = length - (3 if prefix else 0) - 3
+    if core_budget <= 0:
+        return _truncate_to_budget(text[start:], length)
+
+    end = min(len(text), start + core_budget)
+    if end == len(text):
+        core_budget = length - (3 if prefix else 0)
+        start = max(0, len(text) - core_budget)
+        prefix = start > 0
+        end = len(text)
+    suffix = end < len(text)
+
+    snippet = text[start:end].strip()
+    if prefix:
+        snippet = "..." + snippet
+    if suffix:
+        snippet = snippet.rstrip() + "..."
+    return _truncate_to_budget(snippet, length)
+
+
+def build_search_snippet(
+    content: str,
+    query: str,
+    *,
+    length: int = DEFAULT_SEARCH_SNIPPET_LENGTH,
+) -> str:
+    """Return a bounded content snippet, preferring text around query terms."""
+    length = validate_snippet_length(length)
+    text = " ".join((content or "").split())
+    if not text or len(text) <= length:
+        return text
+
+    terms = _query_terms(query)
+    matches: list[tuple[int, int, int]] = []
+    lowered = text.lower()
+    for term in terms:
+        for match in re.finditer(re.escape(term), lowered):
+            window_start = max(0, match.start() - length // 3)
+            window_end = min(len(text), window_start + length)
+            term_hits = sum(1 for candidate in terms if candidate in lowered[window_start:window_end])
+            matches.append((term_hits, -match.start(), window_start))
+
+    if not matches:
+        return _content_excerpt(text, length)
+
+    _hits, _neg_position, window_start = max(matches)
+    return _snippet_window(text, window_start, length)
 
 
 def validate_search_sort(sort: str) -> str:
