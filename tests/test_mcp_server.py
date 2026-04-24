@@ -27,6 +27,14 @@ class FakeAdapter:
         return self.result
 
 
+class StaticEmbeddingProvider:
+    def embed(self, text: str) -> list[float]:
+        return [1.0, 0.0]
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        return [self.embed(text) for text in texts]
+
+
 def _populate_tags_graph(store: Store) -> None:
     for unit in [
         KnowledgeUnit(
@@ -628,6 +636,7 @@ def test_saved_query_tools_create_list_run_and_delete(tmp_path, monkeypatch):
     assert [result["title"] for result in search_results] == [
         "Solar approved insight"
     ]
+    assert search_results[0]["snippet"]
 
     delete_response = asyncio.run(
         mcp_server.call_tool("delete_query", {"name": "approved-solar"})
@@ -654,6 +663,43 @@ def test_saved_query_tools_create_list_run_and_delete(tmp_path, monkeypatch):
         "found": False,
         "error": "Saved query not found: approved-solar",
     }
+
+
+def test_search_tool_hybrid_results_include_scores_and_snippets(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    unit = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="hybrid",
+            source_entity_type="insight",
+            title="Solar hybrid insight",
+            content="Solar energy storage market growth",
+            content_type=ContentType.INSIGHT,
+            tags=["energy", "solar"],
+        )
+    )
+    store.fts_index_unit(unit)
+    store.update_embedding(unit.id, serialize_embedding([1.0, 0.0]))
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+    monkeypatch.setattr(
+        "graph.rag.embeddings.get_embedding_provider",
+        lambda *args, **kwargs: StaticEmbeddingProvider(),
+    )
+
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "search",
+            {"query": "solar", "mode": "hybrid", "limit": 1},
+        )
+    )
+    results = json.loads(response[0].text)
+    assert len(results) == 1
+    assert results[0]["title"] == "Solar hybrid insight"
+    assert isinstance(results[0]["score"], float)
+    assert results[0]["snippet"]
 
 
 def test_update_and_delete_unit_tools_reindex_and_clean_edges(tmp_path, monkeypatch):

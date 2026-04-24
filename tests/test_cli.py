@@ -1164,6 +1164,7 @@ def test_search_command_emits_semantic_json_with_scores(monkeypatch):
         assert payload["results"][0]["title"].startswith("Solar")
         assert payload["results"][0]["source_project"] == "max"
         assert isinstance(payload["results"][0]["score"], float)
+        assert payload["results"][0]["snippet"]
     finally:
         store.close()
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
@@ -2040,6 +2041,7 @@ def test_search_command_emits_active_date_and_utility_filters_in_json(monkeypatc
             "Solar approved insight"
         ]
         assert payload["results"][0]["created_at"] == "2026-04-22T00:00:00+00:00"
+        assert payload["results"][0]["snippet"]
     finally:
         store.close()
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]

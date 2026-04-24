@@ -192,6 +192,7 @@ class TestRAGService:
     ):
         results = rag_service.hybrid_search("solar")
         assert len(results) > 0
+        assert all(isinstance(sim, float) for _, sim in results)
 
     def test_search_no_embeddings(self, store: Store, rag_service: RAGService):
         # No units with embeddings

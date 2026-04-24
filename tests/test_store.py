@@ -479,6 +479,8 @@ class TestFTS:
         results = store.fts_search("solar")
         assert len(results) == 1
         assert results[0]["unit_id"] == inserted.id
+        assert results[0]["snippet"]
+        assert "[Solar]" in results[0]["snippet"]
 
     def test_fts_no_results(self, store: Store, sample_unit: KnowledgeUnit):
         inserted = store.insert_unit(sample_unit)
@@ -492,8 +494,10 @@ class TestFTS:
         store.fts_index_unit(inserted)
 
         # Invalid FTS5 syntax should fallback to LIKE
-        results = store.fts_search("solar AND panel")
-        assert len(results) >= 0  # Should not raise
+        results = store.fts_search('"solar')
+        assert len(results) == 1
+        assert results[0]["unit_id"] == inserted.id
+        assert results[0]["snippet"]
 
 
 class TestSyncState:

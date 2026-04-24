@@ -404,7 +404,20 @@ def _do_delete_edge(store: Store, edge_id: str) -> dict:
     return stats
 
 
-def _unit_to_json(unit, *, score: float | None = None, include_content: bool = True) -> dict:
+def _content_excerpt(content: str, *, length: int = 160) -> str:
+    text = " ".join((content or "").split())
+    if len(text) <= length:
+        return text
+    return text[:length].rstrip() + "..."
+
+
+def _unit_to_json(
+    unit,
+    *,
+    score: float | None = None,
+    snippet: str | None = None,
+    include_content: bool = True,
+) -> dict:
     created_at = (
         unit.created_at.isoformat()
         if isinstance(unit.created_at, datetime)
@@ -435,6 +448,8 @@ def _unit_to_json(unit, *, score: float | None = None, include_content: bool = T
         data["utility_score"] = unit.utility_score
     if score is not None:
         data["score"] = score
+    if snippet is not None:
+        data["snippet"] = snippet
     return data
 
 
@@ -581,7 +596,7 @@ def _search_fulltext_with_filters(
     created_before: str | datetime | None = None,
     min_utility: float | str | None = None,
     max_utility: float | str | None = None,
-) -> list:
+) -> list[tuple[object, str]]:
     fetch_limit = max(limit, 20)
 
     while True:
@@ -600,7 +615,7 @@ def _search_fulltext_with_filters(
                 min_utility=min_utility,
                 max_utility=max_utility,
             ):
-                filtered.append(unit)
+                filtered.append((unit, r.get("snippet") or _content_excerpt(unit.content)))
                 if len(filtered) >= limit:
                     return filtered
 
@@ -711,7 +726,9 @@ def _do_search(
         payload = {
             "query": query,
             "mode": mode,
-            "results": [_unit_to_json(unit) for unit in results],
+            "results": [
+                _unit_to_json(unit, snippet=snippet) for unit, snippet in results
+            ],
         }
         if filters:
             payload["filters"] = filters
@@ -741,6 +758,7 @@ def _do_search(
             min_utility=filters.get("min_utility"),
             max_utility=filters.get("max_utility"),
         )
+        snippets = {unit.id: _content_excerpt(unit.content) for unit, _score in pairs}
     else:
         pairs = _search_scored_with_filters(
             lambda q, fetch_limit: rag.hybrid_search(q, limit=fetch_limit),
@@ -755,11 +773,22 @@ def _do_search(
             min_utility=filters.get("min_utility"),
             max_utility=filters.get("max_utility"),
         )
+        fts_snippets = {
+            row["unit_id"]: row.get("snippet") or ""
+            for row in store.fts_search(query, limit=max(limit * 2, 20))
+        }
+        snippets = {
+            unit.id: fts_snippets.get(unit.id) or _content_excerpt(unit.content)
+            for unit, _score in pairs
+        }
 
     payload = {
         "query": query,
         "mode": mode,
-        "results": [_unit_to_json(unit, score=score) for unit, score in pairs],
+        "results": [
+            _unit_to_json(unit, score=score, snippet=snippets.get(unit.id))
+            for unit, score in pairs
+        ],
     }
     if filters:
         payload["filters"] = filters
@@ -795,7 +824,7 @@ def _render_search_payload(payload: dict, *, json_output: bool) -> None:
         typer.echo(
             f"  Type: {result['content_type']} | Tags: {', '.join(result['tags'])}"
         )
-        typer.echo(f"  {result.get('content', '')[:120]}...")
+        typer.echo(f"  {result.get('snippet') or result.get('content', '')[:120]}...")
 
 
 def _do_ingest(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -30,6 +31,39 @@ def _json_value(value) -> str | None:
     if isinstance(value, datetime):
         return value.isoformat()
     return str(value)
+
+
+def _excerpt(text: str, query: str, *, length: int = 160) -> str:
+    text = " ".join((text or "").split())
+    if not text:
+        return ""
+
+    terms = [
+        term.lower()
+        for term in re.findall(r"[\w-]+", query)
+        if term.upper() not in {"AND", "OR", "NOT", "NEAR"}
+    ]
+    lower_text = text.lower()
+    positions = [lower_text.find(term) for term in terms if lower_text.find(term) >= 0]
+    if positions:
+        start = max(min(positions) - length // 3, 0)
+    else:
+        start = 0
+    snippet = text[start : start + length].strip()
+    if start > 0:
+        snippet = "..." + snippet
+    if start + length < len(text):
+        snippet += "..."
+    return snippet
+
+
+def _fallback_search_terms(query: str) -> list[str]:
+    terms = [
+        term
+        for term in re.findall(r"[\w-]+", query)
+        if term.upper() not in {"AND", "OR", "NOT", "NEAR"}
+    ]
+    return terms or [query]
 
 
 def _row_to_unit(row: sqlite3.Row) -> KnowledgeUnit:
@@ -762,25 +796,49 @@ class Store:
     def fts_search(self, query: str, *, limit: int = 20) -> list[dict]:
         try:
             rows = self.conn.execute(
-                """SELECT unit_id, rank
+                """SELECT unit_id,
+                          rank,
+                          snippet(knowledge_fts, -1, '[', ']', '...', 24) AS snippet
                    FROM knowledge_fts
                    WHERE knowledge_fts MATCH ?
                    ORDER BY rank
                    LIMIT ?""",
                 (query, limit),
             ).fetchall()
-            return [{"unit_id": r["unit_id"], "rank": r["rank"]} for r in rows]
+            return [
+                {
+                    "unit_id": r["unit_id"],
+                    "rank": r["rank"],
+                    "snippet": r["snippet"] or "",
+                }
+                for r in rows
+            ]
         except sqlite3.OperationalError:
             # Fallback to LIKE search if FTS query syntax is invalid
-            pattern = f"%{query}%"
+            terms = _fallback_search_terms(query)
+            clauses = " OR ".join(
+                ["title LIKE ? OR content LIKE ? OR tags LIKE ?" for _ in terms]
+            )
+            params: list[object] = []
+            for term in terms:
+                pattern = f"%{term}%"
+                params.extend([pattern, pattern, pattern])
+            params.append(limit)
             rows = self.conn.execute(
-                """SELECT id as unit_id, -1.0 as rank
+                f"""SELECT id as unit_id, content, -1.0 as rank
                    FROM knowledge_units
-                   WHERE title LIKE ? OR content LIKE ?
+                   WHERE {clauses}
                    LIMIT ?""",
-                (pattern, pattern, limit),
+                params,
             ).fetchall()
-            return [{"unit_id": r["unit_id"], "rank": r["rank"]} for r in rows]
+            return [
+                {
+                    "unit_id": r["unit_id"],
+                    "rank": r["rank"],
+                    "snippet": _excerpt(r["content"], query),
+                }
+                for r in rows
+            ]
 
     # --- Ingestion orchestration ---
 
