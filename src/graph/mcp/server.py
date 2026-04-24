@@ -22,6 +22,7 @@ from graph.cli.main import (
     _do_export_queries,
     _do_export_report,
     _do_export_turtle,
+    _do_embeddings_status,
     _do_apply_tags_to_search,
     _do_import_json,
     _do_import_queries,
@@ -580,6 +581,23 @@ async def list_tools() -> list[Tool]:
                         "type": "integer",
                         "default": 20,
                         "description": "Maximum examples per audit category",
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="embedding_status",
+            description="Summarize embedding coverage and stale units by source project and content type.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "source_project": SEARCH_FILTER_SCHEMA["source_project"],
+                    "content_type": SEARCH_FILTER_SCHEMA["content_type"],
+                    "show_stale": {
+                        "type": "integer",
+                        "default": 0,
+                        "minimum": 0,
+                        "description": "List up to this many missing or stale units needing refresh",
                     },
                 },
             },
@@ -1728,6 +1746,15 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 store,
                 repair_fts=arguments.get("repair_fts", False),
                 limit=arguments.get("limit", 20),
+            )
+            return [TextContent(type="text", text=json.dumps(result))]
+
+        elif name == "embedding_status":
+            result = _do_embeddings_status(
+                store,
+                source_project=arguments.get("source_project"),
+                content_type=arguments.get("content_type"),
+                show_stale=arguments.get("show_stale", 0),
             )
             return [TextContent(type="text", text=json.dumps(result))]
 

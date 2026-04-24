@@ -1755,6 +1755,48 @@ def _do_embed(
 def _do_embeddings_status(
     store: Store,
     *,
+    source_project: str | None = None,
+    content_type: str | None = None,
+    show_stale: int | None = None,
+) -> dict:
+    stale_limit = max(0, show_stale) if show_stale is not None else 0
+    return {
+        "filters": {
+            "source_project": source_project,
+            "content_type": content_type,
+        },
+        "totals": store.get_embedding_status(
+            source_project=source_project,
+            content_type=content_type,
+        ),
+        "by_source_project": store.get_embedding_status_groups(
+            "source_project",
+            source_project=source_project,
+            content_type=content_type,
+        ),
+        "by_content_type": store.get_embedding_status_groups(
+            "content_type",
+            source_project=source_project,
+            content_type=content_type,
+        ),
+        "groups": store.get_embedding_status_matrix(
+            source_project=source_project,
+            content_type=content_type,
+        ),
+        "stale_units": store.get_embedding_refresh_status(
+            source_project=source_project,
+            content_type=content_type,
+            limit=stale_limit,
+        )
+        if stale_limit
+        else [],
+        "stale_limit": stale_limit,
+    }
+
+
+def _legacy_embeddings_status(
+    store: Store,
+    *,
     project: str | None = None,
     content_type: str | None = None,
 ) -> dict:
@@ -1839,7 +1881,7 @@ def embeddings_status(
 ) -> None:
     """Report embedding freshness counts."""
     store = _get_store()
-    status = _do_embeddings_status(
+    status = _legacy_embeddings_status(
         store,
         project=project,
         content_type=content_type,
@@ -1861,6 +1903,74 @@ def embeddings_status(
     typer.echo(f"  Fresh: {status['fresh']}")
     typer.echo(f"  Stale: {status['stale']}")
     typer.echo(f"  Missing: {status['missing']}")
+    typer.echo(f"  Percent fresh: {status['percent_fresh']}%")
+
+
+@app.command(name="embedding-status")
+def embedding_status(
+    source_project: str | None = typer.Option(
+        None,
+        "--source-project",
+        "--project",
+        "-p",
+        help="Filter by source project",
+    ),
+    content_type: str | None = typer.Option(None, "--content-type", help="Filter by content type"),
+    show_stale: int | None = typer.Option(
+        None,
+        "--show-stale",
+        min=0,
+        help="List up to LIMIT missing or stale units needing refresh",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Report embedding coverage and stale units by source and content type."""
+    store = _get_store()
+    report = _do_embeddings_status(
+        store,
+        source_project=source_project,
+        content_type=content_type,
+        show_stale=show_stale,
+    )
+    store.close()
+
+    if json_output:
+        _json_echo(report)
+        return
+
+    filters = []
+    if source_project is not None:
+        filters.append(f"source_project={source_project}")
+    if content_type is not None:
+        filters.append(f"content_type={content_type}")
+    suffix = f" ({', '.join(filters)})" if filters else ""
+    totals = report["totals"]
+    typer.echo(f"Embedding coverage{suffix}:")
+    typer.echo(
+        f"  Total: {totals['total']} | Fresh: {totals['fresh']} "
+        f"({totals['percent_fresh']}%) | Stale: {totals['stale']} | Missing: {totals['missing']}"
+    )
+    typer.echo("\nBy source project:")
+    for group in report["by_source_project"]:
+        typer.echo(
+            f"  {group['source_project']}: {group['fresh']}/{group['total']} fresh "
+            f"({group['percent_fresh']}%), {group['stale']} stale, {group['missing']} missing"
+        )
+    typer.echo("\nBy content type:")
+    for group in report["by_content_type"]:
+        typer.echo(
+            f"  {group['content_type']}: {group['fresh']}/{group['total']} fresh "
+            f"({group['percent_fresh']}%), {group['stale']} stale, {group['missing']} missing"
+        )
+    if show_stale is not None:
+        typer.echo(f"\nUnits needing refresh (limit {report['stale_limit']}):")
+        if not report["stale_units"]:
+            typer.echo("  None")
+        for unit in report["stale_units"]:
+            typer.echo(
+                f"  {unit['id']} | [{unit['source_project']}/{unit['content_type']}] "
+                f"{unit['title']} - {unit['reason']}"
+            )
 
 
 @app.command(name="infer-edges")

@@ -1134,12 +1134,48 @@ class TestEmbedding:
             "missing": 1,
             "fresh": 1,
             "stale": 1,
+            "percent_fresh": 33.33,
         }
         assert store.get_embedding_status(source_project="max") == {
             "total": 2,
             "missing": 1,
             "fresh": 0,
             "stale": 1,
+            "percent_fresh": 0.0,
+        }
+        assert store.get_embedding_status_groups("source_project") == [
+            {
+                "source_project": "forty_two",
+                "total": 1,
+                "missing": 0,
+                "fresh": 1,
+                "stale": 0,
+                "percent_fresh": 100.0,
+            },
+            {
+                "source_project": "max",
+                "total": 2,
+                "missing": 1,
+                "fresh": 0,
+                "stale": 1,
+                "percent_fresh": 0.0,
+            },
+        ]
+        assert store.get_embedding_status_matrix(source_project="max") == [
+            {
+                "source_project": "max",
+                "content_type": "insight",
+                "total": 2,
+                "missing": 1,
+                "fresh": 0,
+                "stale": 1,
+                "percent_fresh": 0.0,
+            }
+        ]
+        refresh = store.get_embedding_refresh_status(source_project="max", limit=5)
+        assert {item["id"]: item["reason"] for item in refresh} == {
+            stale.id: "stale_embedding",
+            missing.id: "missing_embedding",
         }
         assert [u.id for u in store.get_units_for_embedding_refresh()] == [missing.id]
         assert {u.id for u in store.get_units_for_embedding_refresh(stale_only=True)} == {

@@ -1766,10 +1766,98 @@ def test_embeddings_status_command_emits_filtered_json(monkeypatch):
             "content_type": "insight",
             "fresh": 1,
             "missing": 0,
+            "percent_fresh": 50.0,
             "source_project": "max",
             "stale": 1,
             "total": 2,
         }
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_embedding_status_report_lists_groups_and_stale_units(monkeypatch):
+    store = _make_store()
+    fresh = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="report-fresh",
+            source_entity_type="insight",
+            title="Report Fresh",
+            content="Fresh content",
+            content_type=ContentType.INSIGHT,
+        )
+    )
+    stale = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="report-stale",
+            source_entity_type="insight",
+            title="Report Stale",
+            content="Stale content",
+            content_type=ContentType.INSIGHT,
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="report-missing",
+            source_entity_type="finding",
+            title="Report Missing",
+            content="Missing content",
+            content_type=ContentType.FINDING,
+        )
+    )
+    store.update_embedding(fresh.id, serialize_embedding([1.0, 0.0]))
+    store.update_embedding(stale.id, serialize_embedding([1.0, 0.0]))
+    store.update_unit_fields(stale.id, content="Updated stale content")
+
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "embedding-status",
+                "--source-project",
+                "max",
+                "--show-stale",
+                "1",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["filters"] == {"source_project": "max", "content_type": None}
+        assert payload["totals"] == {
+            "total": 3,
+            "missing": 1,
+            "fresh": 1,
+            "stale": 1,
+            "percent_fresh": 33.33,
+        }
+        assert payload["by_source_project"][0]["source_project"] == "max"
+        assert {item["content_type"] for item in payload["by_content_type"]} == {
+            "finding",
+            "insight",
+        }
+        assert {
+            (item["source_project"], item["content_type"]) for item in payload["groups"]
+        } == {("max", "finding"), ("max", "insight")}
+        assert payload["stale_limit"] == 1
+        assert len(payload["stale_units"]) == 1
+        assert payload["stale_units"][0]["reason"] in {
+            "missing_embedding",
+            "stale_embedding",
+        }
+
+        human = runner.invoke(app, ["embedding-status", "--source-project", "max", "--show-stale", "2"])
+        assert human.exit_code == 0
+        assert "Embedding coverage" in human.output
+        assert "By source project:" in human.output
+        assert "Units needing refresh (limit 2):" in human.output
     finally:
         store.close()
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]

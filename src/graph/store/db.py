@@ -238,7 +238,7 @@ class Store:
         *,
         source_project: str | None = None,
         content_type: str | None = None,
-    ) -> dict[str, int]:
+    ) -> dict[str, int | float]:
         where, params = self._unit_filter_sql(
             source_project=source_project,
             content_type=content_type,
@@ -260,12 +260,152 @@ class Store:
                 {where}""",
             params,
         ).fetchone()
+        total = row["total"] or 0
+        fresh = row["fresh"] or 0
         return {
-            "total": row["total"] or 0,
+            "total": total,
             "missing": row["missing"] or 0,
-            "fresh": row["fresh"] or 0,
+            "fresh": fresh,
             "stale": row["stale"] or 0,
+            "percent_fresh": round((fresh / total) * 100, 2) if total else 0.0,
         }
+
+    def get_embedding_status_groups(
+        self,
+        group_by: str,
+        *,
+        source_project: str | None = None,
+        content_type: str | None = None,
+    ) -> list[dict[str, int | float | str]]:
+        if group_by not in {"source_project", "content_type"}:
+            raise ValueError("group_by must be source_project or content_type")
+        where, params = self._unit_filter_sql(
+            source_project=source_project,
+            content_type=content_type,
+        )
+        rows = self.conn.execute(
+            f"""SELECT
+                    {group_by} AS group_value,
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN embedding IS NULL THEN 1 ELSE 0 END) AS missing,
+                    SUM(CASE
+                        WHEN embedding IS NOT NULL
+                         AND embedding_updated_at IS NOT NULL
+                         AND embedding_updated_at >= updated_at
+                        THEN 1 ELSE 0 END) AS fresh,
+                    SUM(CASE
+                        WHEN embedding IS NOT NULL
+                         AND (embedding_updated_at IS NULL OR updated_at > embedding_updated_at)
+                        THEN 1 ELSE 0 END) AS stale
+                FROM knowledge_units
+                {where}
+                GROUP BY {group_by}
+                ORDER BY {group_by}""",
+            params,
+        ).fetchall()
+        return [self._embedding_status_group_dict(row, group_by) for row in rows]
+
+    def get_embedding_status_matrix(
+        self,
+        *,
+        source_project: str | None = None,
+        content_type: str | None = None,
+    ) -> list[dict[str, int | float | str]]:
+        where, params = self._unit_filter_sql(
+            source_project=source_project,
+            content_type=content_type,
+        )
+        rows = self.conn.execute(
+            f"""SELECT
+                    source_project,
+                    content_type,
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN embedding IS NULL THEN 1 ELSE 0 END) AS missing,
+                    SUM(CASE
+                        WHEN embedding IS NOT NULL
+                         AND embedding_updated_at IS NOT NULL
+                         AND embedding_updated_at >= updated_at
+                        THEN 1 ELSE 0 END) AS fresh,
+                    SUM(CASE
+                        WHEN embedding IS NOT NULL
+                         AND (embedding_updated_at IS NULL OR updated_at > embedding_updated_at)
+                        THEN 1 ELSE 0 END) AS stale
+                FROM knowledge_units
+                {where}
+                GROUP BY source_project, content_type
+                ORDER BY source_project, content_type""",
+            params,
+        ).fetchall()
+        return [self._embedding_status_group_dict(row) for row in rows]
+
+    def get_embedding_refresh_status(
+        self,
+        *,
+        source_project: str | None = None,
+        content_type: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, str | None]]:
+        where_parts, params = self._unit_filter_parts(
+            source_project=source_project,
+            content_type=content_type,
+        )
+        where_parts.append(
+            """(embedding IS NULL
+                OR embedding_updated_at IS NULL
+                OR updated_at > embedding_updated_at)"""
+        )
+        query = f"""SELECT
+                       id,
+                       title,
+                       source_project,
+                       content_type,
+                       updated_at,
+                       embedding_updated_at,
+                       CASE
+                           WHEN embedding IS NULL THEN 'missing_embedding'
+                           WHEN embedding_updated_at IS NULL THEN 'missing_embedding_timestamp'
+                           ELSE 'stale_embedding'
+                       END AS reason
+                   FROM knowledge_units
+                   WHERE {" AND ".join(where_parts)}
+                   ORDER BY updated_at DESC, created_at DESC
+                   LIMIT ?"""
+        params.append(max(0, limit))
+        rows = self.conn.execute(query, params).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "title": row["title"],
+                "source_project": row["source_project"],
+                "content_type": row["content_type"],
+                "reason": row["reason"],
+                "updated_at": row["updated_at"],
+                "embedding_updated_at": row["embedding_updated_at"],
+            }
+            for row in rows
+        ]
+
+    def _embedding_status_group_dict(
+        self, row: sqlite3.Row, group_by: str | None = None
+    ) -> dict[str, int | float | str]:
+        total = row["total"] or 0
+        fresh = row["fresh"] or 0
+        payload: dict[str, int | float | str] = {}
+        if group_by is not None:
+            payload[group_by] = row["group_value"]
+        else:
+            payload["source_project"] = row["source_project"]
+            payload["content_type"] = row["content_type"]
+        payload.update(
+            {
+                "total": total,
+                "missing": row["missing"] or 0,
+                "fresh": fresh,
+                "stale": row["stale"] or 0,
+                "percent_fresh": round((fresh / total) * 100, 2) if total else 0.0,
+            }
+        )
+        return payload
 
     def get_units_for_embedding_refresh(
         self,

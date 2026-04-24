@@ -621,6 +621,83 @@ def test_freshness_report_tool_returns_counts_and_stale_status(tmp_path, monkeyp
     assert ten_max["stale"] is False
 
 
+def test_embedding_status_tool_returns_grouped_report_and_stale_units(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    fresh = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="mcp-embed-fresh",
+            source_entity_type="insight",
+            title="MCP Fresh",
+            content="Fresh content",
+            content_type=ContentType.INSIGHT,
+        )
+    )
+    stale = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="mcp-embed-stale",
+            source_entity_type="insight",
+            title="MCP Stale",
+            content="Stale content",
+            content_type=ContentType.INSIGHT,
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="mcp-embed-missing",
+            source_entity_type="knowledge_node",
+            title="MCP Missing",
+            content="Missing content",
+            content_type=ContentType.FINDING,
+        )
+    )
+    store.update_embedding(fresh.id, serialize_embedding([1.0, 0.0]))
+    store.update_embedding(stale.id, serialize_embedding([1.0, 0.0]))
+    store.update_unit_fields(stale.id, content="Updated stale content")
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    embedding_tool = next(tool for tool in tools if tool.name == "embedding_status")
+    assert "source_project" in embedding_tool.inputSchema["properties"]
+    assert "content_type" in embedding_tool.inputSchema["properties"]
+    assert embedding_tool.inputSchema["properties"]["show_stale"]["default"] == 0
+
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "embedding_status",
+            {"source_project": "max", "show_stale": 5},
+        )
+    )
+    payload = json.loads(response[0].text)
+
+    assert payload["filters"] == {"source_project": "max", "content_type": None}
+    assert payload["totals"] == {
+        "total": 2,
+        "missing": 0,
+        "fresh": 1,
+        "stale": 1,
+        "percent_fresh": 50.0,
+    }
+    assert payload["by_source_project"][0]["source_project"] == "max"
+    assert payload["groups"][0]["content_type"] == "insight"
+    assert payload["stale_units"] == [
+        {
+            "id": stale.id,
+            "title": "MCP Stale",
+            "source_project": "max",
+            "content_type": "insight",
+            "reason": "stale_embedding",
+            "updated_at": payload["stale_units"][0]["updated_at"],
+            "embedding_updated_at": payload["stale_units"][0]["embedding_updated_at"],
+        }
+    ]
+
+
 def test_ingest_all_includes_sota_and_search_can_filter_sota(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
 
