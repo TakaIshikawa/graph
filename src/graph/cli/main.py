@@ -2201,6 +2201,60 @@ def duplicates(
     store.close()
 
 
+@app.command(name="review-queue")
+def review_queue(
+    limit: int = typer.Option(20, "--limit", "-n", help="Max queue items"),
+    source_project: str | None = typer.Option(
+        None,
+        "--source-project",
+        "--project",
+        "-p",
+        help="Filter by source project",
+    ),
+    content_type: str | None = typer.Option(None, "--content-type", help="Filter by content type"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Rank knowledge units worth revisiting."""
+    from graph.graph.service import GraphService
+
+    store = _get_store()
+    gs = GraphService(store)
+    result = gs.build_review_queue(
+        limit=limit,
+        source_project=source_project,
+        content_type=content_type,
+    )
+
+    if json_output:
+        _json_echo(result)
+        store.close()
+        return
+
+    queue = result["queue"]
+    if not queue:
+        typer.echo("No review candidates found.")
+        store.close()
+        return
+
+    typer.echo("Review queue:")
+    for item in queue:
+        unit = item["unit"]
+        reasons = ", ".join(
+            f"{reason['code']}:{reason['score']:.1f}" for reason in item["reasons"]
+        )
+        typer.echo(
+            f"  [{unit['source_project']}] {unit['title']} "
+            f"score={item['score']:.1f}"
+        )
+        typer.echo(
+            f"    ID: {unit['id']} | Type: {unit['content_type']} | "
+            f"Degree: {item['degree']} | Age: {item['age_days']}d"
+        )
+        typer.echo(f"    Reasons: {reasons}")
+
+    store.close()
+
+
 def _do_export_obsidian(
     store: Store,
     vault_path: str | None = None,

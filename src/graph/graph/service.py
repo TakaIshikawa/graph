@@ -103,6 +103,12 @@ def _metadata_strings(value: object, path: str = "metadata") -> list[tuple[str, 
     return []
 
 
+def _ensure_aware(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 class GraphService:
     """In-memory NetworkX graph built from SQLite for graph algorithms."""
 
@@ -767,6 +773,127 @@ class GraphService:
             )
         )
         return {"results": results[:limit], "filters": filters}
+
+    def build_review_queue(
+        self,
+        limit: int = 20,
+        source_project: str | None = None,
+        content_type: str | None = None,
+    ) -> dict:
+        """Rank knowledge units that are worth resurfacing for review."""
+        units = [
+            unit
+            for unit in self.store.get_all_units(limit=1000000000)
+            if (source_project is None or str(unit.source_project) == source_project)
+            and (content_type is None or str(unit.content_type) == content_type)
+        ]
+
+        degree_by_unit = Counter()
+        candidate_ids = {unit.id for unit in units}
+        for edge in self.store.get_all_edges():
+            if edge.from_unit_id in candidate_ids:
+                degree_by_unit[edge.from_unit_id] += 1
+            if edge.to_unit_id in candidate_ids:
+                degree_by_unit[edge.to_unit_id] += 1
+
+        now = datetime.now(timezone.utc)
+
+        def _unit_summary(unit) -> dict:
+            return {
+                "id": unit.id,
+                "source_project": str(unit.source_project),
+                "source_id": unit.source_id,
+                "source_entity_type": unit.source_entity_type,
+                "title": unit.title,
+                "content_type": str(unit.content_type),
+                "tags": unit.tags,
+                "utility_score": unit.utility_score,
+            }
+
+        queue = []
+        for unit in units:
+            created_at = _ensure_aware(unit.created_at)
+            age_days = max(0, int((now - created_at).total_seconds() // 86400))
+            age_score = min(age_days / 365, 1.0) * 35.0
+
+            degree = int(degree_by_unit.get(unit.id, 0))
+            if degree == 0:
+                degree_score = 30.0
+                degree_code = "isolated"
+            elif degree == 1:
+                degree_score = 20.0
+                degree_code = "low_degree"
+            elif degree == 2:
+                degree_score = 10.0
+                degree_code = "low_degree"
+            else:
+                degree_score = max(0.0, 8.0 - float(degree))
+                degree_code = "connected"
+
+            utility = max(0.0, min(float(unit.utility_score or 0.0), 1.0))
+            utility_score = utility * 20.0
+
+            reviewed_keys = [
+                key
+                for key in ("reviewed_at", "last_reviewed_at")
+                if unit.metadata.get(key)
+            ]
+            review_score = 25.0 if not reviewed_keys else 0.0
+            review_code = "unreviewed" if not reviewed_keys else "reviewed"
+
+            reasons = [
+                {
+                    "code": "age",
+                    "value": age_days,
+                    "score": round(age_score, 6),
+                    "max_score": 35.0,
+                },
+                {
+                    "code": degree_code,
+                    "value": degree,
+                    "score": round(degree_score, 6),
+                    "max_score": 30.0,
+                },
+                {
+                    "code": "utility_score",
+                    "value": utility,
+                    "score": round(utility_score, 6),
+                    "max_score": 20.0,
+                },
+                {
+                    "code": review_code,
+                    "value": reviewed_keys,
+                    "score": round(review_score, 6),
+                    "max_score": 25.0,
+                },
+            ]
+            score = sum(reason["score"] for reason in reasons)
+            queue.append(
+                {
+                    "unit": _unit_summary(unit),
+                    "score": round(score, 6),
+                    "reasons": reasons,
+                    "degree": degree,
+                    "age_days": age_days,
+                }
+            )
+
+        queue.sort(
+            key=lambda item: (
+                -item["score"],
+                -item["age_days"],
+                item["degree"],
+                item["unit"]["title"],
+                item["unit"]["id"],
+            )
+        )
+        return {
+            "queue": queue[:limit],
+            "filters": {
+                "source_project": source_project,
+                "content_type": content_type,
+            },
+        }
 
     def analyze_links(
         self,

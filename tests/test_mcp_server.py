@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 import networkx as nx
 
@@ -103,6 +103,64 @@ def _populate_duplicates_graph(store: Store) -> None:
         ),
     ]:
         store.insert_unit(unit)
+
+
+def _populate_review_queue_graph(store: Store) -> tuple[str, str]:
+    now = datetime.now(timezone.utc)
+    old_isolated = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="old-isolated",
+            source_entity_type="insight",
+            title="Old isolated",
+            content="Old unreviewed insight",
+            content_type=ContentType.INSIGHT,
+            utility_score=0.6,
+            created_at=now - timedelta(days=420),
+        )
+    )
+    recent_reviewed = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="recent-reviewed",
+            source_entity_type="insight",
+            title="Recent reviewed",
+            content="Recent reviewed insight",
+            content_type=ContentType.INSIGHT,
+            metadata={"reviewed_at": now.isoformat()},
+            utility_score=1.0,
+            created_at=now - timedelta(days=2),
+        )
+    )
+    neighbor = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="neighbor",
+            source_entity_type="knowledge_node",
+            title="Neighbor",
+            content="Connected node",
+            content_type=ContentType.FINDING,
+        )
+    )
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=recent_reviewed.id,
+            to_unit_id=neighbor.id,
+            relation=EdgeRelation.RELATES_TO,
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="old-finding",
+            source_entity_type="knowledge_node",
+            title="Old finding",
+            content="Old finding",
+            content_type=ContentType.FINDING,
+            created_at=now - timedelta(days=365),
+        )
+    )
+    return old_isolated.id, recent_reviewed.id
 
 
 def _populate_links_graph(store: Store) -> None:
@@ -1152,6 +1210,45 @@ def test_analyze_duplicates_tool_returns_reasons_units_and_filters(
         for item in payload["results"]
         for unit in item["units"]
     )
+
+
+def test_review_queue_tool_returns_ranked_items_reasons_and_filters(
+    tmp_path, monkeypatch
+):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    old_id, recent_id = _populate_review_queue_graph(store)
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    review_tool = next(tool for tool in tools if tool.name == "review_queue")
+    assert "source_project" in review_tool.inputSchema["properties"]
+    assert "content_type" in review_tool.inputSchema["properties"]
+
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "review_queue",
+            {
+                "source_project": "max",
+                "content_type": "insight",
+            },
+        )
+    )
+    payload = json.loads(response[0].text)
+    assert payload["filters"] == {
+        "source_project": "max",
+        "content_type": "insight",
+    }
+    assert [item["unit"]["id"] for item in payload["queue"]] == [
+        old_id,
+        recent_id,
+    ]
+    assert payload["queue"][0]["score"] > payload["queue"][1]["score"]
+    assert {"age", "isolated", "utility_score", "unreviewed"} <= {
+        reason["code"] for reason in payload["queue"][0]["reasons"]
+    }
 
 
 def test_analyze_links_tool_returns_same_structured_payload(tmp_path, monkeypatch):

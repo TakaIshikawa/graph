@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from datetime import datetime, timedelta, timezone
 
 import networkx as nx
 import pytest
@@ -681,6 +682,98 @@ class TestGraphService:
             for item in result["results"]
             for unit in item["units"]
         )
+
+    def test_build_review_queue_ranks_old_isolated_unreviewed_and_filters(
+        self, store: Store
+    ):
+        now = datetime.now(timezone.utc)
+        old_isolated = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="old-isolated",
+                source_entity_type="insight",
+                title="Old isolated",
+                content="Old unreviewed insight",
+                content_type=ContentType.INSIGHT,
+                utility_score=0.6,
+                created_at=now - timedelta(days=420),
+            )
+        )
+        recent_reviewed = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="recent-reviewed",
+                source_entity_type="insight",
+                title="Recent reviewed",
+                content="Recent reviewed insight",
+                content_type=ContentType.INSIGHT,
+                metadata={"reviewed_at": now.isoformat()},
+                utility_score=1.0,
+                created_at=now - timedelta(days=3),
+            )
+        )
+        neighbor = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="neighbor",
+                source_entity_type="artifact",
+                title="Neighbor",
+                content="Connected artifact",
+                content_type=ContentType.ARTIFACT,
+                created_at=now - timedelta(days=2),
+            )
+        )
+        finding = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="old-finding",
+                source_entity_type="knowledge_node",
+                title="Old finding",
+                content="Old finding",
+                content_type=ContentType.FINDING,
+                created_at=now - timedelta(days=300),
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=recent_reviewed.id,
+                to_unit_id=neighbor.id,
+                relation=EdgeRelation.RELATES_TO,
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=finding.id,
+                to_unit_id=recent_reviewed.id,
+                relation=EdgeRelation.RELATES_TO,
+            )
+        )
+
+        gs = GraphService(store)
+        result = gs.build_review_queue()
+
+        assert result["queue"][0]["unit"]["id"] == old_isolated.id
+        assert result["queue"][0]["degree"] == 0
+        assert result["queue"][0]["age_days"] >= 419
+        reason_codes = {reason["code"] for reason in result["queue"][0]["reasons"]}
+        assert {"age", "isolated", "utility_score", "unreviewed"} <= reason_codes
+
+        by_id = {item["unit"]["id"]: item for item in result["queue"]}
+        assert by_id[old_isolated.id]["score"] > by_id[recent_reviewed.id]["score"]
+        assert any(
+            reason["code"] == "reviewed"
+            for reason in by_id[recent_reviewed.id]["reasons"]
+        )
+
+        filtered = gs.build_review_queue(source_project="max", content_type="insight")
+        assert [item["unit"]["id"] for item in filtered["queue"]] == [
+            old_isolated.id,
+            recent_reviewed.id,
+        ]
+        assert filtered["filters"] == {
+            "source_project": "max",
+            "content_type": "insight",
+        }
 
     def test_analyze_links_scans_content_metadata_normalizes_and_filters(
         self, external_link_store: Store

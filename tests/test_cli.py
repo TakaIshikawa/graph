@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import networkx as nx
@@ -356,6 +356,64 @@ def _populate_links_graph(store: Store) -> None:
         ),
     ]:
         store.insert_unit(unit)
+
+
+def _populate_review_queue_graph(store: Store) -> tuple[str, str]:
+    now = datetime.now(timezone.utc)
+    old_isolated = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="old-isolated",
+            source_entity_type="insight",
+            title="Old isolated",
+            content="Old unreviewed insight",
+            content_type=ContentType.INSIGHT,
+            utility_score=0.6,
+            created_at=now - timedelta(days=420),
+        )
+    )
+    recent_reviewed = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="recent-reviewed",
+            source_entity_type="insight",
+            title="Recent reviewed",
+            content="Recent reviewed insight",
+            content_type=ContentType.INSIGHT,
+            metadata={"last_reviewed_at": now.isoformat()},
+            utility_score=1.0,
+            created_at=now - timedelta(days=2),
+        )
+    )
+    neighbor = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="neighbor",
+            source_entity_type="knowledge_node",
+            title="Neighbor",
+            content="Connected node",
+            content_type=ContentType.FINDING,
+        )
+    )
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=recent_reviewed.id,
+            to_unit_id=neighbor.id,
+            relation=EdgeRelation.RELATES_TO,
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="old-finding",
+            source_entity_type="knowledge_node",
+            title="Old finding",
+            content="Old finding",
+            content_type=ContentType.FINDING,
+            created_at=now - timedelta(days=365),
+        )
+    )
+    return old_isolated.id, recent_reviewed.id
 
 
 def _cleanup_db(path: str) -> None:
@@ -1341,6 +1399,45 @@ def test_duplicates_command_emits_reasons_units_and_applies_filters(monkeypatch)
             for item in payload["results"]
             for unit in item["units"]
         )
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_review_queue_command_emits_ranked_json_and_applies_filters(monkeypatch):
+    store = _make_store()
+    old_id, recent_id = _populate_review_queue_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "review-queue",
+                "--source-project",
+                "max",
+                "--content-type",
+                "insight",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["filters"] == {
+            "source_project": "max",
+            "content_type": "insight",
+        }
+        assert [item["unit"]["id"] for item in payload["queue"]] == [
+            old_id,
+            recent_id,
+        ]
+        assert payload["queue"][0]["score"] > payload["queue"][1]["score"]
+        assert payload["queue"][0]["degree"] == 0
+        assert {"age", "isolated", "utility_score", "unreviewed"} <= {
+            reason["code"] for reason in payload["queue"][0]["reasons"]
+        }
     finally:
         store.close()
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]

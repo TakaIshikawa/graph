@@ -445,6 +445,33 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="review_queue",
+            description="Rank knowledge units worth resurfacing for review.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "default": 20},
+                    "source_project": {
+                        "type": "string",
+                        "enum": SUPPORTED_SYNC_PROJECTS,
+                        "description": "Filter by source project",
+                    },
+                    "content_type": {
+                        "type": "string",
+                        "enum": [
+                            "insight",
+                            "finding",
+                            "idea",
+                            "design_brief",
+                            "artifact",
+                            "metadata",
+                        ],
+                        "description": "Filter by content type",
+                    },
+                },
+            },
+        ),
+        Tool(
             name="add_unit",
             description="Manually add a knowledge unit to the graph.",
             inputSchema={
@@ -1027,6 +1054,15 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         elif name == "analyze_duplicates":
             gs = GraphService(store)
             result = gs.analyze_duplicates(
+                limit=arguments.get("limit", 20),
+                source_project=arguments.get("source_project"),
+                content_type=arguments.get("content_type"),
+            )
+            return [TextContent(type="text", text=json.dumps(result))]
+
+        elif name == "review_queue":
+            gs = GraphService(store)
+            result = gs.build_review_queue(
                 limit=arguments.get("limit", 20),
                 source_project=arguments.get("source_project"),
                 content_type=arguments.get("content_type"),
