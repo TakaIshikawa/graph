@@ -1128,6 +1128,23 @@ class TestFTS:
         assert results[0]["snippet"]
         assert "[Solar]" in results[0]["snippet"]
 
+    def test_manual_unit_is_discoverable_after_explicit_indexing(self, store: Store):
+        inserted = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.ME,
+                source_id="manual-search-note",
+                source_entity_type="manual",
+                title="Manual battery note",
+                content="Ad hoc sodium battery observation",
+                tags=["manual", "battery"],
+            )
+        )
+        store.fts_index_unit(inserted)
+
+        results = store.fts_search("sodium")
+        assert len(results) == 1
+        assert results[0]["unit_id"] == inserted.id
+
     def test_fts_no_results(self, store: Store, sample_unit: KnowledgeUnit):
         inserted = store.insert_unit(sample_unit)
         store.fts_index_unit(inserted)

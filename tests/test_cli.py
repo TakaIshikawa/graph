@@ -3791,6 +3791,86 @@ def test_update_and_delete_unit_cli_json_reindexes_and_cleans_edges(monkeypatch)
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_create_unit_cli_json_inserts_and_indexes_manual_unit(monkeypatch):
+    store = _make_store()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "create-unit",
+                "--title",
+                "Manual battery note",
+                "--content",
+                "Ad hoc sodium battery observation",
+                "--content-type",
+                "finding",
+                "--tag",
+                "manual",
+                "--tag",
+                "battery",
+                "--metadata-json",
+                '{"owner":"me"}',
+                "--confidence",
+                "0.7",
+                "--utility-score",
+                "8.5",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        unit = payload["unit"]
+        assert payload["created"] is True
+        assert unit["id"]
+        assert unit["source_project"] == "me"
+        assert unit["source_entity_type"] == "manual"
+        assert unit["source_id"]
+        assert unit["title"] == "Manual battery note"
+        assert unit["content_type"] == "finding"
+        assert unit["tags"] == ["manual", "battery"]
+        assert unit["metadata"] == {"owner": "me"}
+        assert unit["confidence"] == 0.7
+        assert unit["utility_score"] == 8.5
+        assert store.fts_search("sodium")[0]["unit_id"] == unit["id"]
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_create_unit_cli_json_rejects_invalid_metadata(monkeypatch):
+    store = _make_store()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "create-unit",
+                "--title",
+                "Manual note",
+                "--content",
+                "Content",
+                "--metadata-json",
+                "[1, 2]",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["created"] is False
+        assert payload["error"] == "--metadata-json must be a valid JSON object."
+        assert store.count_units() == 0
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_units_merge_cli_json_dry_run_and_apply(monkeypatch):
     store = _make_store()
     target = store.insert_unit(

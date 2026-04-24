@@ -13,6 +13,7 @@ from graph.config import settings
 from graph.cli.main import (
     _backlinks_payload,
     _do_context_pack,
+    _do_create_unit,
     _do_delete_edge,
     _do_export_cytoscape,
     _do_export_graphml,
@@ -947,6 +948,54 @@ async def list_tools() -> list[Tool]:
                         "description": "Filter by content type",
                     },
                 },
+            },
+        ),
+        Tool(
+            name="create_unit",
+            description="Create an ad hoc knowledge unit and refresh full-text search.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Unit title"},
+                    "content": {"type": "string", "description": "Unit content"},
+                    "content_type": {
+                        "type": "string",
+                        "enum": [content_type.value for content_type in ContentType],
+                        "default": ContentType.INSIGHT.value,
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "default": [],
+                    },
+                    "metadata_json": {
+                        "type": "string",
+                        "default": "{}",
+                        "description": "JSON object metadata for the new unit",
+                    },
+                    "confidence": {
+                        "type": "number",
+                        "description": "Optional confidence score",
+                    },
+                    "utility_score": {
+                        "type": "number",
+                        "description": "Optional utility score",
+                    },
+                    "source_project": {
+                        "type": "string",
+                        "enum": [source_project.value for source_project in SourceProject],
+                        "default": SourceProject.ME.value,
+                    },
+                    "source_entity_type": {
+                        "type": "string",
+                        "default": "manual",
+                    },
+                    "source_id": {
+                        "type": "string",
+                        "description": "Source ID; generated as a UUID when omitted",
+                    },
+                },
+                "required": ["title", "content"],
             },
         ),
         Tool(
@@ -2082,6 +2131,25 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             days = max(0, int(arguments.get("days", 7)))
             report = store.freshness_report(_supported_sync_targets(), days=days)
             return [TextContent(type="text", text=json.dumps({"days": days, "results": report}))]
+
+        elif name == "create_unit":
+            try:
+                payload = _do_create_unit(
+                    store,
+                    title=arguments["title"],
+                    content=arguments["content"],
+                    content_type=arguments.get("content_type", ContentType.INSIGHT.value),
+                    tags=arguments.get("tags", []),
+                    metadata=arguments.get("metadata_json"),
+                    confidence=arguments.get("confidence"),
+                    utility_score=arguments.get("utility_score"),
+                    source_project=arguments.get("source_project", SourceProject.ME.value),
+                    source_entity_type=arguments.get("source_entity_type", "manual"),
+                    source_id=arguments.get("source_id"),
+                )
+            except ValueError as exc:
+                payload = {"created": False, "error": str(exc)}
+            return [TextContent(type="text", text=json.dumps(payload, default=str))]
 
         elif name == "add_unit":
             unit = KnowledgeUnit(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -11,8 +12,8 @@ import typer
 from graph.config import settings
 from graph.rag.search import SEARCH_SORTS, sort_search_results, validate_search_sort
 from graph.store.db import Store
-from graph.types.enums import ContentType, EdgeRelation, EdgeSource
-from graph.types.models import SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeUnit, SyncState
 
 app = typer.Typer(name="graph", help="Personal Knowledge Graph — aggregate, connect, retrieve")
 queries_app = typer.Typer(help="Save and run repeatable graph searches")
@@ -433,6 +434,38 @@ def _parse_metadata_json(value: str | dict | None) -> dict:
     if not isinstance(parsed, dict):
         raise ValueError("--metadata-json must be a valid JSON object.")
     return parsed
+
+
+def _do_create_unit(
+    store: Store,
+    *,
+    title: str,
+    content: str,
+    content_type: str = ContentType.INSIGHT.value,
+    tags: list[str] | None = None,
+    metadata: dict | str | None = None,
+    confidence: float | None = None,
+    utility_score: float | None = None,
+    source_project: str = SourceProject.ME.value,
+    source_entity_type: str = "manual",
+    source_id: str | None = None,
+) -> dict:
+    metadata_values = _parse_metadata_json(metadata)
+    unit = KnowledgeUnit(
+        source_project=SourceProject(source_project),
+        source_id=source_id or str(uuid.uuid4()),
+        source_entity_type=source_entity_type,
+        title=title,
+        content=content,
+        content_type=ContentType(content_type),
+        tags=tags or [],
+        metadata=metadata_values,
+        confidence=confidence,
+        utility_score=utility_score,
+    )
+    inserted = store.insert_unit(unit)
+    store.fts_index_unit(inserted)
+    return {"created": True, "unit_id": inserted.id, "unit": _unit_to_json(inserted)}
 
 
 def _do_update_unit(
@@ -2327,6 +2360,80 @@ def extract_references(
         )
 
     store.close()
+
+
+@app.command(name="create-unit")
+def create_unit(
+    title: str = typer.Option(..., "--title", help="Unit title"),
+    content: str = typer.Option(..., "--content", help="Unit content"),
+    content_type: str = typer.Option(
+        ContentType.INSIGHT.value,
+        "--content-type",
+        help="Content type",
+    ),
+    tag: list[str] = typer.Option(
+        [],
+        "--tag",
+        help="Add a tag. Repeat to add multiple tags.",
+    ),
+    metadata_json: str | None = typer.Option(
+        None,
+        "--metadata-json",
+        help="JSON object metadata for the new unit",
+    ),
+    confidence: float | None = typer.Option(None, "--confidence", help="Optional confidence score"),
+    utility_score: float | None = typer.Option(
+        None,
+        "--utility-score",
+        help="Optional utility score",
+    ),
+    source_project: str = typer.Option(
+        SourceProject.ME.value,
+        "--source-project",
+        help="Source project for the unit",
+    ),
+    source_entity_type: str = typer.Option(
+        "manual",
+        "--source-entity-type",
+        help="Source entity type for the unit",
+    ),
+    source_id: str | None = typer.Option(
+        None,
+        "--source-id",
+        help="Source ID; generated as a UUID when omitted",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Create an ad hoc knowledge unit and refresh full-text search."""
+    store = _get_store()
+    try:
+        payload = _do_create_unit(
+            store,
+            title=title,
+            content=content,
+            content_type=content_type,
+            tags=tag,
+            metadata=metadata_json,
+            confidence=confidence,
+            utility_score=utility_score,
+            source_project=source_project,
+            source_entity_type=source_entity_type,
+            source_id=source_id,
+        )
+    except ValueError as exc:
+        if json_output:
+            _json_echo({"created": False, "error": str(exc)})
+            return
+        raise typer.BadParameter(str(exc)) from exc
+    finally:
+        store.close()
+
+    if json_output:
+        _json_echo(payload)
+        return
+
+    unit = payload["unit"]
+    typer.echo(f"Created unit {unit['id']}: {unit['title']}")
 
 
 @app.command(name="update-unit")

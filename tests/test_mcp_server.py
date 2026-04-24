@@ -440,6 +440,10 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_pa
         "semantic",
         "fulltext",
     ]
+    create_unit_tool = next(tool for tool in tools if tool.name == "create_unit")
+    assert create_unit_tool.inputSchema["properties"]["metadata_json"]["type"] == "string"
+    assert create_unit_tool.inputSchema["properties"]["source_project"]["default"] == "me"
+    assert create_unit_tool.inputSchema["properties"]["source_entity_type"]["default"] == "manual"
     save_query_tool = next(tool for tool in tools if tool.name == "save_query")
     assert save_query_tool.inputSchema["properties"]["created_before"]["type"] == "string"
     assert save_query_tool.inputSchema["properties"]["max_utility"]["type"] == "number"
@@ -1520,6 +1524,60 @@ def test_update_and_delete_unit_tools_reindex_and_clean_edges(tmp_path, monkeypa
         assert verify.fts_search("battery") == []
     finally:
         verify.close()
+
+
+def test_create_unit_tool_validates_metadata_and_indexes_unit(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    store.close()
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "create_unit",
+            {
+                "title": "Manual battery note",
+                "content": "Ad hoc sodium battery observation",
+                "content_type": "finding",
+                "tags": ["manual", "battery"],
+                "metadata_json": '{"owner":"me"}',
+                "confidence": 0.7,
+                "utility_score": 8.5,
+            },
+        )
+    )
+    payload = json.loads(response[0].text)
+    unit = payload["unit"]
+    assert payload["created"] is True
+    assert unit["id"]
+    assert unit["source_project"] == "me"
+    assert unit["source_entity_type"] == "manual"
+    assert unit["source_id"]
+    assert unit["metadata"] == {"owner": "me"}
+    assert unit["confidence"] == 0.7
+    assert unit["utility_score"] == 8.5
+
+    verify = Store(str(db_path))
+    try:
+        assert verify.fts_search("sodium")[0]["unit_id"] == unit["id"]
+    finally:
+        verify.close()
+
+    invalid_response = asyncio.run(
+        mcp_server.call_tool(
+            "create_unit",
+            {
+                "title": "Invalid metadata",
+                "content": "Content",
+                "metadata_json": "{not json",
+            },
+        )
+    )
+    invalid_payload = json.loads(invalid_response[0].text)
+    assert invalid_payload == {
+        "created": False,
+        "error": "--metadata-json must be a valid JSON object.",
+    }
 
 
 def test_merge_units_tool_dry_run_and_apply(tmp_path, monkeypatch):
