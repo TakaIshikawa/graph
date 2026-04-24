@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 
@@ -345,6 +346,65 @@ class TestGraphService:
         assert 'graph:tag "solar \\"pv\\""' in text
         assert 'graph:tag "line\\nbreak"' in text
         assert f"graph:builds_on <https://example.test/unit/{b.id}>" in text
+
+    def test_export_neighborhood_writes_capped_local_json(
+        self, populated_store: Store, tmp_path
+    ):
+        a = populated_store.get_unit_by_source("forty_two", "a", "knowledge_node")
+        c = populated_store.get_unit_by_source("max", "c", "insight")
+        output_path = tmp_path / "neighborhood.json"
+
+        gs = GraphService(populated_store)
+        gs.rebuild()
+        stats = gs.export_neighborhood(a.id, output_path, depth=9)
+        payload = json.loads(output_path.read_text())
+
+        assert stats == {
+            "path": str(output_path),
+            "unit_count": 3,
+            "edge_count": 2,
+            "depth": 3,
+            "center_unit_id": a.id,
+        }
+        assert payload["schema_version"] == 1
+        assert payload["exported_at"]
+        assert payload["center"]["id"] == a.id
+        assert payload["depth"] == 3
+        assert {unit["title"] for unit in payload["units"]} == {
+            "Node A",
+            "Node B",
+            "Node C",
+        }
+        assert {edge["relation"] for edge in payload["edges"]} == {
+            "builds_on",
+            "inspires",
+        }
+        assert c.id in {unit["id"] for unit in payload["units"]}
+
+    def test_export_neighborhood_limits_depth_and_reports_missing_unit(
+        self, populated_store: Store, tmp_path
+    ):
+        a = populated_store.get_unit_by_source("forty_two", "a", "knowledge_node")
+        output_path = tmp_path / "depth-one.json"
+
+        gs = GraphService(populated_store)
+        gs.rebuild()
+        gs.export_neighborhood(a.id, output_path, depth=1)
+        payload = json.loads(output_path.read_text())
+
+        assert payload["depth"] == 1
+        assert {unit["title"] for unit in payload["units"]} == {"Node A", "Node B"}
+        assert [edge["relation"] for edge in payload["edges"]] == ["builds_on"]
+
+        with pytest.raises(ValueError) as exc_info:
+            gs.export_neighborhood("missing", tmp_path / "missing.json")
+        error = json.loads(str(exc_info.value))
+        assert error == {
+            "error": "unit_not_found",
+            "message": "Unit not found: missing",
+            "unit_id": "missing",
+        }
+        assert not (tmp_path / "missing.json").exists()
 
     def test_find_gaps(self, populated_store: Store):
         gs = GraphService(populated_store)

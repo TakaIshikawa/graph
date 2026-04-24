@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections import Counter
+from datetime import datetime, timezone
+import json
 from pathlib import Path
 import re
 from urllib.parse import quote, urlsplit, urlunsplit
@@ -79,6 +81,10 @@ def _normalize_external_url(value: str) -> str | None:
 def _external_url_domain(url: str) -> str | None:
     hostname = urlsplit(url).hostname
     return hostname.lower().rstrip(".") if hostname else None
+
+
+def _json_value(value: object) -> object:
+    return value.isoformat() if hasattr(value, "isoformat") else value
 
 
 def _metadata_strings(value: object, path: str = "metadata") -> list[tuple[str, str]]:
@@ -238,6 +244,103 @@ class GraphService:
             "node_count": len(units),
             "edge_count": len(edges),
             "base_uri": base_uri,
+        }
+
+    def _unit_export_data(self, unit) -> dict:
+        return {
+            "id": unit.id,
+            "source_project": str(unit.source_project),
+            "source_id": unit.source_id,
+            "source_entity_type": unit.source_entity_type,
+            "title": unit.title,
+            "content": unit.content,
+            "content_type": str(unit.content_type),
+            "metadata": unit.metadata,
+            "tags": unit.tags,
+            "confidence": unit.confidence,
+            "utility_score": unit.utility_score,
+            "created_at": _json_value(unit.created_at),
+            "ingested_at": _json_value(unit.ingested_at),
+            "updated_at": _json_value(unit.updated_at),
+        }
+
+    def _edge_export_data(self, edge) -> dict:
+        return {
+            "id": edge.id,
+            "from_unit_id": edge.from_unit_id,
+            "to_unit_id": edge.to_unit_id,
+            "relation": str(edge.relation),
+            "weight": edge.weight,
+            "source": str(edge.source),
+            "metadata": edge.metadata,
+            "created_at": _json_value(edge.created_at),
+        }
+
+    def build_neighborhood_export(self, unit_id: str, depth: int = 1) -> dict:
+        """Build a portable JSON payload for one unit's local neighborhood."""
+        capped_depth = max(1, min(depth, 3))
+        if not self.G:
+            self.rebuild()
+
+        result = self.get_neighbors(unit_id, depth=capped_depth)
+        if result["center"] is None:
+            raise ValueError(
+                json.dumps(
+                    {
+                        "error": "unit_not_found",
+                        "message": f"Unit not found: {unit_id}",
+                        "unit_id": unit_id,
+                    }
+                )
+            )
+
+        unit_ids = {unit_id, *result["neighbors"]}
+        units = [
+            unit
+            for unit in (self.store.get_unit(found_id) for found_id in sorted(unit_ids))
+            if unit is not None
+        ]
+        edges = sorted(
+            (
+                edge
+                for edge in self.store.get_all_edges()
+                if edge.from_unit_id in unit_ids and edge.to_unit_id in unit_ids
+            ),
+            key=lambda edge: (
+                edge.from_unit_id,
+                edge.to_unit_id,
+                str(edge.relation),
+                edge.id,
+            ),
+        )
+        center = self.store.get_unit(unit_id)
+
+        return {
+            "schema_version": 1,
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "center": self._unit_export_data(center) if center else None,
+            "units": [self._unit_export_data(unit) for unit in units],
+            "edges": [self._edge_export_data(edge) for edge in edges],
+            "depth": capped_depth,
+        }
+
+    def export_neighborhood(
+        self, unit_id: str, path: str | Path, depth: int = 1
+    ) -> dict:
+        """Write one unit's local subgraph to JSON and return export stats."""
+        output_path = Path(path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = self.build_neighborhood_export(unit_id, depth=depth)
+        output_path.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        return {
+            "path": str(output_path),
+            "unit_count": len(payload["units"]),
+            "edge_count": len(payload["edges"]),
+            "depth": payload["depth"],
+            "center_unit_id": unit_id,
         }
 
     def get_neighbors(self, unit_id: str, depth: int = 1) -> dict:

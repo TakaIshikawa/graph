@@ -89,6 +89,16 @@ def _do_export_turtle(
     return gs.export_turtle(path, base_uri=base_uri)
 
 
+def _do_export_neighborhood(
+    store: Store, unit_id: str, path: str | Path, *, depth: int = 1
+) -> dict:
+    from graph.graph.service import GraphService
+
+    gs = GraphService(store)
+    gs.rebuild()
+    return gs.export_neighborhood(unit_id, path, depth=depth)
+
+
 def _do_export_report(store: Store, path: str | Path, *, limit: int = 10) -> dict:
     from graph.graph.service import GraphService
 
@@ -644,6 +654,41 @@ def export_turtle(
     typer.echo(
         f"Exported {stats['node_count']} nodes and "
         f"{stats['edge_count']} edges to {stats['path']}"
+    )
+
+
+@app.command(name="export-neighborhood")
+def export_neighborhood(
+    unit_id: str = typer.Argument(..., help="Center unit ID"),
+    path: Path = typer.Argument(..., help="Destination neighborhood JSON path"),
+    depth: int = typer.Option(1, "--depth", "-d", help="Traversal depth (1-3; max 3)"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Export a focused JSON subgraph around one unit."""
+    store = _get_store()
+    try:
+        stats = _do_export_neighborhood(store, unit_id, path, depth=depth)
+    except ValueError as exc:
+        store.close()
+        try:
+            payload = json.loads(str(exc))
+        except json.JSONDecodeError:
+            payload = {"error": "export_failed", "message": str(exc)}
+        if json_output:
+            _json_echo(payload)
+        else:
+            typer.echo(payload["message"])
+        raise typer.Exit(code=1) from exc
+    store.close()
+
+    if json_output:
+        _json_echo(stats)
+        return
+
+    typer.echo(
+        f"Exported {stats['unit_count']} units and "
+        f"{stats['edge_count']} edges to {stats['path']} "
+        f"(depth {stats['depth']})"
     )
 
 

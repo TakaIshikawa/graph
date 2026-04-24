@@ -813,6 +813,64 @@ def test_export_turtle_tool_returns_path_counts_and_base_uri(tmp_path, monkeypat
     assert f"graph:builds_on <https://example.test/unit/{b.id}>" in text
 
 
+def test_export_neighborhood_tool_returns_path_counts_and_writes_json(
+    tmp_path, monkeypatch
+):
+    db_path = tmp_path / "graph.db"
+    export_path = tmp_path / "neighborhood.json"
+
+    store = Store(str(db_path))
+    a, b, c = _populate_backlinks_graph(store)
+    isolated = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.PRESENCE,
+            source_id="isolated",
+            source_entity_type="knowledge_item",
+            title="Isolated",
+            content="Outside the neighborhood",
+        )
+    )
+    store.close()
+
+    tools = asyncio.run(mcp_server.list_tools())
+    assert any(tool.name == "export_neighborhood" for tool in tools)
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "export_neighborhood",
+            {"unit_id": a, "path": str(export_path), "depth": 2},
+        )
+    )
+    payload = json.loads(response[0].text)
+
+    assert payload == {
+        "path": str(export_path),
+        "unit_count": 3,
+        "edge_count": 2,
+        "depth": 2,
+        "center_unit_id": a,
+    }
+    exported = json.loads(export_path.read_text())
+    assert exported["center"]["id"] == a
+    assert {unit["id"] for unit in exported["units"]} == {a, b, c}
+    assert isolated.id not in {unit["id"] for unit in exported["units"]}
+    assert {edge["relation"] for edge in exported["edges"]} == {
+        "builds_on",
+        "inspires",
+    }
+
+    missing_response = asyncio.run(
+        mcp_server.call_tool(
+            "export_neighborhood",
+            {"unit_id": "missing", "path": str(tmp_path / "missing.json")},
+        )
+    )
+    missing_payload = json.loads(missing_response[0].text)
+    assert missing_payload["error"] == "unit_not_found"
+    assert missing_payload["unit_id"] == "missing"
+
+
 def test_export_report_tool_writes_markdown_with_same_sections(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     report_path = tmp_path / "graph-report.md"

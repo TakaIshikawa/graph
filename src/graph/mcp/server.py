@@ -14,6 +14,7 @@ from graph.cli.main import (
     _backlinks_payload,
     _do_export_graphml,
     _do_export_json,
+    _do_export_neighborhood,
     _do_export_obsidian,
     _do_export_report,
     _do_export_turtle,
@@ -577,6 +578,30 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="export_neighborhood",
+            description="Export a focused JSON subgraph around one knowledge unit.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "unit_id": {
+                        "type": "string",
+                        "description": "Center knowledge unit ID",
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Destination neighborhood JSON path",
+                    },
+                    "depth": {
+                        "type": "integer",
+                        "default": 1,
+                        "maximum": 3,
+                        "description": "Traversal depth from the center unit",
+                    },
+                },
+                "required": ["unit_id", "path"],
+            },
+        ),
+        Tool(
             name="export_report",
             description="Export a Markdown graph health report for review and sharing.",
             inputSchema={
@@ -1016,6 +1041,22 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 arguments["path"],
                 base_uri=arguments.get("base_uri", "https://graph.local/unit/"),
             )
+            return [TextContent(type="text", text=json.dumps(stats))]
+
+        elif name == "export_neighborhood":
+            try:
+                stats = _do_export_neighborhood(
+                    store,
+                    arguments["unit_id"],
+                    arguments["path"],
+                    depth=arguments.get("depth", 1),
+                )
+            except ValueError as exc:
+                try:
+                    payload = json.loads(str(exc))
+                except json.JSONDecodeError:
+                    payload = {"error": "export_failed", "message": str(exc)}
+                return [TextContent(type="text", text=json.dumps(payload))]
             return [TextContent(type="text", text=json.dumps(stats))]
 
         elif name == "export_report":

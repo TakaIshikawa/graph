@@ -486,6 +486,67 @@ def test_export_turtle_command_writes_turtle_with_counts(tmp_path, monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_export_neighborhood_command_writes_local_json_and_caps_depth(
+    tmp_path, monkeypatch
+):
+    store = _make_store()
+    a_id, _, _, d_id = _populate_graph(store)
+    export_path = tmp_path / "neighborhood.json"
+
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    result = runner.invoke(
+        app,
+        ["export-neighborhood", a_id, str(export_path), "--depth", "9"],
+    )
+
+    try:
+        assert result.exit_code == 0
+        assert "Exported 3 units and 2 edges" in result.output
+        assert "(depth 3)" in result.output
+        payload = json.loads(export_path.read_text())
+        assert payload["center"]["id"] == a_id
+        assert payload["depth"] == 3
+        assert len(payload["units"]) == 3
+        assert len(payload["edges"]) == 2
+        assert d_id not in {unit["id"] for unit in payload["units"]}
+        assert {edge["relation"] for edge in payload["edges"]} == {
+            "builds_on",
+            "inspires",
+        }
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_export_neighborhood_command_reports_missing_unit(tmp_path, monkeypatch):
+    store = _make_store()
+    export_path = tmp_path / "missing.json"
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(
+            app,
+            ["export-neighborhood", "missing", str(export_path)],
+        )
+        assert result.exit_code == 1
+        assert "Unit not found: missing" in result.output
+        assert not export_path.exists()
+
+        json_result = runner.invoke(
+            app,
+            ["export-neighborhood", "missing", str(export_path), "--json"],
+        )
+        payload = json.loads(json_result.output)
+        assert json_result.exit_code == 1
+        assert payload["error"] == "unit_not_found"
+        assert payload["unit_id"] == "missing"
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_export_report_command_writes_markdown_and_json_counts(tmp_path, monkeypatch):
     store = _make_store()
     a = store.insert_unit(
