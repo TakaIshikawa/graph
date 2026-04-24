@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     sota_db: str = ""
     feed_sources: str = ""
     bookmarks_path: str = ""
+    csv_path: str = ""
     me_config: str = ""
     markdown_root: str = ""
     obsidian_vault_path: str = "/Users/taka/ObsidianVaults/note"

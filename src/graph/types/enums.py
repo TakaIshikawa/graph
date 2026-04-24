@@ -9,6 +9,7 @@ class SourceProject(StrEnum):
     KINDLE = "kindle"
     SOTA = "sota"
     BOOKMARKS = "bookmarks"
+    CSV = "csv"
 
 
 class ContentType(StrEnum):

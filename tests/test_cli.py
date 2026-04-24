@@ -1005,6 +1005,55 @@ def test_ingest_bookmarks_command_uses_configured_path_and_updates_by_url(
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_ingest_csv_command_uses_configured_path_and_indexes_fulltext(
+    tmp_path, monkeypatch
+):
+    csv_path = tmp_path / "knowledge.csv"
+    csv_path.write_text(
+        "source_id,title,content,content_type,tags,utility_score,confidence,created_at,metadata_json\n"
+        'csv-1,CSV Import,"Spreadsheet search phrase.",artifact,"spreadsheet, import",9.1,0.8,2025-04-24T12:00:00Z,"{""tool"": ""sheet""}"\n',
+        encoding="utf-8",
+    )
+
+    store = _make_store()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    monkeypatch.setattr("graph.cli.main.settings.csv_path", str(csv_path))
+
+    try:
+        result = runner.invoke(app, ["ingest", "csv"])
+
+        assert result.exit_code == 0
+        assert "Ingesting from csv" in result.output
+        assert "csv: 1 new" in result.output
+        unit = store.get_unit_by_source("csv", "csv-1", "csv_row")
+        assert unit is not None
+        assert unit.title == "CSV Import"
+        assert unit.content_type == "artifact"
+        assert unit.tags == ["spreadsheet", "import"]
+        assert unit.utility_score == 9.1
+        assert unit.confidence == 0.8
+        assert unit.metadata == {"tool": "sheet"}
+
+        search = runner.invoke(
+            app,
+            [
+                "search",
+                "Spreadsheet",
+                "--mode",
+                "fulltext",
+                "--limit",
+                "1",
+            ],
+        )
+
+        assert search.exit_code == 0
+        assert "CSV Import" in search.output
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_shortest_path_command_prints_readable_path(monkeypatch):
     store = _make_store()
     a_id, _, c_id, _ = _populate_graph(store)

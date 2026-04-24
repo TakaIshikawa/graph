@@ -43,6 +43,7 @@ SUPPORTED_SYNC_PROJECTS = [
     "kindle",
     "sota",
     "bookmarks",
+    "csv",
 ]
 
 SEARCH_FILTER_SCHEMA = {
@@ -90,6 +91,7 @@ def _get_store() -> Store:
 
 def _get_adapter(name: str):
     from graph.adapters.bookmarks import BookmarksAdapter
+    from graph.adapters.csv_adapter import CsvAdapter
     from graph.adapters.forty_two import FortyTwoAdapter
     from graph.adapters.kindle import KindleAdapter
     from graph.adapters.max_adapter import MaxAdapter
@@ -107,6 +109,7 @@ def _get_adapter(name: str):
         "kindle": lambda: KindleAdapter(db_path=settings.kindle_db),
         "sota": lambda: SOTAAdapter(db_path=settings.sota_db),
         "bookmarks": lambda: BookmarksAdapter(path=settings.bookmarks_path),
+        "csv": lambda: CsvAdapter(path=settings.csv_path),
     }
     return mapping[name]()
 

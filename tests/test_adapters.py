@@ -11,6 +11,7 @@ import pytest
 import yaml
 
 from graph.adapters.bookmarks import BookmarksAdapter
+from graph.adapters.csv_adapter import CsvAdapter
 from graph.adapters.feed import FeedAdapter
 from graph.adapters.forty_two import FortyTwoAdapter
 from graph.adapters.markdown import MarkdownAdapter
@@ -655,6 +656,75 @@ class TestBookmarksAdapter:
         assert result.edges == []
 
 
+class TestCsvAdapter:
+    def test_ingest_csv_rows_with_optional_fields(self, tmp_path):
+        csv_path = tmp_path / "notes.csv"
+        csv_path.write_text(
+            "source_id,title,content,content_type,tags,utility_score,confidence,created_at,metadata_json\n"
+            'note-1,Solar note,"Storage doubled.",finding,"energy, solar",8.5,0.75,2025-04-24T12:00:00Z,"{""url"": ""https://example.com"", ""rank"": 3}"\n',
+            encoding="utf-8",
+        )
+
+        result = CsvAdapter(path=str(csv_path)).ingest()
+
+        assert len(result.units) == 1
+        unit = result.units[0]
+        assert unit.source_project == "csv"
+        assert unit.source_entity_type == "csv_row"
+        assert unit.source_id == "note-1"
+        assert unit.title == "Solar note"
+        assert unit.content == "Storage doubled."
+        assert unit.content_type == "finding"
+        assert unit.tags == ["energy", "solar"]
+        assert unit.utility_score == 8.5
+        assert unit.confidence == 0.75
+        assert unit.created_at.isoformat() == "2025-04-24T12:00:00+00:00"
+        assert unit.metadata == {"url": "https://example.com", "rank": 3}
+
+    def test_missing_optional_columns_and_source_id_are_handled(self, tmp_path):
+        csv_path = tmp_path / "minimal.csv"
+        csv_path.write_text(
+            "title,content\nMinimal row,Only required columns.\n",
+            encoding="utf-8",
+        )
+
+        first = CsvAdapter(path=str(csv_path)).ingest()
+        second = CsvAdapter(path=str(csv_path)).ingest()
+
+        assert len(first.units) == 1
+        unit = first.units[0]
+        assert unit.source_id == second.units[0].source_id
+        assert unit.source_id.startswith("row-2-minimal-row-")
+        assert unit.content_type == "insight"
+        assert unit.tags == []
+        assert unit.metadata == {}
+        assert unit.utility_score is None
+        assert unit.confidence is None
+
+    def test_malformed_metadata_falls_back_without_crashing(self, tmp_path):
+        csv_path = tmp_path / "bad-metadata.csv"
+        csv_path.write_text(
+            "title,content,metadata_json\nBad metadata,Still imported,{not json\n",
+            encoding="utf-8",
+        )
+
+        result = CsvAdapter(path=str(csv_path)).ingest()
+
+        assert len(result.units) == 1
+        assert result.units[0].metadata == {"metadata_json": "{not json"}
+
+    def test_missing_path_and_missing_required_headers_return_empty_result(self, tmp_path):
+        missing = CsvAdapter(path=str(tmp_path / "missing.csv")).ingest()
+        assert missing.units == []
+        assert missing.edges == []
+
+        csv_path = tmp_path / "no-content.csv"
+        csv_path.write_text("title,tags\nNo content,tag\n", encoding="utf-8")
+        malformed = CsvAdapter(path=str(csv_path)).ingest()
+        assert malformed.units == []
+        assert malformed.edges == []
+
+
 class TestRegistry:
     def test_list_adapters(self):
         adapters = list_adapters()
@@ -668,6 +738,7 @@ class TestRegistry:
             "sota",
             "feed",
             "bookmarks",
+            "csv",
         }
 
     def test_get_adapter(self):
