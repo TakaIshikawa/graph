@@ -289,6 +289,48 @@ def _populate_tags_graph(store: Store) -> None:
         store.insert_unit(unit)
 
 
+def _populate_tag_synonym_graph(store: Store) -> None:
+    for unit in [
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="agent-hyphen",
+            source_entity_type="insight",
+            title="Agent hyphen",
+            content="Agent note",
+            content_type=ContentType.INSIGHT,
+            tags=["ai-agent"],
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="agent-underscore",
+            source_entity_type="insight",
+            title="Agent underscore",
+            content="Agent note",
+            content_type=ContentType.INSIGHT,
+            tags=["ai_agent"],
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="agent-plural",
+            source_entity_type="knowledge_node",
+            title="Agent plural",
+            content="Agent note",
+            content_type=ContentType.FINDING,
+            tags=["AI Agents"],
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.PRESENCE,
+            source_id="unrelated",
+            source_entity_type="knowledge_item",
+            title="Unrelated",
+            content="Unrelated note",
+            content_type=ContentType.ARTIFACT,
+            tags=["storage"],
+        ),
+    ]:
+        store.insert_unit(unit)
+
+
 def _populate_duplicates_graph(store: Store) -> None:
     for unit in [
         KnowledgeUnit(
@@ -1350,6 +1392,41 @@ def test_tags_command_detail_applies_filters_and_co_occurrences(monkeypatch):
             "solar",
         ]
         assert [item["count"] for item in payload["co_occurring_tags"]] == [2, 1, 1]
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_tag_synonyms_command_emits_json_and_readable_output(monkeypatch):
+    store = _make_store()
+    _populate_tag_synonym_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        json_result = runner.invoke(
+            app,
+            ["tag-synonyms", "--limit", "5", "--min-similarity", "0.8", "--json"],
+        )
+
+        assert json_result.exit_code == 0
+        payload = json.loads(json_result.output)
+        assert len(payload["suggestions"]) == 1
+        suggestion = payload["suggestions"][0]
+        assert suggestion["canonical_candidate"] == "ai-agent"
+        assert {variant["tag"] for variant in suggestion["variants"]} == {
+            "ai-agent",
+            "ai_agent",
+            "AI Agents",
+        }
+        assert "storage" not in {variant["tag"] for variant in suggestion["variants"]}
+
+        readable_result = runner.invoke(app, ["tag-synonyms"])
+
+        assert readable_result.exit_code == 0
+        assert "Tag synonym suggestions:" in readable_result.output
+        assert "ai-agent (3 uses, 3 variants, similarity 1.000)" in readable_result.output
+        assert "AI Agents: 1" in readable_result.output
     finally:
         store.close()
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]

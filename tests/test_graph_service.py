@@ -138,6 +138,52 @@ def tagged_store(store: Store):
 
 
 @pytest.fixture
+def tag_synonym_store(store: Store):
+    """Store with variant tags that should suggest a canonical form."""
+    units = [
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="agent-hyphen",
+            source_entity_type="insight",
+            title="Agent hyphen",
+            content="Agent note",
+            content_type=ContentType.INSIGHT,
+            tags=["ai-agent", "workflow"],
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="agent-underscore",
+            source_entity_type="insight",
+            title="Agent underscore",
+            content="Agent note",
+            content_type=ContentType.INSIGHT,
+            tags=["ai_agent"],
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="agent-plural",
+            source_entity_type="knowledge_node",
+            title="Agent plural",
+            content="Agent note",
+            content_type=ContentType.FINDING,
+            tags=["AI Agents"],
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.PRESENCE,
+            source_id="unrelated",
+            source_entity_type="knowledge_item",
+            title="Unrelated",
+            content="Unrelated note",
+            content_type=ContentType.ARTIFACT,
+            tags=["storage", "writing"],
+        ),
+    ]
+    for unit in units:
+        store.insert_unit(unit)
+    return store
+
+
+@pytest.fixture
 def external_link_store(store: Store):
     """Store with external links in content and metadata."""
     for unit in [
@@ -603,6 +649,44 @@ class TestGraphService:
             "Solar grid",
             "Battery storage",
         }
+
+    def test_suggest_tag_synonyms_groups_variants_and_is_read_only(
+        self, tag_synonym_store: Store
+    ):
+        before = {
+            unit.source_id: list(unit.tags)
+            for unit in tag_synonym_store.get_all_units(limit=100)
+        }
+
+        gs = GraphService(tag_synonym_store)
+        result = gs.suggest_tag_synonyms(limit=10, min_similarity=0.8)
+
+        assert result["limit"] == 10
+        assert result["min_similarity"] == 0.8
+        assert len(result["suggestions"]) == 1
+
+        suggestion = result["suggestions"][0]
+        assert suggestion["canonical_candidate"] == "ai-agent"
+        assert suggestion["total_count"] == 3
+        assert suggestion["variant_count"] == 3
+        assert suggestion["similarity"] == 1.0
+        assert {variant["tag"] for variant in suggestion["variants"]} == {
+            "ai-agent",
+            "ai_agent",
+            "AI Agents",
+        }
+        assert {variant["count"] for variant in suggestion["variants"]} == {1}
+        assert "storage" not in {
+            variant["tag"]
+            for found in result["suggestions"]
+            for variant in found["variants"]
+        }
+
+        after = {
+            unit.source_id: list(unit.tags)
+            for unit in tag_synonym_store.get_all_units(limit=100)
+        }
+        assert after == before
 
     def test_analyze_duplicates_finds_titles_content_and_applies_filters(
         self, store: Store

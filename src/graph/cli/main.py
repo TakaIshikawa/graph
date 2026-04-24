@@ -2115,6 +2115,48 @@ def tags(
     store.close()
 
 
+@app.command(name="tag-synonyms")
+def tag_synonyms(
+    limit: int = typer.Option(20, "--limit", "-n", help="Max synonym groups"),
+    min_similarity: float = typer.Option(
+        0.8,
+        "--min-similarity",
+        help="Minimum normalized character similarity",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Suggest likely synonymous or variant tags without modifying data."""
+    from graph.graph.service import GraphService
+
+    store = _get_store()
+    gs = GraphService(store)
+    result = gs.suggest_tag_synonyms(limit=limit, min_similarity=min_similarity)
+
+    if json_output:
+        _json_echo(result)
+        store.close()
+        return
+
+    suggestions = result["suggestions"]
+    if not suggestions:
+        typer.echo("No tag synonym suggestions found.")
+        store.close()
+        return
+
+    typer.echo("Tag synonym suggestions:")
+    for suggestion in suggestions:
+        typer.echo(
+            f"  {suggestion['canonical_candidate']} "
+            f"({suggestion['total_count']} uses, "
+            f"{suggestion['variant_count']} variants, "
+            f"similarity {suggestion['similarity']:.3f})"
+        )
+        for variant in suggestion["variants"]:
+            typer.echo(f"    {variant['tag']}: {variant['count']}")
+
+    store.close()
+
+
 @app.command(name="links")
 def links(
     domain: str | None = typer.Option(None, "--domain", help="Filter by exact domain"),

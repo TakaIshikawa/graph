@@ -404,6 +404,21 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="suggest_tag_synonyms",
+            description="Suggest likely synonymous or variant tags without modifying stored data.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "default": 20},
+                    "min_similarity": {
+                        "type": "number",
+                        "default": 0.8,
+                        "description": "Minimum normalized character similarity",
+                    },
+                },
+            },
+        ),
+        Tool(
             name="analyze_links",
             description="Inventory external http/https links across knowledge unit content and metadata.",
             inputSchema={
@@ -1040,6 +1055,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 limit=arguments.get("limit", 20),
                 source_project=arguments.get("source_project"),
                 content_type=arguments.get("content_type"),
+            )
+            return [TextContent(type="text", text=json.dumps(result))]
+
+        elif name == "suggest_tag_synonyms":
+            gs = GraphService(store)
+            result = gs.suggest_tag_synonyms(
+                limit=arguments.get("limit", 20),
+                min_similarity=arguments.get("min_similarity", 0.8),
             )
             return [TextContent(type="text", text=json.dumps(result))]
 

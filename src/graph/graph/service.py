@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 import json
 from pathlib import Path
 import re
@@ -22,6 +23,29 @@ _TRAILING_URL_PUNCTUATION = ".,;:!?)]}'\""
 
 def _normalize_text(value: str) -> str:
     return _NORMALIZED_TEXT_RE.sub(" ", value.lower()).strip()
+
+
+def _singularize_token(value: str) -> str:
+    if len(value) > 4 and value.endswith("ies"):
+        return f"{value[:-3]}y"
+    if len(value) > 4 and value.endswith("ses"):
+        return value[:-2]
+    if len(value) > 3 and value.endswith("s"):
+        return value[:-1]
+    return value
+
+
+def _normalize_tag_variant(value: str) -> str:
+    tokens = [_singularize_token(token) for token in _normalize_text(value).split()]
+    return " ".join(token for token in tokens if token)
+
+
+def _tag_similarity(left: str, right: str) -> float:
+    if not left or not right:
+        return 0.0
+    if left == right:
+        return 1.0
+    return SequenceMatcher(None, left, right).ratio()
 
 
 def _content_tokens(value: str) -> Counter[str]:
@@ -660,6 +684,92 @@ class GraphService:
 
         tags.sort(key=lambda item: (-item["count"], item["tag"]))
         return {"tags": tags[:limit], "filters": filters}
+
+    def suggest_tag_synonyms(
+        self, limit: int = 20, min_similarity: float = 0.8
+    ) -> dict:
+        """Suggest likely synonym or variant tags without modifying stored units."""
+        tag_counts = Counter(
+            str(unit_tag)
+            for unit in self.store.get_all_units(limit=1000000000)
+            for unit_tag in unit.tags
+            if str(unit_tag).strip()
+        )
+        normalized_by_tag = {
+            tag: _normalize_tag_variant(tag) for tag in sorted(tag_counts)
+        }
+        tags = [
+            tag for tag, normalized in normalized_by_tag.items() if normalized
+        ]
+
+        parent = {tag: tag for tag in tags}
+
+        def _find(tag: str) -> str:
+            while parent[tag] != tag:
+                parent[tag] = parent[parent[tag]]
+                tag = parent[tag]
+            return tag
+
+        def _union(left: str, right: str) -> None:
+            left_root = _find(left)
+            right_root = _find(right)
+            if left_root != right_root:
+                parent[max(left_root, right_root)] = min(left_root, right_root)
+
+        for index, left in enumerate(tags):
+            left_normalized = normalized_by_tag[left]
+            for right in tags[index + 1 :]:
+                right_normalized = normalized_by_tag[right]
+                if _tag_similarity(left_normalized, right_normalized) >= min_similarity:
+                    _union(left, right)
+
+        groups: dict[str, list[str]] = {}
+        for tag in tags:
+            groups.setdefault(_find(tag), []).append(tag)
+
+        suggestions = []
+        for grouped_tags in groups.values():
+            if len(grouped_tags) < 2:
+                continue
+
+            variants = [
+                {
+                    "tag": tag,
+                    "count": tag_counts[tag],
+                    "normalized": normalized_by_tag[tag],
+                }
+                for tag in sorted(grouped_tags, key=lambda item: (-tag_counts[item], item.lower(), item))
+            ]
+            normalized_values = [normalized_by_tag[tag] for tag in grouped_tags]
+            canonical_normalized = Counter(normalized_values).most_common(1)[0][0]
+            canonical_candidate = canonical_normalized.replace(" ", "-")
+            similarities = [
+                _tag_similarity(normalized_by_tag[left], normalized_by_tag[right])
+                for index, left in enumerate(grouped_tags)
+                for right in grouped_tags[index + 1 :]
+            ]
+            suggestions.append(
+                {
+                    "canonical_candidate": canonical_candidate,
+                    "total_count": sum(tag_counts[tag] for tag in grouped_tags),
+                    "variant_count": len(grouped_tags),
+                    "similarity": round(min(similarities), 6) if similarities else 1.0,
+                    "variants": variants,
+                }
+            )
+
+        suggestions.sort(
+            key=lambda item: (
+                -item["total_count"],
+                -item["variant_count"],
+                item["canonical_candidate"],
+            )
+        )
+        return {
+            "suggestions": suggestions[:limit],
+            "limit": limit,
+            "min_similarity": min_similarity,
+        }
 
     def analyze_duplicates(
         self,

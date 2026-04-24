@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 import networkx as nx
 
 from graph.adapters.base import IngestResult
+from graph.graph.service import GraphService
 from graph.mcp import server as mcp_server
 from graph.rag.embeddings import serialize_embedding
 from graph.store.db import Store
@@ -54,6 +55,48 @@ def _populate_tags_graph(store: Store) -> None:
             content="Battery storage insight",
             content_type=ContentType.INSIGHT,
             tags=["energy", "storage", "battery"],
+        ),
+    ]:
+        store.insert_unit(unit)
+
+
+def _populate_tag_synonym_graph(store: Store) -> None:
+    for unit in [
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="agent-hyphen",
+            source_entity_type="insight",
+            title="Agent hyphen",
+            content="Agent note",
+            content_type=ContentType.INSIGHT,
+            tags=["ai-agent"],
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="agent-underscore",
+            source_entity_type="insight",
+            title="Agent underscore",
+            content="Agent note",
+            content_type=ContentType.INSIGHT,
+            tags=["ai_agent"],
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="agent-plural",
+            source_entity_type="knowledge_node",
+            title="Agent plural",
+            content="Agent note",
+            content_type=ContentType.FINDING,
+            tags=["AI Agents"],
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.PRESENCE,
+            source_id="unrelated",
+            source_entity_type="knowledge_item",
+            title="Unrelated",
+            content="Unrelated note",
+            content_type=ContentType.ARTIFACT,
+            tags=["storage"],
         ),
     ]:
         store.insert_unit(unit)
@@ -1168,6 +1211,41 @@ def test_analyze_tags_tool_returns_summary_and_detail_json(tmp_path, monkeypatch
         "battery",
         "solar",
     ]
+
+
+def test_suggest_tag_synonyms_tool_matches_service_structure(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    _populate_tag_synonym_graph(store)
+    expected = GraphService(store).suggest_tag_synonyms(limit=5, min_similarity=0.8)
+    store.close()
+
+    monkeypatch.setattr(
+        mcp_server,
+        "_get_store",
+        lambda: Store(str(db_path)),
+    )
+
+    tools = asyncio.run(mcp_server.list_tools())
+    synonym_tool = next(tool for tool in tools if tool.name == "suggest_tag_synonyms")
+    assert synonym_tool.inputSchema["properties"]["limit"]["default"] == 20
+    assert synonym_tool.inputSchema["properties"]["min_similarity"]["default"] == 0.8
+
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "suggest_tag_synonyms",
+            {"limit": 5, "min_similarity": 0.8},
+        )
+    )
+    payload = json.loads(response[0].text)
+
+    assert payload == expected
+    assert payload["suggestions"][0]["canonical_candidate"] == "ai-agent"
+    assert {variant["tag"] for variant in payload["suggestions"][0]["variants"]} == {
+        "ai-agent",
+        "ai_agent",
+        "AI Agents",
+    }
 
 
 def test_analyze_duplicates_tool_returns_reasons_units_and_filters(
