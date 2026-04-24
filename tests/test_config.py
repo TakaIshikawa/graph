@@ -13,6 +13,7 @@ def test_source_path_settings_honor_environment_overrides(monkeypatch):
         "GRAPH_PRESENCE_DB": "/tmp/presence.db",
         "GRAPH_KINDLE_DB": "/tmp/kindle.db",
         "GRAPH_SOTA_DB": "/tmp/sota.db",
+        "GRAPH_FEED_SOURCES": "/tmp/feed.xml,/tmp/feeds",
         "GRAPH_ME_CONFIG": "/tmp/projects.yaml",
         "GRAPH_OBSIDIAN_VAULT_PATH": "/tmp/obsidian",
     }
@@ -27,5 +28,6 @@ def test_source_path_settings_honor_environment_overrides(monkeypatch):
     assert loaded.presence_db == "/tmp/presence.db"
     assert loaded.kindle_db == "/tmp/kindle.db"
     assert loaded.sota_db == "/tmp/sota.db"
+    assert loaded.feed_sources == "/tmp/feed.xml,/tmp/feeds"
     assert loaded.me_config == "/tmp/projects.yaml"
     assert loaded.obsidian_vault_path == "/tmp/obsidian"

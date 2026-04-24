@@ -23,6 +23,7 @@ def _get_store() -> Store:
 
 
 def _get_adapter_for_project(name: str):
+    from graph.adapters.feed import FeedAdapter
     from graph.adapters.forty_two import FortyTwoAdapter
     from graph.adapters.kindle import KindleAdapter
     from graph.adapters.markdown import MarkdownAdapter
@@ -41,6 +42,7 @@ def _get_adapter_for_project(name: str):
         "markdown": lambda: MarkdownAdapter(root_path=settings.markdown_root),
         "kindle": lambda: KindleAdapter(db_path=settings.kindle_db),
         "sota": lambda: SOTAAdapter(db_path=settings.sota_db),
+        "feed": lambda: FeedAdapter(sources=settings.feed_sources),
     }
     factory = mapping.get(name)
     if factory is None:
@@ -697,7 +699,7 @@ def _do_ingest(
 ) -> dict:
     """Core ingest logic. Returns total stats dict."""
     projects = (
-        ["forty_two", "max", "presence", "me", "markdown", "kindle", "sota"]
+        ["forty_two", "max", "presence", "me", "markdown", "kindle", "sota", "feed"]
         if project == "all"
         else [project]
     )

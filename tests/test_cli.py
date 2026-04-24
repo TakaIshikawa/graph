@@ -793,6 +793,53 @@ def test_ingest_markdown_incremental_links_to_existing_note(tmp_path, monkeypatc
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_ingest_feed_command_uses_configured_sources(tmp_path, monkeypatch):
+    feed = tmp_path / "feed.xml"
+    feed.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+        <rss version="2.0">
+          <channel>
+            <title>CLI Feed</title>
+            <item>
+              <guid>cli-feed-1</guid>
+              <title>Local feed item</title>
+              <link>https://example.com/local</link>
+              <description>Read from a local XML fixture.</description>
+              <category>local</category>
+              <pubDate>Thu, 24 Apr 2025 09:00:00 GMT</pubDate>
+            </item>
+          </channel>
+        </rss>
+        """,
+        encoding="utf-8",
+    )
+
+    store = _make_store()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    monkeypatch.setattr("graph.cli.main.settings.feed_sources", str(feed))
+
+    try:
+        result = runner.invoke(app, ["ingest", "feed"])
+
+        assert result.exit_code == 0
+        assert "Ingesting from feed" in result.output
+        assert "feed: 1 new" in result.output
+        unit = store.conn.execute(
+            """SELECT * FROM knowledge_units
+               WHERE source_project = 'me' AND source_entity_type = 'feed_item'"""
+        ).fetchone()
+        assert unit is not None
+        assert unit["title"] == "Local feed item"
+        assert json.loads(unit["tags"]) == ["local"]
+        metadata = json.loads(unit["metadata"])
+        assert metadata["link"] == "https://example.com/local"
+        assert metadata["id"] == "cli-feed-1"
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_shortest_path_command_prints_readable_path(monkeypatch):
     store = _make_store()
     a_id, _, c_id, _ = _populate_graph(store)

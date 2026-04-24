@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     presence_db: str = ""
     kindle_db: str = ""
     sota_db: str = ""
+    feed_sources: str = ""
     me_config: str = ""
     markdown_root: str = ""
     obsidian_vault_path: str = "/Users/taka/ObsidianVaults/note"

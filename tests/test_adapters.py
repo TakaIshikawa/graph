@@ -9,6 +9,7 @@ import tempfile
 import pytest
 import yaml
 
+from graph.adapters.feed import FeedAdapter
 from graph.adapters.forty_two import FortyTwoAdapter
 from graph.adapters.markdown import MarkdownAdapter
 from graph.adapters.max_adapter import MaxAdapter
@@ -517,6 +518,84 @@ class TestMarkdownAdapter:
         assert result.edges == []
 
 
+class TestFeedAdapter:
+    def test_ingest_rss_items_with_stable_metadata_and_tags(self, tmp_path):
+        feed = tmp_path / "research.xml"
+        feed.write_text(
+            """<?xml version="1.0" encoding="utf-8"?>
+            <rss version="2.0">
+              <channel>
+                <title>Research Feed</title>
+                <item>
+                  <guid isPermaLink="false">rss-1</guid>
+                  <title>Solar storage update</title>
+                  <link>https://example.com/solar</link>
+                  <description><![CDATA[<p>Storage capacity doubled.</p>]]></description>
+                  <author>alice@example.com</author>
+                  <category>energy</category>
+                  <category>solar</category>
+                  <pubDate>Wed, 23 Apr 2025 10:30:00 GMT</pubDate>
+                </item>
+              </channel>
+            </rss>
+            """,
+            encoding="utf-8",
+        )
+
+        first = FeedAdapter(sources=str(feed)).ingest()
+        second = FeedAdapter(sources=str(feed)).ingest()
+
+        assert len(first.units) == 1
+        unit = first.units[0]
+        assert unit.source_project == "me"
+        assert unit.source_entity_type == "feed_item"
+        assert unit.content_type == "artifact"
+        assert unit.title == "Solar storage update"
+        assert unit.content == "Storage capacity doubled."
+        assert unit.source_id == second.units[0].source_id
+        assert unit.tags == ["energy", "solar"]
+        assert unit.metadata["feed_title"] == "Research Feed"
+        assert unit.metadata["id"] == "rss-1"
+        assert unit.metadata["link"] == "https://example.com/solar"
+        assert unit.metadata["author"] == "alice@example.com"
+        assert unit.created_at.isoformat() == "2025-04-23T10:30:00+00:00"
+
+    def test_ingest_atom_entries_and_respects_entity_filter(self, tmp_path):
+        feed = tmp_path / "atom.xml"
+        feed.write_text(
+            """<?xml version="1.0" encoding="utf-8"?>
+            <feed xmlns="http://www.w3.org/2005/Atom">
+              <title>Atom Research</title>
+              <entry>
+                <id>tag:example.com,2025:atom-1</id>
+                <title>Agent evaluation note</title>
+                <link href="https://example.com/agent-eval"/>
+                <updated>2025-04-24T12:00:00Z</updated>
+                <author><name>Robin</name></author>
+                <category term="agents"/>
+                <category term="evaluation"/>
+                <summary>Evaluation rubric changed.</summary>
+              </entry>
+            </feed>
+            """,
+            encoding="utf-8",
+        )
+
+        skipped = FeedAdapter(sources=str(feed)).ingest(entity_types=["markdown_note"])
+        result = FeedAdapter(sources=str(feed)).ingest(entity_types=["feed_item"])
+
+        assert skipped.units == []
+        assert len(result.units) == 1
+        unit = result.units[0]
+        assert unit.title == "Agent evaluation note"
+        assert unit.content == "Evaluation rubric changed."
+        assert unit.metadata["id"] == "tag:example.com,2025:atom-1"
+        assert unit.metadata["link"] == "https://example.com/agent-eval"
+        assert unit.metadata["author"] == "Robin"
+        assert unit.tags == ["agents", "evaluation"]
+        assert unit.created_at.isoformat() == "2025-04-24T12:00:00+00:00"
+
+
 class TestRegistry:
     def test_list_adapters(self):
         adapters = list_adapters()
@@ -528,6 +607,7 @@ class TestRegistry:
             "markdown",
             "kindle",
             "sota",
+            "feed",
         }
 
     def test_get_adapter(self):
