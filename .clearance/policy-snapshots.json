@@ -1,0 +1,47 @@
+[
+  {
+    "content_hash": "0a4a772b7328a1b2b3a8fb92f304256b30eb25ffc7c653e892ef972a153a45e1",
+    "error": null,
+    "fetched_at": "2026-04-24T03:06:37+00:00",
+    "name": "Terms and policies index",
+    "provider": "OpenAI",
+    "status": 200,
+    "url": "https://openai.com/policies"
+  },
+  {
+    "content_hash": null,
+    "error": "HTTP Error 403: Forbidden",
+    "fetched_at": "2026-04-24T03:06:37+00:00",
+    "name": "Usage policies",
+    "provider": "OpenAI",
+    "status": 403,
+    "url": "https://openai.com/policies/usage-policies/"
+  },
+  {
+    "content_hash": "a074d5ed540c31f1dd7a5d9042995d82d121d6b1cdc6c914a19cfcd4412abea5",
+    "error": null,
+    "fetched_at": "2026-04-24T03:06:38+00:00",
+    "name": "Service terms",
+    "provider": "OpenAI",
+    "status": 200,
+    "url": "https://openai.com/policies/service-terms"
+  },
+  {
+    "content_hash": "1555ef308db4c62765e140e0536b5f0c7d434e794c7ab093ee7806e8b105edec",
+    "error": null,
+    "fetched_at": "2026-04-24T03:06:39+00:00",
+    "name": "Claude Code data usage",
+    "provider": "Anthropic",
+    "status": 200,
+    "url": "https://docs.anthropic.com/en/docs/claude-code/data-usage"
+  },
+  {
+    "content_hash": "367fe8a77e946d488c1252619329594191ff6ec619d788784bd45e8b4564ec2a",
+    "error": null,
+    "fetched_at": "2026-04-24T03:06:39+00:00",
+    "name": "Usage policy update",
+    "provider": "Anthropic",
+    "status": 200,
+    "url": "https://www.anthropic.com/news/usage-policy-update"
+  }
+]
