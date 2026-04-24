@@ -12,6 +12,7 @@ from mcp.types import TextContent, Tool
 from graph.config import settings
 from graph.cli.main import (
     _backlinks_payload,
+    _do_context_pack,
     _do_delete_edge,
     _do_export_graphml,
     _do_export_json,
@@ -224,6 +225,36 @@ async def list_tools() -> list[Tool]:
                         "enum": ["hybrid", "semantic", "fulltext"],
                         "default": "fulltext",
                         "description": "Search mode",
+                    },
+                },
+                "required": ["query"],
+            },
+        ),
+        Tool(
+            name="context_pack",
+            description="Search knowledge units and return ranked excerpts with adjacent graph context for LLM retrieval.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query"},
+                    "limit": {"type": "integer", "default": 10},
+                    **SEARCH_FILTER_SCHEMA,
+                    "mode": {
+                        "type": "string",
+                        "enum": ["hybrid", "semantic", "fulltext"],
+                        "default": "fulltext",
+                        "description": "Search mode",
+                    },
+                    "neighbor_depth": {
+                        "type": "integer",
+                        "default": 1,
+                        "maximum": 2,
+                        "description": "Graph neighbor depth for context; capped at 2",
+                    },
+                    "char_budget": {
+                        "type": "integer",
+                        "default": 4000,
+                        "description": "Total character budget for content excerpts",
                     },
                 },
                 "required": ["query"],
@@ -968,6 +999,29 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 filters=filters,
             )
             return [TextContent(type="text", text=json.dumps(payload["results"]))]
+
+        elif name == "context_pack":
+            query = arguments["query"]
+            filters = _search_filters_dict(
+                source_project=arguments.get("source_project"),
+                content_type=arguments.get("content_type"),
+                review_state=arguments.get("review_state"),
+                tag=arguments.get("tag"),
+                created_after=arguments.get("created_after"),
+                created_before=arguments.get("created_before"),
+                min_utility=arguments.get("min_utility"),
+                max_utility=arguments.get("max_utility"),
+            )
+            payload = _do_context_pack(
+                store,
+                query,
+                limit=arguments.get("limit", 10),
+                mode=arguments.get("mode", "fulltext"),
+                filters=filters,
+                char_budget=arguments.get("char_budget", 4000),
+                neighbor_depth=arguments.get("neighbor_depth", 1),
+            )
+            return [TextContent(type="text", text=json.dumps(payload))]
 
         elif name == "save_query":
             filters = dict(arguments.get("filters", {}))

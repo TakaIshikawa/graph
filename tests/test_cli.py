@@ -1170,6 +1170,79 @@ def test_search_command_emits_semantic_json_with_scores(monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_context_command_emits_ranked_units_neighbors_and_budget(monkeypatch):
+    store = _make_store()
+    center = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="context-center",
+            source_entity_type="insight",
+            title="Solar context center",
+            content="Solar context content " * 10,
+            content_type=ContentType.INSIGHT,
+            tags=["solar"],
+        )
+    )
+    neighbor = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="context-neighbor",
+            source_entity_type="knowledge_node",
+            title="Panel neighbor",
+            content="Neighbor content " * 10,
+            content_type=ContentType.FINDING,
+        )
+    )
+    store.fts_index_unit(center)
+    store.fts_index_unit(neighbor)
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=neighbor.id,
+            to_unit_id=center.id,
+            relation=EdgeRelation.BUILDS_ON,
+            source=EdgeSource.MANUAL,
+        )
+    )
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "context",
+                "solar",
+                "--mode",
+                "fulltext",
+                "--limit",
+                "1",
+                "--neighbor-depth",
+                "9",
+                "--char-budget",
+                "40",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["query"] == "solar"
+        assert payload["ranked_units"][0]["id"] == center.id
+        assert payload["neighbors"][0]["id"] == neighbor.id
+        assert payload["selected_edges"][0]["relation"] == "builds_on"
+        assert payload["metadata"]["neighbor_depth"] == 2
+        assert (
+            sum(
+                len(unit["content_excerpt"])
+                for unit in [*payload["ranked_units"], *payload["neighbors"]]
+            )
+            <= 40
+        )
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_embeddings_status_command_emits_filtered_json(monkeypatch):
     store = _make_store()
     fresh = store.insert_unit(

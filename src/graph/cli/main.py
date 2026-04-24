@@ -818,6 +818,33 @@ def _do_search(
     return payload
 
 
+def _do_context_pack(
+    store: Store,
+    query: str,
+    *,
+    limit: int = 10,
+    mode: str = "fulltext",
+    filters: dict | None = None,
+    char_budget: int = 4000,
+    neighbor_depth: int = 1,
+) -> dict:
+    from graph.rag.search import RAGService
+
+    search_payload = _do_search(
+        store,
+        query,
+        limit=limit,
+        mode=mode,
+        filters=filters,
+    )
+    rag = RAGService(store, provider=None)
+    return rag.context_pack(
+        search_payload,
+        char_budget=char_budget,
+        neighbor_depth=neighbor_depth,
+    )
+
+
 def _render_search_payload(payload: dict, *, json_output: bool) -> None:
     if "error" in payload:
         if json_output:
@@ -1539,6 +1566,104 @@ def search(
 
     _render_search_payload(payload, json_output=json_output)
     store.close()
+
+
+@app.command(name="context")
+def context(
+    query: str = typer.Argument(..., help="Search query"),
+    limit: int = typer.Option(10, "--limit", "-n", help="Max ranked units"),
+    mode: str = typer.Option("fulltext", "--mode", "-m", help="Search mode: fulltext | semantic | hybrid"),
+    source_project: str | None = typer.Option(
+        None,
+        "--source-project",
+        "--project",
+        "-p",
+        help="Filter by source project",
+    ),
+    content_type: str | None = typer.Option(None, "--content-type", help="Filter by content type"),
+    tag: str | None = typer.Option(None, "--tag", help="Require an exact tag"),
+    review_state: str | None = typer.Option(
+        None,
+        "--review-state",
+        help="Filter by review state metadata",
+    ),
+    created_after: str | None = typer.Option(
+        None,
+        "--created-after",
+        help="Filter to units created on or after an ISO-8601 date/datetime",
+    ),
+    created_before: str | None = typer.Option(
+        None,
+        "--created-before",
+        help="Filter to units created on or before an ISO-8601 date/datetime",
+    ),
+    min_utility: float | None = typer.Option(
+        None,
+        "--min-utility",
+        help="Filter to units with utility score at least this value",
+    ),
+    max_utility: float | None = typer.Option(
+        None,
+        "--max-utility",
+        help="Filter to units with utility score at most this value",
+    ),
+    neighbor_depth: int = typer.Option(
+        1,
+        "--neighbor-depth",
+        help="Graph neighbor depth for context; capped at 2",
+    ),
+    char_budget: int = typer.Option(
+        4000,
+        "--char-budget",
+        help="Total character budget for content excerpts",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Build a compact retrieval context pack for LLM use."""
+    store = _get_store()
+    try:
+        payload = _do_context_pack(
+            store,
+            query,
+            limit=limit,
+            mode=mode,
+            filters=_search_filters_dict(
+                source_project=source_project,
+                content_type=content_type,
+                tag=tag,
+                review_state=review_state,
+                created_after=created_after,
+                created_before=created_before,
+                min_utility=min_utility,
+                max_utility=max_utility,
+            ),
+            char_budget=char_budget,
+            neighbor_depth=neighbor_depth,
+        )
+    except ValueError as exc:
+        payload = {
+            "error": str(exc),
+            "valid_modes": ["fulltext", "semantic", "hybrid"],
+        }
+    finally:
+        store.close()
+
+    if json_output:
+        _json_echo(payload)
+        return
+    if payload.get("error"):
+        typer.echo(payload["error"])
+        raise typer.Exit(code=1)
+    if not payload["ranked_units"]:
+        typer.echo("No results found.")
+        return
+    typer.echo(f"Context pack: {payload['query']} ({payload['mode']})")
+    for unit in payload["ranked_units"]:
+        score = f" | score {unit['score']:.3f}" if "score" in unit else ""
+        typer.echo(
+            f"{unit['rank']}. [{unit['source_project']}] {unit['title']}{score}"
+        )
+        typer.echo(f"   neighbors: {len(unit['neighbor_ids'])}")
 
 
 @queries_app.command(name="save")

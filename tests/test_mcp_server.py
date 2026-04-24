@@ -702,6 +702,83 @@ def test_search_tool_hybrid_results_include_scores_and_snippets(tmp_path, monkey
     assert results[0]["snippet"]
 
 
+def test_context_pack_tool_returns_filtered_results_and_graph_context(
+    tmp_path, monkeypatch
+):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    center = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="context-center",
+            source_entity_type="insight",
+            title="Solar context center",
+            content="Solar context content " * 10,
+            content_type=ContentType.INSIGHT,
+            tags=["solar"],
+        )
+    )
+    filtered_out = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="context-other",
+            source_entity_type="knowledge_node",
+            title="Solar other project",
+            content="Solar content from another project",
+            content_type=ContentType.FINDING,
+            tags=["solar"],
+        )
+    )
+    neighbor = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="context-neighbor",
+            source_entity_type="insight",
+            title="Neighbor insight",
+            content="Neighbor content " * 10,
+            content_type=ContentType.INSIGHT,
+        )
+    )
+    store.fts_index_unit(center)
+    store.fts_index_unit(filtered_out)
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=center.id,
+            to_unit_id=neighbor.id,
+            relation=EdgeRelation.RELATES_TO,
+            source=EdgeSource.MANUAL,
+        )
+    )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    tool = next(tool for tool in tools if tool.name == "context_pack")
+    assert "source_project" in tool.inputSchema["properties"]
+    assert tool.inputSchema["properties"]["neighbor_depth"]["maximum"] == 2
+
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "context_pack",
+            {
+                "query": "solar",
+                "mode": "fulltext",
+                "source_project": "max",
+                "limit": 5,
+                "neighbor_depth": 2,
+                "char_budget": 35,
+            },
+        )
+    )
+    payload = json.loads(response[0].text)
+    assert [unit["id"] for unit in payload["ranked_units"]] == [center.id]
+    assert payload["filters"] == {"source_project": "max"}
+    assert payload["neighbors"][0]["id"] == neighbor.id
+    assert payload["selected_edges"][0]["relation"] == "relates_to"
+    assert payload["metadata"]["content_chars_used"] <= 35
+
+
 def test_update_and_delete_unit_tools_reindex_and_clean_edges(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))

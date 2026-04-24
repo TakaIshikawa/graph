@@ -368,3 +368,91 @@ class TestRAGService:
             inserted[0].id,
             inserted[3].id,
         }
+
+    def test_context_pack_clamps_depth_and_respects_content_budget(
+        self, store: Store, rag_service: RAGService
+    ):
+        center = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="center",
+                source_entity_type="insight",
+                title="Solar center",
+                content="Solar content " * 20,
+                content_type=ContentType.INSIGHT,
+            )
+        )
+        first_hop = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="first-hop",
+                source_entity_type="insight",
+                title="First hop",
+                content="First hop content " * 20,
+                content_type=ContentType.INSIGHT,
+            )
+        )
+        second_hop = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="second-hop",
+                source_entity_type="insight",
+                title="Second hop",
+                content="Second hop content " * 20,
+                content_type=ContentType.INSIGHT,
+            )
+        )
+        third_hop = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="third-hop",
+                source_entity_type="insight",
+                title="Third hop",
+                content="Third hop content",
+                content_type=ContentType.INSIGHT,
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=center.id,
+                to_unit_id=first_hop.id,
+                relation=EdgeRelation.RELATES_TO,
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=first_hop.id,
+                to_unit_id=second_hop.id,
+                relation=EdgeRelation.RELATES_TO,
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=second_hop.id,
+                to_unit_id=third_hop.id,
+                relation=EdgeRelation.RELATES_TO,
+            )
+        )
+
+        payload = rag_service.context_pack(
+            {
+                "query": "solar",
+                "mode": "fulltext",
+                "results": [{"id": center.id, "snippet": "Solar content"}],
+            },
+            char_budget=50,
+            neighbor_depth=9,
+        )
+
+        excerpt_chars = sum(
+            len(unit["content_excerpt"])
+            for unit in [*payload["ranked_units"], *payload["neighbors"]]
+        )
+        assert excerpt_chars <= 50
+        assert payload["metadata"]["neighbor_depth"] == 2
+        assert payload["metadata"]["neighbor_depth_cap"] == 2
+        assert {unit["id"] for unit in payload["neighbors"]} == {
+            first_hop.id,
+            second_hop.id,
+        }
+        assert third_hop.id not in {unit["id"] for unit in payload["neighbors"]}
