@@ -1818,6 +1818,53 @@ def test_tag_synonyms_command_emits_json_and_readable_output(monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_rename_tag_command_dry_run_json_and_execute(monkeypatch):
+    store = _make_store()
+    _populate_tag_synonym_graph(store)
+    for unit in store.get_all_units(limit=100):
+        store.fts_index_unit(unit)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        dry_run = runner.invoke(
+            app,
+            [
+                "rename-tag",
+                "ai_agent",
+                "ai-agent",
+                "--source-project",
+                "max",
+                "--content-type",
+                "insight",
+                "--dry-run",
+                "--json",
+            ],
+        )
+
+        assert dry_run.exit_code == 0
+        dry_payload = json.loads(dry_run.output)
+        assert dry_payload["dry_run"] is True
+        assert dry_payload["changed_count"] == 1
+        assert dry_payload["sample_units"][0]["title"] == "Agent underscore"
+        unit = store.get_unit_by_source("max", "agent-underscore", "insight")
+        assert unit is not None
+        assert unit.tags == ["ai_agent"]
+
+        executed = runner.invoke(app, ["rename-tag", "ai_agent", "ai-agent"])
+
+        assert executed.exit_code == 0
+        assert "Updated 1 units: ai_agent -> ai-agent" in executed.output
+        unit = store.get_unit_by_source("max", "agent-underscore", "insight")
+        assert unit is not None
+        assert unit.tags == ["ai-agent"]
+        assert store.fts_search("ai_agent") == []
+        assert {row["unit_id"] for row in store.fts_search("ai-agent")}
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_links_command_emits_json_and_filters_by_domain(monkeypatch):
     store = _make_store()
     _populate_links_graph(store)

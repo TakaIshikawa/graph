@@ -931,6 +931,28 @@ class GraphService:
             "min_similarity": min_similarity,
         }
 
+    def rename_tag(
+        self,
+        old_tag: str,
+        new_tag: str,
+        *,
+        dry_run: bool = False,
+        source_project: str | None = None,
+        content_type: str | None = None,
+        sample_limit: int = 10,
+    ) -> dict:
+        """Rename or merge one exact tag across matching units."""
+        result = self.store.rename_tag(
+            old_tag,
+            new_tag,
+            dry_run=dry_run,
+            source_project=source_project,
+            content_type=content_type,
+        )
+        result["sample_units"] = result["changed_units"][:sample_limit]
+        result["sample_limit"] = sample_limit
+        return result
+
     def analyze_duplicates(
         self,
         *,

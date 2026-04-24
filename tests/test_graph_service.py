@@ -802,6 +802,41 @@ class TestGraphService:
         }
         assert after == before
 
+    def test_rename_tag_dry_run_and_execute_return_same_sample_schema(
+        self, tag_synonym_store: Store
+    ):
+        gs = GraphService(tag_synonym_store)
+
+        dry_run = gs.rename_tag(
+            "ai_agent",
+            "ai-agent",
+            dry_run=True,
+            source_project="max",
+            content_type="insight",
+        )
+
+        assert dry_run["dry_run"] is True
+        assert dry_run["changed_count"] == 1
+        assert dry_run["sample_units"] == dry_run["changed_units"]
+        unit = tag_synonym_store.get_unit_by_source("max", "agent-underscore", "insight")
+        assert unit is not None
+        assert unit.tags == ["ai_agent"]
+
+        result = gs.rename_tag(
+            "ai_agent",
+            "ai-agent",
+            source_project="max",
+            content_type="insight",
+        )
+
+        assert result["dry_run"] is False
+        assert result["changed_count"] == 1
+        assert result["sample_units"][0]["old_tags"] == ["ai_agent"]
+        assert result["sample_units"][0]["new_tags"] == ["ai-agent"]
+        unit = tag_synonym_store.get_unit_by_source("max", "agent-underscore", "insight")
+        assert unit is not None
+        assert unit.tags == ["ai-agent"]
+
     def test_analyze_duplicates_finds_titles_content_and_applies_filters(
         self, store: Store
     ):

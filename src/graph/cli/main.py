@@ -295,6 +295,29 @@ def _do_update_unit(
     return {"unit_id": unit_id, "updated": True, "unit": _unit_to_json(updated)}
 
 
+def _do_rename_tag(
+    store: Store,
+    old_tag: str,
+    new_tag: str,
+    *,
+    dry_run: bool = False,
+    source_project: str | None = None,
+    content_type: str | None = None,
+) -> dict:
+    if content_type is not None:
+        content_type = ContentType(content_type).value
+    from graph.graph.service import GraphService
+
+    gs = GraphService(store)
+    return gs.rename_tag(
+        old_tag,
+        new_tag,
+        dry_run=dry_run,
+        source_project=source_project,
+        content_type=content_type,
+    )
+
+
 def _do_delete_unit(store: Store, unit_id: str) -> dict:
     stats = store.delete_unit(unit_id)
     if not stats["deleted"]:
@@ -2586,6 +2609,65 @@ def tag_synonyms(
         for variant in suggestion["variants"]:
             typer.echo(f"    {variant['tag']}: {variant['count']}")
 
+    store.close()
+
+
+@app.command(name="rename-tag")
+def rename_tag(
+    old_tag: str = typer.Argument(..., help="Exact tag to replace"),
+    new_tag: str = typer.Argument(..., help="Replacement tag"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without writing"),
+    source_project: str | None = typer.Option(
+        None,
+        "--source-project",
+        "--project",
+        "-p",
+        help="Filter by source project",
+    ),
+    content_type: str | None = typer.Option(None, "--content-type", help="Filter by content type"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Rename or merge one exact tag across matching units."""
+    store = _get_store()
+    try:
+        result = _do_rename_tag(
+            store,
+            old_tag,
+            new_tag,
+            dry_run=dry_run,
+            source_project=source_project,
+            content_type=content_type,
+        )
+    except ValueError as exc:
+        store.close()
+        if json_output:
+            _json_echo(
+                {
+                    "old_tag": old_tag,
+                    "new_tag": new_tag,
+                    "dry_run": dry_run,
+                    "changed_count": 0,
+                    "changed_units": [],
+                    "sample_units": [],
+                    "error": str(exc),
+                }
+            )
+            return
+        raise typer.BadParameter(str(exc)) from exc
+
+    if json_output:
+        _json_echo(result)
+        store.close()
+        return
+
+    action = "Would update" if dry_run else "Updated"
+    typer.echo(
+        f"{action} {result['changed_count']} units: "
+        f"{result['old_tag']} -> {result['new_tag']}"
+    )
+    for unit in result["sample_units"]:
+        typer.echo(f"  [{unit['source_project']}] {unit['title']}")
+        typer.echo(f"    ID: {unit['id']} | Tags: {', '.join(unit['new_tags'])}")
     store.close()
 
 

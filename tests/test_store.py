@@ -150,6 +150,74 @@ class TestUnitCRUD:
     def test_update_unit_fields_missing_unit(self, store: Store):
         assert store.update_unit_fields("missing", title="Nope") is None
 
+    def test_rename_tag_dry_run_and_execute_merges_reindexes_fts(self, store: Store):
+        first = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="first",
+                source_entity_type="insight",
+                title="First tag note",
+                content="Contains rename target",
+                content_type=ContentType.INSIGHT,
+                tags=["ai_agent", "workflow"],
+            )
+        )
+        second = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="second",
+                source_entity_type="insight",
+                title="Second tag note",
+                content="Contains merge target",
+                content_type=ContentType.INSIGHT,
+                tags=["ai_agent", "ai-agent", "review"],
+            )
+        )
+        skipped = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="third",
+                source_entity_type="knowledge_node",
+                title="Skipped tag note",
+                content="Different project",
+                content_type=ContentType.FINDING,
+                tags=["ai_agent"],
+            )
+        )
+        for unit in [first, second, skipped]:
+            store.fts_index_unit(unit)
+        original_updated_at = str(store.get_unit(first.id).updated_at)  # type: ignore[union-attr]
+
+        dry_run = store.rename_tag(
+            "ai_agent",
+            "ai-agent",
+            dry_run=True,
+            source_project="max",
+            content_type="insight",
+        )
+
+        assert dry_run["dry_run"] is True
+        assert dry_run["changed_count"] == 2
+        assert {unit["id"] for unit in dry_run["changed_units"]} == {first.id, second.id}
+        assert store.get_unit(first.id).tags == ["ai_agent", "workflow"]  # type: ignore[union-attr]
+        assert str(store.get_unit(first.id).updated_at) == original_updated_at  # type: ignore[union-attr]
+
+        result = store.rename_tag(
+            "ai_agent",
+            "ai-agent",
+            source_project="max",
+            content_type="insight",
+        )
+
+        assert result["dry_run"] is False
+        assert result["changed_count"] == 2
+        assert store.get_unit(first.id).tags == ["ai-agent", "workflow"]  # type: ignore[union-attr]
+        assert store.get_unit(second.id).tags == ["ai-agent", "review"]  # type: ignore[union-attr]
+        assert store.get_unit(skipped.id).tags == ["ai_agent"]  # type: ignore[union-attr]
+        assert str(store.get_unit(first.id).updated_at) != original_updated_at  # type: ignore[union-attr]
+        assert {row["unit_id"] for row in store.fts_search("ai-agent")} >= {first.id, second.id}
+        assert {row["unit_id"] for row in store.fts_search("ai_agent")} == {skipped.id}
+
 
 class TestEdgeCRUD:
     def test_insert_and_get_edges(self, store: Store):

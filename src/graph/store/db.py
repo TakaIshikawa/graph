@@ -66,6 +66,13 @@ def _fallback_search_terms(query: str) -> list[str]:
     return terms or [query]
 
 
+def _requires_exact_single_term_filter(query: str) -> bool:
+    stripped = query.strip()
+    return bool(stripped) and not re.search(r"\s", stripped) and bool(
+        re.search(r"[-_/]", stripped)
+    )
+
+
 def _row_to_unit(row: sqlite3.Row) -> KnowledgeUnit:
     return KnowledgeUnit(
         id=row["id"],
@@ -364,6 +371,91 @@ class Store:
         if updated is not None:
             self.fts_index_unit(updated)
         return updated
+
+    def rename_tag(
+        self,
+        old_tag: str,
+        new_tag: str,
+        *,
+        dry_run: bool = False,
+        source_project: str | None = None,
+        content_type: str | None = None,
+    ) -> dict:
+        old_tag = old_tag.strip()
+        new_tag = new_tag.strip()
+        if not old_tag:
+            raise ValueError("old_tag must not be empty.")
+        if not new_tag:
+            raise ValueError("new_tag must not be empty.")
+
+        where, params = self._unit_filter_sql(
+            source_project=source_project,
+            content_type=content_type,
+        )
+        rows = self.conn.execute(
+            f"SELECT * FROM knowledge_units {where} ORDER BY created_at DESC",
+            params,
+        ).fetchall()
+        units = [_row_to_unit(row) for row in rows]
+
+        changed: list[tuple[KnowledgeUnit, list[str]]] = []
+        for unit in units:
+            if old_tag not in unit.tags:
+                continue
+
+            renamed_tags: list[str] = []
+            for tag in unit.tags:
+                candidate = new_tag if tag == old_tag else tag
+                if candidate not in renamed_tags:
+                    renamed_tags.append(candidate)
+
+            if renamed_tags != unit.tags:
+                changed.append((unit, renamed_tags))
+
+        changed_units = [
+            {
+                "id": unit.id,
+                "title": unit.title,
+                "source_project": str(unit.source_project),
+                "source_entity_type": unit.source_entity_type,
+                "content_type": str(unit.content_type),
+                "old_tags": unit.tags,
+                "new_tags": renamed_tags,
+            }
+            for unit, renamed_tags in changed
+        ]
+
+        if not dry_run and changed:
+            now = _utcnow_iso()
+            with self.conn:
+                for unit, renamed_tags in changed:
+                    self.conn.execute(
+                        """UPDATE knowledge_units
+                           SET tags = ?, updated_at = ?
+                           WHERE id = ?""",
+                        (json.dumps(renamed_tags), now, unit.id),
+                    )
+                    unit.tags = renamed_tags
+                    unit.updated_at = now
+                    self.conn.execute(
+                        "DELETE FROM knowledge_fts WHERE unit_id = ?", (unit.id,)
+                    )
+                    self.conn.execute(
+                        "INSERT INTO knowledge_fts (unit_id, title, content, tags) VALUES (?, ?, ?, ?)",
+                        (unit.id, unit.title, unit.content, " ".join(unit.tags)),
+                    )
+
+        return {
+            "old_tag": old_tag,
+            "new_tag": new_tag,
+            "dry_run": dry_run,
+            "changed_count": len(changed_units),
+            "changed_units": changed_units,
+            "filters": {
+                "source_project": source_project,
+                "content_type": content_type,
+            },
+        }
 
     def delete_unit(self, unit_id: str) -> dict:
         unit = self.get_unit(unit_id)
@@ -805,7 +897,7 @@ class Store:
                    LIMIT ?""",
                 (query, limit),
             ).fetchall()
-            return [
+            results = [
                 {
                     "unit_id": r["unit_id"],
                     "rank": r["rank"],
@@ -813,6 +905,18 @@ class Store:
                 }
                 for r in rows
             ]
+            if _requires_exact_single_term_filter(query):
+                exact = query.strip().lower()
+                filtered = []
+                for result in results:
+                    unit = self.get_unit(result["unit_id"])
+                    if unit is None:
+                        continue
+                    haystacks = [unit.title, unit.content, *unit.tags]
+                    if any(exact in str(value).lower() for value in haystacks):
+                        filtered.append(result)
+                return filtered
+            return results
         except sqlite3.OperationalError:
             # Fallback to LIKE search if FTS query syntax is invalid
             terms = _fallback_search_terms(query)

@@ -1528,6 +1528,72 @@ def test_suggest_tag_synonyms_tool_matches_service_structure(tmp_path, monkeypat
     }
 
 
+def test_rename_tag_tool_dry_run_and_execute_match_service_counts(
+    tmp_path, monkeypatch
+):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    _populate_tag_synonym_graph(store)
+    store.close()
+
+    monkeypatch.setattr(
+        mcp_server,
+        "_get_store",
+        lambda: Store(str(db_path)),
+    )
+
+    tools = asyncio.run(mcp_server.list_tools())
+    rename_tool = next(tool for tool in tools if tool.name == "rename_tag")
+    assert rename_tool.inputSchema["properties"]["dry_run"]["default"] is False
+    assert "source_project" in rename_tool.inputSchema["properties"]
+    assert "content_type" in rename_tool.inputSchema["properties"]
+
+    dry_response = asyncio.run(
+        mcp_server.call_tool(
+            "rename_tag",
+            {
+                "old_tag": "ai_agent",
+                "new_tag": "ai-agent",
+                "source_project": "max",
+                "content_type": "insight",
+                "dry_run": True,
+            },
+        )
+    )
+    dry_payload = json.loads(dry_response[0].text)
+    assert dry_payload["dry_run"] is True
+    assert dry_payload["changed_count"] == 1
+    assert dry_payload["sample_units"][0]["title"] == "Agent underscore"
+
+    store = Store(str(db_path))
+    unit = store.get_unit_by_source("max", "agent-underscore", "insight")
+    assert unit is not None
+    assert unit.tags == ["ai_agent"]
+    store.close()
+
+    execute_response = asyncio.run(
+        mcp_server.call_tool(
+            "rename_tag",
+            {
+                "old_tag": "ai_agent",
+                "new_tag": "ai-agent",
+                "source_project": "max",
+                "content_type": "insight",
+            },
+        )
+    )
+    execute_payload = json.loads(execute_response[0].text)
+    assert execute_payload["dry_run"] is False
+    assert execute_payload["changed_count"] == dry_payload["changed_count"]
+    assert execute_payload["sample_units"] == dry_payload["sample_units"]
+
+    store = Store(str(db_path))
+    unit = store.get_unit_by_source("max", "agent-underscore", "insight")
+    assert unit is not None
+    assert unit.tags == ["ai-agent"]
+    store.close()
+
+
 def test_analyze_duplicates_tool_returns_reasons_units_and_filters(
     tmp_path, monkeypatch
 ):
