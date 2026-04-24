@@ -374,6 +374,54 @@ class Store:
             self.fts_index_unit(updated)
         return updated
 
+    def pin_unit(self, unit_id: str, *, reason: str | None = None) -> KnowledgeUnit | None:
+        unit = self.get_unit(unit_id)
+        if unit is None:
+            return None
+
+        metadata = dict(unit.metadata)
+        now = _utcnow_iso()
+        metadata["pinned"] = True
+        metadata["pinned_at"] = now
+        if reason is not None:
+            metadata["pin_reason"] = reason
+        else:
+            metadata.pop("pin_reason", None)
+
+        self.conn.execute(
+            """UPDATE knowledge_units
+               SET metadata = ?, updated_at = ?
+               WHERE id = ?""",
+            (json.dumps(metadata), now, unit.id),
+        )
+        self.conn.commit()
+        updated = self.get_unit(unit_id)
+        if updated is not None:
+            self.fts_index_unit(updated)
+        return updated
+
+    def unpin_unit(self, unit_id: str) -> KnowledgeUnit | None:
+        unit = self.get_unit(unit_id)
+        if unit is None:
+            return None
+
+        metadata = dict(unit.metadata)
+        for key in ("pinned", "pinned_at", "pin_reason"):
+            metadata.pop(key, None)
+
+        now = _utcnow_iso()
+        self.conn.execute(
+            """UPDATE knowledge_units
+               SET metadata = ?, updated_at = ?
+               WHERE id = ?""",
+            (json.dumps(metadata), now, unit.id),
+        )
+        self.conn.commit()
+        updated = self.get_unit(unit_id)
+        if updated is not None:
+            self.fts_index_unit(updated)
+        return updated
+
     def rename_tag(
         self,
         old_tag: str,

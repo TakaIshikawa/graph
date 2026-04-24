@@ -2868,6 +2868,63 @@ def test_update_and_delete_unit_cli_json_reindexes_and_cleans_edges(monkeypatch)
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_pin_and_unpin_unit_cli_json_preserves_metadata(monkeypatch):
+    store = _make_store()
+    unit = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="manual-pin",
+            source_entity_type="manual",
+            title="Pinned solar reference",
+            content="Evergreen solar content",
+            metadata={"owner": "me", "review_state": "approved"},
+            tags=["solar"],
+        )
+    )
+    store.fts_index_unit(unit)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        pin_result = runner.invoke(
+            app,
+            ["pin-unit", unit.id, "--reason", "evergreen", "--json"],
+        )
+
+        assert pin_result.exit_code == 0
+        pin_payload = json.loads(pin_result.output)
+        assert pin_payload["updated"] is True
+        assert pin_payload["unit"]["tags"] == ["solar"]
+        assert pin_payload["unit"]["content"] == "Evergreen solar content"
+        assert pin_payload["unit"]["metadata"]["owner"] == "me"
+        assert pin_payload["unit"]["metadata"]["pinned"] is True
+        assert pin_payload["unit"]["metadata"]["pin_reason"] == "evergreen"
+        assert pin_payload["unit"]["metadata"]["pinned_at"]
+
+        unpin_result = runner.invoke(app, ["unpin-unit", unit.id, "--json"])
+
+        assert unpin_result.exit_code == 0
+        unpin_payload = json.loads(unpin_result.output)
+        assert unpin_payload["updated"] is True
+        assert unpin_payload["unit"]["metadata"] == {
+            "owner": "me",
+            "review_state": "approved",
+        }
+
+        missing_result = runner.invoke(app, ["pin-unit", "missing", "--json"])
+
+        assert missing_result.exit_code == 0
+        assert json.loads(missing_result.output) == {
+            "unit_id": "missing",
+            "updated": False,
+            "error": "unit_not_found",
+            "message": "Unit not found: missing",
+        }
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_integrity_cli_json_reports_and_repairs_fts(monkeypatch):
     store = _make_store()
     unit = store.insert_unit(

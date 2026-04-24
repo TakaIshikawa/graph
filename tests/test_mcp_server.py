@@ -1071,6 +1071,67 @@ def test_update_and_delete_unit_tools_reindex_and_clean_edges(tmp_path, monkeypa
         verify.close()
 
 
+def test_pin_and_unpin_unit_tools_preserve_metadata_and_report_missing(
+    tmp_path, monkeypatch
+):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    unit = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="manual-pin",
+            source_entity_type="manual",
+            title="Pinned solar reference",
+            content="Evergreen solar content",
+            metadata={"owner": "me", "review_state": "approved"},
+            tags=["solar"],
+        )
+    )
+    store.fts_index_unit(unit)
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    tool_names = {tool.name for tool in tools}
+    assert {"pin_unit", "unpin_unit"} <= tool_names
+
+    pin_response = asyncio.run(
+        mcp_server.call_tool(
+            "pin_unit",
+            {"unit_id": unit.id, "reason": "evergreen"},
+        )
+    )
+    pin_payload = json.loads(pin_response[0].text)
+    assert pin_payload["updated"] is True
+    assert pin_payload["unit"]["tags"] == ["solar"]
+    assert pin_payload["unit"]["content"] == "Evergreen solar content"
+    assert pin_payload["unit"]["metadata"]["owner"] == "me"
+    assert pin_payload["unit"]["metadata"]["pinned"] is True
+    assert pin_payload["unit"]["metadata"]["pin_reason"] == "evergreen"
+    assert pin_payload["unit"]["metadata"]["pinned_at"]
+
+    unpin_response = asyncio.run(
+        mcp_server.call_tool("unpin_unit", {"unit_id": unit.id})
+    )
+    unpin_payload = json.loads(unpin_response[0].text)
+    assert unpin_payload["updated"] is True
+    assert unpin_payload["unit"]["metadata"] == {
+        "owner": "me",
+        "review_state": "approved",
+    }
+
+    missing_response = asyncio.run(
+        mcp_server.call_tool("pin_unit", {"unit_id": "missing"})
+    )
+    assert json.loads(missing_response[0].text) == {
+        "unit_id": "missing",
+        "updated": False,
+        "error": "unit_not_found",
+        "message": "Unit not found: missing",
+    }
+
+
 def test_integrity_audit_tool_reports_and_repairs_fts(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))

@@ -26,7 +26,9 @@ from graph.cli.main import (
     _do_infer_edges,
     _do_integrity_audit,
     _do_delete_unit,
+    _do_pin_unit,
     _do_rename_tag,
+    _do_unpin_unit,
     _do_update_edge,
     _do_search,
     _do_search_facets,
@@ -811,6 +813,32 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="delete_unit",
             description="Delete a knowledge unit, its full-text row, and related edges.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "unit_id": {"type": "string", "description": "Knowledge unit ID"},
+                },
+                "required": ["unit_id"],
+            },
+        ),
+        Tool(
+            name="pin_unit",
+            description="Pin a knowledge unit by adding pin metadata and refreshing updated_at.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "unit_id": {"type": "string", "description": "Knowledge unit ID"},
+                    "reason": {
+                        "type": "string",
+                        "description": "Optional reason to store as pin_reason",
+                    },
+                },
+                "required": ["unit_id"],
+            },
+        ),
+        Tool(
+            name="unpin_unit",
+            description="Remove pin metadata from a knowledge unit and refresh updated_at.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1637,6 +1665,18 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         elif name == "delete_unit":
             payload = _do_delete_unit(store, arguments["unit_id"])
             return [TextContent(type="text", text=json.dumps(payload))]
+
+        elif name == "pin_unit":
+            payload = _do_pin_unit(
+                store,
+                arguments["unit_id"],
+                reason=arguments.get("reason"),
+            )
+            return [TextContent(type="text", text=json.dumps(payload, default=str))]
+
+        elif name == "unpin_unit":
+            payload = _do_unpin_unit(store, arguments["unit_id"])
+            return [TextContent(type="text", text=json.dumps(payload, default=str))]
 
         elif name == "add_edge":
             try:

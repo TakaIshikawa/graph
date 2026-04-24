@@ -316,6 +316,30 @@ def _do_update_unit(
     return {"unit_id": unit_id, "updated": True, "unit": _unit_to_json(updated)}
 
 
+def _do_pin_unit(store: Store, unit_id: str, *, reason: str | None = None) -> dict:
+    updated = store.pin_unit(unit_id, reason=reason)
+    if updated is None:
+        return {
+            "unit_id": unit_id,
+            "updated": False,
+            "error": "unit_not_found",
+            "message": f"Unit not found: {unit_id}",
+        }
+    return {"unit_id": unit_id, "updated": True, "unit": _unit_to_json(updated)}
+
+
+def _do_unpin_unit(store: Store, unit_id: str) -> dict:
+    updated = store.unpin_unit(unit_id)
+    if updated is None:
+        return {
+            "unit_id": unit_id,
+            "updated": False,
+            "error": "unit_not_found",
+            "message": f"Unit not found: {unit_id}",
+        }
+    return {"unit_id": unit_id, "updated": True, "unit": _unit_to_json(updated)}
+
+
 def _do_rename_tag(
     store: Store,
     old_tag: str,
@@ -1717,6 +1741,57 @@ def update_unit(
 
     unit = payload["unit"]
     typer.echo(f"Updated unit {unit['id']}: {unit['title']}")
+
+
+@app.command(name="pin-unit")
+def pin_unit(
+    unit_id: str = typer.Argument(..., help="Knowledge unit ID"),
+    reason: str | None = typer.Option(None, "--reason", help="Optional pin reason"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Pin a knowledge unit for later retrieval."""
+    store = _get_store()
+    payload = _do_pin_unit(store, unit_id, reason=reason)
+    store.close()
+
+    if payload.get("error"):
+        if json_output:
+            _json_echo(payload)
+            return
+        typer.echo(payload["message"])
+        raise typer.Exit(code=1)
+
+    if json_output:
+        _json_echo(payload)
+        return
+
+    unit = payload["unit"]
+    typer.echo(f"Pinned unit {unit['id']}: {unit['title']}")
+
+
+@app.command(name="unpin-unit")
+def unpin_unit(
+    unit_id: str = typer.Argument(..., help="Knowledge unit ID"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Remove pin metadata from a knowledge unit."""
+    store = _get_store()
+    payload = _do_unpin_unit(store, unit_id)
+    store.close()
+
+    if payload.get("error"):
+        if json_output:
+            _json_echo(payload)
+            return
+        typer.echo(payload["message"])
+        raise typer.Exit(code=1)
+
+    if json_output:
+        _json_echo(payload)
+        return
+
+    unit = payload["unit"]
+    typer.echo(f"Unpinned unit {unit['id']}: {unit['title']}")
 
 
 @app.command(name="delete-unit")

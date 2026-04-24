@@ -150,6 +150,38 @@ class TestUnitCRUD:
     def test_update_unit_fields_missing_unit(self, store: Store):
         assert store.update_unit_fields("missing", title="Nope") is None
 
+    def test_pin_and_unpin_unit_preserves_existing_fields_and_metadata(
+        self, store: Store, sample_unit: KnowledgeUnit
+    ):
+        sample_unit.metadata = {"review_state": "approved", "owner": "me"}
+        sample_unit.tags = ["energy"]
+        inserted = store.insert_unit(sample_unit)
+        store.fts_index_unit(inserted)
+
+        pinned = store.pin_unit(inserted.id, reason="evergreen")
+
+        assert pinned is not None
+        assert pinned.title == inserted.title
+        assert pinned.content == inserted.content
+        assert pinned.tags == ["energy"]
+        assert pinned.metadata["review_state"] == "approved"
+        assert pinned.metadata["owner"] == "me"
+        assert pinned.metadata["pinned"] is True
+        assert pinned.metadata["pin_reason"] == "evergreen"
+        assert pinned.metadata["pinned_at"]
+        assert store.fts_search(inserted.title)[0]["unit_id"] == inserted.id
+
+        unpinned = store.unpin_unit(inserted.id)
+
+        assert unpinned is not None
+        assert unpinned.tags == ["energy"]
+        assert unpinned.metadata == {"review_state": "approved", "owner": "me"}
+        assert store.fts_search(inserted.title)[0]["unit_id"] == inserted.id
+
+    def test_pin_and_unpin_unit_missing_unit(self, store: Store):
+        assert store.pin_unit("missing", reason="nope") is None
+        assert store.unpin_unit("missing") is None
+
     def test_rename_tag_dry_run_and_execute_merges_reindexes_fts(self, store: Store):
         first = store.insert_unit(
             KnowledgeUnit(
