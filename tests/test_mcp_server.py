@@ -365,9 +365,7 @@ def _populate_backlinks_graph(store: Store) -> tuple[str, str, str]:
     return a.id, b.id, c.id
 
 
-def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(
-    tmp_path, monkeypatch
-):
+def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))
     store.upsert_sync_state(
@@ -497,8 +495,7 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(
     bookmarks_missing = next(
         item
         for item in statuses
-        if item["source_project"] == "bookmarks"
-        and item["source_entity_type"] == "bookmark"
+        if item["source_project"] == "bookmarks" and item["source_entity_type"] == "bookmark"
     )
     assert bookmarks_missing == {
         "source_project": "bookmarks",
@@ -524,8 +521,7 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(
     jsonl_missing = next(
         item
         for item in statuses
-        if item["source_project"] == "jsonl"
-        and item["source_entity_type"] == "jsonl_record"
+        if item["source_project"] == "jsonl" and item["source_entity_type"] == "jsonl_record"
     )
     assert jsonl_missing == {
         "source_project": "jsonl",
@@ -567,9 +563,7 @@ def test_ingest_all_includes_sota_and_search_can_filter_sota(tmp_path, monkeypat
     )
     monkeypatch.setattr(mcp_server, "_get_adapter", fake_get_adapter)
 
-    response = asyncio.run(
-        mcp_server.call_tool("ingest", {"project": "all", "full": True})
-    )
+    response = asyncio.run(mcp_server.call_tool("ingest", {"project": "all", "full": True}))
     payload = json.loads(response[0].text)
 
     assert calls == [
@@ -738,16 +732,12 @@ def test_saved_query_tools_create_list_run_and_delete(tmp_path, monkeypatch):
     listed = json.loads(list_response[0].text)
     assert [item["name"] for item in listed["queries"]] == ["approved-solar"]
 
-    run_response = asyncio.run(
-        mcp_server.call_tool("run_query", {"name": "approved-solar"})
-    )
+    run_response = asyncio.run(mcp_server.call_tool("run_query", {"name": "approved-solar"}))
     payload = json.loads(run_response[0].text)
     assert payload["saved_query"] == "approved-solar"
     assert payload["query"] == "solar"
     assert payload["filters"] == saved["filters"]
-    assert [result["title"] for result in payload["results"]] == [
-        "Solar approved insight"
-    ]
+    assert [result["title"] for result in payload["results"]] == ["Solar approved insight"]
 
     search_response = asyncio.run(
         mcp_server.call_tool(
@@ -763,31 +753,23 @@ def test_saved_query_tools_create_list_run_and_delete(tmp_path, monkeypatch):
         )
     )
     search_results = json.loads(search_response[0].text)
-    assert [result["title"] for result in search_results] == [
-        "Solar approved insight"
-    ]
+    assert [result["title"] for result in search_results] == ["Solar approved insight"]
     assert search_results[0]["snippet"]
 
-    delete_response = asyncio.run(
-        mcp_server.call_tool("delete_query", {"name": "approved-solar"})
-    )
+    delete_response = asyncio.run(mcp_server.call_tool("delete_query", {"name": "approved-solar"}))
     assert json.loads(delete_response[0].text) == {
         "name": "approved-solar",
         "deleted": True,
     }
 
-    missing_delete = asyncio.run(
-        mcp_server.call_tool("delete_query", {"name": "approved-solar"})
-    )
+    missing_delete = asyncio.run(mcp_server.call_tool("delete_query", {"name": "approved-solar"}))
     assert json.loads(missing_delete[0].text) == {
         "name": "approved-solar",
         "deleted": False,
         "error": "Saved query not found: approved-solar",
     }
 
-    missing_run = asyncio.run(
-        mcp_server.call_tool("run_query", {"name": "approved-solar"})
-    )
+    missing_run = asyncio.run(mcp_server.call_tool("run_query", {"name": "approved-solar"}))
     assert json.loads(missing_run[0].text) == {
         "name": "approved-solar",
         "found": False,
@@ -907,9 +889,7 @@ def test_search_tool_hybrid_results_include_scores_and_snippets(tmp_path, monkey
     assert results[0]["snippet"]
 
 
-def test_context_pack_tool_returns_filtered_results_and_graph_context(
-    tmp_path, monkeypatch
-):
+def test_context_pack_tool_returns_filtered_results_and_graph_context(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))
     center = store.insert_unit(
@@ -1053,9 +1033,7 @@ def test_update_and_delete_unit_tools_reindex_and_clean_edges(tmp_path, monkeypa
     finally:
         verify.close()
 
-    delete_response = asyncio.run(
-        mcp_server.call_tool("delete_unit", {"unit_id": manual.id})
-    )
+    delete_response = asyncio.run(mcp_server.call_tool("delete_unit", {"unit_id": manual.id}))
     assert json.loads(delete_response[0].text) == {
         "unit_id": manual.id,
         "deleted": True,
@@ -1071,9 +1049,7 @@ def test_update_and_delete_unit_tools_reindex_and_clean_edges(tmp_path, monkeypa
         verify.close()
 
 
-def test_pin_and_unpin_unit_tools_preserve_metadata_and_report_missing(
-    tmp_path, monkeypatch
-):
+def test_pin_and_unpin_unit_tools_preserve_metadata_and_report_missing(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))
     unit = store.insert_unit(
@@ -1111,9 +1087,7 @@ def test_pin_and_unpin_unit_tools_preserve_metadata_and_report_missing(
     assert pin_payload["unit"]["metadata"]["pin_reason"] == "evergreen"
     assert pin_payload["unit"]["metadata"]["pinned_at"]
 
-    unpin_response = asyncio.run(
-        mcp_server.call_tool("unpin_unit", {"unit_id": unit.id})
-    )
+    unpin_response = asyncio.run(mcp_server.call_tool("unpin_unit", {"unit_id": unit.id}))
     unpin_payload = json.loads(unpin_response[0].text)
     assert unpin_payload["updated"] is True
     assert unpin_payload["unit"]["metadata"] == {
@@ -1121,15 +1095,102 @@ def test_pin_and_unpin_unit_tools_preserve_metadata_and_report_missing(
         "review_state": "approved",
     }
 
-    missing_response = asyncio.run(
-        mcp_server.call_tool("pin_unit", {"unit_id": "missing"})
-    )
+    missing_response = asyncio.run(mcp_server.call_tool("pin_unit", {"unit_id": "missing"}))
     assert json.loads(missing_response[0].text) == {
         "unit_id": "missing",
         "updated": False,
         "error": "unit_not_found",
         "message": "Unit not found: missing",
     }
+
+
+def test_pinned_units_tool_returns_same_structured_payload_with_filters(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    older = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="older-pin",
+            source_entity_type="insight",
+            title="Older pinned",
+            content="Older pinned content",
+            content_type=ContentType.INSIGHT,
+            tags=["solar", "workspace"],
+            metadata={
+                "pinned": True,
+                "pinned_at": "2026-01-01T00:00:00+00:00",
+                "pin_reason": "older",
+            },
+        )
+    )
+    newer = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="newer-pin",
+            source_entity_type="insight",
+            title="Newer pinned",
+            content="Newer pinned content",
+            content_type=ContentType.INSIGHT,
+            tags=["solar", "workspace"],
+            metadata={
+                "pinned": True,
+                "pinned_at": "2026-01-02T00:00:00+00:00",
+                "pin_reason": "newer",
+            },
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="wrong-tag",
+            source_entity_type="insight",
+            title="Wrong tag pinned",
+            content="Wrong tag pinned content",
+            content_type=ContentType.INSIGHT,
+            tags=["archive"],
+            metadata={
+                "pinned": True,
+                "pinned_at": "2026-01-03T00:00:00+00:00",
+            },
+        )
+    )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    pinned_tool = next(tool for tool in tools if tool.name == "pinned_units")
+    assert pinned_tool.inputSchema["properties"]["tag"]["type"] == "string"
+
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "pinned_units",
+            {
+                "source_project": "max",
+                "content_type": "insight",
+                "tag": "workspace",
+                "limit": 2,
+            },
+        )
+    )
+    payload = json.loads(response[0].text)
+
+    assert [unit["id"] for unit in payload["units"]] == [newer.id, older.id]
+    assert payload["units"][0]["pin_reason"] == "newer"
+    assert payload["units"][0]["pinned_at"] == "2026-01-02T00:00:00+00:00"
+    assert "content" not in payload["units"][0]
+    assert payload["filters"] == {
+        "source_project": "max",
+        "content_type": "insight",
+        "tag": "workspace",
+        "limit": 2,
+    }
+
+    with_content = asyncio.run(
+        mcp_server.call_tool("pinned_units", {"tag": "workspace", "include_content": True})
+    )
+    content_payload = json.loads(with_content[0].text)
+    assert content_payload["units"][0]["content"] == "Newer pinned content"
 
 
 def test_integrity_audit_tool_reports_and_repairs_fts(tmp_path, monkeypatch):
@@ -1160,9 +1221,7 @@ def test_integrity_audit_tool_reports_and_repairs_fts(tmp_path, monkeypatch):
     assert payload["categories"]["units_missing_fts_rows"]["count"] == 1
     assert payload["categories"]["stale_fts_rows"]["count"] == 1
 
-    repaired = asyncio.run(
-        mcp_server.call_tool("integrity_audit", {"repair_fts": True})
-    )
+    repaired = asyncio.run(mcp_server.call_tool("integrity_audit", {"repair_fts": True}))
     repaired_payload = json.loads(repaired[0].text)
     assert repaired_payload["repair"]["requested"] is True
     assert repaired_payload["repair"]["fts_rows_inserted"] == 1
@@ -1178,9 +1237,7 @@ def test_integrity_audit_tool_reports_and_repairs_fts(tmp_path, monkeypatch):
         verify.close()
 
 
-def test_edge_management_tools_list_update_delete_and_report_errors(
-    tmp_path, monkeypatch
-):
+def test_edge_management_tools_list_update_delete_and_report_errors(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))
     center = store.insert_unit(
@@ -1277,9 +1334,7 @@ def test_edge_management_tools_list_update_delete_and_report_errors(
         verify.close()
 
 
-def test_backlinks_tool_returns_expanded_json_filters_and_missing_error(
-    tmp_path, monkeypatch
-):
+def test_backlinks_tool_returns_expanded_json_filters_and_missing_error(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))
     _, b_id, _ = _populate_backlinks_graph(store)
@@ -1299,8 +1354,7 @@ def test_backlinks_tool_returns_expanded_json_filters_and_missing_error(
     payload = json.loads(response[0].text)
     assert payload["center"]["title"] == "Node B"
     assert {
-        (link["direction"], link["relation"], link["unit"]["title"])
-        for link in payload["links"]
+        (link["direction"], link["relation"], link["unit"]["title"]) for link in payload["links"]
     } == {
         ("incoming", "builds_on", "Node A"),
         ("outgoing", "inspires", "Node C"),
@@ -1390,9 +1444,7 @@ def test_shortest_path_tool_returns_structured_path_and_errors(tmp_path, monkeyp
     assert disconnected_payload["edges"] == []
 
 
-def test_export_obsidian_tool_exports_same_vault_structure_as_cli(
-    tmp_path, monkeypatch
-):
+def test_export_obsidian_tool_exports_same_vault_structure_as_cli(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))
     a = store.insert_unit(
@@ -1555,9 +1607,7 @@ def test_json_backup_tools_export_and_import_idempotently(tmp_path, monkeypatch)
     assert any(tool.name == "import_json" for tool in tools)
 
     monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(source_db)))
-    export_response = asyncio.run(
-        mcp_server.call_tool("export_json", {"path": str(backup_path)})
-    )
+    export_response = asyncio.run(mcp_server.call_tool("export_json", {"path": str(backup_path)}))
     export_payload = json.loads(export_response[0].text)
 
     assert export_payload["units_exported"] == 2
@@ -1565,17 +1615,13 @@ def test_json_backup_tools_export_and_import_idempotently(tmp_path, monkeypatch)
     assert backup_path.exists()
 
     monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(target_db)))
-    import_response = asyncio.run(
-        mcp_server.call_tool("import_json", {"path": str(backup_path)})
-    )
+    import_response = asyncio.run(mcp_server.call_tool("import_json", {"path": str(backup_path)}))
     import_payload = json.loads(import_response[0].text)
 
     assert import_payload["units_inserted"] == 2
     assert import_payload["edges_inserted"] == 1
 
-    second_response = asyncio.run(
-        mcp_server.call_tool("import_json", {"path": str(backup_path)})
-    )
+    second_response = asyncio.run(mcp_server.call_tool("import_json", {"path": str(backup_path)}))
     second_payload = json.loads(second_response[0].text)
 
     assert second_payload["units_inserted"] == 0
@@ -1632,9 +1678,7 @@ def test_export_graphml_tool_returns_path_and_counts(tmp_path, monkeypatch):
     assert any(tool.name == "export_graphml" for tool in tools)
 
     monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
-    response = asyncio.run(
-        mcp_server.call_tool("export_graphml", {"path": str(graphml_path)})
-    )
+    response = asyncio.run(mcp_server.call_tool("export_graphml", {"path": str(graphml_path)}))
     payload = json.loads(response[0].text)
 
     assert payload == {
@@ -1716,9 +1760,7 @@ def test_export_turtle_tool_returns_path_counts_and_base_uri(tmp_path, monkeypat
     assert f"graph:builds_on <https://example.test/unit/{b.id}>" in text
 
 
-def test_export_mermaid_tool_returns_path_counts_and_capped_flag(
-    tmp_path, monkeypatch
-):
+def test_export_mermaid_tool_returns_path_counts_and_capped_flag(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     mermaid_path = tmp_path / "graph.md"
 
@@ -1766,9 +1808,7 @@ def test_export_mermaid_tool_returns_path_counts_and_capped_flag(
     assert c not in text
 
 
-def test_export_neighborhood_tool_returns_path_counts_and_writes_json(
-    tmp_path, monkeypatch
-):
+def test_export_neighborhood_tool_returns_path_counts_and_writes_json(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     export_path = tmp_path / "neighborhood.json"
 
@@ -1912,9 +1952,7 @@ def test_analyze_tags_tool_returns_summary_and_detail_json(tmp_path, monkeypatch
     assert "source_project" in analyze_tool.inputSchema["properties"]
     assert "content_type" in analyze_tool.inputSchema["properties"]
 
-    summary_response = asyncio.run(
-        mcp_server.call_tool("analyze_tags", {"limit": 2})
-    )
+    summary_response = asyncio.run(mcp_server.call_tool("analyze_tags", {"limit": 2}))
     summary = json.loads(summary_response[0].text)
     assert [item["tag"] for item in summary["tags"]] == ["energy", "solar"]
 
@@ -2033,9 +2071,7 @@ def test_suggest_tag_synonyms_tool_matches_service_structure(tmp_path, monkeypat
     }
 
 
-def test_rename_tag_tool_dry_run_and_execute_match_service_counts(
-    tmp_path, monkeypatch
-):
+def test_rename_tag_tool_dry_run_and_execute_match_service_counts(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))
     _populate_tag_synonym_graph(store)
@@ -2099,9 +2135,7 @@ def test_rename_tag_tool_dry_run_and_execute_match_service_counts(
     store.close()
 
 
-def test_apply_tags_to_search_tool_returns_counts_summaries_and_updates(
-    tmp_path, monkeypatch
-):
+def test_apply_tags_to_search_tool_returns_counts_summaries_and_updates(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))
     _populate_tags_graph(store)
@@ -2183,9 +2217,7 @@ def test_apply_tags_to_search_tool_returns_counts_summaries_and_updates(
     store.close()
 
 
-def test_analyze_duplicates_tool_returns_reasons_units_and_filters(
-    tmp_path, monkeypatch
-):
+def test_analyze_duplicates_tool_returns_reasons_units_and_filters(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))
     _populate_duplicates_graph(store)
@@ -2219,15 +2251,11 @@ def test_analyze_duplicates_tool_returns_reasons_units_and_filters(
         "same-content-b",
     }
     assert all(
-        unit["source_project"] == "max"
-        for item in payload["results"]
-        for unit in item["units"]
+        unit["source_project"] == "max" for item in payload["results"] for unit in item["units"]
     )
 
 
-def test_review_queue_tool_returns_ranked_items_reasons_and_filters(
-    tmp_path, monkeypatch
-):
+def test_review_queue_tool_returns_ranked_items_reasons_and_filters(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))
     old_id, recent_id = _populate_review_queue_graph(store)
@@ -2327,10 +2355,10 @@ def test_analyze_links_tool_returns_same_structured_payload(tmp_path, monkeypatc
     assert payload["domains"][0]["count"] == 2
     assert payload["links"][0]["url"] == "https://example.com/docs"
     assert payload["links"][0]["count"] == 2
-    assert {
-        occurrence["source_project"]
-        for occurrence in payload["links"][0]["occurrences"]
-    } == {"max", "forty_two"}
+    assert {occurrence["source_project"] for occurrence in payload["links"][0]["occurrences"]} == {
+        "max",
+        "forty_two",
+    }
 
 
 def test_analyze_source_coverage_tool_returns_service_payload(tmp_path, monkeypatch):
@@ -2393,8 +2421,7 @@ def test_analyze_source_coverage_tool_returns_service_payload(tmp_path, monkeypa
     payload = json.loads(response[0].text)
     assert payload == expected
     by_source = {
-        (item["source_project"], item["source_entity_type"]): item
-        for item in payload["sources"]
+        (item["source_project"], item["source_entity_type"]): item for item in payload["sources"]
     }
     assert by_source[("presence", "knowledge_item")]["orphan_count"] == 1
     assert by_source[("sota", "paper")]["unit_count"] == 0

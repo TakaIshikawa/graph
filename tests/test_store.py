@@ -182,6 +182,97 @@ class TestUnitCRUD:
         assert store.pin_unit("missing", reason="nope") is None
         assert store.unpin_unit("missing") is None
 
+    def test_get_pinned_units_filters_and_sorts_by_pinned_at(self, store: Store):
+        older = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="older-pin",
+                source_entity_type="insight",
+                title="Older pinned",
+                content="Older pinned content",
+                content_type=ContentType.INSIGHT,
+                tags=["solar", "workspace"],
+                metadata={
+                    "pinned": True,
+                    "pinned_at": "2026-01-01T00:00:00+00:00",
+                    "pin_reason": "older",
+                },
+            )
+        )
+        newer = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="newer-pin",
+                source_entity_type="insight",
+                title="Newer pinned",
+                content="Newer pinned content",
+                content_type=ContentType.INSIGHT,
+                tags=["solar", "workspace"],
+                metadata={
+                    "pinned": True,
+                    "pinned_at": "2026-01-02T00:00:00+00:00",
+                    "pin_reason": "newer",
+                },
+            )
+        )
+        store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="other-project",
+                source_entity_type="knowledge_node",
+                title="Other project pinned",
+                content="Other pinned content",
+                content_type=ContentType.FINDING,
+                tags=["solar", "workspace"],
+                metadata={
+                    "pinned": True,
+                    "pinned_at": "2026-01-03T00:00:00+00:00",
+                },
+            )
+        )
+        store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="wrong-tag",
+                source_entity_type="insight",
+                title="Wrong tag pinned",
+                content="Wrong tag pinned content",
+                content_type=ContentType.INSIGHT,
+                tags=["archive"],
+                metadata={
+                    "pinned": True,
+                    "pinned_at": "2026-01-04T00:00:00+00:00",
+                },
+            )
+        )
+        store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="not-pinned",
+                source_entity_type="insight",
+                title="Not pinned",
+                content="Not pinned content",
+                content_type=ContentType.INSIGHT,
+                tags=["solar", "workspace"],
+            )
+        )
+
+        all_pinned = store.get_pinned_units(limit=2)
+        assert [unit.title for unit in all_pinned] == [
+            "Wrong tag pinned",
+            "Other project pinned",
+        ]
+
+        filtered = store.get_pinned_units(
+            source_project="max",
+            content_type="insight",
+            tag="workspace",
+            limit=10,
+        )
+
+        assert [unit.id for unit in filtered] == [newer.id, older.id]
+        assert filtered[0].metadata["pin_reason"] == "newer"
+
     def test_rename_tag_dry_run_and_execute_merges_reindexes_fts(self, store: Store):
         first = store.insert_unit(
             KnowledgeUnit(
@@ -250,9 +341,7 @@ class TestUnitCRUD:
         assert {row["unit_id"] for row in store.fts_search("ai-agent")} >= {first.id, second.id}
         assert {row["unit_id"] for row in store.fts_search("ai_agent")} == {skipped.id}
 
-    def test_apply_tags_to_units_dry_run_execute_dedupes_and_reindexes_fts(
-        self, store: Store
-    ):
+    def test_apply_tags_to_units_dry_run_execute_dedupes_and_reindexes_fts(self, store: Store):
         first = store.insert_unit(
             KnowledgeUnit(
                 source_project=SourceProject.MAX,
@@ -823,8 +912,7 @@ class TestSavedQueries:
         store = Store(str(db_path))
         try:
             columns = {
-                row["name"]
-                for row in store.conn.execute("PRAGMA table_info(knowledge_units)")
+                row["name"] for row in store.conn.execute("PRAGMA table_info(knowledge_units)")
             }
             assert "embedding_updated_at" in columns
             version = store.conn.execute("SELECT version FROM schema_version").fetchone()[0]
@@ -934,13 +1022,16 @@ class TestEmbedding:
             "stale": 1,
         }
         assert [u.id for u in store.get_units_for_embedding_refresh()] == [missing.id]
-        assert {
-            u.id for u in store.get_units_for_embedding_refresh(stale_only=True)
-        } == {stale.id, missing.id}
+        assert {u.id for u in store.get_units_for_embedding_refresh(stale_only=True)} == {
+            stale.id,
+            missing.id,
+        }
 
 
 class TestJsonBackup:
-    def test_export_json_contains_required_top_level_fields(self, store: Store, sample_unit: KnowledgeUnit):
+    def test_export_json_contains_required_top_level_fields(
+        self, store: Store, sample_unit: KnowledgeUnit
+    ):
         inserted = store.insert_unit(sample_unit)
         store.fts_index_unit(inserted)
 
@@ -952,9 +1043,7 @@ class TestJsonBackup:
         assert payload["units"][0]["id"] == inserted.id
         assert payload["edges"] == []
 
-    def test_import_export_round_trip_recreates_graph_and_fts_idempotently(
-        self, tmp_path
-    ):
+    def test_import_export_round_trip_recreates_graph_and_fts_idempotently(self, tmp_path):
         source_path = tmp_path / "source.db"
         target_path = tmp_path / "target.db"
         source = Store(str(source_path))

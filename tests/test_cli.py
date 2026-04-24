@@ -685,9 +685,7 @@ def test_export_turtle_command_writes_turtle_with_counts(tmp_path, monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
-def test_export_mermaid_command_writes_markdown_and_supports_neighborhood(
-    tmp_path, monkeypatch
-):
+def test_export_mermaid_command_writes_markdown_and_supports_neighborhood(tmp_path, monkeypatch):
     store = _make_store()
     a_id, b_id, c_id, d_id = _populate_graph(store)
     export_path = tmp_path / "graph.md"
@@ -724,9 +722,7 @@ def test_export_mermaid_command_writes_markdown_and_supports_neighborhood(
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
-def test_export_neighborhood_command_writes_local_json_and_caps_depth(
-    tmp_path, monkeypatch
-):
+def test_export_neighborhood_command_writes_local_json_and_caps_depth(tmp_path, monkeypatch):
     store = _make_store()
     a_id, _, _, d_id = _populate_graph(store)
     export_path = tmp_path / "neighborhood.json"
@@ -1010,9 +1006,7 @@ def test_ingest_feed_command_uses_configured_sources(tmp_path, monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
-def test_ingest_bookmarks_command_uses_configured_path_and_updates_by_url(
-    tmp_path, monkeypatch
-):
+def test_ingest_bookmarks_command_uses_configured_path_and_updates_by_url(tmp_path, monkeypatch):
     bookmarks = tmp_path / "bookmarks.html"
     bookmarks.write_text(
         """<!DOCTYPE NETSCAPE-Bookmark-file-1>
@@ -1042,9 +1036,7 @@ def test_ingest_bookmarks_command_uses_configured_path_and_updates_by_url(
         assert result.exit_code == 0
         assert "Ingesting from bookmarks" in result.output
         assert "bookmarks: 1 new" in result.output
-        unit = store.get_unit_by_source(
-            "bookmarks", "https://example.com/bookmark", "bookmark"
-        )
+        unit = store.get_unit_by_source("bookmarks", "https://example.com/bookmark", "bookmark")
         assert unit is not None
         assert unit.title == "Useful Bookmark"
         assert unit.tags == ["Bookmarks Bar", "Bookmarks Bar/Research"]
@@ -1052,9 +1044,7 @@ def test_ingest_bookmarks_command_uses_configured_path_and_updates_by_url(
         assert unit.metadata["folder_path"] == "Bookmarks Bar/Research"
 
         bookmarks.write_text(
-            bookmarks.read_text(encoding="utf-8").replace(
-                "Useful Bookmark", "Updated Bookmark"
-            ),
+            bookmarks.read_text(encoding="utf-8").replace("Useful Bookmark", "Updated Bookmark"),
             encoding="utf-8",
         )
         second = runner.invoke(app, ["ingest", "bookmarks", "--full"])
@@ -1088,9 +1078,7 @@ def test_ingest_bookmarks_command_uses_configured_path_and_updates_by_url(
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
-def test_ingest_csv_command_uses_configured_path_and_indexes_fulltext(
-    tmp_path, monkeypatch
-):
+def test_ingest_csv_command_uses_configured_path_and_indexes_fulltext(tmp_path, monkeypatch):
     csv_path = tmp_path / "knowledge.csv"
     csv_path.write_text(
         "source_id,title,content,content_type,tags,utility_score,confidence,created_at,metadata_json\n"
@@ -1137,9 +1125,7 @@ def test_ingest_csv_command_uses_configured_path_and_indexes_fulltext(
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
-def test_ingest_jsonl_command_uses_configured_path_and_indexes_fulltext(
-    tmp_path, monkeypatch
-):
+def test_ingest_jsonl_command_uses_configured_path_and_indexes_fulltext(tmp_path, monkeypatch):
     jsonl_path = tmp_path / "knowledge.jsonl"
     jsonl_path.write_text(
         json.dumps(
@@ -1200,9 +1186,7 @@ def test_ingest_jsonl_command_uses_configured_path_and_indexes_fulltext(
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
-def test_ingest_opml_command_uses_configured_path_and_inserts_edges(
-    tmp_path, monkeypatch
-):
+def test_ingest_opml_command_uses_configured_path_and_inserts_edges(tmp_path, monkeypatch):
     opml_path = tmp_path / "subscriptions.opml"
     opml_path.write_text(
         """<opml version="2.0">
@@ -1324,7 +1308,10 @@ def test_search_command_preserves_default_format(monkeypatch):
     _populate_search_graph(store)
     proxy = StoreProxy(store)
     monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
-    monkeypatch.setattr("graph.rag.embeddings.get_embedding_provider", lambda *args, **kwargs: MockEmbeddingProvider())
+    monkeypatch.setattr(
+        "graph.rag.embeddings.get_embedding_provider",
+        lambda *args, **kwargs: MockEmbeddingProvider(),
+    )
 
     try:
         result = runner.invoke(app, ["search", "solar", "--mode", "fulltext", "--limit", "1"])
@@ -1344,7 +1331,10 @@ def test_search_command_emits_semantic_json_with_scores(monkeypatch):
     _populate_search_graph(store)
     proxy = StoreProxy(store)
     monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
-    monkeypatch.setattr("graph.rag.embeddings.get_embedding_provider", lambda *args, **kwargs: MockEmbeddingProvider())
+    monkeypatch.setattr(
+        "graph.rag.embeddings.get_embedding_provider",
+        lambda *args, **kwargs: MockEmbeddingProvider(),
+    )
 
     try:
         result = runner.invoke(
@@ -1632,7 +1622,9 @@ def test_embed_command_honors_limit_and_stale_only(monkeypatch):
     provider = RecordingEmbeddingProvider()
     proxy = StoreProxy(store)
     monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
-    monkeypatch.setattr("graph.rag.embeddings.get_embedding_provider", lambda *args, **kwargs: provider)
+    monkeypatch.setattr(
+        "graph.rag.embeddings.get_embedding_provider", lambda *args, **kwargs: provider
+    )
 
     try:
         result = runner.invoke(
@@ -1672,7 +1664,9 @@ def test_embed_command_force_refreshes_existing_embeddings(monkeypatch):
     provider = RecordingEmbeddingProvider()
     proxy = StoreProxy(store)
     monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
-    monkeypatch.setattr("graph.rag.embeddings.get_embedding_provider", lambda *args, **kwargs: provider)
+    monkeypatch.setattr(
+        "graph.rag.embeddings.get_embedding_provider", lambda *args, **kwargs: provider
+    )
 
     try:
         result = runner.invoke(
@@ -2340,17 +2334,14 @@ def test_links_command_emits_json_and_filters_by_domain(monkeypatch):
         assert payload["domains"][0]["domain"] == "example.com"
         assert payload["domains"][0]["count"] == 2
         assert payload["domains"][0]["url_count"] == 1
-        assert payload["domains"][0]["urls"] == [
-            {"url": "https://example.com/docs", "count": 2}
-        ]
-        assert {
-            unit["source_id"] for unit in payload["domains"][0]["representative_units"]
-        } == {"markdown-link", "duplicate-link"}
+        assert payload["domains"][0]["urls"] == [{"url": "https://example.com/docs", "count": 2}]
+        assert {unit["source_id"] for unit in payload["domains"][0]["representative_units"]} == {
+            "markdown-link",
+            "duplicate-link",
+        }
         assert payload["links"][0]["url"] == "https://example.com/docs"
         assert payload["links"][0]["count"] == 2
-        assert {item["field"] for item in payload["links"][0]["occurrences"]} == {
-            "content"
-        }
+        assert {item["field"] for item in payload["links"][0]["occurrences"]} == {"content"}
     finally:
         store.close()
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
@@ -2448,16 +2439,12 @@ def test_duplicates_command_emits_reasons_units_and_applies_filters(monkeypatch)
             "same-title-a",
             "same-title-b",
         }
-        assert {
-            unit["source_id"] for unit in by_reason["similar_content"]["units"]
-        } == {
+        assert {unit["source_id"] for unit in by_reason["similar_content"]["units"]} == {
             "same-content-a",
             "same-content-b",
         }
         assert all(
-            unit["source_project"] == "max"
-            for item in payload["results"]
-            for unit in item["units"]
+            unit["source_project"] == "max" for item in payload["results"] for unit in item["units"]
         )
     finally:
         store.close()
@@ -2509,7 +2496,10 @@ def test_search_command_applies_filters_in_all_modes(monkeypatch, mode):
     _populate_search_graph(store)
     proxy = StoreProxy(store)
     monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
-    monkeypatch.setattr("graph.rag.embeddings.get_embedding_provider", lambda *args, **kwargs: MockEmbeddingProvider())
+    monkeypatch.setattr(
+        "graph.rag.embeddings.get_embedding_provider",
+        lambda *args, **kwargs: MockEmbeddingProvider(),
+    )
 
     try:
         result = runner.invoke(
@@ -2587,9 +2577,7 @@ def test_search_command_emits_active_date_and_utility_filters_in_json(monkeypatc
             "max_utility": 0.93,
             "min_utility": 0.9,
         }
-        assert [result["title"] for result in payload["results"]] == [
-            "Solar approved insight"
-        ]
+        assert [result["title"] for result in payload["results"]] == ["Solar approved insight"]
         assert payload["results"][0]["created_at"] == "2026-04-22T00:00:00+00:00"
         assert payload["results"][0]["snippet"]
     finally:
@@ -2638,7 +2626,10 @@ def test_search_facets_command_respects_filters_in_all_modes(monkeypatch, mode):
     _populate_search_graph(store)
     proxy = StoreProxy(store)
     monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
-    monkeypatch.setattr("graph.rag.embeddings.get_embedding_provider", lambda *args, **kwargs: MockEmbeddingProvider())
+    monkeypatch.setattr(
+        "graph.rag.embeddings.get_embedding_provider",
+        lambda *args, **kwargs: MockEmbeddingProvider(),
+    )
 
     try:
         result = runner.invoke(
@@ -2696,7 +2687,10 @@ def test_queries_cli_save_list_run_and_delete(monkeypatch):
     _populate_search_graph(store)
     proxy = StoreProxy(store)
     monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
-    monkeypatch.setattr("graph.rag.embeddings.get_embedding_provider", lambda *args, **kwargs: MockEmbeddingProvider())
+    monkeypatch.setattr(
+        "graph.rag.embeddings.get_embedding_provider",
+        lambda *args, **kwargs: MockEmbeddingProvider(),
+    )
 
     try:
         save_result = runner.invoke(
@@ -2756,9 +2750,7 @@ def test_queries_cli_save_list_run_and_delete(monkeypatch):
         assert payload["query"] == "solar"
         assert payload["mode"] == "fulltext"
         assert payload["filters"] == saved["filters"]
-        assert [result["title"] for result in payload["results"]] == [
-            "Solar approved insight"
-        ]
+        assert [result["title"] for result in payload["results"]] == ["Solar approved insight"]
 
         delete_result = runner.invoke(app, ["queries", "delete", "approved-solar", "--json"])
 
@@ -2850,9 +2842,7 @@ def test_update_and_delete_unit_cli_json_reindexes_and_cleans_edges(monkeypatch)
         assert store.fts_search("battery")[0]["unit_id"] == manual.id
         assert store.fts_search("Original") == []
 
-        delete_result = runner.invoke(
-            app, ["delete-unit", manual.id, "--yes", "--json"]
-        )
+        delete_result = runner.invoke(app, ["delete-unit", manual.id, "--yes", "--json"])
 
         assert delete_result.exit_code == 0
         assert json.loads(delete_result.output) == {
@@ -2920,6 +2910,101 @@ def test_pin_and_unpin_unit_cli_json_preserves_metadata(monkeypatch):
             "error": "unit_not_found",
             "message": "Unit not found: missing",
         }
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_pinned_cli_json_filters_orders_and_controls_content(monkeypatch):
+    store = _make_store()
+    older = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="older-pin",
+            source_entity_type="insight",
+            title="Older pinned",
+            content="Older pinned content",
+            content_type=ContentType.INSIGHT,
+            tags=["solar", "workspace"],
+            metadata={
+                "pinned": True,
+                "pinned_at": "2026-01-01T00:00:00+00:00",
+                "pin_reason": "older",
+            },
+        )
+    )
+    newer = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="newer-pin",
+            source_entity_type="insight",
+            title="Newer pinned",
+            content="Newer pinned content",
+            content_type=ContentType.INSIGHT,
+            tags=["solar", "workspace"],
+            metadata={
+                "pinned": True,
+                "pinned_at": "2026-01-02T00:00:00+00:00",
+                "pin_reason": "newer",
+            },
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="wrong-tag",
+            source_entity_type="insight",
+            title="Wrong tag pinned",
+            content="Wrong tag pinned content",
+            content_type=ContentType.INSIGHT,
+            tags=["archive"],
+            metadata={
+                "pinned": True,
+                "pinned_at": "2026-01-03T00:00:00+00:00",
+            },
+        )
+    )
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "pinned",
+                "--source-project",
+                "max",
+                "--content-type",
+                "insight",
+                "--tag",
+                "workspace",
+                "--limit",
+                "2",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert [unit["id"] for unit in payload["units"]] == [newer.id, older.id]
+        assert payload["units"][0]["pin_reason"] == "newer"
+        assert payload["units"][0]["pinned_at"] == "2026-01-02T00:00:00+00:00"
+        assert "content" not in payload["units"][0]
+        assert payload["filters"] == {
+            "source_project": "max",
+            "content_type": "insight",
+            "tag": "workspace",
+            "limit": 2,
+        }
+
+        with_content = runner.invoke(
+            app,
+            ["pinned", "--tag", "workspace", "--include-content", "--json"],
+        )
+
+        assert with_content.exit_code == 0
+        content_payload = json.loads(with_content.output)
+        assert content_payload["units"][0]["content"] == "Newer pinned content"
     finally:
         store.close()
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]

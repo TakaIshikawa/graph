@@ -166,10 +166,7 @@ def _do_export_report(store: Store, path: str | Path, *, limit: int = 10) -> dic
         "### By Project",
         "",
         *_line_items(
-            [
-                f"- {project}: {count}"
-                for project, count in sorted(stats["by_project"].items())
-            ]
+            [f"- {project}: {count}" for project, count in sorted(stats["by_project"].items())]
         ),
         "",
         "### By Content Type",
@@ -232,8 +229,7 @@ def _do_export_report(store: Store, path: str | Path, *, limit: int = 10) -> dic
             f"{project}:{count}" for project, count in item["source_projects"].items()
         )
         content_types = ", ".join(
-            f"{content_type}:{count}"
-            for content_type, count in item["content_types"].items()
+            f"{content_type}:{count}" for content_type, count in item["content_types"].items()
         )
         tag_lines.append(
             f"- {item['tag']}: {item['count']} units "
@@ -340,6 +336,36 @@ def _do_unpin_unit(store: Store, unit_id: str) -> dict:
     return {"unit_id": unit_id, "updated": True, "unit": _unit_to_json(updated)}
 
 
+def _do_pinned_units(
+    store: Store,
+    *,
+    source_project: str | None = None,
+    content_type: str | None = None,
+    tag: str | None = None,
+    limit: int | None = None,
+    include_content: bool = False,
+) -> dict:
+    if content_type is not None:
+        content_type = ContentType(content_type).value
+
+    units = store.get_pinned_units(
+        source_project=source_project,
+        content_type=content_type,
+        tag=tag,
+        limit=limit,
+    )
+    return {
+        "units": [_pinned_unit_to_json(unit, include_content=include_content) for unit in units],
+        "count": len(units),
+        "filters": {
+            "source_project": source_project,
+            "content_type": content_type,
+            "tag": tag,
+            "limit": limit,
+        },
+    }
+
+
 def _do_rename_tag(
     store: Store,
     old_tag: str,
@@ -387,9 +413,7 @@ def _edge_summary_payload(store: Store, edge, center_unit_id: str | None = None)
         payload["direction"] = direction
     if neighbor_id is not None:
         neighbor = store.get_unit(neighbor_id)
-        payload["neighbor"] = (
-            _unit_to_json(neighbor, include_content=False) if neighbor else None
-        )
+        payload["neighbor"] = _unit_to_json(neighbor, include_content=False) if neighbor else None
     return payload
 
 
@@ -518,6 +542,13 @@ def _unit_to_json(
         data["score"] = score
     if snippet is not None:
         data["snippet"] = snippet
+    return data
+
+
+def _pinned_unit_to_json(unit, *, include_content: bool = False) -> dict:
+    data = _unit_to_json(unit, include_content=include_content)
+    data["pin_reason"] = unit.metadata.get("pin_reason")
+    data["pinned_at"] = unit.metadata.get("pinned_at")
     return data
 
 
@@ -818,9 +849,7 @@ def _do_search(
         payload = {
             "query": query,
             "mode": mode,
-            "results": [
-                _unit_to_json(unit, snippet=snippet) for unit, snippet in results
-            ],
+            "results": [_unit_to_json(unit, snippet=snippet) for unit, snippet in results],
         }
         if filters:
             payload["filters"] = filters
@@ -882,8 +911,7 @@ def _do_search(
         "query": query,
         "mode": mode,
         "results": [
-            _unit_to_json(unit, score=score, snippet=snippets.get(unit.id))
-            for unit, score in pairs
+            _unit_to_json(unit, score=score, snippet=snippets.get(unit.id)) for unit, score in pairs
         ],
     }
     if filters:
@@ -962,10 +990,7 @@ def _facet_payload_from_units(
         "query": query,
         "mode": mode,
         "total_matches": len(units),
-        "facets": {
-            facet_name: _sorted_counts(counts)
-            for facet_name, counts in facets.items()
-        },
+        "facets": {facet_name: _sorted_counts(counts) for facet_name, counts in facets.items()},
     }
     if filters:
         payload["filters"] = filters
@@ -1159,15 +1184,12 @@ def _render_search_payload(payload: dict, *, json_output: bool) -> None:
     for result in results:
         if "score" in result:
             typer.echo(
-                f"\n[{result['source_project']}] {result['title']}  "
-                f"(score: {result['score']:.3f})"
+                f"\n[{result['source_project']}] {result['title']}  (score: {result['score']:.3f})"
             )
         else:
             typer.echo(f"\n[{result['source_project']}] {result['title']}")
         typer.echo(f"  ID: {result['id']}")
-        typer.echo(
-            f"  Type: {result['content_type']} | Tags: {', '.join(result['tags'])}"
-        )
+        typer.echo(f"  Type: {result['content_type']} | Tags: {', '.join(result['tags'])}")
         typer.echo(f"  {result.get('snippet') or result.get('content', '')[:120]}...")
 
 
@@ -1195,9 +1217,7 @@ def _render_similar_payload(payload: dict, *, json_output: bool) -> None:
             f"(score: {result['score']:.3f}, reason: {result['reason']})"
         )
         typer.echo(f"  ID: {result['id']}")
-        typer.echo(
-            f"  Type: {result['content_type']} | Tags: {', '.join(result['tags'])}"
-        )
+        typer.echo(f"  Type: {result['content_type']} | Tags: {', '.join(result['tags'])}")
         typer.echo(f"  {result.get('snippet') or ''}")
 
 
@@ -1337,8 +1357,7 @@ def export_graphml(
     stats = _do_export_graphml(store, path)
     store.close()
     typer.echo(
-        f"Exported {stats['node_count']} nodes and "
-        f"{stats['edge_count']} edges to {stats['path']}"
+        f"Exported {stats['node_count']} nodes and {stats['edge_count']} edges to {stats['path']}"
     )
 
 
@@ -1402,8 +1421,7 @@ def export_turtle(
     stats = _do_export_turtle(store, path, base_uri=base_uri)
     store.close()
     typer.echo(
-        f"Exported {stats['node_count']} nodes and "
-        f"{stats['edge_count']} edges to {stats['path']}"
+        f"Exported {stats['node_count']} nodes and {stats['edge_count']} edges to {stats['path']}"
     )
 
 
@@ -1526,7 +1544,9 @@ def _do_embed(
         count = rag.embed_batch_and_store(batch)
         total += count
         batch_num = i // batch_size + 1
-        typer.echo(f"  Batch {batch_num}/{total_batches}: {count} embedded ({total}/{len(units_to_embed)})")
+        typer.echo(
+            f"  Batch {batch_num}/{total_batches}: {count} embedded ({total}/{len(units_to_embed)})"
+        )
         if i + batch_size < len(units_to_embed):
             time.sleep(delay)
 
@@ -1590,9 +1610,13 @@ def embed(
     content_type: str | None = typer.Option(None, "--content-type", help="Filter by content type"),
     batch_size: int = typer.Option(5, "--batch-size", "-b", help="Batch size for API calls"),
     delay: float = typer.Option(21.0, "--delay", help="Seconds between batches (rate limit)"),
-    force: bool = typer.Option(False, "--force", help="Refresh embeddings even when they are fresh"),
+    force: bool = typer.Option(
+        False, "--force", help="Refresh embeddings even when they are fresh"
+    ),
     limit: int | None = typer.Option(None, "--limit", "-n", help="Maximum units to embed"),
-    stale_only: bool = typer.Option(False, "--stale-only", help="Embed only missing or stale embeddings"),
+    stale_only: bool = typer.Option(
+        False, "--stale-only", help="Embed only missing or stale embeddings"
+    ),
 ) -> None:
     """Generate embeddings for units missing them."""
     store = _get_store()
@@ -1650,8 +1674,12 @@ def infer_edges(
         "-p",
         help="Filter candidate units by source project",
     ),
-    content_type: str | None = typer.Option(None, "--content-type", help="Filter candidate units by content type"),
-    min_similarity: float = typer.Option(0.75, "--min-similarity", help="Minimum cosine similarity"),
+    content_type: str | None = typer.Option(
+        None, "--content-type", help="Filter candidate units by content type"
+    ),
+    min_similarity: float = typer.Option(
+        0.75, "--min-similarity", help="Minimum cosine similarity"
+    ),
     limit: int = typer.Option(100, "--limit", "-n", help="Max candidate pairs to process"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview inferred edges without writing"),
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
@@ -1794,6 +1822,50 @@ def unpin_unit(
     typer.echo(f"Unpinned unit {unit['id']}: {unit['title']}")
 
 
+@app.command(name="pinned")
+def pinned(
+    source_project: str | None = typer.Option(
+        None, "--source-project", help="Filter by source project"
+    ),
+    content_type: str | None = typer.Option(None, "--content-type", help="Filter by content type"),
+    tag: str | None = typer.Option(None, "--tag", help="Require an exact graph tag"),
+    limit: int = typer.Option(20, "--limit", min=0, help="Maximum pinned units to return"),
+    include_content: bool = typer.Option(
+        False,
+        "--include-content",
+        help="Include full content in JSON output",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """List pinned knowledge units newest pin first."""
+    store = _get_store()
+    try:
+        payload = _do_pinned_units(
+            store,
+            source_project=source_project,
+            content_type=content_type,
+            tag=tag,
+            limit=limit,
+            include_content=include_content,
+        )
+    finally:
+        store.close()
+
+    if json_output:
+        _json_echo(payload)
+        return
+
+    if not payload["units"]:
+        typer.echo("No pinned units found.")
+        return
+
+    for unit in payload["units"]:
+        reason = f" - {unit['pin_reason']}" if unit.get("pin_reason") else ""
+        typer.echo(
+            f"{unit['pinned_at']} {unit['id']} [{unit['source_project']}] {unit['title']}{reason}"
+        )
+
+
 @app.command(name="delete-unit")
 def delete_unit(
     unit_id: str = typer.Argument(..., help="Knowledge unit ID"),
@@ -1819,9 +1891,7 @@ def delete_unit(
         _json_echo(payload)
         return
 
-    typer.echo(
-        f"Deleted unit {unit_id}; removed {payload['edges_deleted']} related edges."
-    )
+    typer.echo(f"Deleted unit {unit_id}; removed {payload['edges_deleted']} related edges.")
 
 
 @edges_app.command(name="list")
@@ -1962,7 +2032,9 @@ def delete_edge(
 def search(
     query: str = typer.Argument(..., help="Search query"),
     limit: int = typer.Option(10, "--limit", "-n", help="Max results"),
-    mode: str = typer.Option("fulltext", "--mode", "-m", help="Search mode: fulltext | semantic | hybrid"),
+    mode: str = typer.Option(
+        "fulltext", "--mode", "-m", help="Search mode: fulltext | semantic | hybrid"
+    ),
     source_project: str | None = typer.Option(
         None,
         "--source-project",
@@ -2074,7 +2146,9 @@ def similar(
 @app.command(name="search-facets")
 def search_facets(
     query: str = typer.Argument(..., help="Search query"),
-    mode: str = typer.Option("fulltext", "--mode", "-m", help="Search mode: fulltext | semantic | hybrid"),
+    mode: str = typer.Option(
+        "fulltext", "--mode", "-m", help="Search mode: fulltext | semantic | hybrid"
+    ),
     source_project: str | None = typer.Option(
         None,
         "--source-project",
@@ -2155,7 +2229,9 @@ def search_facets(
 def context(
     query: str = typer.Argument(..., help="Search query"),
     limit: int = typer.Option(10, "--limit", "-n", help="Max ranked units"),
-    mode: str = typer.Option("fulltext", "--mode", "-m", help="Search mode: fulltext | semantic | hybrid"),
+    mode: str = typer.Option(
+        "fulltext", "--mode", "-m", help="Search mode: fulltext | semantic | hybrid"
+    ),
     source_project: str | None = typer.Option(
         None,
         "--source-project",
@@ -2243,9 +2319,7 @@ def context(
     typer.echo(f"Context pack: {payload['query']} ({payload['mode']})")
     for unit in payload["ranked_units"]:
         score = f" | score {unit['score']:.3f}" if "score" in unit else ""
-        typer.echo(
-            f"{unit['rank']}. [{unit['source_project']}] {unit['title']}{score}"
-        )
+        typer.echo(f"{unit['rank']}. [{unit['source_project']}] {unit['title']}{score}")
         typer.echo(f"   neighbors: {len(unit['neighbor_ids'])}")
 
 
@@ -2254,7 +2328,9 @@ def save_query(
     name: str = typer.Argument(..., help="Saved query name"),
     query: str = typer.Argument(..., help="Search query"),
     limit: int = typer.Option(10, "--limit", "-n", help="Max results"),
-    mode: str = typer.Option("fulltext", "--mode", "-m", help="Search mode: fulltext | semantic | hybrid"),
+    mode: str = typer.Option(
+        "fulltext", "--mode", "-m", help="Search mode: fulltext | semantic | hybrid"
+    ),
     source_project: str | None = typer.Option(
         None,
         "--source-project",
@@ -2340,13 +2416,10 @@ def list_queries(
         return
 
     for saved in queries:
-        filters = ", ".join(
-            f"{key}={value}" for key, value in saved["filters"].items()
-        )
+        filters = ", ".join(f"{key}={value}" for key, value in saved["filters"].items())
         suffix = f" | {filters}" if filters else ""
         typer.echo(
-            f"{saved['name']}: {saved['query']} "
-            f"({saved['mode']}, limit {saved['limit']}){suffix}"
+            f"{saved['name']}: {saved['query']} ({saved['mode']}, limit {saved['limit']}){suffix}"
         )
 
 
@@ -2525,9 +2598,7 @@ def design_briefs(
         typer.echo(
             f"  Domain: {metadata.get('domain') or '-'} | Theme: {metadata.get('theme') or '-'}"
         )
-        typer.echo(
-            f"  Readiness: {readiness_score if readiness_score is not None else '-'}"
-        )
+        typer.echo(f"  Readiness: {readiness_score if readiness_score is not None else '-'}")
         typer.echo(f"  Status: {brief_status or '-'}")
         typer.echo(
             f"  Lead idea: {lead_idea_id or '-'} | Source ideas: "
@@ -2859,13 +2930,10 @@ def shortest_path(
     if len(path_units) > 1:
         typer.echo("  Edges:")
         for left, right in zip(path_units, path_units[1:], strict=False):
-            edge = gs.G.get_edge_data(left.id, right.id) or gs.G.get_edge_data(
-                right.id, left.id
-            )
+            edge = gs.G.get_edge_data(left.id, right.id) or gs.G.get_edge_data(right.id, left.id)
             relation = edge.get("relation") if edge else "related_to"
             typer.echo(
-                f"    {_format_unit_label(left)} --{relation}--> "
-                f"{_format_unit_label(right)}"
+                f"    {_format_unit_label(left)} --{relation}--> {_format_unit_label(right)}"
             )
 
     store.close()
@@ -2967,8 +3035,7 @@ def gaps(
         unit = store.get_unit(g["unit_id"])
         if unit:
             typer.echo(
-                f"[{g['gap_type']}] [{unit.source_project}] {unit.title} "
-                f"(score: {g['score']:.2f})"
+                f"[{g['gap_type']}] [{unit.source_project}] {unit.title} (score: {g['score']:.2f})"
             )
             typer.echo(f"  {g['reason']}")
 
@@ -3002,9 +3069,7 @@ def central(
             {
                 "results": [
                     {"unit": _unit_to_json(unit), "score": score}
-                    for unit, score in (
-                        (store.get_unit(nid), score) for nid, score in found
-                    )
+                    for unit, score in ((store.get_unit(nid), score) for nid, score in found)
                     if unit
                 ]
             }
@@ -3015,10 +3080,7 @@ def central(
     for nid, score in found:
         unit = store.get_unit(nid)
         if unit:
-            typer.echo(
-                f"[{unit.source_project}] {unit.title} "
-                f"(PageRank: {score:.6f})"
-            )
+            typer.echo(f"[{unit.source_project}] {unit.title} (PageRank: {score:.6f})")
 
     store.close()
 
@@ -3050,9 +3112,7 @@ def bridges(
             {
                 "results": [
                     {"unit": _unit_to_json(unit), "score": score}
-                    for unit, score in (
-                        (store.get_unit(nid), score) for nid, score in found
-                    )
+                    for unit, score in ((store.get_unit(nid), score) for nid, score in found)
                     if unit
                 ]
             }
@@ -3063,10 +3123,7 @@ def bridges(
     for nid, score in found:
         unit = store.get_unit(nid)
         if unit:
-            typer.echo(
-                f"[{unit.source_project}] {unit.title} "
-                f"(betweenness: {score:.6f})"
-            )
+            typer.echo(f"[{unit.source_project}] {unit.title} (betweenness: {score:.6f})")
 
     store.close()
 
@@ -3099,9 +3156,7 @@ def cross_project(
 
     typer.echo("Cross-project connections:")
     for item in found:
-        typer.echo(
-            f"  {_format_project_pair(item['projects'])}: {item['edge_count']} edges"
-        )
+        typer.echo(f"  {_format_project_pair(item['projects'])}: {item['edge_count']} edges")
 
     store.close()
 
@@ -3136,14 +3191,10 @@ def source_coverage(
             f"Orphans: {item['orphan_count']}"
         )
         typer.echo(
-            f"    Created: {item['oldest_created_at'] or '-'} -> "
-            f"{item['newest_created_at'] or '-'}"
+            f"    Created: {item['oldest_created_at'] or '-'} -> {item['newest_created_at'] or '-'}"
         )
         if item["has_sync_state"]:
-            typer.echo(
-                f"    Sync: {item['last_sync_at']} | "
-                f"Items synced: {item['items_synced']}"
-            )
+            typer.echo(f"    Sync: {item['last_sync_at']} | Items synced: {item['items_synced']}")
         else:
             typer.echo("    Sync: -")
 
@@ -3201,9 +3252,7 @@ def timeline(
         store.close()
         return
 
-    typer.echo(
-        f"Timeline: {result['total']} units by {result['bucket']} using {result['field']}"
-    )
+    typer.echo(f"Timeline: {result['total']} units by {result['bucket']} using {result['field']}")
     if not result["buckets"]:
         typer.echo("No timeline buckets found.")
         store.close()
@@ -3325,7 +3374,9 @@ def tags_apply_search(
         "--remove",
         help="Tag to remove from matching units. Repeat to remove multiple tags.",
     ),
-    mode: str = typer.Option("fulltext", "--mode", "-m", help="Search mode: fulltext | semantic | hybrid"),
+    mode: str = typer.Option(
+        "fulltext", "--mode", "-m", help="Search mode: fulltext | semantic | hybrid"
+    ),
     limit: int = typer.Option(10, "--limit", "-n", help="Max matching units to update"),
     source_project: str | None = typer.Option(
         None,
@@ -3428,9 +3479,7 @@ def tags_apply_search(
         return
 
     action = "Would update" if dry_run else "Updated"
-    typer.echo(
-        f"{action} {result['changed_count']} of {result['matched_count']} matched units."
-    )
+    typer.echo(f"{action} {result['changed_count']} of {result['matched_count']} matched units.")
     for unit in result["changed_units"]:
         typer.echo(f"  [{unit['source_project']}] {unit['title']}")
         typer.echo(
@@ -3532,8 +3581,7 @@ def rename_tag(
 
     action = "Would update" if dry_run else "Updated"
     typer.echo(
-        f"{action} {result['changed_count']} units: "
-        f"{result['old_tag']} -> {result['new_tag']}"
+        f"{action} {result['changed_count']} units: {result['old_tag']} -> {result['new_tag']}"
     )
     for unit in result["sample_units"]:
         typer.echo(f"  [{unit['source_project']}] {unit['title']}")
@@ -3568,8 +3616,7 @@ def links(
     typer.echo("Top external link domains:")
     for item in found_domains:
         typer.echo(
-            f"  {item['domain']}: {item['count']} occurrences "
-            f"across {item['url_count']} URLs"
+            f"  {item['domain']}: {item['count']} occurrences across {item['url_count']} URLs"
         )
         units = ", ".join(
             f"[{unit['source_project']}] {unit['title']}"
@@ -3621,10 +3668,7 @@ def suggest_edges(
     for candidate in candidates:
         from_unit = candidate["from_unit"]
         to_unit = candidate["to_unit"]
-        typer.echo(
-            f"  {from_unit['title']} -> {to_unit['title']} "
-            f"score={candidate['score']:.3f}"
-        )
+        typer.echo(f"  {from_unit['title']} -> {to_unit['title']} score={candidate['score']:.3f}")
         typer.echo(f"    IDs: {candidate['from_id']} -> {candidate['to_id']}")
         for reason in candidate["reasons"]:
             typer.echo(f"    - {reason}")
@@ -3670,10 +3714,7 @@ def duplicates(
     for item in found:
         typer.echo(f"[{item['reason']}] score: {item['score']:.3f}")
         for unit in item["units"]:
-            typer.echo(
-                f"  [{unit['source_project']}] {unit['title']} "
-                f"({unit['content_type']})"
-            )
+            typer.echo(f"  [{unit['source_project']}] {unit['title']} ({unit['content_type']})")
             typer.echo(f"    ID: {unit['id']}")
 
     store.close()
@@ -3717,13 +3758,8 @@ def review_queue(
     typer.echo("Review queue:")
     for item in queue:
         unit = item["unit"]
-        reasons = ", ".join(
-            f"{reason['code']}:{reason['score']:.1f}" for reason in item["reasons"]
-        )
-        typer.echo(
-            f"  [{unit['source_project']}] {unit['title']} "
-            f"score={item['score']:.1f}"
-        )
+        reasons = ", ".join(f"{reason['code']}:{reason['score']:.1f}" for reason in item["reasons"])
+        typer.echo(f"  [{unit['source_project']}] {unit['title']} score={item['score']:.1f}")
         typer.echo(
             f"    ID: {unit['id']} | Type: {unit['content_type']} | "
             f"Degree: {item['degree']} | Age: {item['age_days']}d"
@@ -3764,8 +3800,8 @@ def _do_export_obsidian(
         incoming.setdefault(e.to_unit_id, []).append((e.relation, e.from_unit_id))
 
     def _safe_filename(title: str) -> str:
-        name = re.sub(r'[<>:"/\\|?*]', '', title)
-        name = name.strip('. ')
+        name = re.sub(r'[<>:"/\\|?*]', "", title)
+        name = name.strip(". ")
         return name[:120] if name else "Untitled"
 
     written = 0

@@ -27,6 +27,7 @@ from graph.cli.main import (
     _do_integrity_audit,
     _do_delete_unit,
     _do_pin_unit,
+    _do_pinned_units,
     _do_rename_tag,
     _do_unpin_unit,
     _do_update_edge,
@@ -262,6 +263,24 @@ async def list_tools() -> list[Tool]:
                     **SEARCH_FILTER_SCHEMA,
                 },
                 "required": ["unit_id"],
+            },
+        ),
+        Tool(
+            name="pinned_units",
+            description="List pinned knowledge units newest pin first, with optional filters.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "default": 20},
+                    "include_content": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Include full content in each unit payload",
+                    },
+                    "source_project": SEARCH_FILTER_SCHEMA["source_project"],
+                    "content_type": SEARCH_FILTER_SCHEMA["content_type"],
+                    "tag": SEARCH_FILTER_SCHEMA["tag"],
+                },
             },
         ),
         Tool(
@@ -1199,6 +1218,17 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             )
             return [TextContent(type="text", text=json.dumps(payload["results"]))]
 
+        elif name == "pinned_units":
+            payload = _do_pinned_units(
+                store,
+                source_project=arguments.get("source_project"),
+                content_type=arguments.get("content_type"),
+                tag=arguments.get("tag"),
+                limit=arguments.get("limit", 20),
+                include_content=arguments.get("include_content", False),
+            )
+            return [TextContent(type="text", text=json.dumps(payload, default=str))]
+
         elif name == "similar_units":
             filters = _search_filters_dict(
                 source_project=arguments.get("source_project"),
@@ -1403,13 +1433,19 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             gs.rebuild()
             path = gs.shortest_path(arguments["from_id"], arguments["to_id"])
             if path is None:
-                return [TextContent(type="text", text=json.dumps({"path": None, "message": "No path found"}))]
+                return [
+                    TextContent(
+                        type="text", text=json.dumps({"path": None, "message": "No path found"})
+                    )
+                ]
 
             path_details = []
             for nid in path:
                 n = store.get_unit(nid)
                 if n:
-                    path_details.append({"id": n.id, "title": n.title, "source_project": n.source_project})
+                    path_details.append(
+                        {"id": n.id, "title": n.title, "source_project": n.source_project}
+                    )
 
             return [TextContent(type="text", text=json.dumps({"path": path_details}))]
 
@@ -1434,7 +1470,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 for nid in cluster[:10]:
                     n = store.get_unit(nid)
                     if n:
-                        nodes.append({"id": n.id, "title": n.title, "source_project": n.source_project})
+                        nodes.append(
+                            {"id": n.id, "title": n.title, "source_project": n.source_project}
+                        )
                 clusters.append({"size": len(cluster), "nodes": nodes})
 
             return [TextContent(type="text", text=json.dumps(clusters))]
@@ -1449,14 +1487,16 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             for g in found:
                 n = store.get_unit(g["unit_id"])
                 if n:
-                    results.append({
-                        "unit_id": g["unit_id"],
-                        "title": n.title,
-                        "source_project": n.source_project,
-                        "gap_type": g["gap_type"],
-                        "score": g["score"],
-                        "reason": g["reason"],
-                    })
+                    results.append(
+                        {
+                            "unit_id": g["unit_id"],
+                            "title": n.title,
+                            "source_project": n.source_project,
+                            "gap_type": g["gap_type"],
+                            "score": g["score"],
+                            "reason": g["reason"],
+                        }
+                    )
 
             return [TextContent(type="text", text=json.dumps(results))]
 
@@ -1470,12 +1510,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             for nid, score in found:
                 n = store.get_unit(nid)
                 if n:
-                    results.append({
-                        "id": nid,
-                        "title": n.title,
-                        "source_project": n.source_project,
-                        "pagerank": round(score, 6),
-                    })
+                    results.append(
+                        {
+                            "id": nid,
+                            "title": n.title,
+                            "source_project": n.source_project,
+                            "pagerank": round(score, 6),
+                        }
+                    )
 
             return [TextContent(type="text", text=json.dumps(results))]
 
@@ -1489,12 +1531,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             for nid, score in found:
                 n = store.get_unit(nid)
                 if n:
-                    results.append({
-                        "id": nid,
-                        "title": n.title,
-                        "source_project": n.source_project,
-                        "betweenness": round(score, 6),
-                    })
+                    results.append(
+                        {
+                            "id": nid,
+                            "title": n.title,
+                            "source_project": n.source_project,
+                            "betweenness": round(score, 6),
+                        }
+                    )
 
             return [TextContent(type="text", text=json.dumps(results))]
 
@@ -1624,9 +1668,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             statuses = []
             for source_project, source_entity_type in _supported_sync_targets():
                 state = store.get_sync_state(source_project, source_entity_type)
-                statuses.append(
-                    _sync_state_to_dict(source_project, source_entity_type, state)
-                )
+                statuses.append(_sync_state_to_dict(source_project, source_entity_type, state))
             return [TextContent(type="text", text=json.dumps({"sync_states": statuses}))]
 
         elif name == "add_unit":
@@ -1699,12 +1741,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return [
                 TextContent(
                     type="text",
-                    text=json.dumps({
-                        "id": inserted.id,
-                        "from_unit_id": inserted.from_unit_id,
-                        "to_unit_id": inserted.to_unit_id,
-                        "relation": inserted.relation,
-                    }),
+                    text=json.dumps(
+                        {
+                            "id": inserted.id,
+                            "from_unit_id": inserted.from_unit_id,
+                            "to_unit_id": inserted.to_unit_id,
+                            "relation": inserted.relation,
+                        }
+                    ),
                 )
             ]
 

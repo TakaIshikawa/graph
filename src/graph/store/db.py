@@ -68,9 +68,7 @@ def _fallback_search_terms(query: str) -> list[str]:
 
 def _requires_exact_single_term_filter(query: str) -> bool:
     stripped = query.strip()
-    return bool(stripped) and not re.search(r"\s", stripped) and bool(
-        re.search(r"[-_/]", stripped)
-    )
+    return bool(stripped) and not re.search(r"\s", stripped) and bool(re.search(r"[-_/]", stripped))
 
 
 def _row_to_unit(row: sqlite3.Row) -> KnowledgeUnit:
@@ -178,9 +176,7 @@ class Store:
         return unit
 
     def get_unit(self, unit_id: str) -> KnowledgeUnit | None:
-        row = self.conn.execute(
-            "SELECT * FROM knowledge_units WHERE id = ?", (unit_id,)
-        ).fetchone()
+        row = self.conn.execute("SELECT * FROM knowledge_units WHERE id = ?", (unit_id,)).fetchone()
         return _row_to_unit(row) if row else None
 
     def get_unit_by_source(
@@ -422,6 +418,41 @@ class Store:
             self.fts_index_unit(updated)
         return updated
 
+    def get_pinned_units(
+        self,
+        *,
+        source_project: str | None = None,
+        content_type: str | None = None,
+        tag: str | None = None,
+        limit: int | None = None,
+    ) -> list[KnowledgeUnit]:
+        where_parts = ["json_extract(metadata, '$.pinned') = 1"]
+        params: list = []
+        if source_project:
+            where_parts.append("source_project = ?")
+            params.append(source_project)
+        if content_type:
+            where_parts.append("content_type = ?")
+            params.append(content_type)
+        if tag:
+            where_parts.append(
+                "EXISTS (SELECT 1 FROM json_each(knowledge_units.tags) WHERE value = ?)"
+            )
+            params.append(tag)
+
+        query = (
+            "SELECT * FROM knowledge_units "
+            "WHERE "
+            + " AND ".join(where_parts)
+            + " ORDER BY json_extract(metadata, '$.pinned_at') DESC, updated_at DESC"
+        )
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(max(0, limit))
+
+        rows = self.conn.execute(query, params).fetchall()
+        return [_row_to_unit(row) for row in rows]
+
     def rename_tag(
         self,
         old_tag: str,
@@ -487,9 +518,7 @@ class Store:
                     )
                     unit.tags = renamed_tags
                     unit.updated_at = now
-                    self.conn.execute(
-                        "DELETE FROM knowledge_fts WHERE unit_id = ?", (unit.id,)
-                    )
+                    self.conn.execute("DELETE FROM knowledge_fts WHERE unit_id = ?", (unit.id,))
                     self.conn.execute(
                         "INSERT INTO knowledge_fts (unit_id, title, content, tags) VALUES (?, ?, ?, ?)",
                         (unit.id, unit.title, unit.content, " ".join(unit.tags)),
@@ -516,16 +545,12 @@ class Store:
         dry_run: bool = False,
     ) -> dict:
         add_tags = list(dict.fromkeys(tag.strip() for tag in (add_tags or []) if tag.strip()))
-        remove_tags = list(
-            dict.fromkeys(tag.strip() for tag in (remove_tags or []) if tag.strip())
-        )
+        remove_tags = list(dict.fromkeys(tag.strip() for tag in (remove_tags or []) if tag.strip()))
         if not add_tags and not remove_tags:
             raise ValueError("At least one --add or --remove tag is required.")
         overlap = sorted(set(add_tags) & set(remove_tags))
         if overlap:
-            raise ValueError(
-                "Tags cannot be both added and removed: " + ", ".join(overlap)
-            )
+            raise ValueError("Tags cannot be both added and removed: " + ", ".join(overlap))
 
         ordered_ids = list(dict.fromkeys(unit_ids))
         units = [unit for unit_id in ordered_ids if (unit := self.get_unit(unit_id))]
@@ -565,9 +590,7 @@ class Store:
                     )
                     unit.tags = next_tags
                     unit.updated_at = now
-                    self.conn.execute(
-                        "DELETE FROM knowledge_fts WHERE unit_id = ?", (unit.id,)
-                    )
+                    self.conn.execute("DELETE FROM knowledge_fts WHERE unit_id = ?", (unit.id,))
                     self.conn.execute(
                         "INSERT INTO knowledge_fts (unit_id, title, content, tags) VALUES (?, ?, ?, ?)",
                         (unit.id, unit.title, unit.content, " ".join(unit.tags)),
@@ -594,9 +617,7 @@ class Store:
             (unit_id, unit_id),
         )
         self.conn.execute("DELETE FROM knowledge_fts WHERE unit_id = ?", (unit_id,))
-        unit_cursor = self.conn.execute(
-            "DELETE FROM knowledge_units WHERE id = ?", (unit_id,)
-        )
+        unit_cursor = self.conn.execute("DELETE FROM knowledge_units WHERE id = ?", (unit_id,))
         self.conn.commit()
         return {
             "unit_id": unit_id,
@@ -763,21 +784,15 @@ class Store:
         return saved
 
     def get_saved_query(self, name: str) -> dict | None:
-        row = self.conn.execute(
-            "SELECT * FROM saved_queries WHERE name = ?", (name,)
-        ).fetchone()
+        row = self.conn.execute("SELECT * FROM saved_queries WHERE name = ?", (name,)).fetchone()
         return _row_to_saved_query(row) if row else None
 
     def list_saved_queries(self) -> list[dict]:
-        rows = self.conn.execute(
-            "SELECT * FROM saved_queries ORDER BY name"
-        ).fetchall()
+        rows = self.conn.execute("SELECT * FROM saved_queries ORDER BY name").fetchall()
         return [_row_to_saved_query(row) for row in rows]
 
     def delete_saved_query(self, name: str) -> bool:
-        cursor = self.conn.execute(
-            "DELETE FROM saved_queries WHERE name = ?", (name,)
-        )
+        cursor = self.conn.execute("DELETE FROM saved_queries WHERE name = ?", (name,))
         self.conn.commit()
         return cursor.rowcount > 0
 
@@ -1156,7 +1171,7 @@ class Store:
                   WHEN e.from_unit_id = ? THEN e.to_unit_id
                   ELSE e.from_unit_id
               END
-            WHERE ({' OR '.join(where)})
+            WHERE ({" OR ".join(where)})
         """
         query_params: list = [unit_id, *params]
         if relation:
@@ -1180,9 +1195,7 @@ class Store:
             )
             links.append(
                 {
-                    "direction": "outgoing"
-                    if row["from_unit_id"] == unit_id
-                    else "incoming",
+                    "direction": "outgoing" if row["from_unit_id"] == unit_id else "incoming",
                     "relation": str(edge.relation),
                     "edge": edge,
                     "unit": _row_to_unit(row),
@@ -1203,9 +1216,7 @@ class Store:
 
     # --- Sync state ---
 
-    def get_sync_state(
-        self, source_project: str, source_entity_type: str
-    ) -> SyncState | None:
+    def get_sync_state(self, source_project: str, source_entity_type: str) -> SyncState | None:
         row = self.conn.execute(
             """SELECT * FROM sync_state
                WHERE source_project = ? AND source_entity_type = ?""",
@@ -1247,9 +1258,7 @@ class Store:
     # --- FTS ---
 
     def fts_index_unit(self, unit: KnowledgeUnit) -> None:
-        self.conn.execute(
-            "DELETE FROM knowledge_fts WHERE unit_id = ?", (unit.id,)
-        )
+        self.conn.execute("DELETE FROM knowledge_fts WHERE unit_id = ?", (unit.id,))
         self.conn.execute(
             "INSERT INTO knowledge_fts (unit_id, title, content, tags) VALUES (?, ?, ?, ?)",
             (unit.id, unit.title, unit.content, " ".join(unit.tags)),
@@ -1291,9 +1300,7 @@ class Store:
         except sqlite3.OperationalError:
             # Fallback to LIKE search if FTS query syntax is invalid
             terms = _fallback_search_terms(query)
-            clauses = " OR ".join(
-                ["title LIKE ? OR content LIKE ? OR tags LIKE ?" for _ in terms]
-            )
+            clauses = " OR ".join(["title LIKE ? OR content LIKE ? OR tags LIKE ?" for _ in terms])
             params: list[object] = []
             for term in terms:
                 pattern = f"%{term}%"
