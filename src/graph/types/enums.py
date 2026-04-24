@@ -10,6 +10,7 @@ class SourceProject(StrEnum):
     SOTA = "sota"
     BOOKMARKS = "bookmarks"
     CSV = "csv"
+    JSONL = "jsonl"
 
 
 class ContentType(StrEnum):

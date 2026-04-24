@@ -16,6 +16,7 @@ def test_source_path_settings_honor_environment_overrides(monkeypatch):
         "GRAPH_FEED_SOURCES": "/tmp/feed.xml,/tmp/feeds",
         "GRAPH_BOOKMARKS_PATH": "/tmp/bookmarks.html",
         "GRAPH_CSV_PATH": "/tmp/export.csv",
+        "GRAPH_JSONL_PATH": "/tmp/export.jsonl",
         "GRAPH_ME_CONFIG": "/tmp/projects.yaml",
         "GRAPH_OBSIDIAN_VAULT_PATH": "/tmp/obsidian",
     }
@@ -33,5 +34,6 @@ def test_source_path_settings_honor_environment_overrides(monkeypatch):
     assert loaded.feed_sources == "/tmp/feed.xml,/tmp/feeds"
     assert loaded.bookmarks_path == "/tmp/bookmarks.html"
     assert loaded.csv_path == "/tmp/export.csv"
+    assert loaded.jsonl_path == "/tmp/export.jsonl"
     assert loaded.me_config == "/tmp/projects.yaml"
     assert loaded.obsidian_vault_path == "/tmp/obsidian"

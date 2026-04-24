@@ -49,6 +49,7 @@ SUPPORTED_SYNC_PROJECTS = [
     "sota",
     "bookmarks",
     "csv",
+    "jsonl",
 ]
 
 SEARCH_FILTER_SCHEMA = {
@@ -106,6 +107,7 @@ def _get_adapter(name: str):
     from graph.adapters.bookmarks import BookmarksAdapter
     from graph.adapters.csv_adapter import CsvAdapter
     from graph.adapters.forty_two import FortyTwoAdapter
+    from graph.adapters.jsonl_adapter import JsonlAdapter
     from graph.adapters.kindle import KindleAdapter
     from graph.adapters.max_adapter import MaxAdapter
     from graph.adapters.me import MeAdapter
@@ -123,6 +125,7 @@ def _get_adapter(name: str):
         "sota": lambda: SOTAAdapter(db_path=settings.sota_db),
         "bookmarks": lambda: BookmarksAdapter(path=settings.bookmarks_path),
         "csv": lambda: CsvAdapter(path=settings.csv_path),
+        "jsonl": lambda: JsonlAdapter(path=settings.jsonl_path),
     }
     return mapping[name]()
 

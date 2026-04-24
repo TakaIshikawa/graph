@@ -351,6 +351,7 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(
         "sota": ["paper"],
         "bookmarks": ["bookmark"],
         "csv": ["csv_row"],
+        "jsonl": ["jsonl_record"],
     }
     monkeypatch.setattr(
         mcp_server,
@@ -364,12 +365,14 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(
     assert "sota" in ingest_tool.inputSchema["properties"]["project"]["enum"]
     assert "bookmarks" in ingest_tool.inputSchema["properties"]["project"]["enum"]
     assert "csv" in ingest_tool.inputSchema["properties"]["project"]["enum"]
+    assert "jsonl" in ingest_tool.inputSchema["properties"]["project"]["enum"]
 
     search_tool = next(tool for tool in tools if tool.name == "search")
     assert "kindle" in search_tool.inputSchema["properties"]["source_project"]["enum"]
     assert "sota" in search_tool.inputSchema["properties"]["source_project"]["enum"]
     assert "bookmarks" in search_tool.inputSchema["properties"]["source_project"]["enum"]
     assert "csv" in search_tool.inputSchema["properties"]["source_project"]["enum"]
+    assert "jsonl" in search_tool.inputSchema["properties"]["source_project"]["enum"]
     assert search_tool.inputSchema["properties"]["created_after"]["type"] == "string"
     assert search_tool.inputSchema["properties"]["min_utility"]["type"] == "number"
     assert search_tool.inputSchema["properties"]["min_confidence"]["type"] == "number"
@@ -471,6 +474,20 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(
         "last_source_id": None,
         "items_synced": 0,
     }
+    jsonl_missing = next(
+        item
+        for item in statuses
+        if item["source_project"] == "jsonl"
+        and item["source_entity_type"] == "jsonl_record"
+    )
+    assert jsonl_missing == {
+        "source_project": "jsonl",
+        "source_entity_type": "jsonl_record",
+        "has_sync_state": False,
+        "last_sync_at": None,
+        "last_source_id": None,
+        "items_synced": 0,
+    }
 
 
 def test_ingest_all_includes_sota_and_search_can_filter_sota(tmp_path, monkeypatch):
@@ -517,6 +534,7 @@ def test_ingest_all_includes_sota_and_search_can_filter_sota(tmp_path, monkeypat
         "sota",
         "bookmarks",
         "csv",
+        "jsonl",
     ]
     assert payload == {"units_inserted": 1, "units_skipped": 0, "edges_inserted": 0}
 

@@ -169,7 +169,9 @@ class Store:
                 if isinstance(unit.created_at, datetime)
                 else str(unit.created_at),
                 now,
-                now,
+                unit.updated_at.isoformat()
+                if isinstance(unit.updated_at, datetime)
+                else str(unit.updated_at),
             ),
         )
         self.conn.commit()

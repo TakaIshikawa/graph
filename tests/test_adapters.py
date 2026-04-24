@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 import sqlite3
 import tempfile
 from datetime import datetime, timezone
@@ -14,6 +15,7 @@ from graph.adapters.bookmarks import BookmarksAdapter
 from graph.adapters.csv_adapter import CsvAdapter
 from graph.adapters.feed import FeedAdapter
 from graph.adapters.forty_two import FortyTwoAdapter
+from graph.adapters.jsonl_adapter import JsonlAdapter
 from graph.adapters.markdown import MarkdownAdapter
 from graph.adapters.max_adapter import MaxAdapter
 from graph.adapters.me import MeAdapter
@@ -725,6 +727,79 @@ class TestCsvAdapter:
         assert malformed.edges == []
 
 
+class TestJsonlAdapter:
+    def test_ingest_jsonl_records_with_optional_fields(self, tmp_path):
+        jsonl_path = tmp_path / "notes.jsonl"
+        jsonl_path.write_text(
+            json.dumps(
+                {
+                    "source_id": "jsonl-1",
+                    "title": "JSONL note",
+                    "content": "Structured export content.",
+                    "content_type": "finding",
+                    "tags": ["energy", "#solar", "energy"],
+                    "utility_score": 8.7,
+                    "confidence": "0.81",
+                    "created_at": "2025-04-24T12:00:00Z",
+                    "updated_at": "2025-04-25T09:30:00Z",
+                    "metadata": {"url": "https://example.com", "rank": 3},
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        result = JsonlAdapter(path=str(jsonl_path)).ingest()
+
+        assert len(result.units) == 1
+        unit = result.units[0]
+        assert unit.source_project == "jsonl"
+        assert unit.source_entity_type == "jsonl_record"
+        assert unit.source_id == "jsonl-1"
+        assert unit.title == "JSONL note"
+        assert unit.content == "Structured export content."
+        assert unit.content_type == "finding"
+        assert unit.tags == ["energy", "solar"]
+        assert unit.utility_score == 8.7
+        assert unit.confidence == 0.81
+        assert unit.created_at.isoformat() == "2025-04-24T12:00:00+00:00"
+        assert unit.updated_at.isoformat() == "2025-04-25T09:30:00+00:00"
+        assert unit.metadata == {"url": "https://example.com", "rank": 3}
+
+    def test_malformed_json_lines_are_skipped_with_warning(self, tmp_path):
+        jsonl_path = tmp_path / "mixed.jsonl"
+        jsonl_path.write_text(
+            '{"source_id": "ok", "title": "Valid", "content": "Imported."}\n'
+            "{not json\n"
+            '["not", "object"]\n',
+            encoding="utf-8",
+        )
+
+        with pytest.warns(UserWarning, match="Skipped 2 malformed JSONL line"):
+            result = JsonlAdapter(path=str(jsonl_path)).ingest()
+
+        assert [unit.source_id for unit in result.units] == ["ok"]
+
+    def test_missing_required_fields_and_entity_filter_return_empty_result(self, tmp_path):
+        jsonl_path = tmp_path / "missing.jsonl"
+        jsonl_path.write_text(
+            '{"title": "No source", "content": "Skipped."}\n'
+            '{"source_id": "no-title", "content": "Skipped."}\n'
+            '{"source_id": "no-content", "title": "Skipped"}\n',
+            encoding="utf-8",
+        )
+
+        filtered = JsonlAdapter(path=str(jsonl_path)).ingest(
+            entity_types=["csv_row"]
+        )
+        missing = JsonlAdapter(path=str(jsonl_path)).ingest()
+
+        assert filtered.units == []
+        assert filtered.edges == []
+        assert missing.units == []
+        assert missing.edges == []
+
+
 class TestRegistry:
     def test_list_adapters(self):
         adapters = list_adapters()
@@ -739,11 +814,15 @@ class TestRegistry:
             "feed",
             "bookmarks",
             "csv",
+            "jsonl",
         }
 
     def test_get_adapter(self):
         adapter = get_adapter("me", config_path="/tmp/test.yaml")
         assert adapter.name == "me"
+
+        jsonl_adapter = get_adapter("jsonl", path="/tmp/test.jsonl")
+        assert jsonl_adapter.name == "jsonl"
 
     def test_unknown_adapter(self):
         with pytest.raises(KeyError):

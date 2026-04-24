@@ -29,6 +29,7 @@ def _get_adapter_for_project(name: str):
     from graph.adapters.csv_adapter import CsvAdapter
     from graph.adapters.feed import FeedAdapter
     from graph.adapters.forty_two import FortyTwoAdapter
+    from graph.adapters.jsonl_adapter import JsonlAdapter
     from graph.adapters.kindle import KindleAdapter
     from graph.adapters.markdown import MarkdownAdapter
     from graph.adapters.max_adapter import MaxAdapter
@@ -49,6 +50,7 @@ def _get_adapter_for_project(name: str):
         "feed": lambda: FeedAdapter(sources=settings.feed_sources),
         "bookmarks": lambda: BookmarksAdapter(path=settings.bookmarks_path),
         "csv": lambda: CsvAdapter(path=settings.csv_path),
+        "jsonl": lambda: JsonlAdapter(path=settings.jsonl_path),
     }
     factory = mapping.get(name)
     if factory is None:
@@ -1164,6 +1166,7 @@ def _do_ingest(
             "feed",
             "bookmarks",
             "csv",
+            "jsonl",
         ]
         if project == "all"
         else [project]
