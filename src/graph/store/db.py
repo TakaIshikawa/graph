@@ -619,6 +619,159 @@ class Store:
             self.fts_index_unit(updated)
         return updated
 
+    def merge_units(self, source_id: str, target_id: str, dry_run: bool = False) -> dict:
+        if source_id == target_id:
+            raise ValueError("source_id and target_id must be different.")
+
+        source = self.get_unit(source_id)
+        target = self.get_unit(target_id)
+        missing_ids = [
+            unit_id
+            for unit_id, unit in ((source_id, source), (target_id, target))
+            if unit is None
+        ]
+        if missing_ids:
+            return {
+                "source_id": source_id,
+                "target_id": target_id,
+                "dry_run": dry_run,
+                "merged": False,
+                "error": "unit_not_found",
+                "missing_unit_ids": missing_ids,
+                "message": "Unit not found: " + ", ".join(missing_ids),
+            }
+
+        assert source is not None
+        assert target is not None
+
+        merged_tags = list(target.tags)
+        added_tags: list[str] = []
+        for tag in source.tags:
+            if tag not in merged_tags:
+                merged_tags.append(tag)
+                added_tags.append(tag)
+
+        merged_metadata = dict(target.metadata)
+        metadata_keys: list[str] = []
+        metadata_conflicts: list[str] = []
+        source_conflict_metadata: dict = {}
+        for key in sorted(source.metadata):
+            value = source.metadata[key]
+            metadata_keys.append(key)
+            if key not in merged_metadata or merged_metadata[key] == value:
+                merged_metadata[key] = value
+            else:
+                metadata_conflicts.append(key)
+                source_conflict_metadata[key] = value
+
+        if source_conflict_metadata:
+            merged_from_units = dict(merged_metadata.get("merged_from_units") or {})
+            existing_source_entry = dict(merged_from_units.get(source_id) or {})
+            existing_source_entry["metadata"] = {
+                **dict(existing_source_entry.get("metadata") or {}),
+                **source_conflict_metadata,
+            }
+            merged_from_units[source_id] = existing_source_entry
+            merged_metadata["merged_from_units"] = merged_from_units
+
+        existing_keys = {
+            (row["from_unit_id"], row["to_unit_id"], row["relation"])
+            for row in self.conn.execute(
+                """SELECT from_unit_id, to_unit_id, relation
+                   FROM edges
+                   WHERE from_unit_id != ? AND to_unit_id != ?""",
+                (source_id, source_id),
+            ).fetchall()
+        }
+        source_edge_rows = self.conn.execute(
+            """SELECT * FROM edges
+               WHERE from_unit_id = ? OR to_unit_id = ?
+               ORDER BY created_at, id""",
+            (source_id, source_id),
+        ).fetchall()
+
+        rewired_edges: list[dict] = []
+        skipped_duplicate_edges: list[dict] = []
+        skipped_self_edges: list[dict] = []
+        rewired_edge_counts = {"incoming": 0, "outgoing": 0, "total": 0}
+
+        for row in source_edge_rows:
+            edge = _row_to_edge(row)
+            new_from = target_id if edge.from_unit_id == source_id else edge.from_unit_id
+            new_to = target_id if edge.to_unit_id == source_id else edge.to_unit_id
+            planned = {
+                "edge_id": edge.id,
+                "from_unit_id": edge.from_unit_id,
+                "to_unit_id": edge.to_unit_id,
+                "relation": edge.relation,
+                "new_from_unit_id": new_from,
+                "new_to_unit_id": new_to,
+            }
+            if new_from == new_to:
+                skipped_self_edges.append(planned)
+                continue
+
+            edge_key = (new_from, new_to, edge.relation)
+            if edge_key in existing_keys:
+                skipped_duplicate_edges.append(planned)
+                continue
+
+            existing_keys.add(edge_key)
+            rewired_edges.append(planned)
+            if edge.from_unit_id == source_id:
+                rewired_edge_counts["outgoing"] += 1
+            if edge.to_unit_id == source_id:
+                rewired_edge_counts["incoming"] += 1
+            rewired_edge_counts["total"] += 1
+
+        deleted_unit_id = None if dry_run else source_id
+        summary = {
+            "source_id": source_id,
+            "target_id": target_id,
+            "dry_run": dry_run,
+            "merged": not dry_run,
+            "merged_tags": merged_tags,
+            "added_tags": added_tags,
+            "metadata_keys": metadata_keys,
+            "metadata_conflicts": metadata_conflicts,
+            "rewired_edge_counts": rewired_edge_counts,
+            "rewired_edges": rewired_edges,
+            "skipped_duplicate_edges": skipped_duplicate_edges,
+            "skipped_self_edges": skipped_self_edges,
+            "deleted_unit_id": deleted_unit_id,
+        }
+
+        if dry_run:
+            return summary
+
+        now = _utcnow_iso()
+        with self.conn:
+            self.conn.execute(
+                """UPDATE knowledge_units
+                   SET metadata = ?, tags = ?, updated_at = ?
+                   WHERE id = ?""",
+                (json.dumps(merged_metadata), json.dumps(merged_tags), now, target_id),
+            )
+            for edge in rewired_edges:
+                self.conn.execute(
+                    """UPDATE edges
+                       SET from_unit_id = ?, to_unit_id = ?
+                       WHERE id = ?""",
+                    (edge["new_from_unit_id"], edge["new_to_unit_id"], edge["edge_id"]),
+                )
+            skipped_edge_ids = [
+                edge["edge_id"] for edge in [*skipped_duplicate_edges, *skipped_self_edges]
+            ]
+            for edge_id in skipped_edge_ids:
+                self.conn.execute("DELETE FROM edges WHERE id = ?", (edge_id,))
+            self.conn.execute("DELETE FROM knowledge_fts WHERE unit_id = ?", (source_id,))
+            self.conn.execute("DELETE FROM knowledge_units WHERE id = ?", (source_id,))
+
+        updated_target = self.get_unit(target_id)
+        if updated_target is not None:
+            self.fts_index_unit(updated_target)
+        return summary
+
     def get_pinned_units(
         self,
         *,

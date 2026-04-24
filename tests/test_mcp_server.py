@@ -1312,6 +1312,97 @@ def test_update_and_delete_unit_tools_reindex_and_clean_edges(tmp_path, monkeypa
         verify.close()
 
 
+def test_merge_units_tool_dry_run_and_apply(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    target = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="merge-target",
+            source_entity_type="manual",
+            title="Target note",
+            content="Target content",
+            metadata={"owner": "target"},
+            tags=["solar"],
+        )
+    )
+    source = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="merge-source",
+            source_entity_type="manual",
+            title="Source note",
+            content="Source content",
+            metadata={"owner": "source", "status": "approved"},
+            tags=["battery"],
+        )
+    )
+    neighbor = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="merge-neighbor",
+            source_entity_type="insight",
+            title="Neighbor",
+            content="Neighbor content",
+        )
+    )
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=source.id,
+            to_unit_id=neighbor.id,
+            relation=EdgeRelation.RELATES_TO,
+        )
+    )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    assert any(tool.name == "merge_units" for tool in tools)
+
+    dry_response = asyncio.run(
+        mcp_server.call_tool(
+            "merge_units",
+            {"source_id": source.id, "target_id": target.id, "dry_run": True},
+        )
+    )
+    dry_payload = json.loads(dry_response[0].text)
+    assert dry_payload["dry_run"] is True
+    assert dry_payload["rewired_edge_counts"]["total"] == 1
+
+    verify = Store(str(db_path))
+    try:
+        assert verify.get_unit(source.id) is not None
+        assert len(verify.get_all_edges()) == 1
+    finally:
+        verify.close()
+
+    merge_response = asyncio.run(
+        mcp_server.call_tool("merge_units", {"source_id": source.id, "target_id": target.id})
+    )
+    payload = json.loads(merge_response[0].text)
+    assert payload["merged"] is True
+    assert payload["deleted_unit_id"] == source.id
+
+    verify = Store(str(db_path))
+    try:
+        assert verify.get_unit(source.id) is None
+        merged = verify.get_unit(target.id)
+        assert merged.tags == ["solar", "battery"]
+        assert merged.metadata["status"] == "approved"
+        edges = verify.get_all_edges()
+        assert len(edges) == 1
+        assert edges[0].from_unit_id == target.id
+        assert edges[0].to_unit_id == neighbor.id
+    finally:
+        verify.close()
+
+    missing = asyncio.run(
+        mcp_server.call_tool("merge_units", {"source_id": "missing", "target_id": target.id})
+    )
+    assert json.loads(missing[0].text)["error"] == "unit_not_found"
+
+
 def test_pin_and_unpin_unit_tools_preserve_metadata_and_report_missing(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))

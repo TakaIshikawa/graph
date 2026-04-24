@@ -183,6 +183,182 @@ class TestUnitCRUD:
         assert store.pin_unit("missing", reason="nope") is None
         assert store.unpin_unit("missing") is None
 
+    def test_merge_units_dry_run_reports_effects_without_writing(self, store: Store):
+        target = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.ME,
+                source_id="target",
+                source_entity_type="manual",
+                title="Target title",
+                content="Target content",
+                metadata={"owner": "target", "priority": "high"},
+                tags=["solar", "shared"],
+            )
+        )
+        source = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.ME,
+                source_id="source",
+                source_entity_type="manual",
+                title="Source title",
+                content="Source content",
+                metadata={"owner": "source", "review_state": "approved"},
+                tags=["shared", "battery"],
+            )
+        )
+        neighbor = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="neighbor",
+                source_entity_type="insight",
+                title="Neighbor",
+                content="Neighbor content",
+            )
+        )
+        store.fts_index_unit(target)
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=source.id,
+                to_unit_id=neighbor.id,
+                relation=EdgeRelation.RELATES_TO,
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=target.id,
+                to_unit_id=neighbor.id,
+                relation=EdgeRelation.RELATES_TO,
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=neighbor.id,
+                to_unit_id=source.id,
+                relation=EdgeRelation.BUILDS_ON,
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=source.id,
+                to_unit_id=target.id,
+                relation=EdgeRelation.INSPIRES,
+            )
+        )
+
+        result = store.merge_units(source.id, target.id, dry_run=True)
+
+        assert result["dry_run"] is True
+        assert result["merged"] is False
+        assert result["merged_tags"] == ["solar", "shared", "battery"]
+        assert result["metadata_keys"] == ["owner", "review_state"]
+        assert result["metadata_conflicts"] == ["owner"]
+        assert result["rewired_edge_counts"] == {"incoming": 1, "outgoing": 0, "total": 1}
+        assert len(result["skipped_duplicate_edges"]) == 1
+        assert len(result["skipped_self_edges"]) == 1
+        assert result["deleted_unit_id"] is None
+
+        assert store.get_unit(source.id) is not None
+        assert store.get_unit(target.id).metadata == {"owner": "target", "priority": "high"}
+        assert len(store.get_all_edges()) == 4
+
+    def test_merge_units_rewires_edges_merges_fields_and_deletes_source(self, store: Store):
+        target = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.ME,
+                source_id="target",
+                source_entity_type="manual",
+                title="Target title",
+                content="Target searchable content",
+                metadata={"owner": "target", "priority": "high"},
+                tags=["solar", "shared"],
+            )
+        )
+        source = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.ME,
+                source_id="source",
+                source_entity_type="manual",
+                title="Source title",
+                content="Source searchable content",
+                metadata={"owner": "source", "review_state": "approved"},
+                tags=["shared", "battery"],
+            )
+        )
+        neighbor = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="neighbor",
+                source_entity_type="insight",
+                title="Neighbor",
+                content="Neighbor content",
+            )
+        )
+        store.fts_index_unit(target)
+        store.fts_index_unit(source)
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=source.id,
+                to_unit_id=neighbor.id,
+                relation=EdgeRelation.RELATES_TO,
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=target.id,
+                to_unit_id=neighbor.id,
+                relation=EdgeRelation.RELATES_TO,
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=neighbor.id,
+                to_unit_id=source.id,
+                relation=EdgeRelation.BUILDS_ON,
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=source.id,
+                to_unit_id=target.id,
+                relation=EdgeRelation.INSPIRES,
+            )
+        )
+
+        result = store.merge_units(source.id, target.id)
+
+        assert result["merged"] is True
+        assert result["deleted_unit_id"] == source.id
+        assert store.get_unit(source.id) is None
+        merged = store.get_unit(target.id)
+        assert merged.title == "Target title"
+        assert merged.content == "Target searchable content"
+        assert merged.tags == ["solar", "shared", "battery"]
+        assert merged.metadata["owner"] == "target"
+        assert merged.metadata["priority"] == "high"
+        assert merged.metadata["review_state"] == "approved"
+        assert merged.metadata["merged_from_units"][source.id]["metadata"] == {
+            "owner": "source"
+        }
+
+        edges = store.get_all_edges()
+        assert len(edges) == 2
+        assert {(edge.from_unit_id, edge.to_unit_id, edge.relation) for edge in edges} == {
+            (target.id, neighbor.id, EdgeRelation.RELATES_TO),
+            (neighbor.id, target.id, EdgeRelation.BUILDS_ON),
+        }
+        assert store.fts_search("battery")[0]["unit_id"] == target.id
+        assert store.fts_search("Source searchable") == []
+
+    def test_merge_units_missing_and_same_ids(self, store: Store, sample_unit: KnowledgeUnit):
+        inserted = store.insert_unit(sample_unit)
+
+        missing = store.merge_units("missing", inserted.id)
+
+        assert missing["error"] == "unit_not_found"
+        assert missing["missing_unit_ids"] == ["missing"]
+        with pytest.raises(ValueError):
+            store.merge_units(inserted.id, inserted.id)
+
     def test_get_pinned_units_filters_and_sorts_by_pinned_at(self, store: Store):
         older = store.insert_unit(
             KnowledgeUnit(

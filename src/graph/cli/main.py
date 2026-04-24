@@ -19,6 +19,8 @@ queries_app = typer.Typer(help="Save and run repeatable graph searches")
 app.add_typer(queries_app, name="queries")
 edges_app = typer.Typer(help="List and edit graph edges")
 app.add_typer(edges_app, name="edges")
+units_app = typer.Typer(help="Manage knowledge units")
+app.add_typer(units_app, name="units")
 tags_app = typer.Typer(help="Explore and mutate graph tags", invoke_without_command=True)
 app.add_typer(tags_app, name="tags")
 
@@ -532,6 +534,16 @@ def _do_delete_unit(store: Store, unit_id: str) -> dict:
         stats["error"] = "unit_not_found"
         stats["message"] = f"Unit not found: {unit_id}"
     return stats
+
+
+def _do_merge_units(
+    store: Store,
+    source_id: str,
+    target_id: str,
+    *,
+    dry_run: bool = False,
+) -> dict:
+    return store.merge_units(source_id, target_id, dry_run=dry_run)
 
 
 def _edge_summary_payload(store: Store, edge, center_unit_id: str | None = None) -> dict:
@@ -2315,6 +2327,48 @@ def delete_unit(
         return
 
     typer.echo(f"Deleted unit {unit_id}; removed {payload['edges_deleted']} related edges.")
+
+
+@units_app.command(name="merge")
+def merge_units(
+    source_id: str = typer.Argument(..., help="Source knowledge unit ID to merge and delete"),
+    target_id: str = typer.Argument(..., help="Target knowledge unit ID to keep"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview merge effects without writing"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Merge a duplicate source unit into a target unit."""
+    store = _get_store()
+    try:
+        payload = _do_merge_units(store, source_id, target_id, dry_run=dry_run)
+    except ValueError as exc:
+        payload = {
+            "source_id": source_id,
+            "target_id": target_id,
+            "dry_run": dry_run,
+            "merged": False,
+            "error": str(exc),
+        }
+    finally:
+        store.close()
+
+    if payload.get("error"):
+        if json_output:
+            _json_echo(payload)
+            return
+        typer.echo(payload.get("message", payload["error"]))
+        raise typer.Exit(code=1)
+
+    if json_output:
+        _json_echo(payload)
+        return
+
+    action = "Would merge" if dry_run else "Merged"
+    typer.echo(
+        f"{action} {source_id} into {target_id}: "
+        f"{payload['rewired_edge_counts']['total']} edges rewired, "
+        f"{len(payload['skipped_duplicate_edges'])} duplicate edges skipped, "
+        f"{len(payload['skipped_self_edges'])} self edges skipped."
+    )
 
 
 @edges_app.command(name="list")

@@ -28,6 +28,7 @@ from graph.cli.main import (
     _do_import_queries,
     _do_infer_edges,
     _do_integrity_audit,
+    _do_merge_units,
     _do_delete_unit,
     _do_pin_unit,
     _do_pinned_units,
@@ -956,6 +957,29 @@ async def list_tools() -> list[Tool]:
                     "unit_id": {"type": "string", "description": "Knowledge unit ID"},
                 },
                 "required": ["unit_id"],
+            },
+        ),
+        Tool(
+            name="merge_units",
+            description="Merge a duplicate source knowledge unit into a target, rewiring valid edges.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "source_id": {
+                        "type": "string",
+                        "description": "Source unit ID to merge and delete",
+                    },
+                    "target_id": {
+                        "type": "string",
+                        "description": "Target unit ID to keep",
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Preview merge effects without writing",
+                    },
+                },
+                "required": ["source_id", "target_id"],
             },
         ),
         Tool(
@@ -1942,6 +1966,24 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         elif name == "delete_unit":
             payload = _do_delete_unit(store, arguments["unit_id"])
             return [TextContent(type="text", text=json.dumps(payload))]
+
+        elif name == "merge_units":
+            try:
+                payload = _do_merge_units(
+                    store,
+                    arguments["source_id"],
+                    arguments["target_id"],
+                    dry_run=arguments.get("dry_run", False),
+                )
+            except ValueError as exc:
+                payload = {
+                    "source_id": arguments.get("source_id"),
+                    "target_id": arguments.get("target_id"),
+                    "dry_run": arguments.get("dry_run", False),
+                    "merged": False,
+                    "error": str(exc),
+                }
+            return [TextContent(type="text", text=json.dumps(payload, default=str))]
 
         elif name == "pin_unit":
             payload = _do_pin_unit(

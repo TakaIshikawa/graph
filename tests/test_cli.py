@@ -3420,6 +3420,92 @@ def test_update_and_delete_unit_cli_json_reindexes_and_cleans_edges(monkeypatch)
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_units_merge_cli_json_dry_run_and_apply(monkeypatch):
+    store = _make_store()
+    target = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="merge-target",
+            source_entity_type="manual",
+            title="Target note",
+            content="Target content",
+            metadata={"owner": "target"},
+            tags=["solar"],
+        )
+    )
+    source = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="merge-source",
+            source_entity_type="manual",
+            title="Source note",
+            content="Source content",
+            metadata={"owner": "source", "status": "approved"},
+            tags=["battery"],
+        )
+    )
+    neighbor = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="merge-neighbor",
+            source_entity_type="insight",
+            title="Neighbor",
+            content="Neighbor content",
+        )
+    )
+    store.fts_index_unit(target)
+    store.fts_index_unit(source)
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=source.id,
+            to_unit_id=neighbor.id,
+            relation=EdgeRelation.RELATES_TO,
+        )
+    )
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        dry_result = runner.invoke(
+            app,
+            ["units", "merge", source.id, target.id, "--dry-run", "--json"],
+        )
+
+        assert dry_result.exit_code == 0
+        dry_payload = json.loads(dry_result.output)
+        assert dry_payload["dry_run"] is True
+        assert dry_payload["merged"] is False
+        assert dry_payload["rewired_edge_counts"]["total"] == 1
+        assert store.get_unit(source.id) is not None
+        assert len(store.get_all_edges()) == 1
+
+        merge_result = runner.invoke(app, ["units", "merge", source.id, target.id, "--json"])
+
+        assert merge_result.exit_code == 0
+        payload = json.loads(merge_result.output)
+        assert payload["merged"] is True
+        assert payload["deleted_unit_id"] == source.id
+        assert payload["merged_tags"] == ["solar", "battery"]
+        assert store.get_unit(source.id) is None
+        merged = store.get_unit(target.id)
+        assert merged.metadata["owner"] == "target"
+        assert merged.metadata["status"] == "approved"
+        edges = store.get_all_edges()
+        assert len(edges) == 1
+        assert edges[0].from_unit_id == target.id
+        assert edges[0].to_unit_id == neighbor.id
+
+        missing_result = runner.invoke(
+            app,
+            ["units", "merge", "missing", target.id, "--json"],
+        )
+        assert missing_result.exit_code == 0
+        assert json.loads(missing_result.output)["error"] == "unit_not_found"
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_pin_and_unpin_unit_cli_json_preserves_metadata(monkeypatch):
     store = _make_store()
     unit = store.insert_unit(
