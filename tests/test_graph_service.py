@@ -11,7 +11,7 @@ import pytest
 from graph.graph.service import GraphService
 from graph.store.db import Store
 from graph.types.enums import ContentType, EdgeRelation, SourceProject
-from graph.types.models import KnowledgeEdge, KnowledgeUnit
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 @pytest.fixture
@@ -277,6 +277,118 @@ class TestGraphService:
         # B(forty_two) -> C(max) is cross-project
         assert len(connections) >= 1
         assert connections[0]["edge_count"] >= 1
+
+    def test_analyze_source_coverage_counts_units_edges_sync_and_orphans(
+        self, store: Store
+    ):
+        a = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="a",
+                source_entity_type="knowledge_node",
+                title="Node A",
+                content="First node",
+                created_at="2026-04-20T00:00:00+00:00",
+            )
+        )
+        b = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="b",
+                source_entity_type="knowledge_node",
+                title="Node B",
+                content="Second node",
+                created_at="2026-04-21T00:00:00+00:00",
+            )
+        )
+        c = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="c",
+                source_entity_type="insight",
+                title="Node C",
+                content="Third node",
+                created_at="2026-04-22T00:00:00+00:00",
+            )
+        )
+        store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.PRESENCE,
+                source_id="d",
+                source_entity_type="knowledge_item",
+                title="Node D",
+                content="Isolated node",
+                created_at="2026-04-23T00:00:00+00:00",
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=a.id,
+                to_unit_id=b.id,
+                relation=EdgeRelation.BUILDS_ON,
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=b.id,
+                to_unit_id=c.id,
+                relation=EdgeRelation.INSPIRES,
+            )
+        )
+        store.upsert_sync_state(
+            SyncState(
+                source_project="forty_two",
+                source_entity_type="knowledge_node",
+                last_sync_at="2026-04-24T00:00:00+00:00",
+                last_source_id="b",
+                items_synced=2,
+            )
+        )
+        store.upsert_sync_state(
+            SyncState(
+                source_project="sota",
+                source_entity_type="paper",
+                last_sync_at="2026-04-24T01:00:00+00:00",
+                last_source_id="paper-1",
+                items_synced=5,
+            )
+        )
+
+        result = GraphService(store).analyze_source_coverage()
+        by_source = {
+            (item["source_project"], item["source_entity_type"]): item
+            for item in result["sources"]
+        }
+
+        forty_two = by_source[("forty_two", "knowledge_node")]
+        assert forty_two["unit_count"] == 2
+        assert forty_two["edge_count"] == 2
+        assert forty_two["orphan_count"] == 0
+        assert forty_two["oldest_created_at"] == "2026-04-20T00:00:00+00:00"
+        assert forty_two["newest_created_at"] == "2026-04-21T00:00:00+00:00"
+        assert forty_two["last_sync_at"] == "2026-04-24T00:00:00+00:00"
+        assert forty_two["last_source_id"] == "b"
+        assert forty_two["items_synced"] == 2
+        assert forty_two["has_sync_state"] is True
+
+        max_insight = by_source[("max", "insight")]
+        assert max_insight["unit_count"] == 1
+        assert max_insight["edge_count"] == 1
+        assert max_insight["orphan_count"] == 0
+
+        presence = by_source[("presence", "knowledge_item")]
+        assert presence["unit_count"] == 1
+        assert presence["edge_count"] == 0
+        assert presence["orphan_count"] == 1
+
+        sync_only = by_source[("sota", "paper")]
+        assert sync_only["unit_count"] == 0
+        assert sync_only["edge_count"] == 0
+        assert sync_only["orphan_count"] == 0
+        assert sync_only["oldest_created_at"] is None
+        assert sync_only["newest_created_at"] is None
+        assert sync_only["last_sync_at"] == "2026-04-24T01:00:00+00:00"
+        assert sync_only["items_synced"] == 5
 
     def test_stats(self, populated_store: Store):
         gs = GraphService(populated_store)

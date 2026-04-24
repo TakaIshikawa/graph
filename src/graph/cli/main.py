@@ -1627,6 +1627,50 @@ def cross_project(
     store.close()
 
 
+@app.command(name="source-coverage")
+def source_coverage(
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Summarize coverage by source project and entity type."""
+    from graph.graph.service import GraphService
+
+    store = _get_store()
+    gs = GraphService(store)
+    result = gs.analyze_source_coverage()
+
+    if json_output:
+        _json_echo(result)
+        store.close()
+        return
+
+    sources = result["sources"]
+    if not sources:
+        typer.echo("No sources found.")
+        store.close()
+        return
+
+    typer.echo("Source coverage:")
+    for item in sources:
+        typer.echo(f"  {item['source_project']}/{item['source_entity_type']}")
+        typer.echo(
+            f"    Units: {item['unit_count']} | Edges: {item['edge_count']} | "
+            f"Orphans: {item['orphan_count']}"
+        )
+        typer.echo(
+            f"    Created: {item['oldest_created_at'] or '-'} -> "
+            f"{item['newest_created_at'] or '-'}"
+        )
+        if item["has_sync_state"]:
+            typer.echo(
+                f"    Sync: {item['last_sync_at']} | "
+                f"Items synced: {item['items_synced']}"
+            )
+        else:
+            typer.echo("    Sync: -")
+
+    store.close()
+
+
 @app.command()
 def tags(
     limit: int = typer.Option(20, "--limit", "-n", help="Max tags or matching units"),

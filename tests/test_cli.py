@@ -981,6 +981,61 @@ def test_cross_project_command_summarizes_project_pairs(monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_source_coverage_command_emits_json_matching_service(monkeypatch):
+    from graph.graph.service import GraphService
+
+    store = _make_store()
+    _populate_graph(store)
+    store.upsert_sync_state(
+        SyncState(
+            source_project="sota",
+            source_entity_type="paper",
+            last_sync_at="2026-04-24T01:00:00+00:00",
+            last_source_id="paper-1",
+            items_synced=5,
+        )
+    )
+    expected = GraphService(store).analyze_source_coverage()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(app, ["source-coverage", "--json"])
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload == expected
+        by_source = {
+            (item["source_project"], item["source_entity_type"]): item
+            for item in payload["sources"]
+        }
+        assert by_source[("presence", "knowledge_item")]["orphan_count"] == 1
+        assert by_source[("sota", "paper")]["unit_count"] == 0
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_source_coverage_command_prints_readable_summary(monkeypatch):
+    store = _make_store()
+    _populate_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(app, ["source-coverage"])
+
+        assert result.exit_code == 0
+        assert "Source coverage:" in result.output
+        assert "forty_two/knowledge_node" in result.output
+        assert "Units: 2 | Edges: 2 | Orphans: 0" in result.output
+        assert "presence/knowledge_item" in result.output
+        assert "Units: 1 | Edges: 0 | Orphans: 1" in result.output
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_analytics_commands_emit_parseable_json(monkeypatch):
     store = _make_store()
     _populate_graph(store)

@@ -342,6 +342,11 @@ async def list_tools() -> list[Tool]:
             inputSchema={"type": "object", "properties": {}},
         ),
         Tool(
+            name="analyze_source_coverage",
+            description="Summarize unit, edge, sync, and orphan coverage by source project and entity type.",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
             name="analyze_tags",
             description="Analyze graph tags with counts, source/type breakdowns, matching units, and co-occurrences.",
             inputSchema={
@@ -858,6 +863,11 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             gs.rebuild()
             connections = gs.cross_project_connections()
             return [TextContent(type="text", text=json.dumps(connections))]
+
+        elif name == "analyze_source_coverage":
+            gs = GraphService(store)
+            result = gs.analyze_source_coverage()
+            return [TextContent(type="text", text=json.dumps(result))]
 
         elif name == "analyze_tags":
             gs = GraphService(store)

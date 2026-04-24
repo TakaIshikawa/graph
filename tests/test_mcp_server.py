@@ -885,6 +885,73 @@ def test_analyze_duplicates_tool_returns_reasons_units_and_filters(
     )
 
 
+def test_analyze_source_coverage_tool_returns_service_payload(tmp_path, monkeypatch):
+    from graph.graph.service import GraphService
+
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    a = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="a",
+            source_entity_type="knowledge_node",
+            title="Node A",
+            content="First node",
+        )
+    )
+    b = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="b",
+            source_entity_type="insight",
+            title="Node B",
+            content="Second node",
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.PRESENCE,
+            source_id="c",
+            source_entity_type="knowledge_item",
+            title="Node C",
+            content="Isolated node",
+        )
+    )
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=a.id,
+            to_unit_id=b.id,
+            relation=EdgeRelation.BUILDS_ON,
+        )
+    )
+    store.upsert_sync_state(
+        SyncState(
+            source_project="sota",
+            source_entity_type="paper",
+            last_sync_at="2026-04-24T01:00:00+00:00",
+            last_source_id="paper-1",
+            items_synced=5,
+        )
+    )
+    expected = GraphService(store).analyze_source_coverage()
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    assert any(tool.name == "analyze_source_coverage" for tool in tools)
+
+    response = asyncio.run(mcp_server.call_tool("analyze_source_coverage", {}))
+    payload = json.loads(response[0].text)
+    assert payload == expected
+    by_source = {
+        (item["source_project"], item["source_entity_type"]): item
+        for item in payload["sources"]
+    }
+    assert by_source[("presence", "knowledge_item")]["orphan_count"] == 1
+    assert by_source[("sota", "paper")]["unit_count"] == 0
+
+
 def test_infer_edges_tool_returns_counts_and_inserts_edges(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))

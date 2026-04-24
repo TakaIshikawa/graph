@@ -253,6 +253,90 @@ class GraphService:
             )
         ]
 
+    def analyze_source_coverage(self) -> dict:
+        """Summarize graph coverage by source project and entity type."""
+        units = self.store.get_all_units(limit=1000000000)
+        edges = self.store.get_all_edges()
+
+        coverage: dict[tuple[str, str], dict] = {}
+
+        def _entry(source_project: str, source_entity_type: str) -> dict:
+            key = (source_project, source_entity_type)
+            if key not in coverage:
+                coverage[key] = {
+                    "source_project": source_project,
+                    "source_entity_type": source_entity_type,
+                    "unit_count": 0,
+                    "edge_count": 0,
+                    "orphan_count": 0,
+                    "oldest_created_at": None,
+                    "newest_created_at": None,
+                    "last_sync_at": None,
+                    "last_source_id": None,
+                    "items_synced": 0,
+                    "has_sync_state": False,
+                }
+            return coverage[key]
+
+        unit_source: dict[str, tuple[str, str]] = {}
+        touched_unit_ids: set[str] = set()
+        edge_ids_by_source: dict[tuple[str, str], set[str]] = {}
+
+        for unit in units:
+            source_project = str(unit.source_project)
+            source_entity_type = unit.source_entity_type
+            unit_source[unit.id] = (source_project, source_entity_type)
+            entry = _entry(source_project, source_entity_type)
+            entry["unit_count"] += 1
+            created_at = (
+                unit.created_at.isoformat()
+                if hasattr(unit.created_at, "isoformat")
+                else str(unit.created_at)
+            )
+            if entry["oldest_created_at"] is None or created_at < entry["oldest_created_at"]:
+                entry["oldest_created_at"] = created_at
+            if entry["newest_created_at"] is None or created_at > entry["newest_created_at"]:
+                entry["newest_created_at"] = created_at
+
+        for edge in edges:
+            edge_id = edge.id or f"{edge.from_unit_id}:{edge.to_unit_id}:{edge.relation}"
+            source_keys = set()
+            for unit_id in (edge.from_unit_id, edge.to_unit_id):
+                source_key = unit_source.get(unit_id)
+                if source_key is None:
+                    continue
+                touched_unit_ids.add(unit_id)
+                source_keys.add(source_key)
+            for source_key in source_keys:
+                edge_ids_by_source.setdefault(source_key, set()).add(edge_id)
+
+        for source_key, edge_ids in edge_ids_by_source.items():
+            _entry(*source_key)["edge_count"] = len(edge_ids)
+
+        orphan_counts = Counter(
+            unit_source[unit.id] for unit in units if unit.id not in touched_unit_ids
+        )
+        for source_key, count in orphan_counts.items():
+            _entry(*source_key)["orphan_count"] = count
+
+        rows = self.store.conn.execute(
+            """SELECT source_project, source_entity_type, last_sync_at,
+                      last_source_id, items_synced
+               FROM sync_state"""
+        ).fetchall()
+        for row in rows:
+            entry = _entry(str(row["source_project"]), str(row["source_entity_type"]))
+            entry["has_sync_state"] = True
+            entry["last_sync_at"] = row["last_sync_at"]
+            entry["last_source_id"] = row["last_source_id"]
+            entry["items_synced"] = row["items_synced"]
+
+        sources = sorted(
+            coverage.values(),
+            key=lambda item: (item["source_project"], item["source_entity_type"]),
+        )
+        return {"sources": sources}
+
     def analyze_tags(
         self,
         *,
