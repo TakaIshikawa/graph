@@ -32,7 +32,15 @@ from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 server = Server("graph")
 
-SUPPORTED_SYNC_PROJECTS = ["forty_two", "max", "presence", "me", "kindle", "sota"]
+SUPPORTED_SYNC_PROJECTS = [
+    "forty_two",
+    "max",
+    "presence",
+    "me",
+    "kindle",
+    "sota",
+    "bookmarks",
+]
 
 SEARCH_FILTER_SCHEMA = {
     "source_project": {
@@ -78,6 +86,7 @@ def _get_store() -> Store:
 
 
 def _get_adapter(name: str):
+    from graph.adapters.bookmarks import BookmarksAdapter
     from graph.adapters.forty_two import FortyTwoAdapter
     from graph.adapters.kindle import KindleAdapter
     from graph.adapters.max_adapter import MaxAdapter
@@ -94,6 +103,7 @@ def _get_adapter(name: str):
         "me": lambda: MeAdapter(config_path=settings.me_config),
         "kindle": lambda: KindleAdapter(db_path=settings.kindle_db),
         "sota": lambda: SOTAAdapter(db_path=settings.sota_db),
+        "bookmarks": lambda: BookmarksAdapter(path=settings.bookmarks_path),
     }
     return mapping[name]()
 

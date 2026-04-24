@@ -23,6 +23,7 @@ def _get_store() -> Store:
 
 
 def _get_adapter_for_project(name: str):
+    from graph.adapters.bookmarks import BookmarksAdapter
     from graph.adapters.feed import FeedAdapter
     from graph.adapters.forty_two import FortyTwoAdapter
     from graph.adapters.kindle import KindleAdapter
@@ -43,6 +44,7 @@ def _get_adapter_for_project(name: str):
         "kindle": lambda: KindleAdapter(db_path=settings.kindle_db),
         "sota": lambda: SOTAAdapter(db_path=settings.sota_db),
         "feed": lambda: FeedAdapter(sources=settings.feed_sources),
+        "bookmarks": lambda: BookmarksAdapter(path=settings.bookmarks_path),
     }
     factory = mapping.get(name)
     if factory is None:
@@ -699,7 +701,17 @@ def _do_ingest(
 ) -> dict:
     """Core ingest logic. Returns total stats dict."""
     projects = (
-        ["forty_two", "max", "presence", "me", "markdown", "kindle", "sota", "feed"]
+        [
+            "forty_two",
+            "max",
+            "presence",
+            "me",
+            "markdown",
+            "kindle",
+            "sota",
+            "feed",
+            "bookmarks",
+        ]
         if project == "all"
         else [project]
     )
@@ -1583,7 +1595,7 @@ def sync_status(
     """Show last sync timestamps per source project."""
     store = _get_store()
 
-    projects = ["forty_two", "max", "presence", "me", "sota"]
+    projects = ["forty_two", "max", "presence", "me", "sota", "bookmarks"]
     if json_output:
         statuses = []
         for proj in projects:
@@ -2476,7 +2488,7 @@ def _do_export_obsidian(
         f"**{len(all_units)} units** | **{len(all_edges)} edges**",
         "",
     ]
-    for proj in ["forty_two", "max", "presence", "me"]:
+    for proj in ["forty_two", "max", "presence", "me", "bookmarks"]:
         proj_units = [u for u in all_units if u.source_project == proj]
         if proj_units:
             index_lines.append(f"## {proj} ({len(proj_units)})")

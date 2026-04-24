@@ -8,6 +8,7 @@ class SourceProject(StrEnum):
     ME = "me"
     KINDLE = "kindle"
     SOTA = "sota"
+    BOOKMARKS = "bookmarks"
 
 
 class ContentType(StrEnum):

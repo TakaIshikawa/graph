@@ -891,6 +891,84 @@ def test_ingest_feed_command_uses_configured_sources(tmp_path, monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_ingest_bookmarks_command_uses_configured_path_and_updates_by_url(
+    tmp_path, monkeypatch
+):
+    bookmarks = tmp_path / "bookmarks.html"
+    bookmarks.write_text(
+        """<!DOCTYPE NETSCAPE-Bookmark-file-1>
+        <DL><p>
+          <DT><H3>Bookmarks Bar</H3>
+          <DL><p>
+            <DT><H3>Research</H3>
+            <DL><p>
+              <DT><A HREF="https://example.com/bookmark"
+                     ADD_DATE="1713952800"
+                     LAST_MODIFIED="1713956400">Useful Bookmark</A>
+            </DL><p>
+          </DL><p>
+        </DL><p>
+        """,
+        encoding="utf-8",
+    )
+
+    store = _make_store()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    monkeypatch.setattr("graph.cli.main.settings.bookmarks_path", str(bookmarks))
+
+    try:
+        result = runner.invoke(app, ["ingest", "bookmarks"])
+
+        assert result.exit_code == 0
+        assert "Ingesting from bookmarks" in result.output
+        assert "bookmarks: 1 new" in result.output
+        unit = store.get_unit_by_source(
+            "bookmarks", "https://example.com/bookmark", "bookmark"
+        )
+        assert unit is not None
+        assert unit.title == "Useful Bookmark"
+        assert unit.tags == ["Bookmarks Bar", "Bookmarks Bar/Research"]
+        assert unit.metadata["url"] == "https://example.com/bookmark"
+        assert unit.metadata["folder_path"] == "Bookmarks Bar/Research"
+
+        bookmarks.write_text(
+            bookmarks.read_text(encoding="utf-8").replace(
+                "Useful Bookmark", "Updated Bookmark"
+            ),
+            encoding="utf-8",
+        )
+        second = runner.invoke(app, ["ingest", "bookmarks", "--full"])
+
+        assert second.exit_code == 0
+        assert "bookmarks: 0 new, 1 updated" in second.output
+        rows = store.conn.execute(
+            """SELECT title FROM knowledge_units
+               WHERE source_project = 'bookmarks'
+                 AND source_id = 'https://example.com/bookmark'
+                 AND source_entity_type = 'bookmark'"""
+        ).fetchall()
+        assert [row["title"] for row in rows] == ["Updated Bookmark"]
+
+        search = runner.invoke(
+            app,
+            [
+                "search",
+                "https://example.com/bookmark",
+                "--mode",
+                "fulltext",
+                "--limit",
+                "1",
+            ],
+        )
+
+        assert search.exit_code == 0
+        assert "Updated Bookmark" in search.output
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_shortest_path_command_prints_readable_path(monkeypatch):
     store = _make_store()
     a_id, _, c_id, _ = _populate_graph(store)

@@ -5,10 +5,12 @@ from __future__ import annotations
 import os
 import sqlite3
 import tempfile
+from datetime import datetime, timezone
 
 import pytest
 import yaml
 
+from graph.adapters.bookmarks import BookmarksAdapter
 from graph.adapters.feed import FeedAdapter
 from graph.adapters.forty_two import FortyTwoAdapter
 from graph.adapters.markdown import MarkdownAdapter
@@ -596,6 +598,63 @@ class TestFeedAdapter:
         assert unit.created_at.isoformat() == "2025-04-24T12:00:00+00:00"
 
 
+class TestBookmarksAdapter:
+    def test_ingest_netscape_bookmarks_with_folder_metadata_and_url_source_id(
+        self, tmp_path
+    ):
+        bookmarks = tmp_path / "bookmarks.html"
+        bookmarks.write_text(
+            """<!DOCTYPE NETSCAPE-Bookmark-file-1>
+            <TITLE>Bookmarks</TITLE>
+            <H1>Bookmarks</H1>
+            <DL><p>
+              <DT><H3 ADD_DATE="1713949200">Bookmarks Bar</H3>
+              <DL><p>
+                <DT><H3>Research</H3>
+                <DL><p>
+                  <DT><A HREF="https://example.com/agent-eval?ref=bookmarks"
+                         ADD_DATE="1713952800"
+                         LAST_MODIFIED="1713956400">Agent &amp; Evaluation</A>
+                </DL><p>
+              </DL><p>
+            </DL><p>
+            """,
+            encoding="utf-8",
+        )
+
+        skipped = BookmarksAdapter(path=str(bookmarks)).ingest(
+            entity_types=["feed_item"]
+        )
+        first = BookmarksAdapter(path=str(bookmarks)).ingest()
+        second = BookmarksAdapter(path=str(bookmarks)).ingest()
+
+        assert skipped.units == []
+        assert len(first.units) == 1
+        unit = first.units[0]
+        assert unit.source_project == "bookmarks"
+        assert unit.source_entity_type == "bookmark"
+        assert unit.source_id == "https://example.com/agent-eval?ref=bookmarks"
+        assert unit.source_id == second.units[0].source_id
+        assert unit.title == "Agent & Evaluation"
+        assert "https://example.com/agent-eval?ref=bookmarks" in unit.content
+        assert unit.content_type == "artifact"
+        assert unit.tags == ["Bookmarks Bar", "Bookmarks Bar/Research"]
+        assert unit.metadata == {
+            "url": "https://example.com/agent-eval?ref=bookmarks",
+            "folder_path": "Bookmarks Bar/Research",
+            "add_date": "1713952800",
+            "last_modified": "1713956400",
+        }
+        assert unit.created_at == datetime.fromtimestamp(1713952800, tz=timezone.utc)
+        assert unit.updated_at == datetime.fromtimestamp(1713956400, tz=timezone.utc)
+
+    def test_missing_bookmarks_path_returns_empty_result(self, tmp_path):
+        result = BookmarksAdapter(path=str(tmp_path / "missing.html")).ingest()
+
+        assert result.units == []
+        assert result.edges == []
+
+
 class TestRegistry:
     def test_list_adapters(self):
         adapters = list_adapters()
@@ -608,6 +667,7 @@ class TestRegistry:
             "kindle",
             "sota",
             "feed",
+            "bookmarks",
         }
 
     def test_get_adapter(self):
