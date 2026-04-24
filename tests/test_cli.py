@@ -279,6 +279,52 @@ def _populate_tags_graph(store: Store) -> None:
         store.insert_unit(unit)
 
 
+def _populate_duplicates_graph(store: Store) -> None:
+    for unit in [
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="same-title-a",
+            source_entity_type="insight",
+            title="Repeated Import",
+            content="First independent note about sales workflow cleanup.",
+            content_type=ContentType.INSIGHT,
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="same-title-b",
+            source_entity_type="insight",
+            title=" repeated   import ",
+            content="Second independent note about onboarding research.",
+            content_type=ContentType.INSIGHT,
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="same-content-a",
+            source_entity_type="insight",
+            title="Storage market signal",
+            content="Solar storage adoption is accelerating across midmarket operations teams this quarter.",
+            content_type=ContentType.INSIGHT,
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="same-content-b",
+            source_entity_type="insight",
+            title="Battery adoption memo",
+            content="Solar storage adoption is accelerating across midmarket operations teams this quarter rapidly.",
+            content_type=ContentType.INSIGHT,
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="filtered-title",
+            source_entity_type="knowledge_node",
+            title="Repeated Import",
+            content="Outside project duplicate title.",
+            content_type=ContentType.FINDING,
+        ),
+    ]:
+        store.insert_unit(unit)
+
+
 def _cleanup_db(path: str) -> None:
     db_path = Path(path)
     for candidate in (
@@ -918,6 +964,49 @@ def test_tags_command_detail_applies_filters_and_co_occurrences(monkeypatch):
             "solar",
         ]
         assert [item["count"] for item in payload["co_occurring_tags"]] == [2, 1, 1]
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_duplicates_command_emits_reasons_units_and_applies_filters(monkeypatch):
+    store = _make_store()
+    _populate_duplicates_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "duplicates",
+                "--source-project",
+                "max",
+                "--content-type",
+                "insight",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        by_reason = {item["reason"]: item for item in payload["results"]}
+        assert set(by_reason) == {"same_title", "similar_content"}
+        assert {unit["source_id"] for unit in by_reason["same_title"]["units"]} == {
+            "same-title-a",
+            "same-title-b",
+        }
+        assert {
+            unit["source_id"] for unit in by_reason["similar_content"]["units"]
+        } == {
+            "same-content-a",
+            "same-content-b",
+        }
+        assert all(
+            unit["source_project"] == "max"
+            for item in payload["results"]
+            for unit in item["units"]
+        )
     finally:
         store.close()
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]

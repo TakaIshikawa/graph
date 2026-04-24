@@ -346,3 +346,82 @@ class TestGraphService:
             "Solar grid",
             "Battery storage",
         }
+
+    def test_analyze_duplicates_finds_titles_content_and_applies_filters(
+        self, store: Store
+    ):
+        for unit in [
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="same-title-a",
+                source_entity_type="insight",
+                title="Repeated Import",
+                content="First independent note about sales workflow cleanup.",
+                content_type=ContentType.INSIGHT,
+            ),
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="same-title-b",
+                source_entity_type="insight",
+                title=" repeated   import ",
+                content="Second independent note about onboarding research.",
+                content_type=ContentType.INSIGHT,
+            ),
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="same-content-a",
+                source_entity_type="insight",
+                title="Storage market signal",
+                content="Solar storage adoption is accelerating across midmarket operations teams this quarter.",
+                content_type=ContentType.INSIGHT,
+            ),
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="same-content-b",
+                source_entity_type="insight",
+                title="Battery adoption memo",
+                content="Solar storage adoption is accelerating across midmarket operations teams this quarter rapidly.",
+                content_type=ContentType.INSIGHT,
+            ),
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="unique",
+                source_entity_type="insight",
+                title="Unique note",
+                content="A completely different topic about meeting notes and planning.",
+                content_type=ContentType.INSIGHT,
+            ),
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="filtered-title",
+                source_entity_type="knowledge_node",
+                title="Repeated Import",
+                content="Outside project duplicate title.",
+                content_type=ContentType.FINDING,
+            ),
+        ]:
+            store.insert_unit(unit)
+
+        gs = GraphService(store)
+        result = gs.analyze_duplicates(source_project="max", content_type="insight")
+
+        by_reason = {item["reason"]: item for item in result["results"]}
+        assert set(by_reason) == {"same_title", "similar_content"}
+
+        assert by_reason["same_title"]["score"] == 1.0
+        assert {unit["source_id"] for unit in by_reason["same_title"]["units"]} == {
+            "same-title-a",
+            "same-title-b",
+        }
+        assert {
+            unit["source_id"] for unit in by_reason["similar_content"]["units"]
+        } == {
+            "same-content-a",
+            "same-content-b",
+        }
+        assert by_reason["similar_content"]["score"] >= 0.9
+        assert all(
+            unit["source_project"] == "max"
+            for item in result["results"]
+            for unit in item["units"]
+        )

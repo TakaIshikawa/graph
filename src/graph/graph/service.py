@@ -4,10 +4,30 @@ from __future__ import annotations
 
 from collections import Counter
 from pathlib import Path
+import re
 
 import networkx as nx
 
 from graph.store.db import Store
+
+
+_NORMALIZED_TEXT_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _normalize_text(value: str) -> str:
+    return _NORMALIZED_TEXT_RE.sub(" ", value.lower()).strip()
+
+
+def _content_tokens(value: str) -> Counter[str]:
+    return Counter(_normalize_text(value).split())
+
+
+def _counter_similarity(left: Counter[str], right: Counter[str]) -> float:
+    if not left or not right:
+        return 0.0
+    overlap = sum((left & right).values())
+    total = max(sum(left.values()), sum(right.values()))
+    return overlap / total if total else 0.0
 
 
 class GraphService:
@@ -315,6 +335,119 @@ class GraphService:
 
         tags.sort(key=lambda item: (-item["count"], item["tag"]))
         return {"tags": tags[:limit], "filters": filters}
+
+    def analyze_duplicates(
+        self,
+        *,
+        limit: int = 20,
+        source_project: str | None = None,
+        content_type: str | None = None,
+        content_similarity: float = 0.9,
+    ) -> dict:
+        """Find likely duplicate units by normalized title and content similarity."""
+        units = [
+            unit
+            for unit in self.store.get_all_units(limit=1000000000)
+            if (source_project is None or str(unit.source_project) == source_project)
+            and (content_type is None or str(unit.content_type) == content_type)
+        ]
+        units.sort(key=lambda unit: (str(unit.source_project), unit.title, unit.id))
+
+        filters = {
+            "source_project": source_project,
+            "content_type": content_type,
+        }
+
+        def _unit_summary(unit) -> dict:
+            return {
+                "id": unit.id,
+                "source_project": str(unit.source_project),
+                "source_id": unit.source_id,
+                "source_entity_type": unit.source_entity_type,
+                "title": unit.title,
+                "content_type": str(unit.content_type),
+                "tags": unit.tags,
+                "utility_score": unit.utility_score,
+            }
+
+        results = []
+
+        title_groups: dict[str, list] = {}
+        for unit in units:
+            normalized_title = _normalize_text(unit.title)
+            if normalized_title:
+                title_groups.setdefault(normalized_title, []).append(unit)
+
+        for normalized_title, matching_units in title_groups.items():
+            if len(matching_units) < 2:
+                continue
+            results.append(
+                {
+                    "reason": "same_title",
+                    "score": 1.0,
+                    "normalized_title": normalized_title,
+                    "units": [_unit_summary(unit) for unit in matching_units],
+                }
+            )
+
+        fingerprints = {
+            unit.id: _content_tokens(unit.content)
+            for unit in units
+            if _normalize_text(unit.content)
+        }
+        adjacency: dict[str, set[str]] = {unit_id: set() for unit_id in fingerprints}
+        pair_scores: dict[tuple[str, str], float] = {}
+        unit_by_id = {unit.id: unit for unit in units}
+        unit_ids = list(fingerprints)
+
+        for index, left_id in enumerate(unit_ids):
+            for right_id in unit_ids[index + 1 :]:
+                score = _counter_similarity(fingerprints[left_id], fingerprints[right_id])
+                if score >= content_similarity:
+                    adjacency[left_id].add(right_id)
+                    adjacency[right_id].add(left_id)
+                    pair_scores[tuple(sorted((left_id, right_id)))] = score
+
+        seen: set[str] = set()
+        for unit_id in unit_ids:
+            if unit_id in seen or not adjacency[unit_id]:
+                continue
+            stack = [unit_id]
+            component = []
+            seen.add(unit_id)
+            while stack:
+                current = stack.pop()
+                component.append(current)
+                for neighbor in sorted(adjacency[current]):
+                    if neighbor not in seen:
+                        seen.add(neighbor)
+                        stack.append(neighbor)
+
+            if len(component) < 2:
+                continue
+            component.sort(key=lambda current_id: (unit_by_id[current_id].title, current_id))
+            component_pair_scores = [
+                score
+                for pair, score in pair_scores.items()
+                if pair[0] in component and pair[1] in component
+            ]
+            results.append(
+                {
+                    "reason": "similar_content",
+                    "score": round(min(component_pair_scores), 6),
+                    "units": [_unit_summary(unit_by_id[current_id]) for current_id in component],
+                }
+            )
+
+        results.sort(
+            key=lambda item: (
+                -item["score"],
+                item["reason"],
+                -len(item["units"]),
+                item["units"][0]["title"],
+            )
+        )
+        return {"results": results[:limit], "filters": filters}
 
     def stats(self) -> dict:
         """Graph summary statistics."""

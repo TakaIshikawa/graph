@@ -1554,6 +1554,53 @@ def tags(
     store.close()
 
 
+@app.command(name="duplicates")
+def duplicates(
+    limit: int = typer.Option(20, "--limit", "-n", help="Max duplicate groups"),
+    source_project: str | None = typer.Option(
+        None,
+        "--source-project",
+        "--project",
+        "-p",
+        help="Filter by source project",
+    ),
+    content_type: str | None = typer.Option(None, "--content-type", help="Filter by content type"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Find likely duplicate knowledge units."""
+    from graph.graph.service import GraphService
+
+    store = _get_store()
+    gs = GraphService(store)
+    result = gs.analyze_duplicates(
+        limit=limit,
+        source_project=source_project,
+        content_type=content_type,
+    )
+
+    if json_output:
+        _json_echo(result)
+        store.close()
+        return
+
+    found = result["results"]
+    if not found:
+        typer.echo("No duplicates found.")
+        store.close()
+        return
+
+    for item in found:
+        typer.echo(f"[{item['reason']}] score: {item['score']:.3f}")
+        for unit in item["units"]:
+            typer.echo(
+                f"  [{unit['source_project']}] {unit['title']} "
+                f"({unit['content_type']})"
+            )
+            typer.echo(f"    ID: {unit['id']}")
+
+    store.close()
+
+
 def _do_export_obsidian(
     store: Store,
     vault_path: str | None = None,

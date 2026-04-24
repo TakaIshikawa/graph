@@ -58,6 +58,52 @@ def _populate_tags_graph(store: Store) -> None:
         store.insert_unit(unit)
 
 
+def _populate_duplicates_graph(store: Store) -> None:
+    for unit in [
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="same-title-a",
+            source_entity_type="insight",
+            title="Repeated Import",
+            content="First independent note about sales workflow cleanup.",
+            content_type=ContentType.INSIGHT,
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="same-title-b",
+            source_entity_type="insight",
+            title=" repeated   import ",
+            content="Second independent note about onboarding research.",
+            content_type=ContentType.INSIGHT,
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="same-content-a",
+            source_entity_type="insight",
+            title="Storage market signal",
+            content="Solar storage adoption is accelerating across midmarket operations teams this quarter.",
+            content_type=ContentType.INSIGHT,
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="same-content-b",
+            source_entity_type="insight",
+            title="Battery adoption memo",
+            content="Solar storage adoption is accelerating across midmarket operations teams this quarter rapidly.",
+            content_type=ContentType.INSIGHT,
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="filtered-title",
+            source_entity_type="knowledge_node",
+            title="Repeated Import",
+            content="Outside project duplicate title.",
+            content_type=ContentType.FINDING,
+        ),
+    ]:
+        store.insert_unit(unit)
+
+
 def _populate_backlinks_graph(store: Store) -> tuple[str, str, str]:
     a = store.insert_unit(
         KnowledgeUnit(
@@ -724,6 +770,48 @@ def test_analyze_tags_tool_returns_summary_and_detail_json(tmp_path, monkeypatch
         "battery",
         "solar",
     ]
+
+
+def test_analyze_duplicates_tool_returns_reasons_units_and_filters(
+    tmp_path, monkeypatch
+):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    _populate_duplicates_graph(store)
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    analyze_tool = next(tool for tool in tools if tool.name == "analyze_duplicates")
+    assert "source_project" in analyze_tool.inputSchema["properties"]
+    assert "content_type" in analyze_tool.inputSchema["properties"]
+
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "analyze_duplicates",
+            {
+                "source_project": "max",
+                "content_type": "insight",
+            },
+        )
+    )
+    payload = json.loads(response[0].text)
+    by_reason = {item["reason"]: item for item in payload["results"]}
+    assert set(by_reason) == {"same_title", "similar_content"}
+    assert {unit["source_id"] for unit in by_reason["same_title"]["units"]} == {
+        "same-title-a",
+        "same-title-b",
+    }
+    assert {unit["source_id"] for unit in by_reason["similar_content"]["units"]} == {
+        "same-content-a",
+        "same-content-b",
+    }
+    assert all(
+        unit["source_project"] == "max"
+        for item in payload["results"]
+        for unit in item["units"]
+    )
 
 
 def test_infer_edges_tool_returns_counts_and_inserts_edges(tmp_path, monkeypatch):
