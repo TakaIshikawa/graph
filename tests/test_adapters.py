@@ -19,8 +19,10 @@ from graph.adapters.jsonl_adapter import JsonlAdapter
 from graph.adapters.markdown import MarkdownAdapter
 from graph.adapters.max_adapter import MaxAdapter
 from graph.adapters.me import MeAdapter
+from graph.adapters.opml import OpmlAdapter
 from graph.adapters.presence import PresenceAdapter
 from graph.adapters.registry import get_adapter, list_adapters
+from graph.store.db import Store
 
 
 @pytest.fixture
@@ -800,6 +802,85 @@ class TestJsonlAdapter:
         assert missing.edges == []
 
 
+class TestOpmlAdapter:
+    def test_ingest_nested_outlines_with_urls_and_edges(self, tmp_path):
+        opml_path = tmp_path / "feeds.opml"
+        opml_path.write_text(
+            """<?xml version="1.0" encoding="UTF-8"?>
+            <opml version="2.0">
+              <body>
+                <outline text="Engineering">
+                  <outline text="Python Weekly" type="rss"
+                    xmlUrl="https://example.com/python.xml"
+                    htmlUrl="https://example.com/python"
+                    url="https://example.com/python-page" />
+                  <outline title="Reading List">
+                    <outline text="Graph Notes" url="https://example.com/graph" />
+                  </outline>
+                </outline>
+              </body>
+            </opml>
+            """,
+            encoding="utf-8",
+        )
+
+        result = OpmlAdapter(path=str(opml_path)).ingest()
+
+        assert [unit.title for unit in result.units] == [
+            "Engineering",
+            "Python Weekly",
+            "Reading List",
+            "Graph Notes",
+        ]
+        feed = result.units[1]
+        assert feed.source_project == "opml"
+        assert feed.source_entity_type == "outline"
+        assert feed.metadata["url"] == "https://example.com/python-page"
+        assert feed.metadata["xmlUrl"] == "https://example.com/python.xml"
+        assert feed.metadata["htmlUrl"] == "https://example.com/python"
+        assert "https://example.com/python.xml" in feed.content
+        assert feed.tags == ["Engineering", "Engineering/Python Weekly"]
+
+        assert len(result.edges) == 3
+        assert all(edge.relation == "contains" for edge in result.edges)
+        assert all(edge.source == "source" for edge in result.edges)
+        assert result.edges[0].metadata["from_entity_type"] == "outline"
+        assert result.edges[0].from_unit_id == result.units[0].source_id
+        assert result.edges[0].to_unit_id == result.units[1].source_id
+
+    def test_missing_and_malformed_opml_return_empty_result_with_diagnostic(self, tmp_path):
+        missing = tmp_path / "missing.opml"
+        with pytest.warns(UserWarning, match="No OPML files found"):
+            missing_result = OpmlAdapter(path=str(missing)).ingest()
+        assert missing_result.units == []
+        assert missing_result.edges == []
+
+        malformed = tmp_path / "bad.opml"
+        malformed.write_text("<opml><body><outline text='broken'></body>", encoding="utf-8")
+        with pytest.warns(UserWarning, match="Skipping invalid OPML file"):
+            malformed_result = OpmlAdapter(path=str(malformed)).ingest()
+        assert malformed_result.units == []
+        assert malformed_result.edges == []
+
+    def test_opml_edges_are_inserted_by_store(self, tmp_path):
+        opml_path = tmp_path / "outline.opml"
+        opml_path.write_text(
+            "<opml><body><outline text='Root'><outline text='Child' /></outline></body></opml>",
+            encoding="utf-8",
+        )
+        result = OpmlAdapter(path=str(opml_path)).ingest()
+        store = Store(str(tmp_path / "graph.db"))
+        try:
+            stats = store.ingest(result, "opml")
+            edges = store.get_all_edges()
+        finally:
+            store.close()
+
+        assert stats == {"units_inserted": 2, "units_skipped": 0, "edges_inserted": 1}
+        assert len(edges) == 1
+        assert edges[0].relation == "contains"
+
+
 class TestRegistry:
     def test_list_adapters(self):
         adapters = list_adapters()
@@ -815,6 +896,7 @@ class TestRegistry:
             "bookmarks",
             "csv",
             "jsonl",
+            "opml",
         }
 
     def test_get_adapter(self):
@@ -823,6 +905,9 @@ class TestRegistry:
 
         jsonl_adapter = get_adapter("jsonl", path="/tmp/test.jsonl")
         assert jsonl_adapter.name == "jsonl"
+
+        opml_adapter = get_adapter("opml", path="/tmp/test.opml")
+        assert opml_adapter.name == "opml"
 
     def test_unknown_adapter(self):
         with pytest.raises(KeyError):

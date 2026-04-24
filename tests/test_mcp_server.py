@@ -396,6 +396,7 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(
         "bookmarks": ["bookmark"],
         "csv": ["csv_row"],
         "jsonl": ["jsonl_record"],
+        "opml": ["outline"],
     }
     monkeypatch.setattr(
         mcp_server,
@@ -410,6 +411,7 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(
     assert "bookmarks" in ingest_tool.inputSchema["properties"]["project"]["enum"]
     assert "csv" in ingest_tool.inputSchema["properties"]["project"]["enum"]
     assert "jsonl" in ingest_tool.inputSchema["properties"]["project"]["enum"]
+    assert "opml" in ingest_tool.inputSchema["properties"]["project"]["enum"]
 
     search_tool = next(tool for tool in tools if tool.name == "search")
     assert "kindle" in search_tool.inputSchema["properties"]["source_project"]["enum"]
@@ -417,6 +419,7 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(
     assert "bookmarks" in search_tool.inputSchema["properties"]["source_project"]["enum"]
     assert "csv" in search_tool.inputSchema["properties"]["source_project"]["enum"]
     assert "jsonl" in search_tool.inputSchema["properties"]["source_project"]["enum"]
+    assert "opml" in search_tool.inputSchema["properties"]["source_project"]["enum"]
     assert search_tool.inputSchema["properties"]["created_after"]["type"] == "string"
     assert search_tool.inputSchema["properties"]["min_utility"]["type"] == "number"
     assert search_tool.inputSchema["properties"]["min_confidence"]["type"] == "number"
@@ -579,6 +582,7 @@ def test_ingest_all_includes_sota_and_search_can_filter_sota(tmp_path, monkeypat
         "bookmarks",
         "csv",
         "jsonl",
+        "opml",
     ]
     assert payload == {"units_inserted": 1, "units_skipped": 0, "edges_inserted": 0}
 

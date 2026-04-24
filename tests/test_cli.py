@@ -1161,6 +1161,54 @@ def test_ingest_jsonl_command_uses_configured_path_and_indexes_fulltext(
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_ingest_opml_command_uses_configured_path_and_inserts_edges(
+    tmp_path, monkeypatch
+):
+    opml_path = tmp_path / "subscriptions.opml"
+    opml_path.write_text(
+        """<opml version="2.0">
+          <body>
+            <outline text="Research">
+              <outline text="AI Feed" xmlUrl="https://example.com/ai.xml"
+                htmlUrl="https://example.com/ai" />
+            </outline>
+          </body>
+        </opml>
+        """,
+        encoding="utf-8",
+    )
+
+    store = _make_store()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    monkeypatch.setattr("graph.cli.main.settings.opml_path", str(opml_path))
+
+    try:
+        result = runner.invoke(app, ["ingest", "opml"])
+
+        assert result.exit_code == 0
+        assert "Ingesting from opml" in result.output
+        assert "opml: 2 new, 0 updated, 1 edges" in result.output
+        unit = store.conn.execute(
+            """SELECT * FROM knowledge_units
+               WHERE source_project = 'opml' AND title = 'AI Feed'"""
+        ).fetchone()
+        assert unit is not None
+        assert "https://example.com/ai.xml" in unit["content"]
+        assert json.loads(unit["metadata"])["xmlUrl"] == "https://example.com/ai.xml"
+        assert len(store.get_all_edges()) == 1
+
+        search = runner.invoke(
+            app,
+            ["search", "https://example.com/ai.xml", "--mode", "fulltext", "--limit", "1"],
+        )
+        assert search.exit_code == 0
+        assert "AI Feed" in search.output
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_shortest_path_command_prints_readable_path(monkeypatch):
     store = _make_store()
     a_id, _, c_id, _ = _populate_graph(store)

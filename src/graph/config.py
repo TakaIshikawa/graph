@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     bookmarks_path: str = ""
     csv_path: str = ""
     jsonl_path: str = ""
+    opml_path: str = ""
     me_config: str = ""
     markdown_root: str = ""
     obsidian_vault_path: str = "/Users/taka/ObsidianVaults/note"

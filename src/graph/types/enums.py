@@ -11,6 +11,7 @@ class SourceProject(StrEnum):
     BOOKMARKS = "bookmarks"
     CSV = "csv"
     JSONL = "jsonl"
+    OPML = "opml"
 
 
 class ContentType(StrEnum):
@@ -31,6 +32,8 @@ class EdgeRelation(StrEnum):
     INSPIRES = "inspires"
     DERIVES_FROM = "derives_from"
     RELATES_TO = "relates_to"
+    CONTAINS = "contains"
+    REFERENCES = "references"
 
 
 class EdgeSource(StrEnum):

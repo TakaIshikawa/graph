@@ -36,6 +36,7 @@ def _get_adapter_for_project(name: str):
     from graph.adapters.markdown import MarkdownAdapter
     from graph.adapters.max_adapter import MaxAdapter
     from graph.adapters.me import MeAdapter
+    from graph.adapters.opml import OpmlAdapter
     from graph.adapters.presence import PresenceAdapter
     from graph.adapters.sota import SOTAAdapter
 
@@ -53,6 +54,7 @@ def _get_adapter_for_project(name: str):
         "bookmarks": lambda: BookmarksAdapter(path=settings.bookmarks_path),
         "csv": lambda: CsvAdapter(path=settings.csv_path),
         "jsonl": lambda: JsonlAdapter(path=settings.jsonl_path),
+        "opml": lambda: OpmlAdapter(path=settings.opml_path),
     }
     factory = mapping.get(name)
     if factory is None:
@@ -1205,6 +1207,7 @@ def _do_ingest(
             "bookmarks",
             "csv",
             "jsonl",
+            "opml",
         ]
         if project == "all"
         else [project]

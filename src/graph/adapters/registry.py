@@ -12,6 +12,7 @@ from graph.adapters.kindle import KindleAdapter
 from graph.adapters.markdown import MarkdownAdapter
 from graph.adapters.max_adapter import MaxAdapter
 from graph.adapters.me import MeAdapter
+from graph.adapters.opml import OpmlAdapter
 from graph.adapters.presence import PresenceAdapter
 from graph.adapters.sota import SOTAAdapter
 
@@ -27,6 +28,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "bookmarks": BookmarksAdapter,
     "csv": CsvAdapter,
     "jsonl": JsonlAdapter,
+    "opml": OpmlAdapter,
 }
 
 
