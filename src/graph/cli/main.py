@@ -3443,6 +3443,56 @@ def links(
     store.close()
 
 
+@app.command(name="suggest-edges")
+def suggest_edges(
+    limit: int = typer.Option(20, "--limit", "-n", help="Max candidate edges"),
+    min_score: float = typer.Option(0.4, "--min-score", help="Minimum suggestion score"),
+    source_project: str | None = typer.Option(
+        None,
+        "--source-project",
+        "--project",
+        "-p",
+        help="Filter candidate units by source project",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Suggest likely missing edges without writing relationships."""
+    from graph.graph.service import GraphService
+
+    store = _get_store()
+    gs = GraphService(store)
+    result = gs.suggest_edges(
+        limit=limit,
+        min_score=min_score,
+        source_project=source_project,
+    )
+
+    if json_output:
+        _json_echo(result)
+        store.close()
+        return
+
+    candidates = result["candidates"]
+    if not candidates:
+        typer.echo("No edge suggestions found.")
+        store.close()
+        return
+
+    typer.echo("Edge suggestions:")
+    for candidate in candidates:
+        from_unit = candidate["from_unit"]
+        to_unit = candidate["to_unit"]
+        typer.echo(
+            f"  {from_unit['title']} -> {to_unit['title']} "
+            f"score={candidate['score']:.3f}"
+        )
+        typer.echo(f"    IDs: {candidate['from_id']} -> {candidate['to_id']}")
+        for reason in candidate["reasons"]:
+            typer.echo(f"    - {reason}")
+
+    store.close()
+
+
 @app.command(name="duplicates")
 def duplicates(
     limit: int = typer.Option(20, "--limit", "-n", help="Max duplicate groups"),

@@ -679,6 +679,26 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="suggest_edges",
+            description="Suggest likely missing graph edges from shared tags, links, and text overlap without writing data.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "default": 20},
+                    "min_score": {
+                        "type": "number",
+                        "default": 0.4,
+                        "description": "Minimum suggestion score",
+                    },
+                    "source_project": {
+                        "type": "string",
+                        "enum": SUPPORTED_SYNC_PROJECTS,
+                        "description": "Filter candidate units by source project",
+                    },
+                },
+            },
+        ),
+        Tool(
             name="analyze_duplicates",
             description="Find likely duplicate knowledge units by repeated titles and near-identical content.",
             inputSchema={
@@ -1509,6 +1529,15 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             result = gs.analyze_links(
                 domain=arguments.get("domain"),
                 limit=arguments.get("limit", 20),
+            )
+            return [TextContent(type="text", text=json.dumps(result))]
+
+        elif name == "suggest_edges":
+            gs = GraphService(store)
+            result = gs.suggest_edges(
+                limit=arguments.get("limit", 20),
+                min_score=arguments.get("min_score", 0.4),
+                source_project=arguments.get("source_project"),
             )
             return [TextContent(type="text", text=json.dumps(result))]
 

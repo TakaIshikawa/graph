@@ -273,6 +273,50 @@ def _populate_links_graph(store: Store) -> None:
         store.insert_unit(unit)
 
 
+def _populate_edge_suggestion_graph(store: Store) -> tuple[str, str]:
+    solar = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="solar-storage",
+            source_entity_type="insight",
+            title="Solar storage roadmap",
+            content="Battery grid planning references https://example.com/docs.",
+            content_type=ContentType.INSIGHT,
+            tags=["energy", "solar", "storage"],
+        )
+    )
+    battery = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="battery-storage",
+            source_entity_type="insight",
+            title="Battery storage plan",
+            content="Grid battery storage notes cite https://example.com/docs.",
+            content_type=ContentType.INSIGHT,
+            tags=["energy", "storage", "battery"],
+        )
+    )
+    grid = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="solar-grid",
+            source_entity_type="knowledge_node",
+            title="Solar grid plan",
+            content="Solar storage grid reference https://example.com/docs.",
+            content_type=ContentType.FINDING,
+            tags=["energy", "solar", "grid"],
+        )
+    )
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=grid.id,
+            to_unit_id=solar.id,
+            relation=EdgeRelation.RELATES_TO,
+        )
+    )
+    return battery.id, solar.id
+
+
 def _populate_backlinks_graph(store: Store) -> tuple[str, str, str]:
     a = store.insert_unit(
         KnowledgeUnit(
@@ -2103,6 +2147,43 @@ def test_review_queue_tool_returns_ranked_items_reasons_and_filters(
     assert {"age", "isolated", "utility_score", "unreviewed"} <= {
         reason["code"] for reason in payload["queue"][0]["reasons"]
     }
+
+
+def test_suggest_edges_tool_returns_parseable_candidate_json(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    from_id, to_id = _populate_edge_suggestion_graph(store)
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    suggest_tool = next(tool for tool in tools if tool.name == "suggest_edges")
+    assert suggest_tool.inputSchema["properties"]["limit"]["default"] == 20
+    assert suggest_tool.inputSchema["properties"]["min_score"]["default"] == 0.4
+    assert "source_project" in suggest_tool.inputSchema["properties"]
+
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "suggest_edges",
+            {
+                "source_project": "max",
+                "min_score": 0.4,
+                "limit": 5,
+            },
+        )
+    )
+    payload = json.loads(response[0].text)
+
+    assert payload["filters"] == {"source_project": "max"}
+    assert len(payload["candidates"]) == 1
+    candidate = payload["candidates"][0]
+    assert candidate["from_id"] == from_id
+    assert candidate["to_id"] == to_id
+    assert candidate["score"] >= 0.8
+    assert any(reason.startswith("shared tags:") for reason in candidate["reasons"])
+    assert any(reason.startswith("shared links:") for reason in candidate["reasons"])
+    assert {"from_id", "to_id", "score", "reasons"} <= set(candidate)
 
 
 def test_analyze_links_tool_returns_same_structured_payload(tmp_path, monkeypatch):

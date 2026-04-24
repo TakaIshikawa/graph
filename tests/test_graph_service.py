@@ -859,6 +859,81 @@ class TestGraphService:
         }
         assert after == before
 
+    def test_suggest_edges_scores_reasons_excludes_existing_and_filters(
+        self, store: Store
+    ):
+        solar = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="solar-storage",
+                source_entity_type="insight",
+                title="Solar storage roadmap",
+                content="Battery grid planning references https://example.com/docs.",
+                content_type=ContentType.INSIGHT,
+                tags=["energy", "solar", "storage"],
+            )
+        )
+        battery = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="battery-storage",
+                source_entity_type="insight",
+                title="Battery storage plan",
+                content="Grid battery storage notes cite https://example.com/docs.",
+                content_type=ContentType.INSIGHT,
+                tags=["energy", "storage", "battery"],
+            )
+        )
+        grid = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="solar-grid",
+                source_entity_type="knowledge_node",
+                title="Solar grid plan",
+                content="Solar storage grid reference https://example.com/docs.",
+                content_type=ContentType.FINDING,
+                tags=["energy", "solar", "grid"],
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=grid.id,
+                to_unit_id=solar.id,
+                relation=EdgeRelation.RELATES_TO,
+            )
+        )
+
+        result = GraphService(store).suggest_edges(
+            limit=10,
+            min_score=0.4,
+            source_project="max",
+        )
+
+        assert result["filters"] == {"source_project": "max"}
+        assert len(result["candidates"]) == 1
+        candidate = result["candidates"][0]
+        assert candidate["from_id"] == battery.id
+        assert candidate["to_id"] == solar.id
+        assert candidate["score"] >= 0.8
+        assert any(reason.startswith("shared tags:") for reason in candidate["reasons"])
+        assert any(reason.startswith("shared links:") for reason in candidate["reasons"])
+        assert any(
+            reason.startswith("title/content token overlap:")
+            for reason in candidate["reasons"]
+        )
+        assert candidate["from_unit"]["source_id"] == "battery-storage"
+        assert candidate["to_unit"]["source_id"] == "solar-storage"
+
+        all_projects = GraphService(store).suggest_edges(limit=10, min_score=0.4)
+        suggested_pairs = {
+            frozenset((item["from_id"], item["to_id"]))
+            for item in all_projects["candidates"]
+        }
+        assert frozenset((solar.id, grid.id)) not in suggested_pairs
+
+        high_threshold = GraphService(store).suggest_edges(limit=10, min_score=1.1)
+        assert high_threshold["candidates"] == []
+
     def test_rename_tag_dry_run_and_execute_return_same_sample_schema(
         self, tag_synonym_store: Store
     ):

@@ -21,6 +21,29 @@ _EXTERNAL_URL_RE = re.compile(r"https?://[^\s<>\"]+", re.IGNORECASE)
 _TRAILING_URL_PUNCTUATION = ".,;:!?)]}'\""
 _TIMELINE_BUCKETS = {"day", "week", "month", "year"}
 _TIMELINE_FIELDS = {"created_at", "ingested_at", "updated_at"}
+_EDGE_SUGGESTION_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "by",
+    "for",
+    "from",
+    "in",
+    "is",
+    "it",
+    "of",
+    "on",
+    "or",
+    "that",
+    "the",
+    "this",
+    "to",
+    "with",
+}
 
 
 def _normalize_text(value: str) -> str:
@@ -52,6 +75,17 @@ def _tag_similarity(left: str, right: str) -> float:
 
 def _content_tokens(value: str) -> Counter[str]:
     return Counter(_normalize_text(value).split())
+
+
+def _edge_suggestion_tokens(*values: str) -> set[str]:
+    tokens = set()
+    for value in values:
+        without_urls = _EXTERNAL_URL_RE.sub(" ", value)
+        for token in _normalize_text(without_urls).split():
+            if len(token) < 3 or token in _EDGE_SUGGESTION_STOPWORDS:
+                continue
+            tokens.add(_singularize_token(token))
+    return tokens
 
 
 def _counter_similarity(left: Counter[str], right: Counter[str]) -> float:
@@ -127,6 +161,18 @@ def _metadata_strings(value: object, path: str = "metadata") -> list[tuple[str, 
             strings.extend(_metadata_strings(child, f"{path}[{index}]"))
         return strings
     return []
+
+
+def _unit_external_urls(unit) -> set[str]:
+    urls = set()
+    fields = [("content", unit.content)]
+    fields.extend(_metadata_strings(unit.metadata))
+    for _, text in fields:
+        for match in _EXTERNAL_URL_RE.finditer(text):
+            url = _normalize_external_url(match.group(0))
+            if url is not None:
+                urls.add(url)
+    return urls
 
 
 def _ensure_aware(value: datetime) -> datetime:
@@ -999,6 +1045,106 @@ class GraphService:
             "suggestions": suggestions[:limit],
             "limit": limit,
             "min_similarity": min_similarity,
+        }
+
+    def suggest_edges(
+        self,
+        limit: int = 20,
+        min_score: float = 0.4,
+        source_project: str | None = None,
+    ) -> dict:
+        """Suggest likely missing edges without modifying stored relationships."""
+        units = [
+            unit
+            for unit in self.store.get_all_units(limit=1000000000)
+            if source_project is None or str(unit.source_project) == source_project
+        ]
+        units.sort(key=lambda unit: (str(unit.source_project), unit.title, unit.id))
+
+        existing_pairs = {
+            tuple(sorted((edge.from_unit_id, edge.to_unit_id)))
+            for edge in self.store.get_all_edges()
+        }
+        tag_sets = {
+            unit.id: {str(tag).strip() for tag in unit.tags if str(tag).strip()}
+            for unit in units
+        }
+        link_sets = {unit.id: _unit_external_urls(unit) for unit in units}
+        token_sets = {
+            unit.id: _edge_suggestion_tokens(unit.title, unit.content)
+            for unit in units
+        }
+
+        def _unit_summary(unit) -> dict:
+            return {
+                "id": unit.id,
+                "source_project": str(unit.source_project),
+                "source_id": unit.source_id,
+                "source_entity_type": unit.source_entity_type,
+                "title": unit.title,
+                "content_type": str(unit.content_type),
+                "tags": unit.tags,
+            }
+
+        candidates = []
+        for index, left in enumerate(units):
+            for right in units[index + 1 :]:
+                pair_key = tuple(sorted((left.id, right.id)))
+                if pair_key in existing_pairs:
+                    continue
+
+                shared_tags = sorted(tag_sets[left.id] & tag_sets[right.id])
+                shared_links = sorted(link_sets[left.id] & link_sets[right.id])
+                shared_tokens = sorted(token_sets[left.id] & token_sets[right.id])
+
+                tag_score = min(len(shared_tags) * 0.2, 0.5)
+                link_score = min(len(shared_links) * 0.45, 0.7)
+                token_score = 0.0
+                if shared_tokens:
+                    token_overlap = len(shared_tokens) / max(
+                        len(token_sets[left.id]),
+                        len(token_sets[right.id]),
+                        1,
+                    )
+                    token_score = min(token_overlap * 0.35, 0.35)
+
+                score = min(tag_score + link_score + token_score, 1.0)
+                if score < min_score:
+                    continue
+
+                reasons = []
+                if shared_tags:
+                    reasons.append(f"shared tags: {', '.join(shared_tags[:5])}")
+                if shared_links:
+                    reasons.append(f"shared links: {', '.join(shared_links[:3])}")
+                if shared_tokens:
+                    reasons.append(f"title/content token overlap: {', '.join(shared_tokens[:8])}")
+
+                candidates.append(
+                    {
+                        "from_id": left.id,
+                        "to_id": right.id,
+                        "score": round(score, 6),
+                        "reasons": reasons,
+                        "from_unit": _unit_summary(left),
+                        "to_unit": _unit_summary(right),
+                    }
+                )
+
+        candidates.sort(
+            key=lambda item: (
+                -item["score"],
+                item["from_unit"]["title"],
+                item["to_unit"]["title"],
+                item["from_id"],
+                item["to_id"],
+            )
+        )
+        return {
+            "candidates": candidates[:limit],
+            "limit": limit,
+            "min_score": min_score,
+            "filters": {"source_project": source_project},
         }
 
     def rename_tag(

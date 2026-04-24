@@ -445,6 +445,50 @@ def _populate_links_graph(store: Store) -> None:
         store.insert_unit(unit)
 
 
+def _populate_edge_suggestion_graph(store: Store) -> tuple[str, str]:
+    solar = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="solar-storage",
+            source_entity_type="insight",
+            title="Solar storage roadmap",
+            content="Battery grid planning references https://example.com/docs.",
+            content_type=ContentType.INSIGHT,
+            tags=["energy", "solar", "storage"],
+        )
+    )
+    battery = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="battery-storage",
+            source_entity_type="insight",
+            title="Battery storage plan",
+            content="Grid battery storage notes cite https://example.com/docs.",
+            content_type=ContentType.INSIGHT,
+            tags=["energy", "storage", "battery"],
+        )
+    )
+    grid = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="solar-grid",
+            source_entity_type="knowledge_node",
+            title="Solar grid plan",
+            content="Solar storage grid reference https://example.com/docs.",
+            content_type=ContentType.FINDING,
+            tags=["energy", "solar", "grid"],
+        )
+    )
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=grid.id,
+            to_unit_id=solar.id,
+            relation=EdgeRelation.RELATES_TO,
+        )
+    )
+    return battery.id, solar.id
+
+
 def _populate_review_queue_graph(store: Store) -> tuple[str, str]:
     now = datetime.now(timezone.utc)
     old_isolated = store.insert_unit(
@@ -2239,6 +2283,52 @@ def test_links_command_human_output_shows_domains_and_units(monkeypatch):
         assert "example.com: 2 occurrences across 1 URLs" in result.output
         assert "[max] Markdown citation" in result.output
         assert "https://example.com/docs (2)" in result.output
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_suggest_edges_command_emits_json_and_readable_output(monkeypatch):
+    store = _make_store()
+    from_id, to_id = _populate_edge_suggestion_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        json_result = runner.invoke(
+            app,
+            [
+                "suggest-edges",
+                "--source-project",
+                "max",
+                "--min-score",
+                "0.4",
+                "--limit",
+                "5",
+                "--json",
+            ],
+        )
+
+        assert json_result.exit_code == 0
+        payload = json.loads(json_result.output)
+        assert payload["filters"] == {"source_project": "max"}
+        assert len(payload["candidates"]) == 1
+        candidate = payload["candidates"][0]
+        assert candidate["from_id"] == from_id
+        assert candidate["to_id"] == to_id
+        assert candidate["score"] >= 0.8
+        assert any(reason.startswith("shared tags:") for reason in candidate["reasons"])
+        assert any(reason.startswith("shared links:") for reason in candidate["reasons"])
+
+        readable_result = runner.invoke(
+            app,
+            ["suggest-edges", "--source-project", "max"],
+        )
+
+        assert readable_result.exit_code == 0
+        assert "Edge suggestions:" in readable_result.output
+        assert "Battery storage plan -> Solar storage roadmap" in readable_result.output
+        assert "shared links: https://example.com/docs" in readable_result.output
     finally:
         store.close()
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
