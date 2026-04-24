@@ -880,6 +880,153 @@ def test_export_report_command_handles_empty_graph(tmp_path, monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_export_anki_command_writes_sanitized_tsv(tmp_path, monkeypatch):
+    store = _make_store()
+    inserted = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="anki\t1",
+            source_entity_type="insight",
+            title="Solar\tPrompt\nLine",
+            content="First\tfact\nSecond fact\r\nThird fact",
+            content_type=ContentType.INSIGHT,
+            tags=["energy", "solar"],
+        )
+    )
+    export_path = tmp_path / "anki.tsv"
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(app, ["export-anki", str(export_path)])
+
+        assert result.exit_code == 0
+        assert "Exported 1 Anki rows" in result.output
+        lines = export_path.read_text().splitlines()
+        assert len(lines) == 1
+        row = lines[0].split("\t")
+        assert row == [
+            "Solar Prompt Line",
+            (
+                "First fact Second fact Third fact "
+                f"Source: max/insight/anki 1 (graph_id: {inserted.id})"
+            ),
+            "",
+            "anki 1",
+        ]
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_export_anki_command_honors_filters_tags_limit_and_json(tmp_path, monkeypatch):
+    store = _make_store()
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="keep-newer",
+            source_entity_type="insight",
+            title="Keep Newer",
+            content="Keep newer content",
+            content_type=ContentType.INSIGHT,
+            tags=["energy", "AI Agents"],
+            created_at=datetime.fromisoformat("2026-04-24T00:00:00+00:00"),
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="keep-older",
+            source_entity_type="insight",
+            title="Keep Older",
+            content="Keep older content",
+            content_type=ContentType.INSIGHT,
+            tags=["energy", "solar"],
+            created_at=datetime.fromisoformat("2026-04-23T00:00:00+00:00"),
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="wrong-tag",
+            source_entity_type="insight",
+            title="Wrong Tag",
+            content="Wrong tag content",
+            content_type=ContentType.INSIGHT,
+            tags=["solar"],
+            created_at=datetime.fromisoformat("2026-04-25T00:00:00+00:00"),
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="wrong-project",
+            source_entity_type="knowledge_node",
+            title="Wrong Project",
+            content="Wrong project content",
+            content_type=ContentType.INSIGHT,
+            tags=["energy"],
+            created_at=datetime.fromisoformat("2026-04-26T00:00:00+00:00"),
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="wrong-type",
+            source_entity_type="design_brief",
+            title="Wrong Type",
+            content="Wrong type content",
+            content_type=ContentType.DESIGN_BRIEF,
+            tags=["energy"],
+            created_at=datetime.fromisoformat("2026-04-27T00:00:00+00:00"),
+        )
+    )
+    export_path = tmp_path / "filtered-anki.tsv"
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "export-anki",
+                str(export_path),
+                "--source-project",
+                "max",
+                "--content-type",
+                "insight",
+                "--tag",
+                "energy",
+                "--limit",
+                "1",
+                "--include-tags",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["rows_exported"] == 1
+        assert payload["include_tags"] is True
+        assert payload["filters"] == {
+            "source_project": "max",
+            "content_type": "insight",
+            "tag": "energy",
+            "limit": 1,
+        }
+        assert payload["path"] == str(export_path)
+
+        lines = export_path.read_text().splitlines()
+        assert len(lines) == 1
+        row = lines[0].split("\t")
+        assert row[0] == "Keep Newer"
+        assert row[2] == "energy AI_Agents"
+        assert row[3] == "keep-newer"
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_ingest_markdown_command_uses_configured_root(tmp_path, monkeypatch):
     notes = tmp_path / "notes"
     notes.mkdir()

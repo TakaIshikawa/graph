@@ -289,6 +289,70 @@ def _do_export_report(store: Store, path: str | Path, *, limit: int = 10) -> dic
     }
 
 
+def _anki_tsv_field(value: object) -> str:
+    text = "" if value is None else str(value)
+    return " ".join(text.replace("\t", " ").split())
+
+
+def _anki_tag(tag: str) -> str:
+    return "_".join(_anki_tsv_field(tag).split())
+
+
+def _do_export_anki(
+    store: Store,
+    path: str | Path,
+    *,
+    source_project: str | None = None,
+    content_type: str | None = None,
+    tag: str | None = None,
+    limit: int | None = None,
+    include_tags: bool = False,
+) -> dict:
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    rows: list[list[str]] = []
+    for unit in store.get_all_units(limit=1000000000):
+        if source_project and unit.source_project != source_project:
+            continue
+        if content_type and unit.content_type != content_type:
+            continue
+        if tag and tag not in unit.tags:
+            continue
+        if limit is not None and len(rows) >= max(0, limit):
+            break
+
+        source = (
+            f"Source: {unit.source_project}/{unit.source_entity_type}/{unit.source_id} "
+            f"(graph_id: {unit.id})"
+        )
+        back = f"{unit.content}\n\n{source}"
+        tags = " ".join(_anki_tag(found_tag) for found_tag in unit.tags) if include_tags else ""
+        rows.append(
+            [
+                _anki_tsv_field(unit.title),
+                _anki_tsv_field(back),
+                _anki_tsv_field(tags),
+                _anki_tsv_field(unit.source_id),
+            ]
+        )
+
+    output_path.write_text(
+        "\n".join("\t".join(row) for row in rows) + ("\n" if rows else "")
+    )
+    return {
+        "path": str(output_path),
+        "rows_exported": len(rows),
+        "include_tags": include_tags,
+        "filters": {
+            "source_project": source_project,
+            "content_type": content_type,
+            "tag": tag,
+            "limit": limit,
+        },
+    }
+
+
 def _do_import_json(store: Store, path: str | Path) -> dict:
     input_path = Path(path)
     payload = json.loads(input_path.read_text())
@@ -1505,6 +1569,40 @@ def export_report(
         return
 
     typer.echo(f"Exported graph report to {stats['path']}")
+
+
+@app.command(name="export-anki")
+def export_anki(
+    path: Path = typer.Argument(..., help="Destination Anki TSV file path"),
+    source_project: str | None = typer.Option(
+        None,
+        "--source-project",
+        help="Filter by source project",
+    ),
+    content_type: str | None = typer.Option(None, "--content-type", help="Filter by content type"),
+    tag: str | None = typer.Option(None, "--tag", help="Require an exact graph tag"),
+    limit: int | None = typer.Option(None, "--limit", "-n", help="Maximum rows to export"),
+    include_tags: bool = typer.Option(False, "--include-tags", help="Emit graph tags"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Export matching units as Anki-compatible TSV rows."""
+    store = _get_store()
+    stats = _do_export_anki(
+        store,
+        path,
+        source_project=source_project,
+        content_type=content_type,
+        tag=tag,
+        limit=limit,
+        include_tags=include_tags,
+    )
+    store.close()
+
+    if json_output:
+        _json_echo(stats)
+        return
+
+    typer.echo(f"Exported {stats['rows_exported']} Anki rows to {stats['path']}")
 
 
 @app.command(name="import-json")
