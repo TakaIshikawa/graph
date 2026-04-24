@@ -543,6 +543,61 @@ def test_ingest_all_includes_sota_and_search_can_filter_sota(tmp_path, monkeypat
     assert results[0]["title"] == "SOTA Transformer Paper"
 
 
+def test_similar_units_tool_returns_payload_and_excludes_seed(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    seed = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="seed",
+            source_entity_type="insight",
+            title="Solar storage seed",
+            content="Solar storage adoption",
+            content_type=ContentType.INSIGHT,
+            tags=["energy"],
+        )
+    )
+    match = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="match",
+            source_entity_type="insight",
+            title="Solar storage match",
+            content="Solar storage demand",
+            content_type=ContentType.INSIGHT,
+            tags=["energy"],
+        )
+    )
+    store.update_embedding(seed.id, serialize_embedding([1.0, 0.0]))
+    store.update_embedding(match.id, serialize_embedding([0.9, 0.1]))
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    assert any(tool.name == "similar_units" for tool in tools)
+
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "similar_units",
+            {
+                "unit_id": seed.id,
+                "limit": 5,
+                "source_project": "max",
+                "content_type": "insight",
+                "tag": "energy",
+            },
+        )
+    )
+    payload = json.loads(response[0].text)
+
+    assert payload["seed_id"] == seed.id
+    assert payload["source_mode"] == "embedding"
+    assert [result["id"] for result in payload["results"]] == [match.id]
+    assert payload["results"][0]["reason"] == "embedding_similarity"
+    assert payload["results"][0]["source_mode"] == "embedding"
+
+
 def test_saved_query_tools_create_list_run_and_delete(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))

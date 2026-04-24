@@ -1004,6 +1004,60 @@ def _do_context_pack(
     )
 
 
+def _similar_payload_to_json(payload: dict) -> dict:
+    seed = (
+        _unit_to_json(payload["seed"], include_content=False)
+        if payload.get("seed") is not None
+        else None
+    )
+    return {
+        key: value
+        for key, value in {
+            "seed_id": payload.get("seed_id"),
+            "seed": seed,
+            "query": payload.get("query"),
+            "source_mode": payload.get("source_mode"),
+            "filters": payload.get("filters", {}),
+            "results": [
+                {
+                    **_unit_to_json(
+                        result["unit"],
+                        score=result["score"],
+                        snippet=result.get("snippet"),
+                        include_content=False,
+                    ),
+                    "reason": result["reason"],
+                    "source_mode": result["source_mode"],
+                }
+                for result in payload.get("results", [])
+            ],
+            "error": payload.get("error"),
+        }.items()
+        if value is not None
+    }
+
+
+def _do_similar(
+    store: Store,
+    unit_id: str,
+    *,
+    limit: int = 10,
+    filters: dict | None = None,
+) -> dict:
+    from graph.rag.search import RAGService
+
+    filters = filters or {}
+    rag = RAGService(store, provider=None)
+    payload = rag.similar_units(
+        unit_id,
+        limit=limit,
+        source_project=filters.get("source_project"),
+        content_type=filters.get("content_type"),
+        tag=filters.get("tag"),
+    )
+    return _similar_payload_to_json(payload)
+
+
 def _render_search_payload(payload: dict, *, json_output: bool) -> None:
     if "error" in payload:
         if json_output:
@@ -1034,6 +1088,36 @@ def _render_search_payload(payload: dict, *, json_output: bool) -> None:
             f"  Type: {result['content_type']} | Tags: {', '.join(result['tags'])}"
         )
         typer.echo(f"  {result.get('snippet') or result.get('content', '')[:120]}...")
+
+
+def _render_similar_payload(payload: dict, *, json_output: bool) -> None:
+    if json_output:
+        _json_echo(payload)
+        return
+
+    if payload.get("error") == "unit_not_found":
+        typer.echo(f"Unit not found: {payload['seed_id']}")
+        return
+
+    seed = payload.get("seed") or {}
+    typer.echo(f"Seed: [{seed.get('source_project')}] {seed.get('title')}")
+    typer.echo(f"Mode: {payload.get('source_mode')}")
+
+    results = payload.get("results", [])
+    if not results:
+        typer.echo("No similar units found.")
+        return
+
+    for result in results:
+        typer.echo(
+            f"\n[{result['source_project']}] {result['title']}  "
+            f"(score: {result['score']:.3f}, reason: {result['reason']})"
+        )
+        typer.echo(f"  ID: {result['id']}")
+        typer.echo(
+            f"  Type: {result['content_type']} | Tags: {', '.join(result['tags'])}"
+        )
+        typer.echo(f"  {result.get('snippet') or ''}")
 
 
 def _render_search_facets_payload(payload: dict, *, json_output: bool) -> None:
@@ -1773,6 +1857,37 @@ def search(
         }
 
     _render_search_payload(payload, json_output=json_output)
+    store.close()
+
+
+@app.command()
+def similar(
+    unit_id: str = typer.Argument(..., help="Seed unit id"),
+    limit: int = typer.Option(10, "--limit", "-n", help="Max results"),
+    source_project: str | None = typer.Option(
+        None,
+        "--source-project",
+        "--project",
+        "-p",
+        help="Filter by source project",
+    ),
+    content_type: str | None = typer.Option(None, "--content-type", help="Filter by content type"),
+    tag: str | None = typer.Option(None, "--tag", help="Require an exact tag"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Find units similar to an existing unit."""
+    store = _get_store()
+    payload = _do_similar(
+        store,
+        unit_id,
+        limit=limit,
+        filters=_search_filters_dict(
+            source_project=source_project,
+            content_type=content_type,
+            tag=tag,
+        ),
+    )
+    _render_similar_payload(payload, json_output=json_output)
     store.close()
 
 

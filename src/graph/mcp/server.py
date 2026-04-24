@@ -28,6 +28,7 @@ from graph.cli.main import (
     _do_update_edge,
     _do_search,
     _do_search_facets,
+    _do_similar,
     _do_update_unit,
     _list_edges_payload,
     _search_filters_dict,
@@ -238,6 +239,19 @@ async def list_tools() -> list[Tool]:
                     },
                 },
                 "required": ["query"],
+            },
+        ),
+        Tool(
+            name="similar_units",
+            description="Find units similar to an existing unit id using stored vectors or local full-text fallback.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "unit_id": {"type": "string", "description": "Seed unit id"},
+                    "limit": {"type": "integer", "default": 10},
+                    **SEARCH_FILTER_SCHEMA,
+                },
+                "required": ["unit_id"],
             },
         ),
         Tool(
@@ -1063,6 +1077,20 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 filters=filters,
             )
             return [TextContent(type="text", text=json.dumps(payload["results"]))]
+
+        elif name == "similar_units":
+            filters = _search_filters_dict(
+                source_project=arguments.get("source_project"),
+                content_type=arguments.get("content_type"),
+                tag=arguments.get("tag"),
+            )
+            payload = _do_similar(
+                store,
+                arguments["unit_id"],
+                limit=arguments.get("limit", 10),
+                filters=filters,
+            )
+            return [TextContent(type="text", text=json.dumps(payload))]
 
         elif name == "search_facets":
             query = arguments["query"]

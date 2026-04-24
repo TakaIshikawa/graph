@@ -1170,6 +1170,98 @@ def test_search_command_emits_semantic_json_with_scores(monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_similar_command_emits_json_with_seed_scores_and_reason(monkeypatch):
+    store = _make_store()
+    _populate_search_graph(store)
+    seed = store.get_unit_by_source("max", "approved", "insight")
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(
+            app,
+            ["similar", seed.id, "--limit", "2", "--json"],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["seed_id"] == seed.id
+        assert payload["source_mode"] == "embedding"
+        assert all(item["id"] != seed.id for item in payload["results"])
+        assert all(isinstance(item["score"], float) for item in payload["results"])
+        assert all(item["reason"] == "embedding_similarity" for item in payload["results"])
+        assert all(item["source_mode"] == "embedding" for item in payload["results"])
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_similar_command_fallback_json_respects_filters(monkeypatch):
+    store = _make_store()
+    seed = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="seed",
+            source_entity_type="insight",
+            title="Solar storage seed",
+            content="Solar storage market adoption",
+            content_type=ContentType.INSIGHT,
+            tags=["solar"],
+        )
+    )
+    keep = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="keep",
+            source_entity_type="insight",
+            title="Solar storage match",
+            content="Solar storage market demand",
+            content_type=ContentType.INSIGHT,
+            tags=["energy"],
+        )
+    )
+    skip = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="skip",
+            source_entity_type="knowledge_node",
+            title="Solar storage finding",
+            content="Solar storage market demand",
+            content_type=ContentType.FINDING,
+            tags=["energy"],
+        )
+    )
+    for unit in [seed, keep, skip]:
+        store.fts_index_unit(unit)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "similar",
+                seed.id,
+                "--source-project",
+                "max",
+                "--content-type",
+                "insight",
+                "--tag",
+                "energy",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["source_mode"] == "local_search"
+        assert [item["id"] for item in payload["results"]] == [keep.id]
+        assert payload["results"][0]["reason"] == "seed_text_fulltext"
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_context_command_emits_ranked_units_neighbors_and_budget(monkeypatch):
     store = _make_store()
     center = store.insert_unit(

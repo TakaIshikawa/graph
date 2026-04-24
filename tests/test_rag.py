@@ -194,6 +194,100 @@ class TestRAGService:
         assert len(results) > 0
         assert all(isinstance(sim, float) for _, sim in results)
 
+    def test_similar_units_uses_stored_seed_embedding_without_provider(self, store: Store):
+        seed = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="seed",
+                source_entity_type="insight",
+                title="Solar storage seed",
+                content="Solar storage adoption",
+                content_type=ContentType.INSIGHT,
+                tags=["energy"],
+            )
+        )
+        close = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="close",
+                source_entity_type="insight",
+                title="Solar storage match",
+                content="Solar storage growth",
+                content_type=ContentType.INSIGHT,
+                tags=["energy"],
+            )
+        )
+        far = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="far",
+                source_entity_type="knowledge_node",
+                title="Python asyncio",
+                content="Concurrency primitives",
+                content_type=ContentType.FINDING,
+                tags=["python"],
+            )
+        )
+        store.update_embedding(seed.id, serialize_embedding([1.0, 0.0]))
+        store.update_embedding(close.id, serialize_embedding([0.9, 0.1]))
+        store.update_embedding(far.id, serialize_embedding([0.0, 1.0]))
+
+        result = RAGService(store, provider=None).similar_units(seed.id, limit=5)
+
+        assert result["source_mode"] == "embedding"
+        assert [item["unit"].id for item in result["results"]] == [close.id, far.id]
+        assert seed.id not in [item["unit"].id for item in result["results"]]
+        assert result["results"][0]["reason"] == "embedding_similarity"
+
+    def test_similar_units_falls_back_to_local_search_without_embeddings(self, store: Store):
+        seed = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="seed",
+                source_entity_type="insight",
+                title="Solar storage seed",
+                content="Solar battery storage market adoption",
+                content_type=ContentType.INSIGHT,
+                tags=["energy", "solar"],
+            )
+        )
+        match = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="match",
+                source_entity_type="insight",
+                title="Battery storage market",
+                content="Solar storage adoption is increasing",
+                content_type=ContentType.INSIGHT,
+                tags=["energy", "storage"],
+            )
+        )
+        skip = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="skip",
+                source_entity_type="knowledge_node",
+                title="Solar grid finding",
+                content="Solar storage grid research",
+                content_type=ContentType.FINDING,
+                tags=["energy"],
+            )
+        )
+        for unit in [seed, match, skip]:
+            store.fts_index_unit(unit)
+
+        result = RAGService(store, provider=None).similar_units(
+            seed.id,
+            limit=5,
+            source_project="max",
+            content_type="insight",
+            tag="storage",
+        )
+
+        assert result["source_mode"] == "local_search"
+        assert [item["unit"].id for item in result["results"]] == [match.id]
+        assert result["results"][0]["reason"] == "seed_text_fulltext"
+
     def test_search_no_embeddings(self, store: Store, rag_service: RAGService):
         # No units with embeddings
         results = rag_service.search("anything")

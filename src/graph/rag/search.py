@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 
 from graph.rag.embeddings import (
@@ -33,6 +34,42 @@ def _truncate_to_budget(text: str, budget: int) -> str:
 
 def _consume_budget(text: str, remaining_budget: int) -> str:
     return _truncate_to_budget(text, remaining_budget)
+
+
+def _content_excerpt(text: str, length: int = 500) -> str:
+    return _truncate_to_budget(text, length)
+
+
+def _unit_matches_filters(
+    unit: KnowledgeUnit,
+    *,
+    source_project: str | None = None,
+    content_type: str | None = None,
+    tag: str | None = None,
+) -> bool:
+    if source_project and str(unit.source_project) != source_project:
+        return False
+    if content_type and str(unit.content_type) != content_type:
+        return False
+    if tag and tag not in unit.tags:
+        return False
+    return True
+
+
+def _similarity_seed_query(unit: KnowledgeUnit) -> str:
+    parts = [unit.title, " ".join(unit.tags), _content_excerpt(unit.content)]
+    return " ".join(part for part in parts if part).strip()
+
+
+def _fts_or_query(text: str) -> str:
+    terms = []
+    seen = set()
+    for term in re.findall(r"[\w-]+", text.lower()):
+        if len(term) <= 1 or term in seen:
+            continue
+        seen.add(term)
+        terms.append(term)
+    return " OR ".join(terms) or text
 
 
 def _context_unit_payload(
@@ -193,6 +230,129 @@ class RAGService:
             if unit:
                 results.append((unit, score))
         return results
+
+    def similar_units(
+        self,
+        unit_id: str,
+        *,
+        limit: int = 10,
+        source_project: str | None = None,
+        content_type: str | None = None,
+        tag: str | None = None,
+    ) -> dict:
+        """Find units similar to an existing unit without embedding the seed text."""
+        seed = self.store.get_unit(unit_id)
+        if seed is None:
+            return {
+                "seed_id": unit_id,
+                "seed": None,
+                "results": [],
+                "source_mode": "missing",
+                "filters": {
+                    key: value
+                    for key, value in {
+                        "source_project": source_project,
+                        "content_type": content_type,
+                        "tag": tag,
+                    }.items()
+                    if value is not None
+                },
+                "error": "unit_not_found",
+            }
+
+        candidates = self.store.get_units_with_embeddings(
+            source_project=source_project,
+            content_type=content_type,
+        )
+        seed_embedding = None
+        for unit, blob in self.store.get_units_with_embeddings():
+            if unit.id == unit_id:
+                seed_embedding = deserialize_embedding(blob)
+                break
+
+        filters = {
+            key: value
+            for key, value in {
+                "source_project": source_project,
+                "content_type": content_type,
+                "tag": tag,
+            }.items()
+            if value is not None
+        }
+
+        if seed_embedding is not None:
+            results = []
+            for unit, blob in candidates:
+                if unit.id == unit_id:
+                    continue
+                if not _unit_matches_filters(
+                    unit,
+                    source_project=source_project,
+                    content_type=content_type,
+                    tag=tag,
+                ):
+                    continue
+                score = cosine_similarity(seed_embedding, deserialize_embedding(blob))
+                results.append(
+                    {
+                        "unit": unit,
+                        "score": score,
+                        "reason": "embedding_similarity",
+                        "source_mode": "embedding",
+                        "snippet": _content_excerpt(unit.content, 160),
+                    }
+                )
+
+            results.sort(key=lambda item: item["score"], reverse=True)
+            return {
+                "seed_id": seed.id,
+                "seed": seed,
+                "query": _similarity_seed_query(seed),
+                "results": results[:limit],
+                "source_mode": "embedding",
+                "filters": filters,
+            }
+
+        query = _similarity_seed_query(seed)
+        fts_results = self.store.fts_search(_fts_or_query(query), limit=max(limit * 4, 20))
+        max_rank = max((abs(row["rank"]) for row in fts_results), default=1.0) or 1.0
+        results = []
+        seen: set[str] = set()
+        for row in fts_results:
+            candidate_id = row["unit_id"]
+            if candidate_id == unit_id or candidate_id in seen:
+                continue
+            seen.add(candidate_id)
+            unit = self.store.get_unit(candidate_id)
+            if unit is None:
+                continue
+            if not _unit_matches_filters(
+                unit,
+                source_project=source_project,
+                content_type=content_type,
+                tag=tag,
+            ):
+                continue
+            results.append(
+                {
+                    "unit": unit,
+                    "score": abs(row["rank"]) / max_rank,
+                    "reason": "seed_text_fulltext",
+                    "source_mode": "local_search",
+                    "snippet": row.get("snippet") or _content_excerpt(unit.content, 160),
+                }
+            )
+            if len(results) >= limit:
+                break
+
+        return {
+            "seed_id": seed.id,
+            "seed": seed,
+            "query": query,
+            "results": results,
+            "source_mode": "local_search",
+            "filters": filters,
+        }
 
     def context_pack(
         self,
