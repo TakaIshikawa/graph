@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from pathlib import Path
 
 import networkx as nx
 
@@ -25,9 +26,11 @@ class GraphService:
                 u.id,
                 title=u.title,
                 source_project=u.source_project,
+                source_entity_type=u.source_entity_type,
                 content_type=u.content_type,
                 utility_score=u.utility_score or 0.0,
                 tags=u.tags,
+                created_at=str(u.created_at),
             )
         edges = self.store.get_all_edges()
         for e in edges:
@@ -37,9 +40,53 @@ class GraphService:
                     e.to_unit_id,
                     relation=e.relation,
                     weight=e.weight,
+                    source=e.source,
+                    created_at=str(e.created_at),
                     id=e.id,
                 )
         return len(self.G.nodes)
+
+    def build_export_graph(self) -> nx.DiGraph:
+        """Build a GraphML-safe graph containing scalar export attributes only."""
+        export_graph = nx.DiGraph()
+        for node_id, data in self.G.nodes(data=True):
+            tags = data.get("tags") or []
+            if isinstance(tags, list):
+                tags_value = ",".join(str(tag) for tag in tags)
+            else:
+                tags_value = str(tags)
+            export_graph.add_node(
+                node_id,
+                title=str(data.get("title", "")),
+                source_project=str(data.get("source_project", "")),
+                source_entity_type=str(data.get("source_entity_type", "")),
+                content_type=str(data.get("content_type", "")),
+                tags=tags_value,
+                utility_score=float(data.get("utility_score", 0.0) or 0.0),
+                created_at=str(data.get("created_at", "")),
+            )
+        for from_id, to_id, data in self.G.edges(data=True):
+            export_graph.add_edge(
+                from_id,
+                to_id,
+                relation=str(data.get("relation", "")),
+                weight=float(data.get("weight", 1.0) or 0.0),
+                source=str(data.get("source", "")),
+                created_at=str(data.get("created_at", "")),
+            )
+        return export_graph
+
+    def export_graphml(self, path: str | Path) -> dict:
+        """Write the current graph to a GraphML file and return export stats."""
+        output_path = Path(path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        export_graph = self.build_export_graph()
+        nx.write_graphml(export_graph, output_path)
+        return {
+            "path": str(output_path),
+            "node_count": export_graph.number_of_nodes(),
+            "edge_count": export_graph.number_of_edges(),
+        }
 
     def get_neighbors(self, unit_id: str, depth: int = 1) -> dict:
         """Get unit and neighbors up to depth hops."""

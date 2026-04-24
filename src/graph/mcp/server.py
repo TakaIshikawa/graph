@@ -11,6 +11,7 @@ from mcp.types import TextContent, Tool
 
 from graph.config import settings
 from graph.cli.main import (
+    _do_export_graphml,
     _do_export_json,
     _do_export_obsidian,
     _do_import_json,
@@ -472,6 +473,20 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="export_graphml",
+            description="Export the graph to a GraphML file for tools like Gephi and yEd.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Destination GraphML file path",
+                    },
+                },
+                "required": ["path"],
+            },
+        ),
+        Tool(
             name="import_json",
             description="Import a portable JSON graph backup file idempotently.",
             inputSchema={
@@ -833,6 +848,10 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
         elif name == "export_json":
             stats = _do_export_json(store, arguments["path"])
+            return [TextContent(type="text", text=json.dumps(stats))]
+
+        elif name == "export_graphml":
+            stats = _do_export_graphml(store, arguments["path"])
             return [TextContent(type="text", text=json.dumps(stats))]
 
         elif name == "import_json":

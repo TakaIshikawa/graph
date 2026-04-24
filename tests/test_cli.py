@@ -8,6 +8,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+import networkx as nx
 import pytest
 from typer.testing import CliRunner
 
@@ -355,6 +356,32 @@ def test_json_export_and_import_commands_round_trip(tmp_path, monkeypatch):
         target.close()
         _cleanup_db(source._test_db_path)  # type: ignore[attr-defined]
         _cleanup_db(target._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_export_graphml_command_writes_valid_graphml(tmp_path, monkeypatch):
+    store = _make_store()
+    a_id, b_id, _, _ = _populate_graph(store)
+    export_path = tmp_path / "graph.graphml"
+
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    result = runner.invoke(app, ["export-graphml", str(export_path)])
+
+    try:
+        assert result.exit_code == 0
+        assert export_path.exists()
+        assert "Exported 4 nodes and 2 edges" in result.output
+
+        exported = nx.read_graphml(export_path)
+        assert exported.nodes[a_id]["title"] == "Node A"
+        assert exported.nodes[a_id]["source_project"] == "forty_two"
+        assert exported.nodes[a_id]["source_entity_type"] == "knowledge_node"
+        assert exported.nodes[a_id]["created_at"]
+        assert exported.get_edge_data(a_id, b_id)["relation"] == "builds_on"
+        assert exported.get_edge_data(a_id, b_id)["source"] == "inferred"
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
 def test_ingest_markdown_command_uses_configured_root(tmp_path, monkeypatch):

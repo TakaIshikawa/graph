@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import tempfile
 
+import networkx as nx
 import pytest
 
 from graph.graph.service import GraphService
@@ -197,6 +198,69 @@ class TestGraphService:
         assert len(central) == 2
         # Each entry is (node_id, pagerank_score)
         assert all(isinstance(score, float) for _, score in central)
+
+    def test_export_graphml_writes_scalar_node_and_edge_attributes(
+        self, store: Store, tmp_path
+    ):
+        a = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="a",
+                source_entity_type="knowledge_node",
+                title="Node A",
+                content="First node",
+                content_type=ContentType.FINDING,
+                tags=["energy", "solar"],
+                utility_score=0.9,
+            )
+        )
+        b = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="b",
+                source_entity_type="insight",
+                title="Node B",
+                content="Second node",
+                content_type=ContentType.INSIGHT,
+                tags=["storage"],
+                utility_score=0.7,
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=a.id,
+                to_unit_id=b.id,
+                relation=EdgeRelation.BUILDS_ON,
+                weight=0.75,
+            )
+        )
+
+        gs = GraphService(store)
+        gs.rebuild()
+        output_path = tmp_path / "graph.graphml"
+        stats = gs.export_graphml(output_path)
+
+        assert stats == {
+            "path": str(output_path),
+            "node_count": 2,
+            "edge_count": 1,
+        }
+        assert output_path.exists()
+
+        exported = nx.read_graphml(output_path)
+        assert exported.nodes[a.id]["title"] == "Node A"
+        assert exported.nodes[a.id]["source_project"] == "forty_two"
+        assert exported.nodes[a.id]["source_entity_type"] == "knowledge_node"
+        assert exported.nodes[a.id]["content_type"] == "finding"
+        assert exported.nodes[a.id]["tags"] == "energy,solar"
+        assert float(exported.nodes[a.id]["utility_score"]) == 0.9
+        assert exported.nodes[a.id]["created_at"]
+
+        edge_data = exported.get_edge_data(a.id, b.id)
+        assert edge_data["relation"] == "builds_on"
+        assert float(edge_data["weight"]) == 0.75
+        assert edge_data["source"] == "inferred"
+        assert edge_data["created_at"]
 
     def test_find_gaps(self, populated_store: Store):
         gs = GraphService(populated_store)

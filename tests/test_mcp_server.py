@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 
+import networkx as nx
+
 from graph.adapters.base import IngestResult
 from graph.mcp import server as mcp_server
 from graph.rag.embeddings import serialize_embedding
@@ -522,6 +524,66 @@ def test_json_backup_tools_export_and_import_idempotently(tmp_path, monkeypatch)
         assert target.fts_search("searchable")
     finally:
         target.close()
+
+
+def test_export_graphml_tool_returns_path_and_counts(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    graphml_path = tmp_path / "graph.graphml"
+
+    store = Store(str(db_path))
+    a = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="a",
+            source_entity_type="knowledge_node",
+            title="Node A",
+            content="First searchable node",
+            tags=["energy", "solar"],
+            utility_score=0.9,
+        )
+    )
+    b = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="b",
+            source_entity_type="insight",
+            title="Node B",
+            content="Second searchable node",
+            content_type=ContentType.INSIGHT,
+        )
+    )
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=a.id,
+            to_unit_id=b.id,
+            relation=EdgeRelation.BUILDS_ON,
+            weight=0.8,
+        )
+    )
+    store.close()
+
+    tools = asyncio.run(mcp_server.list_tools())
+    assert any(tool.name == "export_graphml" for tool in tools)
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+    response = asyncio.run(
+        mcp_server.call_tool("export_graphml", {"path": str(graphml_path)})
+    )
+    payload = json.loads(response[0].text)
+
+    assert payload == {
+        "path": str(graphml_path),
+        "node_count": 2,
+        "edge_count": 1,
+    }
+    assert graphml_path.exists()
+
+    exported = nx.read_graphml(graphml_path)
+    assert exported.nodes[a.id]["tags"] == "energy,solar"
+    assert exported.nodes[a.id]["utility_score"] == 0.9
+    assert exported.get_edge_data(a.id, b.id)["relation"] == "builds_on"
+    assert exported.get_edge_data(a.id, b.id)["weight"] == 0.8
+    assert exported.get_edge_data(a.id, b.id)["source"] == "inferred"
 
 
 def test_analyze_tags_tool_returns_summary_and_detail_json(tmp_path, monkeypatch):

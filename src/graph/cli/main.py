@@ -72,6 +72,14 @@ def _do_export_json(store: Store, path: str | Path) -> dict:
     }
 
 
+def _do_export_graphml(store: Store, path: str | Path) -> dict:
+    from graph.graph.service import GraphService
+
+    gs = GraphService(store)
+    gs.rebuild()
+    return gs.export_graphml(path)
+
+
 def _do_import_json(store: Store, path: str | Path) -> dict:
     input_path = Path(path)
     payload = json.loads(input_path.read_text())
@@ -404,6 +412,20 @@ def export_json(
     typer.echo(
         f"Exported {stats['units_exported']} units and "
         f"{stats['edges_exported']} edges to {stats['path']}"
+    )
+
+
+@app.command(name="export-graphml")
+def export_graphml(
+    path: Path = typer.Argument(..., help="Destination GraphML file path"),
+) -> None:
+    """Export the graph to GraphML for external visualization tools."""
+    store = _get_store()
+    stats = _do_export_graphml(store, path)
+    store.close()
+    typer.echo(
+        f"Exported {stats['node_count']} nodes and "
+        f"{stats['edge_count']} edges to {stats['path']}"
     )
 
 
