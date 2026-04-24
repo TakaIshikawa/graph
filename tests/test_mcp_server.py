@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime
 
 import networkx as nx
 
@@ -217,6 +218,11 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(
     search_tool = next(tool for tool in tools if tool.name == "search")
     assert "kindle" in search_tool.inputSchema["properties"]["source_project"]["enum"]
     assert "sota" in search_tool.inputSchema["properties"]["source_project"]["enum"]
+    assert search_tool.inputSchema["properties"]["created_after"]["type"] == "string"
+    assert search_tool.inputSchema["properties"]["min_utility"]["type"] == "number"
+    save_query_tool = next(tool for tool in tools if tool.name == "save_query")
+    assert save_query_tool.inputSchema["properties"]["created_before"]["type"] == "string"
+    assert save_query_tool.inputSchema["properties"]["max_utility"]["type"] == "number"
 
     assert any(tool.name == "sync_status" for tool in tools)
 
@@ -354,6 +360,8 @@ def test_saved_query_tools_create_list_run_and_delete(tmp_path, monkeypatch):
             content_type=ContentType.INSIGHT,
             metadata={"review_state": "approved"},
             tags=["energy", "solar"],
+            utility_score=0.92,
+            created_at=datetime.fromisoformat("2026-04-22T00:00:00+00:00"),
         )
     )
     skip = store.insert_unit(
@@ -366,6 +374,8 @@ def test_saved_query_tools_create_list_run_and_delete(tmp_path, monkeypatch):
             content_type=ContentType.INSIGHT,
             metadata={"review_state": "rejected"},
             tags=["energy", "solar"],
+            utility_score=0.4,
+            created_at=datetime.fromisoformat("2026-04-23T00:00:00+00:00"),
         )
     )
     store.fts_index_unit(keep)
@@ -386,11 +396,15 @@ def test_saved_query_tools_create_list_run_and_delete(tmp_path, monkeypatch):
                 "query": "solar",
                 "mode": "fulltext",
                 "limit": 5,
+                "created_before": "2026-04-23T00:00:00+00:00",
+                "max_utility": 0.93,
                 "filters": {
                     "source_project": "max",
                     "content_type": "insight",
                     "tag": "energy",
                     "review_state": "approved",
+                    "created_after": "2026-04-21T00:00:00+00:00",
+                    "min_utility": 0.9,
                 },
             },
         )
@@ -398,6 +412,10 @@ def test_saved_query_tools_create_list_run_and_delete(tmp_path, monkeypatch):
     saved = json.loads(save_response[0].text)
     assert saved["name"] == "approved-solar"
     assert saved["filters"]["review_state"] == "approved"
+    assert saved["filters"]["created_after"] == "2026-04-21T00:00:00+00:00"
+    assert saved["filters"]["created_before"] == "2026-04-23T00:00:00+00:00"
+    assert saved["filters"]["min_utility"] == 0.9
+    assert saved["filters"]["max_utility"] == 0.93
 
     list_response = asyncio.run(mcp_server.call_tool("list_queries", {}))
     listed = json.loads(list_response[0].text)
@@ -409,7 +427,26 @@ def test_saved_query_tools_create_list_run_and_delete(tmp_path, monkeypatch):
     payload = json.loads(run_response[0].text)
     assert payload["saved_query"] == "approved-solar"
     assert payload["query"] == "solar"
+    assert payload["filters"] == saved["filters"]
     assert [result["title"] for result in payload["results"]] == [
+        "Solar approved insight"
+    ]
+
+    search_response = asyncio.run(
+        mcp_server.call_tool(
+            "search",
+            {
+                "query": "solar",
+                "mode": "fulltext",
+                "created_after": "2026-04-21T00:00:00+00:00",
+                "created_before": "2026-04-23T00:00:00+00:00",
+                "min_utility": 0.9,
+                "max_utility": 0.93,
+            },
+        )
+    )
+    search_results = json.loads(search_response[0].text)
+    assert [result["title"] for result in search_results] == [
         "Solar approved insight"
     ]
 

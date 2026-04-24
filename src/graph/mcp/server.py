@@ -21,6 +21,7 @@ from graph.cli.main import (
     _do_import_json,
     _do_infer_edges,
     _do_search,
+    _search_filters_dict,
 )
 from graph.graph.service import GraphService
 from graph.store.db import Store
@@ -30,6 +31,44 @@ from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 server = Server("graph")
 
 SUPPORTED_SYNC_PROJECTS = ["forty_two", "max", "presence", "me", "kindle", "sota"]
+
+SEARCH_FILTER_SCHEMA = {
+    "source_project": {
+        "type": "string",
+        "enum": SUPPORTED_SYNC_PROJECTS,
+        "description": "Filter by source project",
+    },
+    "content_type": {
+        "type": "string",
+        "enum": ["insight", "finding", "idea", "artifact", "metadata"],
+        "description": "Filter by content type",
+    },
+    "review_state": {
+        "type": "string",
+        "enum": ["approved", "rejected", "unreviewed"],
+        "description": "Filter max ideas by review state",
+    },
+    "tag": {
+        "type": "string",
+        "description": "Require an exact graph tag",
+    },
+    "created_after": {
+        "type": "string",
+        "description": "Filter to units created on or after an ISO-8601 date/datetime",
+    },
+    "created_before": {
+        "type": "string",
+        "description": "Filter to units created on or before an ISO-8601 date/datetime",
+    },
+    "min_utility": {
+        "type": "number",
+        "description": "Filter to units with utility score at least this value",
+    },
+    "max_utility": {
+        "type": "number",
+        "description": "Filter to units with utility score at most this value",
+    },
+}
 
 
 def _get_store() -> Store:
@@ -160,25 +199,7 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "query": {"type": "string", "description": "Search query"},
                     "limit": {"type": "integer", "default": 10},
-                    "source_project": {
-                        "type": "string",
-                        "enum": SUPPORTED_SYNC_PROJECTS,
-                        "description": "Filter by source project",
-                    },
-                    "content_type": {
-                        "type": "string",
-                        "enum": ["insight", "finding", "idea", "artifact", "metadata"],
-                        "description": "Filter by content type",
-                    },
-                    "review_state": {
-                        "type": "string",
-                        "enum": ["approved", "rejected", "unreviewed"],
-                        "description": "Filter max ideas by review state",
-                    },
-                    "tag": {
-                        "type": "string",
-                        "description": "Require an exact graph tag",
-                    },
+                    **SEARCH_FILTER_SCHEMA,
                     "mode": {
                         "type": "string",
                         "enum": ["hybrid", "semantic", "fulltext"],
@@ -204,9 +225,10 @@ async def list_tools() -> list[Tool]:
                         "description": "Search mode",
                     },
                     "limit": {"type": "integer", "default": 10},
+                    **SEARCH_FILTER_SCHEMA,
                     "filters": {
                         "type": "object",
-                        "description": "Structured filters such as source_project, content_type, tag, review_state",
+                        "description": "Structured filters such as source_project, content_type, tag, review_state, created_after, created_before, min_utility, max_utility",
                         "additionalProperties": True,
                         "default": {},
                     },
@@ -684,16 +706,16 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             query = arguments["query"]
             limit = arguments.get("limit", 10)
             mode = arguments.get("mode", "fulltext")
-            filters = {
-                key: value
-                for key, value in {
-                    "source_project": arguments.get("source_project"),
-                    "content_type": arguments.get("content_type"),
-                    "review_state": arguments.get("review_state"),
-                    "tag": arguments.get("tag"),
-                }.items()
-                if value is not None
-            }
+            filters = _search_filters_dict(
+                source_project=arguments.get("source_project"),
+                content_type=arguments.get("content_type"),
+                review_state=arguments.get("review_state"),
+                tag=arguments.get("tag"),
+                created_after=arguments.get("created_after"),
+                created_before=arguments.get("created_before"),
+                min_utility=arguments.get("min_utility"),
+                max_utility=arguments.get("max_utility"),
+            )
             payload = _do_search(
                 store,
                 query,
@@ -704,12 +726,25 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return [TextContent(type="text", text=json.dumps(payload["results"]))]
 
         elif name == "save_query":
+            filters = dict(arguments.get("filters", {}))
+            filters.update(
+                _search_filters_dict(
+                    source_project=arguments.get("source_project"),
+                    content_type=arguments.get("content_type"),
+                    review_state=arguments.get("review_state"),
+                    tag=arguments.get("tag"),
+                    created_after=arguments.get("created_after"),
+                    created_before=arguments.get("created_before"),
+                    min_utility=arguments.get("min_utility"),
+                    max_utility=arguments.get("max_utility"),
+                )
+            )
             saved = store.save_query(
                 name=arguments["name"],
                 query=arguments["query"],
                 mode=arguments.get("mode", "fulltext"),
                 limit=arguments.get("limit", 10),
-                filters=arguments.get("filters", {}),
+                filters=filters,
             )
             return [TextContent(type="text", text=json.dumps(saved))]
 

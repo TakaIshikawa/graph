@@ -242,6 +242,11 @@ def _do_import_json(store: Store, path: str | Path) -> dict:
 
 
 def _unit_to_json(unit, *, score: float | None = None, include_content: bool = True) -> dict:
+    created_at = (
+        unit.created_at.isoformat()
+        if isinstance(unit.created_at, datetime)
+        else str(unit.created_at)
+    )
     data = {
         "id": unit.id,
         "source_project": str(unit.source_project),
@@ -251,6 +256,7 @@ def _unit_to_json(unit, *, score: float | None = None, include_content: bool = T
         "content_type": str(unit.content_type),
         "tags": unit.tags,
         "metadata": unit.metadata,
+        "created_at": created_at,
     }
     if include_content:
         data["content"] = unit.content
@@ -261,6 +267,32 @@ def _unit_to_json(unit, *, score: float | None = None, include_content: bool = T
     if score is not None:
         data["score"] = score
     return data
+
+
+def _parse_datetime_filter(value: str | datetime | None, *, name: str) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        try:
+            parsed = datetime.fromisoformat(str(value))
+        except ValueError as exc:
+            raise ValueError(f"{name} must be an ISO-8601 date or datetime.") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _unit_created_at(unit) -> datetime:
+    created_at = unit.created_at
+    if isinstance(created_at, datetime):
+        parsed = created_at
+    else:
+        parsed = datetime.fromisoformat(str(created_at))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def _edge_to_json(edge: dict) -> dict:
@@ -335,6 +367,10 @@ def _unit_matches_search_filters(
     content_type: str | None = None,
     tag: str | None = None,
     review_state: str | None = None,
+    created_after: str | datetime | None = None,
+    created_before: str | datetime | None = None,
+    min_utility: float | str | None = None,
+    max_utility: float | str | None = None,
 ) -> bool:
     if source_project and str(unit.source_project) != source_project:
         return False
@@ -344,6 +380,22 @@ def _unit_matches_search_filters(
         return False
     if review_state and unit.metadata.get("review_state") != review_state:
         return False
+    after = _parse_datetime_filter(created_after, name="created_after")
+    before = _parse_datetime_filter(created_before, name="created_before")
+    if after or before:
+        created_at = _unit_created_at(unit)
+        if after and created_at < after:
+            return False
+        if before and created_at > before:
+            return False
+    if min_utility is not None or max_utility is not None:
+        if unit.utility_score is None:
+            return False
+        utility_score = float(unit.utility_score)
+        if min_utility is not None and utility_score < float(min_utility):
+            return False
+        if max_utility is not None and utility_score > float(max_utility):
+            return False
     return True
 
 
@@ -356,6 +408,10 @@ def _search_fulltext_with_filters(
     content_type: str | None = None,
     tag: str | None = None,
     review_state: str | None = None,
+    created_after: str | datetime | None = None,
+    created_before: str | datetime | None = None,
+    min_utility: float | str | None = None,
+    max_utility: float | str | None = None,
 ) -> list:
     fetch_limit = max(limit, 20)
 
@@ -370,6 +426,10 @@ def _search_fulltext_with_filters(
                 content_type=content_type,
                 tag=tag,
                 review_state=review_state,
+                created_after=created_after,
+                created_before=created_before,
+                min_utility=min_utility,
+                max_utility=max_utility,
             ):
                 filtered.append(unit)
                 if len(filtered) >= limit:
@@ -390,6 +450,10 @@ def _search_scored_with_filters(
     content_type: str | None = None,
     tag: str | None = None,
     review_state: str | None = None,
+    created_after: str | datetime | None = None,
+    created_before: str | datetime | None = None,
+    min_utility: float | str | None = None,
+    max_utility: float | str | None = None,
 ) -> list[tuple[object, float]]:
     fetch_limit = max(limit, 20)
 
@@ -403,6 +467,10 @@ def _search_scored_with_filters(
                 content_type=content_type,
                 tag=tag,
                 review_state=review_state,
+                created_after=created_after,
+                created_before=created_before,
+                min_utility=min_utility,
+                max_utility=max_utility,
             ):
                 filtered.append((unit, score))
                 if len(filtered) >= limit:
@@ -420,6 +488,10 @@ def _search_filters_dict(
     content_type: str | None = None,
     tag: str | None = None,
     review_state: str | None = None,
+    created_after: str | None = None,
+    created_before: str | None = None,
+    min_utility: float | None = None,
+    max_utility: float | None = None,
 ) -> dict:
     return {
         key: value
@@ -428,6 +500,10 @@ def _search_filters_dict(
             "content_type": content_type,
             "tag": tag,
             "review_state": review_state,
+            "created_after": created_after,
+            "created_before": created_before,
+            "min_utility": min_utility,
+            "max_utility": max_utility,
         }.items()
         if value is not None
     }
@@ -458,12 +534,19 @@ def _do_search(
             content_type=filters.get("content_type"),
             tag=filters.get("tag"),
             review_state=filters.get("review_state"),
+            created_after=filters.get("created_after"),
+            created_before=filters.get("created_before"),
+            min_utility=filters.get("min_utility"),
+            max_utility=filters.get("max_utility"),
         )
-        return {
+        payload = {
             "query": query,
             "mode": mode,
             "results": [_unit_to_json(unit) for unit in results],
         }
+        if filters:
+            payload["filters"] = filters
+        return payload
 
     from graph.rag.embeddings import get_embedding_provider
     from graph.rag.search import RAGService
@@ -484,6 +567,10 @@ def _do_search(
             content_type=filters.get("content_type"),
             tag=filters.get("tag"),
             review_state=filters.get("review_state"),
+            created_after=filters.get("created_after"),
+            created_before=filters.get("created_before"),
+            min_utility=filters.get("min_utility"),
+            max_utility=filters.get("max_utility"),
         )
     else:
         pairs = _search_scored_with_filters(
@@ -494,13 +581,20 @@ def _do_search(
             content_type=filters.get("content_type"),
             tag=filters.get("tag"),
             review_state=filters.get("review_state"),
+            created_after=filters.get("created_after"),
+            created_before=filters.get("created_before"),
+            min_utility=filters.get("min_utility"),
+            max_utility=filters.get("max_utility"),
         )
 
-    return {
+    payload = {
         "query": query,
         "mode": mode,
         "results": [_unit_to_json(unit, score=score) for unit, score in pairs],
     }
+    if filters:
+        payload["filters"] = filters
+    return payload
 
 
 def _render_search_payload(payload: dict, *, json_output: bool) -> None:
@@ -870,6 +964,26 @@ def search(
         "--review-state",
         help="Filter by review state metadata",
     ),
+    created_after: str | None = typer.Option(
+        None,
+        "--created-after",
+        help="Filter to units created on or after an ISO-8601 date/datetime",
+    ),
+    created_before: str | None = typer.Option(
+        None,
+        "--created-before",
+        help="Filter to units created on or before an ISO-8601 date/datetime",
+    ),
+    min_utility: float | None = typer.Option(
+        None,
+        "--min-utility",
+        help="Filter to units with utility score at least this value",
+    ),
+    max_utility: float | None = typer.Option(
+        None,
+        "--max-utility",
+        help="Filter to units with utility score at most this value",
+    ),
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
     """Search knowledge units."""
@@ -885,6 +999,10 @@ def search(
                 content_type=content_type,
                 tag=tag,
                 review_state=review_state,
+                created_after=created_after,
+                created_before=created_before,
+                min_utility=min_utility,
+                max_utility=max_utility,
             ),
         )
     except ValueError as exc:
@@ -917,6 +1035,26 @@ def save_query(
         "--review-state",
         help="Filter by review state metadata",
     ),
+    created_after: str | None = typer.Option(
+        None,
+        "--created-after",
+        help="Filter to units created on or after an ISO-8601 date/datetime",
+    ),
+    created_before: str | None = typer.Option(
+        None,
+        "--created-before",
+        help="Filter to units created on or before an ISO-8601 date/datetime",
+    ),
+    min_utility: float | None = typer.Option(
+        None,
+        "--min-utility",
+        help="Filter to units with utility score at least this value",
+    ),
+    max_utility: float | None = typer.Option(
+        None,
+        "--max-utility",
+        help="Filter to units with utility score at most this value",
+    ),
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
     """Save a reusable search query."""
@@ -936,6 +1074,10 @@ def save_query(
             content_type=content_type,
             tag=tag,
             review_state=review_state,
+            created_after=created_after,
+            created_before=created_before,
+            min_utility=min_utility,
+            max_utility=max_utility,
         ),
     )
     store.close()

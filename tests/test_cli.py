@@ -135,6 +135,8 @@ def _populate_search_graph(store: Store) -> None:
             content_type=ContentType.INSIGHT,
             metadata={"review_state": "approved"},
             tags=["energy", "solar"],
+            utility_score=0.92,
+            created_at=datetime.fromisoformat("2026-04-22T00:00:00+00:00"),
         ),
         KnowledgeUnit(
             source_project=SourceProject.MAX,
@@ -145,6 +147,8 @@ def _populate_search_graph(store: Store) -> None:
             content_type=ContentType.INSIGHT,
             metadata={"review_state": "rejected"},
             tags=["energy", "solar"],
+            utility_score=0.4,
+            created_at=datetime.fromisoformat("2026-04-23T00:00:00+00:00"),
         ),
         KnowledgeUnit(
             source_project=SourceProject.MAX,
@@ -155,6 +159,8 @@ def _populate_search_graph(store: Store) -> None:
             content_type=ContentType.INSIGHT,
             metadata={"review_state": "approved"},
             tags=["research", "solar"],
+            utility_score=0.65,
+            created_at=datetime.fromisoformat("2026-04-20T00:00:00+00:00"),
         ),
         KnowledgeUnit(
             source_project=SourceProject.MAX,
@@ -165,6 +171,8 @@ def _populate_search_graph(store: Store) -> None:
             content_type=ContentType.DESIGN_BRIEF,
             metadata={"review_state": "approved"},
             tags=["energy", "solar"],
+            utility_score=0.8,
+            created_at=datetime.fromisoformat("2026-04-24T00:00:00+00:00"),
         ),
         KnowledgeUnit(
             source_project=SourceProject.FORTY_TWO,
@@ -174,6 +182,8 @@ def _populate_search_graph(store: Store) -> None:
             content="Solar energy storage market note",
             content_type=ContentType.FINDING,
             tags=["energy", "solar"],
+            utility_score=0.95,
+            created_at=datetime.fromisoformat("2026-04-21T00:00:00+00:00"),
         ),
     ]
 
@@ -1362,6 +1372,14 @@ def test_search_command_applies_filters_in_all_modes(monkeypatch, mode):
                 "energy",
                 "--review-state",
                 "approved",
+                "--created-after",
+                "2026-04-21T00:00:00+00:00",
+                "--created-before",
+                "2026-04-23T00:00:00+00:00",
+                "--min-utility",
+                "0.9",
+                "--max-utility",
+                "0.93",
             ],
         )
 
@@ -1371,6 +1389,51 @@ def test_search_command_applies_filters_in_all_modes(monkeypatch, mode):
         assert "Solar research insight" not in result.output
         assert "Solar approved brief" not in result.output
         assert "Solar forty two note" not in result.output
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_search_command_emits_active_date_and_utility_filters_in_json(monkeypatch):
+    store = _make_store()
+    _populate_search_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "search",
+                "solar",
+                "--mode",
+                "fulltext",
+                "--limit",
+                "10",
+                "--created-after",
+                "2026-04-21",
+                "--created-before",
+                "2026-04-23T00:00:00+00:00",
+                "--min-utility",
+                "0.9",
+                "--max-utility",
+                "0.93",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["filters"] == {
+            "created_after": "2026-04-21",
+            "created_before": "2026-04-23T00:00:00+00:00",
+            "max_utility": 0.93,
+            "min_utility": 0.9,
+        }
+        assert [result["title"] for result in payload["results"]] == [
+            "Solar approved insight"
+        ]
+        assert payload["results"][0]["created_at"] == "2026-04-22T00:00:00+00:00"
     finally:
         store.close()
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
@@ -1403,6 +1466,14 @@ def test_queries_cli_save_list_run_and_delete(monkeypatch):
                 "energy",
                 "--review-state",
                 "approved",
+                "--created-after",
+                "2026-04-21T00:00:00+00:00",
+                "--created-before",
+                "2026-04-23T00:00:00+00:00",
+                "--min-utility",
+                "0.9",
+                "--max-utility",
+                "0.93",
                 "--json",
             ],
         )
@@ -1412,6 +1483,10 @@ def test_queries_cli_save_list_run_and_delete(monkeypatch):
         assert saved["name"] == "approved-solar"
         assert saved["filters"] == {
             "content_type": "insight",
+            "created_after": "2026-04-21T00:00:00+00:00",
+            "created_before": "2026-04-23T00:00:00+00:00",
+            "max_utility": 0.93,
+            "min_utility": 0.9,
             "review_state": "approved",
             "source_project": "max",
             "tag": "energy",
@@ -1428,6 +1503,7 @@ def test_queries_cli_save_list_run_and_delete(monkeypatch):
         payload = json.loads(run_result.output)
         assert payload["query"] == "solar"
         assert payload["mode"] == "fulltext"
+        assert payload["filters"] == saved["filters"]
         assert [result["title"] for result in payload["results"]] == [
             "Solar approved insight"
         ]
