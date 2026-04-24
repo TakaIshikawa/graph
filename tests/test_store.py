@@ -94,6 +94,47 @@ class TestUnitCRUD:
         units = store.get_all_units()
         assert len(units) == 5
 
+    def test_get_units_filters_and_limits_source_units(self, store: Store):
+        store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="max-insight",
+                source_entity_type="insight",
+                title="Max insight",
+                content="content",
+                content_type=ContentType.INSIGHT,
+            )
+        )
+        store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="max-finding",
+                source_entity_type="insight",
+                title="Max finding",
+                content="content",
+                content_type=ContentType.FINDING,
+            )
+        )
+        store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="ft-insight",
+                source_entity_type="knowledge_node",
+                title="FT insight",
+                content="content",
+                content_type=ContentType.INSIGHT,
+            )
+        )
+
+        units = store.get_units(
+            source_project="max",
+            content_type="insight",
+            limit=1,
+        )
+
+        assert len(units) == 1
+        assert units[0].source_id == "max-insight"
+
     def test_count_units_with_filter(self, store: Store):
         store.insert_unit(
             KnowledgeUnit(

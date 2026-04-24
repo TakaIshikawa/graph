@@ -2139,6 +2139,90 @@ def test_infer_edges_command_dry_run_and_normal_mode(monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_extract_references_command_dry_run_and_normal_mode(monkeypatch):
+    store = _make_store()
+    target = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="reference-target",
+            source_entity_type="insight",
+            title="Reference Target",
+            content="Target content",
+            content_type=ContentType.ARTIFACT,
+            metadata={"url": "https://example.com/reference-target"},
+        )
+    )
+    source = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="reference-source",
+            source_entity_type="insight",
+            title="Reference Source",
+            content="Mentions https://example.com/reference-target.",
+            content_type=ContentType.INSIGHT,
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="filtered-reference-source",
+            source_entity_type="knowledge_node",
+            title="Filtered Reference Source",
+            content="Also mentions https://example.com/reference-target.",
+            content_type=ContentType.INSIGHT,
+        )
+    )
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        dry_result = runner.invoke(
+            app,
+            [
+                "extract-references",
+                "--source-project",
+                "max",
+                "--content-type",
+                "insight",
+                "--dry-run",
+                "--json",
+            ],
+        )
+
+        assert dry_result.exit_code == 0
+        dry_payload = json.loads(dry_result.output)
+        assert dry_payload["inserted"] == 0
+        assert dry_payload["would_insert"] == 1
+        assert dry_payload["candidates"][0]["status"] == "would_insert"
+        assert dry_payload["candidates"][0]["to_unit_id"] == target.id
+        assert len(store.get_all_edges()) == 0
+
+        result = runner.invoke(
+            app,
+            [
+                "extract-references",
+                "--source-project",
+                "max",
+                "--content-type",
+                "insight",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["inserted"] == 1
+        edges = store.get_all_edges()
+        assert len(edges) == 1
+        assert edges[0].from_unit_id == source.id
+        assert edges[0].to_unit_id == target.id
+        assert edges[0].relation == EdgeRelation.REFERENCES
+        assert edges[0].source == EdgeSource.INFERRED
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_design_briefs_command_prints_readable_fields(monkeypatch):
     store = _make_store()
     _populate_design_briefs(store)

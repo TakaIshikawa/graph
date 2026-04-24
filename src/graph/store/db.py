@@ -247,6 +247,27 @@ class Store:
         ).fetchall()
         return [_row_to_unit(r) for r in rows]
 
+    def get_units(
+        self,
+        *,
+        source_project: str | None = None,
+        content_type: str | None = None,
+        limit: int | None = None,
+    ) -> list[KnowledgeUnit]:
+        where_parts, params = self._unit_filter_parts(
+            source_project=source_project,
+            content_type=content_type,
+        )
+        query = "SELECT * FROM knowledge_units"
+        if where_parts:
+            query += " WHERE " + " AND ".join(where_parts)
+        query += " ORDER BY created_at DESC"
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(max(0, limit))
+        rows = self.conn.execute(query, params).fetchall()
+        return [_row_to_unit(r) for r in rows]
+
     def get_units_with_embeddings(
         self,
         *,

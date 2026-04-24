@@ -1167,6 +1167,133 @@ class TestGraphService:
         high_threshold = GraphService(store).suggest_edges(limit=10, min_score=1.1)
         assert high_threshold["candidates"] == []
 
+    def test_extract_references_dry_run_insert_and_skip_counts(self, store: Store):
+        target = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="target",
+                source_entity_type="insight",
+                title="Canonical target",
+                content="target content",
+                content_type=ContentType.ARTIFACT,
+                metadata={"canonical_url": "https://example.com/target"},
+            )
+        )
+        source = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="source",
+                source_entity_type="insight",
+                title="Source",
+                content="See https://example.com/target for details.",
+                metadata={"note": "Also saved at https://example.com/ignored"},
+                content_type=ContentType.INSIGHT,
+            )
+        )
+        duplicate_source = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="duplicate-source",
+                source_entity_type="insight",
+                title="Duplicate source",
+                content="Already references https://example.com/target.",
+                content_type=ContentType.INSIGHT,
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=duplicate_source.id,
+                to_unit_id=target.id,
+                relation=EdgeRelation.REFERENCES,
+                source=EdgeSource.MANUAL,
+            )
+        )
+        store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="self",
+                source_entity_type="insight",
+                title="Self reference",
+                content="Self link https://example.com/self.",
+                metadata={"url": "https://example.com/self"},
+                content_type=ContentType.INSIGHT,
+            )
+        )
+        for suffix in ("a", "b"):
+            store.insert_unit(
+                KnowledgeUnit(
+                    source_project=SourceProject.MAX,
+                    source_id=f"ambiguous-{suffix}",
+                    source_entity_type="insight",
+                    title=f"Ambiguous {suffix}",
+                    content="ambiguous target",
+                    content_type=ContentType.ARTIFACT,
+                    metadata={"url": "https://example.com/ambiguous"},
+                )
+            )
+        ambiguous_source = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="ambiguous-source",
+                source_entity_type="insight",
+                title="Ambiguous source",
+                content="Ambiguous link https://example.com/ambiguous.",
+                content_type=ContentType.INSIGHT,
+            )
+        )
+        store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="filtered",
+                source_entity_type="knowledge_node",
+                title="Filtered source",
+                content="Filtered mention https://example.com/target.",
+                content_type=ContentType.INSIGHT,
+            )
+        )
+
+        dry_run = GraphService(store).extract_references(
+            dry_run=True,
+            source_project="max",
+            content_type="insight",
+        )
+
+        assert dry_run["inserted"] == 0
+        assert dry_run["would_insert"] == 1
+        assert dry_run["skipped_duplicates"] == 1
+        assert dry_run["skipped_self"] == 1
+        assert dry_run["skipped_ambiguous"] == 1
+        assert dry_run["filters"] == {"source_project": "max", "content_type": "insight"}
+        assert len(store.get_all_edges()) == 1
+        statuses = {candidate["status"] for candidate in dry_run["candidates"]}
+        assert {
+            "would_insert",
+            "skipped_duplicate",
+            "skipped_self_reference",
+            "skipped_ambiguous_match",
+        } <= statuses
+
+        result = GraphService(store).extract_references(
+            source_project="max",
+            content_type="insight",
+        )
+
+        assert result["inserted"] == 1
+        assert result["skipped_duplicates"] == 1
+        assert result["skipped_self"] == 1
+        assert result["skipped_ambiguous"] == 1
+        inserted = [edge for edge in store.get_all_edges() if edge.source == EdgeSource.INFERRED]
+        assert len(inserted) == 1
+        assert inserted[0].from_unit_id == source.id
+        assert inserted[0].to_unit_id == target.id
+        assert inserted[0].relation == EdgeRelation.REFERENCES
+        assert inserted[0].metadata["url"] == "https://example.com/target"
+        assert all(
+            candidate["from_unit_id"] != ambiguous_source.id
+            or candidate["status"] == "skipped_ambiguous_match"
+            for candidate in result["candidates"]
+        )
+
     def test_rename_tag_dry_run_and_execute_return_same_sample_schema(
         self, tag_synonym_store: Store
     ):

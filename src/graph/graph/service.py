@@ -15,6 +15,8 @@ from urllib.parse import quote, urlsplit, urlunsplit
 import networkx as nx
 
 from graph.store.db import Store
+from graph.types.enums import EdgeRelation, EdgeSource
+from graph.types.models import KnowledgeEdge
 
 
 _NORMALIZED_TEXT_RE = re.compile(r"[^a-z0-9]+")
@@ -47,6 +49,7 @@ _EDGE_SUGGESTION_STOPWORDS = {
     "to",
     "with",
 }
+_REFERENCE_URL_METADATA_FIELDS = {"url", "link", "canonical_url", "source_url", "source_id"}
 
 
 def _normalize_text(value: str) -> str:
@@ -181,6 +184,35 @@ def _unit_external_urls(unit) -> set[str]:
             if url is not None:
                 urls.add(url)
     return urls
+
+
+def _extract_urls_from_text(text: str) -> set[str]:
+    urls = set()
+    for match in _EXTERNAL_URL_RE.finditer(text or ""):
+        url = _normalize_external_url(match.group(0))
+        if url is not None:
+            urls.add(url)
+    return urls
+
+
+def _metadata_url_field_values(value: object, path: str = "metadata") -> list[tuple[str, str]]:
+    if isinstance(value, dict):
+        strings = []
+        for key, child in value.items():
+            child_path = f"{path}.{key}"
+            if (
+                str(key).lower() in _REFERENCE_URL_METADATA_FIELDS
+                and isinstance(child, str)
+            ):
+                strings.append((child_path, child))
+            strings.extend(_metadata_url_field_values(child, child_path))
+        return strings
+    if isinstance(value, list):
+        strings = []
+        for index, child in enumerate(value):
+            strings.extend(_metadata_url_field_values(child, f"{path}[{index}]"))
+        return strings
+    return []
 
 
 def _ensure_aware(value: datetime) -> datetime:
@@ -1353,6 +1385,163 @@ class GraphService:
             "limit": limit,
             "min_score": min_score,
             "filters": {"source_project": source_project},
+        }
+
+    def extract_references(
+        self,
+        *,
+        dry_run: bool = False,
+        source_project: str | None = None,
+        content_type: str | None = None,
+        limit: int | None = None,
+    ) -> dict:
+        """Infer REFERENCES edges when a source unit mentions another unit's known URL."""
+        source_units = self.store.get_units(
+            source_project=source_project,
+            content_type=content_type,
+            limit=limit,
+        )
+        all_units = self.store.get_all_units(limit=1000000000)
+
+        def _unit_summary(unit) -> dict:
+            return {
+                "id": unit.id,
+                "source_project": str(unit.source_project),
+                "source_id": unit.source_id,
+                "source_entity_type": unit.source_entity_type,
+                "title": unit.title,
+                "content_type": str(unit.content_type),
+            }
+
+        url_targets: dict[str, dict[str, dict]] = {}
+        for unit in all_units:
+            known_fields = [("source_id", unit.source_id)]
+            known_fields.extend(_metadata_url_field_values(unit.metadata))
+            for field, value in known_fields:
+                for url in _extract_urls_from_text(value):
+                    target = url_targets.setdefault(url, {}).setdefault(
+                        unit.id,
+                        {"unit": unit, "fields": set()},
+                    )
+                    target["fields"].add(field)
+
+        existing_references = {
+            (edge.from_unit_id, edge.to_unit_id)
+            for edge in self.store.get_all_edges()
+            if str(edge.relation) == EdgeRelation.REFERENCES.value
+        }
+        planned_references: set[tuple[str, str]] = set()
+
+        candidates = []
+        inserted_edges = []
+        inserted = 0
+        would_insert = 0
+        skipped_self = 0
+        skipped_duplicates = 0
+        skipped_ambiguous = 0
+
+        for source_unit in source_units:
+            mentioned_urls: dict[str, set[str]] = {}
+            for url in _extract_urls_from_text(source_unit.content):
+                mentioned_urls.setdefault(url, set()).add("content")
+            for path, value in _metadata_strings(source_unit.metadata):
+                for url in _extract_urls_from_text(value):
+                    mentioned_urls.setdefault(url, set()).add(path)
+
+            for url in sorted(mentioned_urls):
+                targets_by_id = url_targets.get(url)
+                if not targets_by_id:
+                    continue
+
+                base_candidate = {
+                    "from_unit_id": source_unit.id,
+                    "from_unit": _unit_summary(source_unit),
+                    "url": url,
+                    "source_fields": sorted(mentioned_urls[url]),
+                }
+
+                if len(targets_by_id) > 1:
+                    skipped_ambiguous += 1
+                    candidates.append(
+                        {
+                            **base_candidate,
+                            "status": "skipped_ambiguous_match",
+                            "target_units": [
+                                {
+                                    **_unit_summary(target["unit"]),
+                                    "matched_fields": sorted(target["fields"]),
+                                }
+                                for target in sorted(
+                                    targets_by_id.values(),
+                                    key=lambda item: item["unit"].id,
+                                )
+                            ],
+                        }
+                    )
+                    continue
+
+                target = next(iter(targets_by_id.values()))
+                target_unit = target["unit"]
+                candidate = {
+                    **base_candidate,
+                    "to_unit_id": target_unit.id,
+                    "to_unit": _unit_summary(target_unit),
+                    "target_fields": sorted(target["fields"]),
+                }
+
+                if source_unit.id == target_unit.id:
+                    skipped_self += 1
+                    candidates.append({**candidate, "status": "skipped_self_reference"})
+                    continue
+
+                edge_key = (source_unit.id, target_unit.id)
+                if edge_key in existing_references or edge_key in planned_references:
+                    skipped_duplicates += 1
+                    candidates.append({**candidate, "status": "skipped_duplicate"})
+                    continue
+
+                planned_references.add(edge_key)
+                if dry_run:
+                    would_insert += 1
+                    candidates.append({**candidate, "status": "would_insert"})
+                    continue
+
+                edge = KnowledgeEdge(
+                    from_unit_id=source_unit.id,
+                    to_unit_id=target_unit.id,
+                    relation=EdgeRelation.REFERENCES,
+                    weight=1.0,
+                    source=EdgeSource.INFERRED,
+                    metadata={
+                        "inference": "url_reference",
+                        "url": url,
+                        "source_fields": sorted(mentioned_urls[url]),
+                        "target_fields": sorted(target["fields"]),
+                        "source_project_filter": source_project,
+                        "content_type_filter": content_type,
+                    },
+                )
+                inserted_edge = self.store.insert_edge(edge)
+                inserted += 1
+                inserted_edges.append(self._edge_export_data(inserted_edge))
+                candidates.append({**candidate, "status": "inserted", "edge_id": inserted_edge.id})
+
+        return {
+            "dry_run": dry_run,
+            "inserted": inserted,
+            "would_insert": would_insert,
+            "skipped_self": skipped_self,
+            "skipped_duplicates": skipped_duplicates,
+            "skipped_ambiguous": skipped_ambiguous,
+            "source_units_scanned": len(source_units),
+            "known_urls": len(url_targets),
+            "limit": limit,
+            "filters": {
+                "source_project": source_project,
+                "content_type": content_type,
+            },
+            "candidates": candidates,
+            "inserted_edges": inserted_edges,
         }
 
     def rename_tag(

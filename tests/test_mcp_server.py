@@ -835,6 +835,81 @@ def test_ingest_all_includes_sota_and_search_can_filter_sota(tmp_path, monkeypat
     assert results[0]["title"] == "SOTA Transformer Paper"
 
 
+def test_extract_references_tool_returns_candidates_and_inserts_edges(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    target = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="reference-target",
+            source_entity_type="insight",
+            title="Reference Target",
+            content="Target content",
+            content_type=ContentType.ARTIFACT,
+            metadata={"source_url": "https://example.com/reference-target"},
+        )
+    )
+    source = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="reference-source",
+            source_entity_type="insight",
+            title="Reference Source",
+            content="Mentions https://example.com/reference-target.",
+            content_type=ContentType.INSIGHT,
+        )
+    )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    extract_tool = next(tool for tool in tools if tool.name == "extract_references")
+    assert extract_tool.inputSchema["properties"]["dry_run"]["default"] is False
+    assert "source_project" in extract_tool.inputSchema["properties"]
+    assert "content_type" in extract_tool.inputSchema["properties"]
+
+    dry_response = asyncio.run(
+        mcp_server.call_tool(
+            "extract_references",
+            {
+                "source_project": "max",
+                "content_type": "insight",
+                "dry_run": True,
+            },
+        )
+    )
+    dry_payload = json.loads(dry_response[0].text)
+    assert dry_payload["inserted"] == 0
+    assert dry_payload["would_insert"] == 1
+    assert dry_payload["candidates"][0]["status"] == "would_insert"
+    assert dry_payload["candidates"][0]["to_unit_id"] == target.id
+
+    normal_response = asyncio.run(
+        mcp_server.call_tool(
+            "extract_references",
+            {
+                "source_project": "max",
+                "content_type": "insight",
+            },
+        )
+    )
+    payload = json.loads(normal_response[0].text)
+    assert payload["inserted"] == 1
+    assert payload["candidates"][0]["from_unit_id"] == source.id
+
+    store = Store(str(db_path))
+    try:
+        edges = store.get_all_edges()
+        assert len(edges) == 1
+        assert edges[0].relation == EdgeRelation.REFERENCES
+        assert edges[0].source == EdgeSource.INFERRED
+        assert edges[0].from_unit_id == source.id
+        assert edges[0].to_unit_id == target.id
+    finally:
+        store.close()
+
+
 def test_similar_units_tool_returns_payload_and_excludes_seed(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))

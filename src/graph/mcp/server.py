@@ -22,6 +22,7 @@ from graph.cli.main import (
     _do_export_queries,
     _do_export_report,
     _do_export_turtle,
+    _do_extract_references,
     _do_embeddings_status,
     _do_stats_snapshot,
     _do_apply_tags_to_search,
@@ -1166,6 +1167,41 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="extract_references",
+            description="Infer REFERENCES edges when source units mention another unit's known URL.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "dry_run": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Preview REFERENCES edges without writing",
+                    },
+                    "source_project": {
+                        "type": "string",
+                        "enum": SUPPORTED_SYNC_PROJECTS,
+                        "description": "Filter scanned source units by source project",
+                    },
+                    "content_type": {
+                        "type": "string",
+                        "enum": [
+                            "insight",
+                            "finding",
+                            "idea",
+                            "design_brief",
+                            "artifact",
+                            "metadata",
+                        ],
+                        "description": "Filter scanned source units by content type",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max source units to scan",
+                    },
+                },
+            },
+        ),
+        Tool(
             name="sync_status",
             description="Inspect sync freshness for each supported source/entity pair before ingesting.",
             inputSchema={"type": "object", "properties": {}},
@@ -2141,6 +2177,16 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 dry_run=arguments.get("dry_run", False),
             )
             return [TextContent(type="text", text=json.dumps(result))]
+
+        elif name == "extract_references":
+            result = _do_extract_references(
+                store,
+                dry_run=arguments.get("dry_run", False),
+                source_project=arguments.get("source_project"),
+                content_type=arguments.get("content_type"),
+                limit=arguments.get("limit"),
+            )
+            return [TextContent(type="text", text=json.dumps(result, default=str))]
 
         elif name == "stats":
             payload = _do_stats_snapshot(store)

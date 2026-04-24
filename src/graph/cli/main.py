@@ -2008,6 +2008,24 @@ def _do_infer_edges(
     )
 
 
+def _do_extract_references(
+    store: Store,
+    *,
+    dry_run: bool = False,
+    source_project: str | None = None,
+    content_type: str | None = None,
+    limit: int | None = None,
+) -> dict:
+    from graph.graph.service import GraphService
+
+    return GraphService(store).extract_references(
+        dry_run=dry_run,
+        source_project=source_project,
+        content_type=content_type,
+        limit=limit,
+    )
+
+
 def _do_integrity_audit(
     store: Store,
     *,
@@ -2193,6 +2211,56 @@ def infer_edges(
         typer.echo(
             f"  {candidate['status']}: {candidate['from_title']} -> "
             f"{candidate['to_title']} ({candidate['similarity']:.3f})"
+        )
+
+    store.close()
+
+
+@app.command(name="extract-references")
+def extract_references(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview REFERENCES edges without writing"),
+    source_project: str | None = typer.Option(
+        None,
+        "--source-project",
+        "--project",
+        "-p",
+        help="Filter scanned source units by source project",
+    ),
+    content_type: str | None = typer.Option(
+        None, "--content-type", help="Filter scanned source units by content type"
+    ),
+    limit: int | None = typer.Option(None, "--limit", "-n", help="Max source units to scan"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Infer REFERENCES edges from URL mentions in content and metadata."""
+    store = _get_store()
+    result = _do_extract_references(
+        store,
+        dry_run=dry_run,
+        source_project=source_project,
+        content_type=content_type,
+        limit=limit,
+    )
+
+    if json_output:
+        _json_echo(result)
+        store.close()
+        return
+
+    action = "Would insert" if dry_run else "Inserted"
+    count = result["would_insert"] if dry_run else result["inserted"]
+    typer.echo(
+        f"{action} {count} REFERENCES edges from {result['source_units_scanned']} scanned units; "
+        f"skipped {result['skipped_duplicates']} duplicates, "
+        f"{result['skipped_self']} self-references, "
+        f"{result['skipped_ambiguous']} ambiguous URL matches."
+    )
+    for candidate in result["candidates"]:
+        to_title = candidate.get("to_unit", {}).get("title")
+        target = to_title or f"{len(candidate.get('target_units', []))} ambiguous targets"
+        typer.echo(
+            f"  {candidate['status']}: {candidate['from_unit']['title']} -> {target} "
+            f"via {candidate['url']}"
         )
 
     store.close()
