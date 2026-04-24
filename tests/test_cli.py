@@ -37,7 +37,7 @@ class MockEmbeddingProvider:
         words = text.lower().split()
         vec = [0.0] * 8
         for w in words:
-            h = hash(w) % 8
+            h = sum(ord(c) for c in w) % 8
             vec[h] += 0.1
         norm = sum(x * x for x in vec) ** 0.5
         if norm > 0:
@@ -276,6 +276,50 @@ def test_export_obsidian_uses_configured_vault_default(tmp_path, monkeypatch):
     assert (vault_path / "Graph" / "forty_two" / "Node A.md").exists()
     assert f"to {vault_path / 'Graph'}" in result.output
     _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_json_export_and_import_commands_round_trip(tmp_path, monkeypatch):
+    source = _make_store()
+    a_id, _, _, _ = _populate_graph(source)
+    export_path = tmp_path / "graph-backup.json"
+
+    source_proxy = StoreProxy(source)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: source_proxy)
+    export_result = runner.invoke(app, ["export-json", str(export_path)])
+
+    assert export_result.exit_code == 0
+    assert export_path.exists()
+    exported = json.loads(export_path.read_text())
+    assert exported["schema_version"] == 1
+    assert exported["exported_at"]
+    assert len(exported["units"]) == 4
+    assert len(exported["edges"]) == 2
+    assert "Exported 4 units and 2 edges" in export_result.output
+
+    target = _make_store()
+    target_proxy = StoreProxy(target)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: target_proxy)
+    import_result = runner.invoke(app, ["import-json", str(export_path)])
+
+    try:
+        assert import_result.exit_code == 0
+        assert "Imported 4 units, updated 0 units, inserted 2 edges" in import_result.output
+        assert target.count_units() == 4
+        assert len(target.get_all_edges()) == 2
+        assert target.get_unit(a_id) is not None
+        assert target.fts_search("First")
+
+        second_result = runner.invoke(app, ["import-json", str(export_path)])
+
+        assert second_result.exit_code == 0
+        assert "Imported 0 units, updated 4 units, inserted 0 edges" in second_result.output
+        assert target.count_units() == 4
+        assert len(target.get_all_edges()) == 2
+    finally:
+        source.close()
+        target.close()
+        _cleanup_db(source._test_db_path)  # type: ignore[attr-defined]
+        _cleanup_db(target._test_db_path)  # type: ignore[attr-defined]
 
 
 def test_shortest_path_command_prints_readable_path(monkeypatch):

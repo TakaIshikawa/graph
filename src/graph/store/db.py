@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from graph.store.migrations import ensure_schema
+from graph.store.migrations import SCHEMA_VERSION, ensure_schema
 from graph.types.enums import EdgeSource
 from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
@@ -22,6 +22,14 @@ def _new_id() -> str:
 
 def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _json_value(value) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value)
 
 
 def _row_to_unit(row: sqlite3.Row) -> KnowledgeUnit:
@@ -158,6 +166,113 @@ class Store:
             (embedding, _utcnow_iso(), unit_id),
         )
         self.conn.commit()
+
+    # --- JSON import/export ---
+
+    def export_json(self) -> dict:
+        """Return a portable JSON-serializable graph backup."""
+        units = [
+            {
+                "id": unit.id,
+                "source_project": str(unit.source_project),
+                "source_id": unit.source_id,
+                "source_entity_type": unit.source_entity_type,
+                "title": unit.title,
+                "content": unit.content,
+                "content_type": str(unit.content_type),
+                "metadata": unit.metadata,
+                "tags": unit.tags,
+                "confidence": unit.confidence,
+                "utility_score": unit.utility_score,
+                "created_at": _json_value(unit.created_at),
+                "ingested_at": _json_value(unit.ingested_at),
+                "updated_at": _json_value(unit.updated_at),
+            }
+            for unit in self.get_all_units(limit=1000000000)
+        ]
+        edges = [
+            {
+                "id": edge.id,
+                "from_unit_id": edge.from_unit_id,
+                "to_unit_id": edge.to_unit_id,
+                "relation": str(edge.relation),
+                "weight": edge.weight,
+                "source": str(edge.source),
+                "metadata": edge.metadata,
+                "created_at": _json_value(edge.created_at),
+            }
+            for edge in self.get_all_edges()
+        ]
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "exported_at": _utcnow_iso(),
+            "units": units,
+            "edges": edges,
+        }
+
+    def import_json(self, payload: dict) -> dict:
+        """Import a portable graph backup idempotently.
+
+        Unit IDs are preserved for new rows. If a unit already exists by source
+        identity, that database ID is kept and imported edges are remapped to it.
+        """
+        schema_version = payload.get("schema_version")
+        if schema_version != SCHEMA_VERSION:
+            raise ValueError(
+                f"Unsupported graph JSON schema_version {schema_version!r}; "
+                f"expected {SCHEMA_VERSION}"
+            )
+
+        units_inserted = 0
+        units_updated = 0
+        edges_inserted = 0
+        edges_skipped = 0
+        imported_to_graph_id: dict[str, str] = {}
+
+        for data in payload.get("units", []):
+            unit = KnowledgeUnit(**data)
+            existing = self.get_unit_by_source(
+                str(unit.source_project), unit.source_id, unit.source_entity_type
+            )
+            if existing:
+                unit.id = existing.id
+                units_updated += 1
+            else:
+                units_inserted += 1
+
+            saved = self.insert_unit(unit)
+            actual_id = unit.id or saved.id
+            imported_to_graph_id[data["id"]] = actual_id
+            fetched = self.get_unit(actual_id)
+            if fetched:
+                self.fts_index_unit(fetched)
+
+        for data in payload.get("edges", []):
+            from_id = imported_to_graph_id.get(data["from_unit_id"], data["from_unit_id"])
+            to_id = imported_to_graph_id.get(data["to_unit_id"], data["to_unit_id"])
+            before = self.conn.total_changes
+            edge = KnowledgeEdge(
+                id=data.get("id", ""),
+                from_unit_id=from_id,
+                to_unit_id=to_id,
+                relation=data["relation"],
+                weight=data.get("weight", 1.0),
+                source=data.get("source", EdgeSource.INFERRED),
+                metadata=data.get("metadata", {}),
+                created_at=data.get("created_at") or _utcnow_iso(),
+            )
+            self.insert_edge(edge)
+            if self.conn.total_changes > before:
+                edges_inserted += 1
+            else:
+                edges_skipped += 1
+
+        return {
+            "units_inserted": units_inserted,
+            "units_updated": units_updated,
+            "edges_inserted": edges_inserted,
+            "edges_skipped": edges_skipped,
+        }
 
     def count_units(self, *, source_project: str | None = None) -> int:
         if source_project:

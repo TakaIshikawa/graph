@@ -312,3 +312,79 @@ def test_export_obsidian_tool_uses_configured_vault_default(tmp_path, monkeypatc
 
     assert json.loads(response[0].text) == {"notes_written": 1}
     assert (vault_path / "Graph" / "forty_two" / "Node A.md").exists()
+
+
+def test_json_backup_tools_export_and_import_idempotently(tmp_path, monkeypatch):
+    source_db = tmp_path / "source.db"
+    target_db = tmp_path / "target.db"
+    backup_path = tmp_path / "backup.json"
+
+    store = Store(str(source_db))
+    a = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="a",
+            source_entity_type="knowledge_node",
+            title="Node A",
+            content="First searchable node",
+        )
+    )
+    b = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="b",
+            source_entity_type="insight",
+            title="Node B",
+            content="Second searchable node",
+            content_type=ContentType.INSIGHT,
+        )
+    )
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=a.id,
+            to_unit_id=b.id,
+            relation=EdgeRelation.BUILDS_ON,
+        )
+    )
+    store.close()
+
+    tools = asyncio.run(mcp_server.list_tools())
+    assert any(tool.name == "export_json" for tool in tools)
+    assert any(tool.name == "import_json" for tool in tools)
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(source_db)))
+    export_response = asyncio.run(
+        mcp_server.call_tool("export_json", {"path": str(backup_path)})
+    )
+    export_payload = json.loads(export_response[0].text)
+
+    assert export_payload["units_exported"] == 2
+    assert export_payload["edges_exported"] == 1
+    assert backup_path.exists()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(target_db)))
+    import_response = asyncio.run(
+        mcp_server.call_tool("import_json", {"path": str(backup_path)})
+    )
+    import_payload = json.loads(import_response[0].text)
+
+    assert import_payload["units_inserted"] == 2
+    assert import_payload["edges_inserted"] == 1
+
+    second_response = asyncio.run(
+        mcp_server.call_tool("import_json", {"path": str(backup_path)})
+    )
+    second_payload = json.loads(second_response[0].text)
+
+    assert second_payload["units_inserted"] == 0
+    assert second_payload["units_updated"] == 2
+    assert second_payload["edges_inserted"] == 0
+    assert second_payload["edges_skipped"] == 1
+
+    target = Store(str(target_db))
+    try:
+        assert target.count_units() == 2
+        assert len(target.get_all_edges()) == 1
+        assert target.fts_search("searchable")
+    finally:
+        target.close()

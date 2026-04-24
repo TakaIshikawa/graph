@@ -10,7 +10,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
 from graph.config import settings
-from graph.cli.main import _do_export_obsidian
+from graph.cli.main import _do_export_json, _do_export_obsidian, _do_import_json
 from graph.graph.service import GraphService
 from graph.store.db import Store
 from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
@@ -328,6 +328,34 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="export_json",
+            description="Export the graph to a portable JSON backup file.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Destination JSON backup path",
+                    },
+                },
+                "required": ["path"],
+            },
+        ),
+        Tool(
+            name="import_json",
+            description="Import a portable JSON graph backup file idempotently.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Source JSON backup path",
+                    },
+                },
+                "required": ["path"],
+            },
+        ),
+        Tool(
             name="stats",
             description="Get graph statistics: node/edge counts, density, breakdown by project and type.",
             inputSchema={"type": "object", "properties": {}},
@@ -637,6 +665,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 clean=clean,
             )
             return [TextContent(type="text", text=json.dumps({"notes_written": written}))]
+
+        elif name == "export_json":
+            stats = _do_export_json(store, arguments["path"])
+            return [TextContent(type="text", text=json.dumps(stats))]
+
+        elif name == "import_json":
+            stats = _do_import_json(store, arguments["path"])
+            return [TextContent(type="text", text=json.dumps(stats))]
 
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
 

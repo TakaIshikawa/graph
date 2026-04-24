@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -20,6 +21,16 @@ def store():
     yield s
     s.close()
     os.unlink(path)
+
+
+def _close_and_unlink(store: Store, path: Path) -> None:
+    store.close()
+    for candidate in (
+        path,
+        path.with_name(path.name + "-wal"),
+        path.with_name(path.name + "-shm"),
+    ):
+        candidate.unlink(missing_ok=True)
 
 
 @pytest.fixture
@@ -289,3 +300,88 @@ class TestEmbedding:
         restored = list(struct.unpack(f"{len(emb_bytes) // 4}f", emb_bytes))
         assert len(restored) == 3
         assert abs(restored[0] - 0.1) < 1e-6
+
+
+class TestJsonBackup:
+    def test_export_json_contains_required_top_level_fields(self, store: Store, sample_unit: KnowledgeUnit):
+        inserted = store.insert_unit(sample_unit)
+        store.fts_index_unit(inserted)
+
+        payload = store.export_json()
+
+        assert payload["schema_version"] == 1
+        assert payload["exported_at"]
+        assert len(payload["units"]) == 1
+        assert payload["units"][0]["id"] == inserted.id
+        assert payload["edges"] == []
+
+    def test_import_export_round_trip_recreates_graph_and_fts_idempotently(
+        self, tmp_path
+    ):
+        source_path = tmp_path / "source.db"
+        target_path = tmp_path / "target.db"
+        source = Store(str(source_path))
+        target = Store(str(target_path))
+
+        try:
+            u1 = source.insert_unit(
+                KnowledgeUnit(
+                    source_project=SourceProject.FORTY_TWO,
+                    source_id="n1",
+                    source_entity_type="knowledge_node",
+                    title="Solar storage note",
+                    content="Solar battery backup and panel sizing details.",
+                    content_type=ContentType.FINDING,
+                    tags=["solar", "battery"],
+                    metadata={"priority": "high"},
+                    utility_score=0.8,
+                )
+            )
+            u2 = source.insert_unit(
+                KnowledgeUnit(
+                    source_project=SourceProject.MAX,
+                    source_id="i1",
+                    source_entity_type="insight",
+                    title="Home energy insight",
+                    content="Home energy resilience depends on battery sizing.",
+                    content_type=ContentType.INSIGHT,
+                )
+            )
+            edge = source.insert_edge(
+                KnowledgeEdge(
+                    from_unit_id=u1.id,
+                    to_unit_id=u2.id,
+                    relation=EdgeRelation.INSPIRES,
+                    source=EdgeSource.MANUAL,
+                    metadata={"why": "backup"},
+                )
+            )
+
+            payload = source.export_json()
+            first_stats = target.import_json(payload)
+
+            assert first_stats == {
+                "units_inserted": 2,
+                "units_updated": 0,
+                "edges_inserted": 1,
+                "edges_skipped": 0,
+            }
+            assert target.count_units() == 2
+            assert len(target.get_all_edges()) == 1
+            assert target.get_unit(u1.id).title == "Solar storage note"
+            assert target.get_all_edges()[0].id == edge.id
+            assert target.fts_search("battery")[0]["unit_id"] in {u1.id, u2.id}
+
+            second_stats = target.import_json(payload)
+
+            assert second_stats == {
+                "units_inserted": 0,
+                "units_updated": 2,
+                "edges_inserted": 0,
+                "edges_skipped": 1,
+            }
+            assert target.count_units() == 2
+            assert len(target.get_all_edges()) == 1
+        finally:
+            _close_and_unlink(source, source_path)
+            _close_and_unlink(target, target_path)

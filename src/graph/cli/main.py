@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 
 import typer
 
@@ -52,6 +53,26 @@ def _format_project_pair(projects: list[str]) -> str:
 
 def _json_echo(payload: object) -> None:
     typer.echo(json.dumps(payload, default=str, sort_keys=True))
+
+
+def _do_export_json(store: Store, path: str | Path) -> dict:
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = store.export_json()
+    output_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    return {
+        "path": str(output_path),
+        "schema_version": payload["schema_version"],
+        "units_exported": len(payload["units"]),
+        "edges_exported": len(payload["edges"]),
+    }
+
+
+def _do_import_json(store: Store, path: str | Path) -> dict:
+    input_path = Path(path)
+    payload = json.loads(input_path.read_text())
+    stats = store.import_json(payload)
+    return {"path": str(input_path), **stats}
 
 
 def _unit_to_json(unit, *, score: float | None = None, include_content: bool = True) -> dict:
@@ -245,6 +266,35 @@ def ingest(
     store = _get_store()
     _do_ingest(store, project=project, entity_type=entity_type, full=full)
     store.close()
+
+
+@app.command(name="export-json")
+def export_json(
+    path: Path = typer.Argument(..., help="Destination JSON backup path"),
+) -> None:
+    """Export the graph to a portable JSON backup."""
+    store = _get_store()
+    stats = _do_export_json(store, path)
+    store.close()
+    typer.echo(
+        f"Exported {stats['units_exported']} units and "
+        f"{stats['edges_exported']} edges to {stats['path']}"
+    )
+
+
+@app.command(name="import-json")
+def import_json_command(
+    path: Path = typer.Argument(..., help="Source JSON backup path"),
+) -> None:
+    """Import a portable JSON graph backup."""
+    store = _get_store()
+    stats = _do_import_json(store, path)
+    store.close()
+    typer.echo(
+        f"Imported {stats['units_inserted']} units, updated "
+        f"{stats['units_updated']} units, inserted {stats['edges_inserted']} edges, "
+        f"skipped {stats['edges_skipped']} duplicate edges from {stats['path']}"
+    )
 
 
 def _do_embed(
