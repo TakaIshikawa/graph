@@ -541,6 +541,68 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_pa
     }
 
 
+def test_stats_tool_returns_snapshot_payload(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    a = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="a",
+            source_entity_type="knowledge_node",
+            title="Node A",
+            content="First node",
+            tags=["shared"],
+        )
+    )
+    b = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="b",
+            source_entity_type="insight",
+            title="Node B",
+            content="Second node",
+            content_type=ContentType.INSIGHT,
+            tags=["shared", "solar"],
+        )
+    )
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=a.id,
+            to_unit_id=b.id,
+            relation=EdgeRelation.RELATES_TO,
+            source=EdgeSource.MANUAL,
+        )
+    )
+    store.update_embedding(a.id, serialize_embedding([1.0, 0.0]))
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    assert next(tool for tool in tools if tool.name == "stats")
+
+    response = asyncio.run(mcp_server.call_tool("stats", {}))
+    payload = json.loads(response[0].text)
+
+    assert set(payload) == {
+        "unit_counts",
+        "edge_counts",
+        "embedding_counts",
+        "isolated_count",
+        "top_degree_units",
+    }
+    assert payload["unit_counts"]["total"] == 2
+    assert payload["unit_counts"]["by_tag"] == {"shared": 2, "solar": 1}
+    assert payload["edge_counts"] == {
+        "total": 1,
+        "by_relation": {"relates_to": 1},
+        "by_source": {"manual": 1},
+    }
+    assert payload["embedding_counts"] == {"with_embeddings": 1, "without_embeddings": 1}
+    assert payload["isolated_count"] == 0
+    assert [item["degree"] for item in payload["top_degree_units"]] == [1, 1]
+
+
 def test_freshness_report_tool_returns_counts_and_stale_status(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     now = datetime.now(timezone.utc)

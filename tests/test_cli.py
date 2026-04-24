@@ -2472,19 +2472,36 @@ def test_source_coverage_command_prints_readable_summary(monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
-def test_analytics_commands_emit_parseable_json(monkeypatch):
+def test_analytics_commands_emit_parseable_json(monkeypatch, tmp_path):
     store = _make_store()
-    _populate_graph(store)
+    a_id, _, _, _ = _populate_graph(store)
+    store.update_embedding(a_id, serialize_embedding([1.0, 0.0]))
     proxy = StoreProxy(store)
     monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    stats_output = tmp_path / "stats.json"
 
     try:
-        stats_result = runner.invoke(app, ["stats", "--json"])
+        stats_result = runner.invoke(app, ["stats", "--json", "--output", str(stats_output)])
         bridges_result = runner.invoke(app, ["bridges", "--limit", "1", "--json"])
         cross_project_result = runner.invoke(app, ["cross-project", "--json"])
 
         assert stats_result.exit_code == 0
-        assert json.loads(stats_result.output)["nodes"] == 4
+        stats_payload = json.loads(stats_result.output)
+        assert set(stats_payload) == {
+            "unit_counts",
+            "edge_counts",
+            "embedding_counts",
+            "isolated_count",
+            "top_degree_units",
+        }
+        assert stats_payload["unit_counts"]["total"] == 4
+        assert stats_payload["edge_counts"]["total"] == 2
+        assert stats_payload["embedding_counts"] == {
+            "with_embeddings": 1,
+            "without_embeddings": 3,
+        }
+        assert stats_payload["isolated_count"] == 1
+        assert json.loads(stats_output.read_text()) == stats_payload
 
         assert bridges_result.exit_code == 0
         bridge_payload = json.loads(bridges_result.output)

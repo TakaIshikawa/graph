@@ -23,6 +23,7 @@ from graph.cli.main import (
     _do_export_report,
     _do_export_turtle,
     _do_embeddings_status,
+    _do_stats_snapshot,
     _do_apply_tags_to_search,
     _do_import_json,
     _do_import_edges_csv,
@@ -1329,7 +1330,10 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="stats",
-            description="Get graph statistics: node/edge counts, density, breakdown by project and type.",
+            description=(
+                "Get a machine-readable graph statistics snapshot with unit, edge, "
+                "embedding, isolation, and top-degree summaries."
+            ),
             inputSchema={"type": "object", "properties": {}},
         ),
     ]
@@ -2122,9 +2126,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return [TextContent(type="text", text=json.dumps(result))]
 
         elif name == "stats":
-            gs = GraphService(store)
-            gs.rebuild()
-            return [TextContent(type="text", text=json.dumps(gs.stats()))]
+            payload = _do_stats_snapshot(store)
+            return [TextContent(type="text", text=json.dumps(payload))]
 
         elif name == "export_obsidian":
             vault_path = arguments.get("vault_path") or settings.obsidian_vault_path

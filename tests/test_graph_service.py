@@ -11,6 +11,7 @@ import networkx as nx
 import pytest
 
 from graph.graph.service import GraphService
+from graph.rag.embeddings import serialize_embedding
 from graph.store.db import Store
 from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
 from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
@@ -845,10 +846,63 @@ class TestGraphService:
         assert s["components"] == 2  # A-B-C and D
         assert "forty_two" in s["by_project"]
 
+    def test_stats_snapshot_counts_units_edges_embeddings_and_degrees(
+        self, populated_store: Store
+    ):
+        a = populated_store.get_unit_by_source("forty_two", "a", "knowledge_node")
+        b = populated_store.get_unit_by_source("forty_two", "b", "knowledge_node")
+        populated_store.update_unit_fields(a.id, tags=["alpha", "shared"])
+        populated_store.update_unit_fields(b.id, tags=["shared"])
+        populated_store.update_embedding(a.id, serialize_embedding([1.0, 0.0]))
+
+        gs = GraphService(populated_store)
+        gs.rebuild()
+        snapshot = gs.stats_snapshot()
+
+        assert set(snapshot) == {
+            "unit_counts",
+            "edge_counts",
+            "embedding_counts",
+            "isolated_count",
+            "top_degree_units",
+        }
+        assert snapshot["unit_counts"] == {
+            "total": 4,
+            "by_source_project": {"forty_two": 2, "max": 1, "presence": 1},
+            "by_content_type": {"artifact": 1, "insight": 3},
+            "by_tag": {"alpha": 1, "shared": 2},
+        }
+        assert snapshot["edge_counts"] == {
+            "total": 2,
+            "by_relation": {"builds_on": 1, "inspires": 1},
+            "by_source": {"inferred": 1, "manual": 1},
+        }
+        assert snapshot["embedding_counts"] == {
+            "with_embeddings": 1,
+            "without_embeddings": 3,
+        }
+        assert snapshot["isolated_count"] == 1
+        assert snapshot["top_degree_units"][0]["id"] == b.id
+        assert snapshot["top_degree_units"][0]["degree"] == 2
+        assert snapshot["top_degree_units"][0]["in_degree"] == 1
+        assert snapshot["top_degree_units"][0]["out_degree"] == 1
+
     def test_empty_graph(self, store: Store):
         gs = GraphService(store)
         gs.rebuild()
         assert gs.stats()["nodes"] == 0
+        assert gs.stats_snapshot() == {
+            "unit_counts": {
+                "total": 0,
+                "by_source_project": {},
+                "by_content_type": {},
+                "by_tag": {},
+            },
+            "edge_counts": {"total": 0, "by_relation": {}, "by_source": {}},
+            "embedding_counts": {"with_embeddings": 0, "without_embeddings": 0},
+            "isolated_count": 0,
+            "top_degree_units": [],
+        }
         assert gs.get_clusters() == []
         assert gs.get_central_nodes() == []
         assert gs.get_bridges() == []

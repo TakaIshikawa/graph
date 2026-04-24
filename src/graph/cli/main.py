@@ -298,6 +298,23 @@ def _do_export_report(store: Store, path: str | Path, *, limit: int = 10) -> dic
     }
 
 
+def _do_stats_snapshot(store: Store, *, output: str | Path | None = None) -> dict:
+    from graph.graph.service import GraphService
+
+    gs = GraphService(store)
+    payload = gs.stats_snapshot()
+
+    if output is not None:
+        output_path = Path(output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+    return payload
+
+
 def _anki_tsv_field(value: object) -> str:
     text = "" if value is None else str(value)
     return " ".join(text.replace("\t", " ").split())
@@ -3276,19 +3293,32 @@ def design_briefs(
 @app.command()
 def stats(
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        help="Write the machine-readable JSON snapshot to a file",
+    ),
 ) -> None:
     """Show graph statistics."""
     from graph.graph.service import GraphService
 
     store = _get_store()
+    if json_output or output is not None:
+        snapshot = _do_stats_snapshot(store, output=output)
+        store.close()
+        if json_output:
+            _json_echo(snapshot)
+        else:
+            typer.echo(
+                f"Units: {snapshot['unit_counts']['total']}; "
+                f"Edges: {snapshot['edge_counts']['total']}; "
+                f"Isolated: {snapshot['isolated_count']}"
+            )
+        return
+
     gs = GraphService(store)
     gs.rebuild()
     s = gs.stats()
-
-    if json_output:
-        _json_echo(s)
-        store.close()
-        return
 
     typer.echo(f"Nodes: {s['nodes']}")
     typer.echo(f"Edges: {s['edges']}")

@@ -1688,6 +1688,87 @@ class GraphService:
             ),
         }
 
+    def stats_snapshot(self, *, top_degree_limit: int = 10) -> dict:
+        """Build a machine-readable graph statistics snapshot."""
+        self.rebuild()
+
+        units = sorted(self.store.get_all_units(limit=1000000000), key=lambda unit: unit.id)
+        valid_unit_ids = {unit.id for unit in units}
+        edges = sorted(
+            (
+                edge
+                for edge in self.store.get_all_edges()
+                if edge.from_unit_id in valid_unit_ids and edge.to_unit_id in valid_unit_ids
+            ),
+            key=lambda edge: (
+                str(edge.relation),
+                str(edge.source),
+                edge.from_unit_id,
+                edge.to_unit_id,
+            ),
+        )
+
+        source_project_counts: Counter[str] = Counter()
+        content_type_counts: Counter[str] = Counter()
+        tag_counts: Counter[str] = Counter()
+        for unit in units:
+            source_project_counts[str(unit.source_project)] += 1
+            content_type_counts[str(unit.content_type)] += 1
+            tag_counts.update(str(tag) for tag in unit.tags)
+
+        relation_counts = Counter(str(edge.relation) for edge in edges)
+        edge_source_counts = Counter(str(edge.source) for edge in edges)
+        embedding_status = self.store.get_embedding_status()
+
+        graph = self.G
+        isolated_count = len(list(nx.isolates(graph.to_undirected()))) if graph.nodes else 0
+        ranked_units = []
+        for unit in units:
+            if unit.id not in graph:
+                continue
+            in_degree = int(graph.in_degree(unit.id))
+            out_degree = int(graph.out_degree(unit.id))
+            ranked_units.append(
+                {
+                    "id": unit.id,
+                    "title": unit.title,
+                    "source_project": str(unit.source_project),
+                    "content_type": str(unit.content_type),
+                    "degree": in_degree + out_degree,
+                    "in_degree": in_degree,
+                    "out_degree": out_degree,
+                }
+            )
+        ranked_units.sort(
+            key=lambda item: (
+                -int(item["degree"]),
+                -int(item["in_degree"]),
+                -int(item["out_degree"]),
+                str(item["title"]).lower(),
+                str(item["id"]),
+            )
+        )
+
+        return {
+            "unit_counts": {
+                "total": len(units),
+                "by_source_project": dict(sorted(source_project_counts.items())),
+                "by_content_type": dict(sorted(content_type_counts.items())),
+                "by_tag": dict(sorted(tag_counts.items())),
+            },
+            "edge_counts": {
+                "total": len(edges),
+                "by_relation": dict(sorted(relation_counts.items())),
+                "by_source": dict(sorted(edge_source_counts.items())),
+            },
+            "embedding_counts": {
+                "with_embeddings": int(embedding_status["total"]) - int(embedding_status["missing"]),
+                "without_embeddings": int(embedding_status["missing"]),
+            },
+            "isolated_count": isolated_count,
+            "top_degree_units": ranked_units[: max(0, top_degree_limit)],
+        }
+
     def integrity_audit(self, *, repair_fts: bool = False, limit: int = 20) -> dict:
         """Audit persisted graph tables for consistency issues."""
         repair = None
