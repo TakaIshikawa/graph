@@ -20,6 +20,7 @@ def test_source_path_settings_honor_environment_overrides(monkeypatch):
         "GRAPH_OPML_PATH": "/tmp/export.opml",
         "GRAPH_ME_CONFIG": "/tmp/projects.yaml",
         "GRAPH_TEXT_ROOT": "/tmp/text",
+        "GRAPH_HTML_ROOT": "/tmp/html",
         "GRAPH_OBSIDIAN_VAULT_PATH": "/tmp/obsidian",
     }
     for key, value in overrides.items():
@@ -40,4 +41,5 @@ def test_source_path_settings_honor_environment_overrides(monkeypatch):
     assert loaded.opml_path == "/tmp/export.opml"
     assert loaded.me_config == "/tmp/projects.yaml"
     assert loaded.text_root == "/tmp/text"
+    assert loaded.html_root == "/tmp/html"
     assert loaded.obsidian_vault_path == "/tmp/obsidian"

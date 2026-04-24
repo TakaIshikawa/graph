@@ -15,6 +15,7 @@ from graph.adapters.bookmarks import BookmarksAdapter
 from graph.adapters.csv_adapter import CsvAdapter
 from graph.adapters.feed import FeedAdapter
 from graph.adapters.forty_two import FortyTwoAdapter
+from graph.adapters.html import HtmlAdapter
 from graph.adapters.jsonl_adapter import JsonlAdapter
 from graph.adapters.markdown import MarkdownAdapter
 from graph.adapters.max_adapter import MaxAdapter
@@ -596,6 +597,96 @@ class TestTextAdapter:
         assert result.edges == []
 
 
+class TestHtmlAdapter:
+    def test_ingest_html_documents_recursively_with_metadata_and_tags(self, tmp_path):
+        root = tmp_path / "html"
+        nested = root / "nested"
+        nested.mkdir(parents=True)
+        page = nested / "page.html"
+        page.write_text(
+            """<!doctype html>
+            <html>
+              <head>
+                <title>HTML Export Title</title>
+                <meta name="description" content="Readable page summary">
+                <meta name="keywords" content="docs, html, docs">
+                <link rel="canonical" href="https://example.com/docs/page">
+                <style>.hidden { color: red; }</style>
+                <script>window.secret = "ignore me";</script>
+              </head>
+              <body>
+                <h1>Fallback Heading</h1>
+                <p>Readable text &amp; content.</p>
+                <div>Nested search phrase.</div>
+              </body>
+            </html>
+            """,
+            encoding="utf-8",
+        )
+        (root / "brief.HTM").write_text("<h1>Brief Heading</h1><p>Brief body.</p>", encoding="utf-8")
+        (root / "skip.txt").write_text("<h1>Not HTML</h1>", encoding="utf-8")
+
+        result = HtmlAdapter(root_path=str(root)).ingest()
+
+        assert [unit.source_id for unit in result.units] == [
+            "brief.HTM",
+            "nested/page.html",
+        ]
+        by_source = {unit.source_id: unit for unit in result.units}
+        unit = by_source["nested/page.html"]
+        assert unit.source_project == "me"
+        assert unit.source_entity_type == "html_document"
+        assert unit.title == "HTML Export Title"
+        assert "Readable text & content." in unit.content
+        assert "Nested search phrase." in unit.content
+        assert "ignore me" not in unit.content
+        assert "hidden" not in unit.content
+        assert unit.tags == ["docs", "html"]
+        assert unit.metadata == {
+            "path": "nested/page.html",
+            "file_size": page.stat().st_size,
+            "description": "Readable page summary",
+            "canonical_url": "https://example.com/docs/page",
+        }
+        assert by_source["brief.HTM"].title == "Brief Heading"
+        assert result.edges == []
+
+    def test_malformed_html_does_not_abort_entire_ingest(self, tmp_path):
+        (tmp_path / "good.html").write_text("<title>Good</title><p>Good body.</p>", encoding="utf-8")
+        (tmp_path / "broken.html").write_text(
+            "<html><head><title>Broken</title><body><h1>Broken Heading<p>Open tags",
+            encoding="utf-8",
+        )
+
+        result = HtmlAdapter(root_path=str(tmp_path)).ingest()
+
+        assert {unit.source_id for unit in result.units} == {"broken.html", "good.html"}
+        assert {unit.title for unit in result.units} == {"Broken", "Good"}
+
+    def test_missing_root_sync_and_entity_filter(self, tmp_path):
+        old_path = tmp_path / "old.html"
+        new_path = tmp_path / "new.html"
+        old_path.write_text("<title>Old</title>", encoding="utf-8")
+        new_path.write_text("<h1>New Heading</h1>", encoding="utf-8")
+        os.utime(old_path, (1_700_000_000, 1_700_000_000))
+        os.utime(new_path, (1_700_100_000, 1_700_100_000))
+
+        result = HtmlAdapter(root_path=str(tmp_path)).ingest(
+            since=SyncState(
+                source_project="html",
+                source_entity_type="html_document",
+                last_sync_at=datetime.fromtimestamp(1_700_050_000, tz=timezone.utc),
+            )
+        )
+        filtered = HtmlAdapter(root_path=str(tmp_path)).ingest(entity_types=["text_document"])
+        missing = HtmlAdapter(root_path=str(tmp_path / "missing")).ingest()
+
+        assert [unit.source_id for unit in result.units] == ["new.html"]
+        assert result.units[0].title == "New Heading"
+        assert filtered.units == []
+        assert missing.units == []
+
+
 class TestFeedAdapter:
     def test_ingest_rss_items_with_stable_metadata_and_tags(self, tmp_path):
         feed = tmp_path / "research.xml"
@@ -969,6 +1060,7 @@ class TestRegistry:
             "jsonl",
             "opml",
             "text",
+            "html",
         }
 
     def test_get_adapter(self):
@@ -983,6 +1075,9 @@ class TestRegistry:
 
         text_adapter = get_adapter("text", root_path="/tmp/text")
         assert text_adapter.name == "text"
+
+        html_adapter = get_adapter("html", root_path="/tmp/html")
+        assert html_adapter.name == "html"
 
     def test_unknown_adapter(self):
         with pytest.raises(KeyError):

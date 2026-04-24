@@ -64,6 +64,7 @@ SUPPORTED_SYNC_PROJECTS = [
     "jsonl",
     "opml",
     "text",
+    "html",
 ]
 
 SEARCH_FILTER_SCHEMA = {
@@ -129,6 +130,7 @@ def _get_adapter(name: str):
     from graph.adapters.bookmarks import BookmarksAdapter
     from graph.adapters.csv_adapter import CsvAdapter
     from graph.adapters.forty_two import FortyTwoAdapter
+    from graph.adapters.html import HtmlAdapter
     from graph.adapters.jsonl_adapter import JsonlAdapter
     from graph.adapters.kindle import KindleAdapter
     from graph.adapters.max_adapter import MaxAdapter
@@ -152,6 +154,7 @@ def _get_adapter(name: str):
         "jsonl": lambda: JsonlAdapter(path=settings.jsonl_path),
         "opml": lambda: OpmlAdapter(path=settings.opml_path),
         "text": lambda: TextAdapter(root_path=settings.text_root),
+        "html": lambda: HtmlAdapter(root_path=settings.html_root),
     }
     return mapping[name]()
 

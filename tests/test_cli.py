@@ -1421,6 +1421,64 @@ def test_ingest_text_command_uses_configured_root_and_indexes_fulltext(tmp_path,
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_ingest_html_command_uses_configured_root_and_indexes_fulltext(tmp_path, monkeypatch):
+    root = tmp_path / "html"
+    nested = root / "nested"
+    nested.mkdir(parents=True)
+    page = nested / "export.html"
+    page.write_text(
+        """<html>
+          <head>
+            <title>Documentation Export</title>
+            <meta name="description" content="Exported documentation page">
+            <meta name="keywords" content="docs, export">
+            <link rel="canonical" href="https://example.com/export">
+          </head>
+          <body>
+            <h1>Fallback</h1>
+            <script>ignore this search phrase</script>
+            <p>HTML fulltext search phrase.</p>
+          </body>
+        </html>
+        """,
+        encoding="utf-8",
+    )
+
+    store = _make_store()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    monkeypatch.setattr("graph.cli.main.settings.html_root", str(root))
+
+    try:
+        result = runner.invoke(app, ["ingest", "html"])
+
+        assert result.exit_code == 0
+        assert "Ingesting from html" in result.output
+        assert "html: 1 new" in result.output
+        unit = store.get_unit_by_source("me", "nested/export.html", "html_document")
+        assert unit is not None
+        assert unit.title == "Documentation Export"
+        assert "HTML fulltext search phrase." in unit.content
+        assert "ignore this" not in unit.content
+        assert unit.tags == ["docs", "export"]
+        assert unit.metadata["description"] == "Exported documentation page"
+        assert unit.metadata["canonical_url"] == "https://example.com/export"
+        sync_state = store.get_sync_state("html", "html_document")
+        assert sync_state is not None
+        assert sync_state.items_synced == 1
+
+        search = runner.invoke(
+            app,
+            ["search", "HTML fulltext", "--mode", "fulltext", "--limit", "1"],
+        )
+
+        assert search.exit_code == 0
+        assert "Documentation Export" in search.output
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_shortest_path_command_prints_readable_path(monkeypatch):
     store = _make_store()
     a_id, _, c_id, _ = _populate_graph(store)
