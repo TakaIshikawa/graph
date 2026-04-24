@@ -6,11 +6,13 @@ import json
 import re
 import sqlite3
 import uuid
+import csv
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from graph.store.migrations import SCHEMA_VERSION, ensure_schema
-from graph.types.enums import EdgeSource
+from graph.types.enums import EdgeRelation, EdgeSource
 from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 SAVED_QUERIES_SCHEMA_VERSION = 1
@@ -1337,6 +1339,127 @@ class Store:
         self.conn.commit()
         return edge
 
+    def import_edges_csv(self, path: str | Path, *, dry_run: bool = False) -> dict:
+        """Import curated graph edges from a CSV file, validating row-by-row."""
+        csv_path = Path(path)
+        required_columns = {"from_unit_id", "to_unit_id", "relation"}
+        optional_columns = {"weight", "source", "metadata_json"}
+        allowed_columns = required_columns | optional_columns
+
+        result = {
+            "path": str(csv_path),
+            "dry_run": dry_run,
+            "inserted": 0,
+            "skipped_existing": 0,
+            "invalid": [],
+            "inserted_rows": [],
+            "skipped_existing_rows": [],
+        }
+        planned_keys: set[tuple[str, str, str]] = set()
+
+        with csv_path.open(newline="") as handle:
+            reader = csv.DictReader(handle)
+            fieldnames = set(reader.fieldnames or [])
+            missing_columns = sorted(required_columns - fieldnames)
+            unknown_columns = sorted(fieldnames - allowed_columns)
+
+            for row_number, row in enumerate(reader, start=2):
+                errors: list[str] = []
+                if missing_columns:
+                    errors.append(f"missing required columns: {', '.join(missing_columns)}")
+                if unknown_columns:
+                    errors.append(f"unknown columns: {', '.join(unknown_columns)}")
+
+                from_unit_id = (row.get("from_unit_id") or "").strip()
+                to_unit_id = (row.get("to_unit_id") or "").strip()
+                relation_value = (row.get("relation") or "").strip()
+                weight_value = (row.get("weight") or "").strip()
+                source_value = (row.get("source") or "").strip()
+                metadata_value = (row.get("metadata_json") or "").strip()
+
+                if not from_unit_id:
+                    errors.append("from_unit_id is required")
+                elif self.get_unit(from_unit_id) is None:
+                    errors.append(f"from_unit_id not found: {from_unit_id}")
+
+                if not to_unit_id:
+                    errors.append("to_unit_id is required")
+                elif self.get_unit(to_unit_id) is None:
+                    errors.append(f"to_unit_id not found: {to_unit_id}")
+
+                try:
+                    relation = EdgeRelation(relation_value)
+                except ValueError:
+                    relation = None
+                    errors.append(f"unknown relation: {relation_value or '<blank>'}")
+
+                if weight_value:
+                    try:
+                        weight = float(weight_value)
+                    except ValueError:
+                        weight = 1.0
+                        errors.append(f"weight must be numeric: {weight_value}")
+                else:
+                    weight = 1.0
+
+                if source_value:
+                    try:
+                        source = EdgeSource(source_value)
+                    except ValueError:
+                        source = EdgeSource.MANUAL
+                        errors.append(f"unknown source: {source_value}")
+                else:
+                    source = EdgeSource.MANUAL
+
+                if metadata_value:
+                    try:
+                        metadata = json.loads(metadata_value)
+                    except json.JSONDecodeError as exc:
+                        metadata = {}
+                        errors.append(f"metadata_json must be valid JSON: {exc.msg}")
+                    else:
+                        if not isinstance(metadata, dict):
+                            errors.append("metadata_json must be a JSON object")
+                else:
+                    metadata = {}
+
+                if errors:
+                    result["invalid"].append({"row_number": row_number, "reasons": errors})
+                    continue
+
+                assert relation is not None
+                edge_key = (from_unit_id, to_unit_id, relation.value)
+                if edge_key in planned_keys or self.edge_exists(from_unit_id, to_unit_id, relation.value):
+                    result["skipped_existing"] += 1
+                    result["skipped_existing_rows"].append(row_number)
+                    continue
+
+                planned_keys.add(edge_key)
+                if not dry_run:
+                    self.conn.execute(
+                        """INSERT INTO edges
+                           (id, from_unit_id, to_unit_id, relation, weight, source, metadata, created_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                           ON CONFLICT(from_unit_id, to_unit_id, relation) DO NOTHING
+                        """,
+                        (
+                            _new_id(),
+                            from_unit_id,
+                            to_unit_id,
+                            relation.value,
+                            weight,
+                            source.value,
+                            json.dumps(metadata),
+                            _utcnow_iso(),
+                        ),
+                    )
+                result["inserted"] += 1
+                result["inserted_rows"].append(row_number)
+
+        if not dry_run:
+            self.conn.commit()
+        return result
+
     def get_all_edges(self) -> list[KnowledgeEdge]:
         rows = self.conn.execute("SELECT * FROM edges").fetchall()
         return [_row_to_edge(r) for r in rows]
@@ -1353,6 +1476,15 @@ class Store:
             (unit_id, unit_id),
         ).fetchall()
         return [_row_to_edge(r) for r in rows]
+
+    def edge_exists(self, from_unit_id: str, to_unit_id: str, relation: str) -> bool:
+        row = self.conn.execute(
+            """SELECT 1 FROM edges
+               WHERE from_unit_id = ? AND to_unit_id = ? AND relation = ?
+               LIMIT 1""",
+            (from_unit_id, to_unit_id, relation),
+        ).fetchone()
+        return row is not None
 
     def update_edge_fields(
         self,

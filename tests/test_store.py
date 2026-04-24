@@ -752,6 +752,81 @@ class TestEdgeCRUD:
         assert store.get_all_edges() == []
         assert store.delete_edge(edge.id) == {"edge_id": edge.id, "deleted": False}
 
+    def test_import_edges_csv_validates_dry_runs_and_skips_duplicates(
+        self, store: Store, tmp_path
+    ):
+        u1 = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.ME,
+                source_id="manual-1",
+                source_entity_type="manual",
+                title="Unit 1",
+                content="Content 1",
+            )
+        )
+        u2 = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.ME,
+                source_id="manual-2",
+                source_entity_type="manual",
+                title="Unit 2",
+                content="Content 2",
+            )
+        )
+        u3 = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.ME,
+                source_id="manual-3",
+                source_entity_type="manual",
+                title="Unit 3",
+                content="Content 3",
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=u1.id,
+                to_unit_id=u2.id,
+                relation=EdgeRelation.RELATES_TO,
+            )
+        )
+        csv_path = tmp_path / "edges.csv"
+        csv_path.write_text(
+            "\n".join(
+                [
+                    "from_unit_id,to_unit_id,relation,weight,source,metadata_json",
+                    f'{u1.id},{u2.id},relates_to,0.8,manual,{{"note":"duplicate"}}',
+                    f'{u2.id},{u3.id},inspires,0.5,source,{{"note":"valid"}}',
+                    f'{u2.id},{u3.id},inspires,0.5,source,{{"note":"in-file duplicate"}}',
+                    f"missing,{u3.id},unknown,nope,bad,[]",
+                ]
+            )
+            + "\n"
+        )
+
+        dry_run = store.import_edges_csv(csv_path, dry_run=True)
+
+        assert dry_run["dry_run"] is True
+        assert dry_run["inserted"] == 1
+        assert dry_run["skipped_existing"] == 2
+        assert dry_run["inserted_rows"] == [3]
+        assert dry_run["skipped_existing_rows"] == [2, 4]
+        assert dry_run["invalid"][0]["row_number"] == 5
+        assert "from_unit_id not found: missing" in dry_run["invalid"][0]["reasons"]
+        assert len(store.get_all_edges()) == 1
+
+        applied = store.import_edges_csv(csv_path)
+
+        assert applied["dry_run"] is False
+        assert applied["inserted"] == 1
+        assert applied["skipped_existing"] == 2
+        edges = store.get_all_edges()
+        assert len(edges) == 2
+        imported = next(edge for edge in edges if edge.to_unit_id == u3.id)
+        assert imported.relation == EdgeRelation.INSPIRES
+        assert imported.weight == 0.5
+        assert imported.source == EdgeSource.SOURCE
+        assert imported.metadata == {"note": "valid"}
+
     def test_delete_unit_removes_fts_row_and_related_edges(self, store: Store):
         u1 = store.insert_unit(
             KnowledgeUnit(

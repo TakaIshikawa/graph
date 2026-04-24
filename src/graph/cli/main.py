@@ -648,6 +648,10 @@ def _do_delete_edge(store: Store, edge_id: str) -> dict:
     return stats
 
 
+def _do_import_edges_csv(store: Store, path: str | Path, *, dry_run: bool = False) -> dict:
+    return store.import_edges_csv(path, dry_run=dry_run)
+
+
 def _content_excerpt(content: str, *, length: int = 160) -> str:
     text = " ".join((content or "").split())
     if len(text) <= length:
@@ -2432,6 +2436,52 @@ def list_edges(
                 f"    Neighbor: [{neighbor['source_project']}] "
                 f"{neighbor['title']} ({neighbor['id'][:8]}...)"
             )
+
+
+@edges_app.command(name="import-csv")
+def import_edges_csv(
+    path: Path = typer.Argument(..., help="CSV file with graph edges to import"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Validate without inserting edges"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Import graph edges from a CSV file."""
+    store = _get_store()
+    try:
+        payload = _do_import_edges_csv(store, path, dry_run=dry_run)
+    except OSError as exc:
+        if json_output:
+            _json_echo(
+                {
+                    "path": str(path),
+                    "dry_run": dry_run,
+                    "inserted": 0,
+                    "skipped_existing": 0,
+                    "invalid": [{"row_number": None, "reasons": [str(exc)]}],
+                    "inserted_rows": [],
+                    "skipped_existing_rows": [],
+                    "error": "file_error",
+                }
+            )
+            return
+        raise typer.BadParameter(str(exc)) from exc
+    finally:
+        store.close()
+
+    if json_output:
+        _json_echo(payload)
+        return
+
+    action = "Would insert" if dry_run else "Inserted"
+    typer.echo(
+        f"{action} {payload['inserted']} edges from {payload['path']}; "
+        f"skipped {payload['skipped_existing']} existing; "
+        f"invalid {len(payload['invalid'])} rows."
+    )
+    for invalid in payload["invalid"]:
+        typer.echo(
+            f"  Row {invalid['row_number']}: "
+            f"{'; '.join(invalid['reasons'])}"
+        )
 
 
 @app.command(name="update-edge")

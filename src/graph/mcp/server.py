@@ -25,6 +25,7 @@ from graph.cli.main import (
     _do_embeddings_status,
     _do_apply_tags_to_search,
     _do_import_json,
+    _do_import_edges_csv,
     _do_import_queries,
     _do_infer_edges,
     _do_integrity_audit,
@@ -1030,6 +1031,25 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="import_edges_csv",
+            description="Import curated graph edges from a CSV file.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "CSV path with from_unit_id, to_unit_id, relation, optional weight, source, metadata_json",
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Validate and report outcomes without inserting edges",
+                    },
+                },
+                "required": ["path"],
+            },
+        ),
+        Tool(
             name="list_edges",
             description="List incoming and outgoing edges for one knowledge unit with neighbor summaries.",
             inputSchema={
@@ -2031,6 +2051,26 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     ),
                 )
             ]
+
+        elif name == "import_edges_csv":
+            try:
+                payload = _do_import_edges_csv(
+                    store,
+                    arguments["path"],
+                    dry_run=arguments.get("dry_run", False),
+                )
+            except OSError as exc:
+                payload = {
+                    "path": arguments.get("path"),
+                    "dry_run": arguments.get("dry_run", False),
+                    "inserted": 0,
+                    "skipped_existing": 0,
+                    "invalid": [{"row_number": None, "reasons": [str(exc)]}],
+                    "inserted_rows": [],
+                    "skipped_existing_rows": [],
+                    "error": "file_error",
+                }
+            return [TextContent(type="text", text=json.dumps(payload, default=str))]
 
         elif name == "list_edges":
             try:

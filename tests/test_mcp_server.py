@@ -1692,6 +1692,88 @@ def test_edge_management_tools_list_update_delete_and_report_errors(tmp_path, mo
         verify.close()
 
 
+def test_import_edges_csv_tool_matches_cli_structured_payload(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    u1 = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="manual-1",
+            source_entity_type="manual",
+            title="Unit 1",
+            content="Content 1",
+        )
+    )
+    u2 = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="manual-2",
+            source_entity_type="manual",
+            title="Unit 2",
+            content="Content 2",
+        )
+    )
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=u1.id,
+            to_unit_id=u2.id,
+            relation=EdgeRelation.RELATES_TO,
+        )
+    )
+    store.close()
+    csv_path = tmp_path / "edges.csv"
+    csv_path.write_text(
+        "\n".join(
+            [
+                "from_unit_id,to_unit_id,relation,weight,source,metadata_json",
+                f'{u1.id},{u2.id},relates_to,1,manual,{{"note":"duplicate"}}',
+                f'{u2.id},{u1.id},references,0.25,manual,{{"note":"valid"}}',
+                f"missing,{u1.id},references,1,manual,{{}}",
+            ]
+        )
+        + "\n"
+    )
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    assert "import_edges_csv" in {tool.name for tool in tools}
+
+    dry_run = asyncio.run(
+        mcp_server.call_tool(
+            "import_edges_csv",
+            {"path": str(csv_path), "dry_run": True},
+        )
+    )
+    dry_payload = json.loads(dry_run[0].text)
+    assert dry_payload["dry_run"] is True
+    assert dry_payload["inserted"] == 1
+    assert dry_payload["skipped_existing"] == 1
+    assert len(dry_payload["invalid"]) == 1
+
+    verify = Store(str(db_path))
+    try:
+        assert len(verify.get_all_edges()) == 1
+    finally:
+        verify.close()
+
+    applied = asyncio.run(mcp_server.call_tool("import_edges_csv", {"path": str(csv_path)}))
+    apply_payload = json.loads(applied[0].text)
+    assert apply_payload["inserted"] == 1
+    assert apply_payload["skipped_existing"] == 1
+
+    verify = Store(str(db_path))
+    try:
+        edges = verify.get_all_edges()
+        assert len(edges) == 2
+        imported = next(edge for edge in edges if edge.from_unit_id == u2.id)
+        assert imported.relation == EdgeRelation.REFERENCES
+        assert imported.weight == 0.25
+        assert imported.metadata == {"note": "valid"}
+    finally:
+        verify.close()
+
+
 def test_backlinks_tool_returns_expanded_json_filters_and_missing_error(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))

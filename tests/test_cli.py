@@ -652,6 +652,75 @@ def test_export_graphml_command_writes_valid_graphml(tmp_path, monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_edges_import_csv_cli_json_dry_run_and_apply(tmp_path, monkeypatch):
+    store = _make_store()
+    u1 = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="manual-1",
+            source_entity_type="manual",
+            title="Unit 1",
+            content="Content 1",
+        )
+    )
+    u2 = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="manual-2",
+            source_entity_type="manual",
+            title="Unit 2",
+            content="Content 2",
+        )
+    )
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=u1.id,
+            to_unit_id=u2.id,
+            relation=EdgeRelation.RELATES_TO,
+        )
+    )
+    csv_path = tmp_path / "edges.csv"
+    csv_path.write_text(
+        "\n".join(
+            [
+                "from_unit_id,to_unit_id,relation,weight,source,metadata_json",
+                f'{u1.id},{u2.id},relates_to,1,manual,{{"note":"duplicate"}}',
+                f'{u2.id},{u1.id},references,0.25,manual,{{"note":"valid"}}',
+                f"missing,{u1.id},references,1,manual,{{}}",
+            ]
+        )
+        + "\n"
+    )
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        dry_run = runner.invoke(
+            app,
+            ["edges", "import-csv", str(csv_path), "--dry-run", "--json"],
+        )
+        assert dry_run.exit_code == 0
+        dry_payload = json.loads(dry_run.output)
+        assert dry_payload["dry_run"] is True
+        assert dry_payload["inserted"] == 1
+        assert dry_payload["skipped_existing"] == 1
+        assert len(dry_payload["invalid"]) == 1
+        assert len(store.get_all_edges()) == 1
+
+        applied = runner.invoke(app, ["edges", "import-csv", str(csv_path), "--json"])
+        assert applied.exit_code == 0
+        apply_payload = json.loads(applied.output)
+        assert apply_payload["inserted"] == 1
+        assert apply_payload["skipped_existing"] == 1
+        assert len(store.get_all_edges()) == 2
+        imported = next(edge for edge in store.get_all_edges() if edge.from_unit_id == u2.id)
+        assert imported.relation == EdgeRelation.REFERENCES
+        assert imported.metadata == {"note": "valid"}
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_export_turtle_command_writes_turtle_with_counts(tmp_path, monkeypatch):
     store = _make_store()
     a_id, b_id, _, _ = _populate_graph(store)
