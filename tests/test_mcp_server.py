@@ -372,6 +372,14 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(
     assert "csv" in search_tool.inputSchema["properties"]["source_project"]["enum"]
     assert search_tool.inputSchema["properties"]["created_after"]["type"] == "string"
     assert search_tool.inputSchema["properties"]["min_utility"]["type"] == "number"
+    assert search_tool.inputSchema["properties"]["min_confidence"]["type"] == "number"
+    search_facets_tool = next(tool for tool in tools if tool.name == "search_facets")
+    assert search_facets_tool.inputSchema["properties"]["tag"]["type"] == "string"
+    assert search_facets_tool.inputSchema["properties"]["mode"]["enum"] == [
+        "hybrid",
+        "semantic",
+        "fulltext",
+    ]
     save_query_tool = next(tool for tool in tools if tool.name == "save_query")
     assert save_query_tool.inputSchema["properties"]["created_before"]["type"] == "string"
     assert save_query_tool.inputSchema["properties"]["max_utility"]["type"] == "number"
@@ -664,6 +672,81 @@ def test_saved_query_tools_create_list_run_and_delete(tmp_path, monkeypatch):
         "found": False,
         "error": "Saved query not found: approved-solar",
     }
+
+
+def test_search_facets_tool_returns_parseable_json(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    units = [
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="approved",
+            source_entity_type="insight",
+            title="Solar approved insight",
+            content="Solar energy storage market growth",
+            content_type=ContentType.INSIGHT,
+            metadata={"review_state": "approved"},
+            tags=["energy", "solar"],
+            utility_score=0.92,
+            created_at=datetime.fromisoformat("2026-04-22T00:00:00+00:00"),
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="brief",
+            source_entity_type="design_brief",
+            title="Solar approved brief",
+            content="Solar energy storage market brief",
+            content_type=ContentType.DESIGN_BRIEF,
+            metadata={"review_state": "approved"},
+            tags=["energy", "solar"],
+            utility_score=0.8,
+            created_at=datetime.fromisoformat("2026-04-24T00:00:00+00:00"),
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="note",
+            source_entity_type="knowledge_node",
+            title="Solar forty two note",
+            content="Solar energy storage market note",
+            content_type=ContentType.FINDING,
+            tags=["energy", "solar", "grid"],
+            utility_score=0.95,
+            created_at=datetime.fromisoformat("2026-04-21T00:00:00+00:00"),
+        ),
+    ]
+    for unit in units:
+        inserted = store.insert_unit(unit)
+        store.fts_index_unit(inserted)
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "search_facets",
+            {
+                "query": "solar",
+                "mode": "fulltext",
+                "source_project": "max",
+                "tag": "energy",
+            },
+        )
+    )
+    payload = json.loads(response[0].text)
+    assert payload["query"] == "solar"
+    assert payload["mode"] == "fulltext"
+    assert payload["filters"] == {"source_project": "max", "tag": "energy"}
+    assert payload["total_matches"] == 2
+    assert payload["facets"]["source_project"] == {"max": 2}
+    assert payload["facets"]["source_entity_type"] == {
+        "design_brief": 1,
+        "insight": 1,
+    }
+    assert payload["facets"]["content_type"] == {
+        "design_brief": 1,
+        "insight": 1,
+    }
+    assert payload["facets"]["tag"] == {"energy": 2, "solar": 2}
 
 
 def test_search_tool_hybrid_results_include_scores_and_snippets(tmp_path, monkeypatch):

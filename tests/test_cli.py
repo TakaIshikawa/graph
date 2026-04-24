@@ -2167,6 +2167,100 @@ def test_search_command_emits_active_date_and_utility_filters_in_json(monkeypatc
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_search_facets_command_emits_fulltext_json(monkeypatch):
+    store = _make_store()
+    _populate_search_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(
+            app,
+            ["search-facets", "solar", "--mode", "fulltext", "--json"],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["query"] == "solar"
+        assert payload["mode"] == "fulltext"
+        assert payload["total_matches"] == 5
+        assert payload["facets"]["source_project"] == {"max": 4, "forty_two": 1}
+        assert payload["facets"]["source_entity_type"] == {
+            "insight": 3,
+            "design_brief": 1,
+            "knowledge_node": 1,
+        }
+        assert payload["facets"]["content_type"] == {
+            "insight": 3,
+            "design_brief": 1,
+            "finding": 1,
+        }
+        assert payload["facets"]["tag"]["solar"] == 5
+        assert payload["facets"]["tag"]["energy"] == 4
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("mode", ["fulltext", "semantic", "hybrid"])
+def test_search_facets_command_respects_filters_in_all_modes(monkeypatch, mode):
+    store = _make_store()
+    _populate_search_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    monkeypatch.setattr("graph.rag.embeddings.get_embedding_provider", lambda *args, **kwargs: MockEmbeddingProvider())
+
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "search-facets",
+                "solar",
+                "--mode",
+                mode,
+                "--source-project",
+                "max",
+                "--content-type",
+                "insight",
+                "--tag",
+                "energy",
+                "--review-state",
+                "approved",
+                "--created-after",
+                "2026-04-21T00:00:00+00:00",
+                "--created-before",
+                "2026-04-23T00:00:00+00:00",
+                "--min-utility",
+                "0.9",
+                "--max-utility",
+                "0.93",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["mode"] == mode
+        assert payload["filters"] == {
+            "content_type": "insight",
+            "created_after": "2026-04-21T00:00:00+00:00",
+            "created_before": "2026-04-23T00:00:00+00:00",
+            "max_utility": 0.93,
+            "min_utility": 0.9,
+            "review_state": "approved",
+            "source_project": "max",
+            "tag": "energy",
+        }
+        assert payload["total_matches"] == 1
+        assert payload["facets"]["source_project"] == {"max": 1}
+        assert payload["facets"]["source_entity_type"] == {"insight": 1}
+        assert payload["facets"]["content_type"] == {"insight": 1}
+        assert payload["facets"]["tag"] == {"energy": 1, "solar": 1}
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_queries_cli_save_list_run_and_delete(monkeypatch):
     store = _make_store()
     _populate_search_graph(store)

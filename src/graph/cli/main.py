@@ -578,6 +578,8 @@ def _unit_matches_search_filters(
     created_before: str | datetime | None = None,
     min_utility: float | str | None = None,
     max_utility: float | str | None = None,
+    min_confidence: float | str | None = None,
+    max_confidence: float | str | None = None,
 ) -> bool:
     if source_project and str(unit.source_project) != source_project:
         return False
@@ -603,6 +605,14 @@ def _unit_matches_search_filters(
             return False
         if max_utility is not None and utility_score > float(max_utility):
             return False
+    if min_confidence is not None or max_confidence is not None:
+        if unit.confidence is None:
+            return False
+        confidence = float(unit.confidence)
+        if min_confidence is not None and confidence < float(min_confidence):
+            return False
+        if max_confidence is not None and confidence > float(max_confidence):
+            return False
     return True
 
 
@@ -619,6 +629,8 @@ def _search_fulltext_with_filters(
     created_before: str | datetime | None = None,
     min_utility: float | str | None = None,
     max_utility: float | str | None = None,
+    min_confidence: float | str | None = None,
+    max_confidence: float | str | None = None,
 ) -> list[tuple[object, str]]:
     fetch_limit = max(limit, 20)
 
@@ -637,6 +649,8 @@ def _search_fulltext_with_filters(
                 created_before=created_before,
                 min_utility=min_utility,
                 max_utility=max_utility,
+                min_confidence=min_confidence,
+                max_confidence=max_confidence,
             ):
                 filtered.append((unit, r.get("snippet") or _content_excerpt(unit.content)))
                 if len(filtered) >= limit:
@@ -661,6 +675,8 @@ def _search_scored_with_filters(
     created_before: str | datetime | None = None,
     min_utility: float | str | None = None,
     max_utility: float | str | None = None,
+    min_confidence: float | str | None = None,
+    max_confidence: float | str | None = None,
 ) -> list[tuple[object, float]]:
     fetch_limit = max(limit, 20)
 
@@ -678,6 +694,8 @@ def _search_scored_with_filters(
                 created_before=created_before,
                 min_utility=min_utility,
                 max_utility=max_utility,
+                min_confidence=min_confidence,
+                max_confidence=max_confidence,
             ):
                 filtered.append((unit, score))
                 if len(filtered) >= limit:
@@ -699,6 +717,8 @@ def _search_filters_dict(
     created_before: str | None = None,
     min_utility: float | None = None,
     max_utility: float | None = None,
+    min_confidence: float | None = None,
+    max_confidence: float | None = None,
 ) -> dict:
     return {
         key: value
@@ -711,6 +731,8 @@ def _search_filters_dict(
             "created_before": created_before,
             "min_utility": min_utility,
             "max_utility": max_utility,
+            "min_confidence": min_confidence,
+            "max_confidence": max_confidence,
         }.items()
         if value is not None
     }
@@ -745,6 +767,8 @@ def _do_search(
             created_before=filters.get("created_before"),
             min_utility=filters.get("min_utility"),
             max_utility=filters.get("max_utility"),
+            min_confidence=filters.get("min_confidence"),
+            max_confidence=filters.get("max_confidence"),
         )
         payload = {
             "query": query,
@@ -780,6 +804,8 @@ def _do_search(
             created_before=filters.get("created_before"),
             min_utility=filters.get("min_utility"),
             max_utility=filters.get("max_utility"),
+            min_confidence=filters.get("min_confidence"),
+            max_confidence=filters.get("max_confidence"),
         )
         snippets = {unit.id: _content_excerpt(unit.content) for unit, _score in pairs}
     else:
@@ -795,6 +821,8 @@ def _do_search(
             created_before=filters.get("created_before"),
             min_utility=filters.get("min_utility"),
             max_utility=filters.get("max_utility"),
+            min_confidence=filters.get("min_confidence"),
+            max_confidence=filters.get("max_confidence"),
         )
         fts_snippets = {
             row["unit_id"]: row.get("snippet") or ""
@@ -816,6 +844,137 @@ def _do_search(
     if filters:
         payload["filters"] = filters
     return payload
+
+
+def _sorted_counts(counts: dict[str, int]) -> dict[str, int]:
+    return dict(sorted(counts.items(), key=lambda item: (-item[1], item[0])))
+
+
+def _facet_payload_from_units(
+    query: str,
+    mode: str,
+    units: list[object],
+    *,
+    filters: dict | None = None,
+) -> dict:
+    facets = {
+        "source_project": {},
+        "source_entity_type": {},
+        "content_type": {},
+        "tag": {},
+    }
+
+    for unit in units:
+        values = {
+            "source_project": str(unit.source_project),
+            "source_entity_type": str(unit.source_entity_type),
+            "content_type": str(unit.content_type),
+        }
+        for facet_name, value in values.items():
+            counts = facets[facet_name]
+            counts[value] = counts.get(value, 0) + 1
+        for tag in unit.tags:
+            counts = facets["tag"]
+            counts[tag] = counts.get(tag, 0) + 1
+
+    payload = {
+        "query": query,
+        "mode": mode,
+        "total_matches": len(units),
+        "facets": {
+            facet_name: _sorted_counts(counts)
+            for facet_name, counts in facets.items()
+        },
+    }
+    if filters:
+        payload["filters"] = filters
+    return payload
+
+
+def _do_search_facets(
+    store: Store,
+    query: str,
+    *,
+    mode: str = "fulltext",
+    filters: dict | None = None,
+) -> dict:
+    _validate_search_mode(mode)
+    filters = filters or {}
+    seen: set[str] = set()
+    units = []
+
+    def add_unit(unit) -> None:
+        if unit.id in seen:
+            return
+        seen.add(unit.id)
+        units.append(unit)
+
+    if mode == "fulltext":
+        fetch_limit = 100
+        while True:
+            results = store.fts_search(query, limit=fetch_limit)
+            for row in results:
+                unit = store.get_unit(row["unit_id"])
+                if unit and _unit_matches_search_filters(
+                    unit,
+                    source_project=filters.get("source_project"),
+                    content_type=filters.get("content_type"),
+                    tag=filters.get("tag"),
+                    review_state=filters.get("review_state"),
+                    created_after=filters.get("created_after"),
+                    created_before=filters.get("created_before"),
+                    min_utility=filters.get("min_utility"),
+                    max_utility=filters.get("max_utility"),
+                    min_confidence=filters.get("min_confidence"),
+                    max_confidence=filters.get("max_confidence"),
+                ):
+                    add_unit(unit)
+            if len(results) < fetch_limit:
+                break
+            fetch_limit *= 2
+        return _facet_payload_from_units(query, mode, units, filters=filters)
+
+    from graph.rag.embeddings import get_embedding_provider
+    from graph.rag.search import RAGService
+
+    provider = get_embedding_provider(
+        settings.embedding_provider,
+        settings.embedding_api_key,
+        settings.embedding_model,
+    )
+    rag = RAGService(store, provider)
+    if mode == "semantic":
+        fetch_results = lambda q, fetch_limit: rag.search(  # noqa: E731
+            q, limit=fetch_limit, min_similarity=0.3
+        )
+    else:
+        fetch_results = lambda q, fetch_limit: rag.hybrid_search(  # noqa: E731
+            q, limit=fetch_limit
+        )
+
+    fetch_limit = 100
+    while True:
+        pairs = fetch_results(query, fetch_limit)
+        for unit, _score in pairs:
+            if _unit_matches_search_filters(
+                unit,
+                source_project=filters.get("source_project"),
+                content_type=filters.get("content_type"),
+                tag=filters.get("tag"),
+                review_state=filters.get("review_state"),
+                created_after=filters.get("created_after"),
+                created_before=filters.get("created_before"),
+                min_utility=filters.get("min_utility"),
+                max_utility=filters.get("max_utility"),
+                min_confidence=filters.get("min_confidence"),
+                max_confidence=filters.get("max_confidence"),
+            ):
+                add_unit(unit)
+        if len(pairs) < fetch_limit:
+            break
+        fetch_limit *= 2
+
+    return _facet_payload_from_units(query, mode, units, filters=filters)
 
 
 def _do_context_pack(
@@ -875,6 +1034,31 @@ def _render_search_payload(payload: dict, *, json_output: bool) -> None:
             f"  Type: {result['content_type']} | Tags: {', '.join(result['tags'])}"
         )
         typer.echo(f"  {result.get('snippet') or result.get('content', '')[:120]}...")
+
+
+def _render_search_facets_payload(payload: dict, *, json_output: bool) -> None:
+    if "error" in payload:
+        if json_output:
+            _json_echo(payload)
+        else:
+            typer.echo(payload["error"])
+        return
+
+    if json_output:
+        _json_echo(payload)
+        return
+
+    typer.echo(
+        f"Search facets: {payload['query']} ({payload['mode']}) - "
+        f"{payload['total_matches']} matches"
+    )
+    for facet_name, counts in payload["facets"].items():
+        typer.echo(f"\n{facet_name}:")
+        if not counts:
+            typer.echo("  (none)")
+            continue
+        for value, count in counts.items():
+            typer.echo(f"  {value}: {count}")
 
 
 def _do_ingest(
@@ -1549,6 +1733,16 @@ def search(
         "--max-utility",
         help="Filter to units with utility score at most this value",
     ),
+    min_confidence: float | None = typer.Option(
+        None,
+        "--min-confidence",
+        help="Filter to units with confidence at least this value",
+    ),
+    max_confidence: float | None = typer.Option(
+        None,
+        "--max-confidence",
+        help="Filter to units with confidence at most this value",
+    ),
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
     """Search knowledge units."""
@@ -1568,6 +1762,8 @@ def search(
                 created_before=created_before,
                 min_utility=min_utility,
                 max_utility=max_utility,
+                min_confidence=min_confidence,
+                max_confidence=max_confidence,
             ),
         )
     except ValueError as exc:
@@ -1577,6 +1773,86 @@ def search(
         }
 
     _render_search_payload(payload, json_output=json_output)
+    store.close()
+
+
+@app.command(name="search-facets")
+def search_facets(
+    query: str = typer.Argument(..., help="Search query"),
+    mode: str = typer.Option("fulltext", "--mode", "-m", help="Search mode: fulltext | semantic | hybrid"),
+    source_project: str | None = typer.Option(
+        None,
+        "--source-project",
+        "--project",
+        "-p",
+        help="Filter by source project",
+    ),
+    content_type: str | None = typer.Option(None, "--content-type", help="Filter by content type"),
+    tag: str | None = typer.Option(None, "--tag", help="Require an exact tag"),
+    review_state: str | None = typer.Option(
+        None,
+        "--review-state",
+        help="Filter by review state metadata",
+    ),
+    created_after: str | None = typer.Option(
+        None,
+        "--created-after",
+        help="Filter to units created on or after an ISO-8601 date/datetime",
+    ),
+    created_before: str | None = typer.Option(
+        None,
+        "--created-before",
+        help="Filter to units created on or before an ISO-8601 date/datetime",
+    ),
+    min_utility: float | None = typer.Option(
+        None,
+        "--min-utility",
+        help="Filter to units with utility score at least this value",
+    ),
+    max_utility: float | None = typer.Option(
+        None,
+        "--max-utility",
+        help="Filter to units with utility score at most this value",
+    ),
+    min_confidence: float | None = typer.Option(
+        None,
+        "--min-confidence",
+        help="Filter to units with confidence at least this value",
+    ),
+    max_confidence: float | None = typer.Option(
+        None,
+        "--max-confidence",
+        help="Filter to units with confidence at most this value",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Summarize matching knowledge units by faceted counts."""
+    store = _get_store()
+    try:
+        payload = _do_search_facets(
+            store,
+            query,
+            mode=mode,
+            filters=_search_filters_dict(
+                source_project=source_project,
+                content_type=content_type,
+                tag=tag,
+                review_state=review_state,
+                created_after=created_after,
+                created_before=created_before,
+                min_utility=min_utility,
+                max_utility=max_utility,
+                min_confidence=min_confidence,
+                max_confidence=max_confidence,
+            ),
+        )
+    except ValueError as exc:
+        payload = {
+            "error": str(exc),
+            "valid_modes": ["fulltext", "semantic", "hybrid"],
+        }
+
+    _render_search_facets_payload(payload, json_output=json_output)
     store.close()
 
 

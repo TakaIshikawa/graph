@@ -27,6 +27,7 @@ from graph.cli.main import (
     _do_rename_tag,
     _do_update_edge,
     _do_search,
+    _do_search_facets,
     _do_update_unit,
     _list_edges_payload,
     _search_filters_dict,
@@ -84,6 +85,14 @@ SEARCH_FILTER_SCHEMA = {
     "max_utility": {
         "type": "number",
         "description": "Filter to units with utility score at most this value",
+    },
+    "min_confidence": {
+        "type": "number",
+        "description": "Filter to units with confidence at least this value",
+    },
+    "max_confidence": {
+        "type": "number",
+        "description": "Filter to units with confidence at most this value",
     },
 }
 
@@ -220,6 +229,24 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "query": {"type": "string", "description": "Search query"},
                     "limit": {"type": "integer", "default": 10},
+                    **SEARCH_FILTER_SCHEMA,
+                    "mode": {
+                        "type": "string",
+                        "enum": ["hybrid", "semantic", "fulltext"],
+                        "default": "fulltext",
+                        "description": "Search mode",
+                    },
+                },
+                "required": ["query"],
+            },
+        ),
+        Tool(
+            name="search_facets",
+            description="Summarize matching knowledge units by source, entity type, content type, and tag facets.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query"},
                     **SEARCH_FILTER_SCHEMA,
                     "mode": {
                         "type": "string",
@@ -1025,6 +1052,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 created_before=arguments.get("created_before"),
                 min_utility=arguments.get("min_utility"),
                 max_utility=arguments.get("max_utility"),
+                min_confidence=arguments.get("min_confidence"),
+                max_confidence=arguments.get("max_confidence"),
             )
             payload = _do_search(
                 store,
@@ -1034,6 +1063,28 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 filters=filters,
             )
             return [TextContent(type="text", text=json.dumps(payload["results"]))]
+
+        elif name == "search_facets":
+            query = arguments["query"]
+            filters = _search_filters_dict(
+                source_project=arguments.get("source_project"),
+                content_type=arguments.get("content_type"),
+                review_state=arguments.get("review_state"),
+                tag=arguments.get("tag"),
+                created_after=arguments.get("created_after"),
+                created_before=arguments.get("created_before"),
+                min_utility=arguments.get("min_utility"),
+                max_utility=arguments.get("max_utility"),
+                min_confidence=arguments.get("min_confidence"),
+                max_confidence=arguments.get("max_confidence"),
+            )
+            payload = _do_search_facets(
+                store,
+                query,
+                mode=arguments.get("mode", "fulltext"),
+                filters=filters,
+            )
+            return [TextContent(type="text", text=json.dumps(payload))]
 
         elif name == "context_pack":
             query = arguments["query"]
@@ -1046,6 +1097,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 created_before=arguments.get("created_before"),
                 min_utility=arguments.get("min_utility"),
                 max_utility=arguments.get("max_utility"),
+                min_confidence=arguments.get("min_confidence"),
+                max_confidence=arguments.get("max_confidence"),
             )
             payload = _do_context_pack(
                 store,
@@ -1070,6 +1123,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     created_before=arguments.get("created_before"),
                     min_utility=arguments.get("min_utility"),
                     max_utility=arguments.get("max_utility"),
+                    min_confidence=arguments.get("min_confidence"),
+                    max_confidence=arguments.get("max_confidence"),
                 )
             )
             saved = store.save_query(
