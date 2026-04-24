@@ -322,6 +322,17 @@ class Store:
         ).fetchall()
         return [_row_to_edge(r) for r in rows]
 
+    def edge_exists_between(self, left_unit_id: str, right_unit_id: str) -> bool:
+        """Return true if any direct edge exists between two units in either direction."""
+        row = self.conn.execute(
+            """SELECT 1 FROM edges
+               WHERE (from_unit_id = ? AND to_unit_id = ?)
+                  OR (from_unit_id = ? AND to_unit_id = ?)
+               LIMIT 1""",
+            (left_unit_id, right_unit_id, right_unit_id, left_unit_id),
+        ).fetchone()
+        return row is not None
+
     # --- Sync state ---
 
     def get_sync_state(

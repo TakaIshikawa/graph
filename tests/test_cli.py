@@ -12,8 +12,9 @@ import pytest
 from typer.testing import CliRunner
 
 from graph.cli.main import app
+from graph.rag.embeddings import serialize_embedding
 from graph.store.db import Store
-from graph.types.enums import ContentType, EdgeRelation, SourceProject
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
 from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
@@ -545,6 +546,59 @@ def test_search_command_emits_semantic_json_with_scores(monkeypatch):
         assert payload["results"][0]["title"].startswith("Solar")
         assert payload["results"][0]["source_project"] == "max"
         assert isinstance(payload["results"][0]["score"], float)
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_infer_edges_command_dry_run_and_normal_mode(monkeypatch):
+    store = _make_store()
+    a = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="edge-a",
+            source_entity_type="insight",
+            title="Edge A",
+            content="Edge A content",
+            content_type=ContentType.INSIGHT,
+        )
+    )
+    b = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="edge-b",
+            source_entity_type="insight",
+            title="Edge B",
+            content="Edge B content",
+            content_type=ContentType.INSIGHT,
+        )
+    )
+    store.update_embedding(a.id, serialize_embedding([1.0, 0.0]))
+    store.update_embedding(b.id, serialize_embedding([0.9, 0.1]))
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        dry_result = runner.invoke(
+            app,
+            ["infer-edges", "--min-similarity", "0.8", "--dry-run", "--json"],
+        )
+
+        assert dry_result.exit_code == 0
+        dry_payload = json.loads(dry_result.output)
+        assert dry_payload["inserted"] == 0
+        assert dry_payload["candidates"][0]["status"] == "would_insert"
+        assert len(store.get_all_edges()) == 0
+
+        result = runner.invoke(app, ["infer-edges", "--min-similarity", "0.8", "--json"])
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["inserted"] == 1
+        edges = store.get_all_edges()
+        assert len(edges) == 1
+        assert edges[0].relation == EdgeRelation.RELATES_TO
+        assert edges[0].source == EdgeSource.INFERRED
     finally:
         store.close()
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]

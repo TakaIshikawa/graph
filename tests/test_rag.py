@@ -10,8 +10,8 @@ import pytest
 from graph.rag.embeddings import cosine_similarity, deserialize_embedding, serialize_embedding
 from graph.rag.search import RAGService
 from graph.store.db import Store
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit
 
 
 class MockEmbeddingProvider:
@@ -170,3 +170,169 @@ class TestRAGService:
     def test_embed_nonexistent_unit(self, store: Store, rag_service: RAGService):
         # Should not raise
         rag_service.embed_and_store("nonexistent-id")
+
+    def test_infer_similarity_edges_dry_run_does_not_write(self, store: Store, rag_service: RAGService):
+        a = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="a",
+                source_entity_type="insight",
+                title="Alpha",
+                content="Alpha content",
+            )
+        )
+        b = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="b",
+                source_entity_type="insight",
+                title="Beta",
+                content="Beta content",
+            )
+        )
+        c = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="c",
+                source_entity_type="insight",
+                title="Gamma",
+                content="Gamma content",
+            )
+        )
+        store.update_embedding(a.id, serialize_embedding([1.0, 0.0]))
+        store.update_embedding(b.id, serialize_embedding([0.8, 0.6]))
+        store.update_embedding(c.id, serialize_embedding([0.0, 1.0]))
+
+        result = rag_service.infer_similarity_edges(min_similarity=0.75, dry_run=True)
+
+        assert result["inserted"] == 0
+        assert result["skipped"] == 0
+        assert len(result["candidates"]) == 1
+        assert result["candidates"][0]["status"] == "would_insert"
+        assert len(store.get_all_edges()) == 0
+
+    def test_infer_similarity_edges_inserts_inferred_relates_to_edge(self, store: Store, rag_service: RAGService):
+        a = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="a",
+                source_entity_type="insight",
+                title="Alpha",
+                content="Alpha content",
+            )
+        )
+        b = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="b",
+                source_entity_type="insight",
+                title="Beta",
+                content="Beta content",
+            )
+        )
+        store.update_embedding(a.id, serialize_embedding([1.0, 0.0]))
+        store.update_embedding(b.id, serialize_embedding([0.8, 0.6]))
+
+        result = rag_service.infer_similarity_edges(min_similarity=0.75)
+
+        assert result["inserted"] == 1
+        assert result["skipped"] == 0
+        edges = store.get_all_edges()
+        assert len(edges) == 1
+        assert edges[0].from_unit_id == a.id
+        assert edges[0].to_unit_id == b.id
+        assert edges[0].relation == EdgeRelation.RELATES_TO
+        assert edges[0].source == EdgeSource.INFERRED
+        assert edges[0].weight == pytest.approx(0.8)
+        assert edges[0].metadata["inference"] == "embedding_similarity"
+
+    def test_infer_similarity_edges_skips_existing_direct_edge(self, store: Store, rag_service: RAGService):
+        a = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="a",
+                source_entity_type="insight",
+                title="Alpha",
+                content="Alpha content",
+            )
+        )
+        b = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="b",
+                source_entity_type="insight",
+                title="Beta",
+                content="Beta content",
+            )
+        )
+        store.update_embedding(a.id, serialize_embedding([1.0, 0.0]))
+        store.update_embedding(b.id, serialize_embedding([0.8, 0.6]))
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=b.id,
+                to_unit_id=a.id,
+                relation=EdgeRelation.BUILDS_ON,
+            )
+        )
+
+        result = rag_service.infer_similarity_edges(min_similarity=0.75)
+
+        assert result["inserted"] == 0
+        assert result["skipped"] == 1
+        assert result["candidates"][0]["status"] == "skipped_existing_edge"
+        assert len(store.get_all_edges()) == 1
+
+    def test_infer_similarity_edges_applies_source_and_content_filters(
+        self, store: Store, rag_service: RAGService
+    ):
+        units = [
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="max-insight-a",
+                source_entity_type="insight",
+                title="Max insight A",
+                content="A",
+                content_type=ContentType.INSIGHT,
+            ),
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="max-finding",
+                source_entity_type="finding",
+                title="Max finding",
+                content="B",
+                content_type=ContentType.FINDING,
+            ),
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="forty-two-insight",
+                source_entity_type="knowledge_node",
+                title="Forty two insight",
+                content="C",
+                content_type=ContentType.INSIGHT,
+            ),
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="max-insight-d",
+                source_entity_type="insight",
+                title="Max insight D",
+                content="D",
+                content_type=ContentType.INSIGHT,
+            ),
+        ]
+        inserted = [store.insert_unit(unit) for unit in units]
+        for unit in inserted:
+            store.update_embedding(unit.id, serialize_embedding([1.0, 0.0]))
+
+        result = rag_service.infer_similarity_edges(
+            min_similarity=0.99,
+            source_project="max",
+            content_type="insight",
+        )
+
+        assert result["inserted"] == 1
+        edges = store.get_all_edges()
+        assert len(edges) == 1
+        assert {edges[0].from_unit_id, edges[0].to_unit_id} == {
+            inserted[0].id,
+            inserted[3].id,
+        }

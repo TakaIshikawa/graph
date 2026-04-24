@@ -347,6 +347,27 @@ def _do_embed(
     return total
 
 
+def _do_infer_edges(
+    store: Store,
+    *,
+    source_project: str | None = None,
+    content_type: str | None = None,
+    min_similarity: float = 0.75,
+    limit: int = 100,
+    dry_run: bool = False,
+) -> dict:
+    from graph.rag.search import RAGService
+
+    rag = RAGService(store, provider=None)
+    return rag.infer_similarity_edges(
+        min_similarity=min_similarity,
+        limit=limit,
+        source_project=source_project,
+        content_type=content_type,
+        dry_run=dry_run,
+    )
+
+
 @app.command()
 def embed(
     project: str | None = typer.Option(None, "--project", "-p", help="Filter by source project"),
@@ -356,6 +377,51 @@ def embed(
     """Generate embeddings for all units missing them."""
     store = _get_store()
     _do_embed(store, project=project, batch_size=batch_size, delay=delay)
+    store.close()
+
+
+@app.command(name="infer-edges")
+def infer_edges(
+    source_project: str | None = typer.Option(
+        None,
+        "--source-project",
+        "--project",
+        "-p",
+        help="Filter candidate units by source project",
+    ),
+    content_type: str | None = typer.Option(None, "--content-type", help="Filter candidate units by content type"),
+    min_similarity: float = typer.Option(0.75, "--min-similarity", help="Minimum cosine similarity"),
+    limit: int = typer.Option(100, "--limit", "-n", help="Max candidate pairs to process"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview inferred edges without writing"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Infer RELATES_TO edges between semantically similar embedded units."""
+    store = _get_store()
+    result = _do_infer_edges(
+        store,
+        source_project=source_project,
+        content_type=content_type,
+        min_similarity=min_similarity,
+        limit=limit,
+        dry_run=dry_run,
+    )
+
+    if json_output:
+        _json_echo(result)
+        store.close()
+        return
+
+    action = "Would insert" if dry_run else "Inserted"
+    typer.echo(
+        f"{action} {result['inserted'] if not dry_run else len([c for c in result['candidates'] if c['status'] == 'would_insert'])} "
+        f"inferred edges; skipped {result['skipped']} existing direct edges."
+    )
+    for candidate in result["candidates"]:
+        typer.echo(
+            f"  {candidate['status']}: {candidate['from_title']} -> "
+            f"{candidate['to_title']} ({candidate['similarity']:.3f})"
+        )
+
     store.close()
 
 

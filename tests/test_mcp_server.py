@@ -7,8 +7,9 @@ import json
 
 from graph.adapters.base import IngestResult
 from graph.mcp import server as mcp_server
+from graph.rag.embeddings import serialize_embedding
 from graph.store.db import Store
-from graph.types.enums import ContentType, EdgeRelation, SourceProject
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
 from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
@@ -467,3 +468,87 @@ def test_analyze_tags_tool_returns_summary_and_detail_json(tmp_path, monkeypatch
         "battery",
         "solar",
     ]
+
+
+def test_infer_edges_tool_returns_counts_and_inserts_edges(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    a = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="edge-a",
+            source_entity_type="insight",
+            title="Edge A",
+            content="Edge A content",
+            content_type=ContentType.INSIGHT,
+        )
+    )
+    b = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="edge-b",
+            source_entity_type="insight",
+            title="Edge B",
+            content="Edge B content",
+            content_type=ContentType.INSIGHT,
+        )
+    )
+    c = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="edge-c",
+            source_entity_type="knowledge_node",
+            title="Edge C",
+            content="Edge C content",
+            content_type=ContentType.INSIGHT,
+        )
+    )
+    store.update_embedding(a.id, serialize_embedding([1.0, 0.0]))
+    store.update_embedding(b.id, serialize_embedding([0.9, 0.1]))
+    store.update_embedding(c.id, serialize_embedding([1.0, 0.0]))
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    assert any(tool.name == "infer_edges" for tool in tools)
+
+    dry_response = asyncio.run(
+        mcp_server.call_tool(
+            "infer_edges",
+            {
+                "source_project": "max",
+                "content_type": "insight",
+                "min_similarity": 0.8,
+                "dry_run": True,
+            },
+        )
+    )
+    dry_payload = json.loads(dry_response[0].text)
+    assert dry_payload["inserted"] == 0
+    assert dry_payload["skipped"] == 0
+    assert len(dry_payload["candidates"]) == 1
+
+    normal_response = asyncio.run(
+        mcp_server.call_tool(
+            "infer_edges",
+            {
+                "source_project": "max",
+                "content_type": "insight",
+                "min_similarity": 0.8,
+            },
+        )
+    )
+    payload = json.loads(normal_response[0].text)
+    assert payload["inserted"] == 1
+    assert payload["skipped"] == 0
+
+    store = Store(str(db_path))
+    try:
+        edges = store.get_all_edges()
+        assert len(edges) == 1
+        assert edges[0].relation == EdgeRelation.RELATES_TO
+        assert edges[0].source == EdgeSource.INFERRED
+        assert {edges[0].from_unit_id, edges[0].to_unit_id} == {a.id, b.id}
+    finally:
+        store.close()

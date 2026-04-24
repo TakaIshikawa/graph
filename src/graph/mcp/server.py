@@ -10,7 +10,12 @@ from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
 from graph.config import settings
-from graph.cli.main import _do_export_json, _do_export_obsidian, _do_import_json
+from graph.cli.main import (
+    _do_export_json,
+    _do_export_obsidian,
+    _do_import_json,
+    _do_infer_edges,
+)
 from graph.graph.service import GraphService
 from graph.store.db import Store
 from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
@@ -327,6 +332,47 @@ async def list_tools() -> list[Tool]:
                     "weight": {"type": "number", "default": 1.0},
                 },
                 "required": ["from_unit_id", "to_unit_id", "relation"],
+            },
+        ),
+        Tool(
+            name="infer_edges",
+            description="Infer RELATES_TO edges between embedded units with high semantic similarity.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "source_project": {
+                        "type": "string",
+                        "enum": SUPPORTED_SYNC_PROJECTS,
+                        "description": "Filter candidate units by source project",
+                    },
+                    "content_type": {
+                        "type": "string",
+                        "enum": [
+                            "insight",
+                            "finding",
+                            "idea",
+                            "design_brief",
+                            "artifact",
+                            "metadata",
+                        ],
+                        "description": "Filter candidate units by content type",
+                    },
+                    "min_similarity": {
+                        "type": "number",
+                        "default": 0.75,
+                        "description": "Minimum cosine similarity",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "default": 100,
+                        "description": "Max candidate pairs to process",
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Preview inferred edges without writing",
+                    },
+                },
             },
         ),
         Tool(
@@ -689,6 +735,17 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     }),
                 )
             ]
+
+        elif name == "infer_edges":
+            result = _do_infer_edges(
+                store,
+                source_project=arguments.get("source_project"),
+                content_type=arguments.get("content_type"),
+                min_similarity=arguments.get("min_similarity", 0.75),
+                limit=arguments.get("limit", 100),
+                dry_run=arguments.get("dry_run", False),
+            )
+            return [TextContent(type="text", text=json.dumps(result))]
 
         elif name == "stats":
             gs = GraphService(store)

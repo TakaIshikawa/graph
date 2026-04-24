@@ -9,13 +9,15 @@ from graph.rag.embeddings import (
     serialize_embedding,
 )
 from graph.store.db import Store
+from graph.types.enums import EdgeRelation, EdgeSource
+from graph.types.models import KnowledgeEdge
 from graph.types.models import KnowledgeUnit
 
 
 class RAGService:
     """Semantic search over knowledge units."""
 
-    def __init__(self, store: Store, provider: EmbeddingProvider) -> None:
+    def __init__(self, store: Store, provider: EmbeddingProvider | None) -> None:
         self.store = store
         self.provider = provider
 
@@ -24,6 +26,8 @@ class RAGService:
         text = f"{unit.title}\n{unit.content}"
         if unit.tags:
             text += f"\n{' '.join(unit.tags)}"
+        if self.provider is None:
+            raise RuntimeError("Embedding provider is required to embed units")
         return self.provider.embed(text)
 
     def embed_and_store(self, unit_id: str) -> None:
@@ -48,6 +52,8 @@ class RAGService:
                 text += f"\n{' '.join(u.tags)}"
             texts.append(text)
 
+        if self.provider is None:
+            raise RuntimeError("Embedding provider is required to embed units")
         embeddings = self.provider.embed_batch(texts)
 
         for unit, emb in zip(units, embeddings):
@@ -64,6 +70,8 @@ class RAGService:
         content_type: str | None = None,
     ) -> list[tuple[KnowledgeUnit, float]]:
         """Semantic search. Returns (unit, similarity) pairs."""
+        if self.provider is None:
+            raise RuntimeError("Embedding provider is required for semantic search")
         query_embedding = self.provider.embed(query)
 
         candidates = self.store.get_units_with_embeddings(
@@ -119,3 +127,81 @@ class RAGService:
             if unit:
                 results.append((unit, score))
         return results
+
+    def infer_similarity_edges(
+        self,
+        *,
+        min_similarity: float = 0.75,
+        limit: int = 100,
+        source_project: str | None = None,
+        content_type: str | None = None,
+        dry_run: bool = False,
+    ) -> dict:
+        """Infer RELATES_TO edges between embedded units above a similarity threshold."""
+        candidates = self.store.get_units_with_embeddings(
+            source_project=source_project,
+            content_type=content_type,
+        )
+
+        similar_pairs = []
+        for left_idx, (left_unit, left_blob) in enumerate(candidates):
+            left_embedding = deserialize_embedding(left_blob)
+            for right_unit, right_blob in candidates[left_idx + 1 :]:
+                similarity = cosine_similarity(
+                    left_embedding,
+                    deserialize_embedding(right_blob),
+                )
+                if similarity >= min_similarity:
+                    similar_pairs.append((left_unit, right_unit, similarity))
+
+        similar_pairs.sort(key=lambda item: item[2], reverse=True)
+
+        inserted = 0
+        skipped = 0
+        results = []
+        for left_unit, right_unit, similarity in similar_pairs[:limit]:
+            pair = {
+                "from_unit_id": left_unit.id,
+                "from_title": left_unit.title,
+                "to_unit_id": right_unit.id,
+                "to_title": right_unit.title,
+                "similarity": similarity,
+            }
+
+            if self.store.edge_exists_between(left_unit.id, right_unit.id):
+                skipped += 1
+                results.append({**pair, "status": "skipped_existing_edge"})
+                continue
+
+            if dry_run:
+                results.append({**pair, "status": "would_insert"})
+                continue
+
+            edge = KnowledgeEdge(
+                from_unit_id=left_unit.id,
+                to_unit_id=right_unit.id,
+                relation=EdgeRelation.RELATES_TO,
+                weight=similarity,
+                source=EdgeSource.INFERRED,
+                metadata={
+                    "inference": "embedding_similarity",
+                    "similarity": similarity,
+                    "min_similarity": min_similarity,
+                    "source_project_filter": source_project,
+                    "content_type_filter": content_type,
+                },
+            )
+            self.store.insert_edge(edge)
+            inserted += 1
+            results.append({**pair, "status": "inserted"})
+
+        return {
+            "inserted": inserted,
+            "skipped": skipped,
+            "dry_run": dry_run,
+            "min_similarity": min_similarity,
+            "limit": limit,
+            "source_project": source_project,
+            "content_type": content_type,
+            "candidates": results,
+        }
