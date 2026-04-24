@@ -2468,6 +2468,62 @@ def test_source_coverage_command_emits_json_matching_service(monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_orphans_command_emits_json_and_readable_filtered_units(monkeypatch):
+    store = _make_store()
+    _populate_graph(store)
+    max_orphan = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="max-orphan",
+            source_entity_type="insight",
+            title="Max orphan",
+            content="No edges",
+            content_type=ContentType.INSIGHT,
+            tags=["energy"],
+        )
+    )
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        json_result = runner.invoke(
+            app,
+            [
+                "orphans",
+                "--source-project",
+                "max",
+                "--content-type",
+                "insight",
+                "--tag",
+                "energy",
+                "--limit",
+                "1",
+                "--json",
+            ],
+        )
+
+        assert json_result.exit_code == 0
+        payload = json.loads(json_result.output)
+        assert payload["total_count"] == 1
+        assert payload["returned_count"] == 1
+        assert payload["filters"] == {
+            "source_project": "max",
+            "content_type": "insight",
+            "tag": "energy",
+            "limit": 1,
+        }
+        assert [unit["id"] for unit in payload["units"]] == [max_orphan.id]
+
+        readable = runner.invoke(app, ["orphans", "--source-project", "presence"])
+        assert readable.exit_code == 0
+        assert "Orphan units: 1 of 1 shown" in readable.output
+        assert "Node D" in readable.output
+        assert "ID:" in readable.output
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_freshness_command_emits_json_and_days_controls_window(monkeypatch):
     store = _make_store()
     now = datetime.now(timezone.utc)

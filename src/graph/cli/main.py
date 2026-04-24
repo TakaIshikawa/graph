@@ -3876,6 +3876,50 @@ def gaps(
 
 
 @app.command()
+def orphans(
+    source_project: str | None = typer.Option(
+        None, "--source-project", help="Filter by source project"
+    ),
+    content_type: str | None = typer.Option(
+        None, "--content-type", help="Filter by content type"
+    ),
+    tag: str | None = typer.Option(None, "--tag", help="Require an exact graph tag"),
+    limit: int = typer.Option(20, "--limit", "-n", help="Max results"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Find knowledge units with no incoming or outgoing edges."""
+    from graph.graph.service import GraphService
+
+    store = _get_store()
+    gs = GraphService(store)
+    payload = gs.find_orphan_units(
+        source_project=source_project,
+        content_type=content_type,
+        tag=tag,
+        limit=limit,
+    )
+
+    if json_output:
+        _json_echo(payload)
+        store.close()
+        return
+
+    if not payload["units"]:
+        typer.echo("No orphan units found.")
+        store.close()
+        return
+
+    typer.echo(
+        f"Orphan units: {payload['returned_count']} of {payload['total_count']} shown"
+    )
+    for unit in payload["units"]:
+        typer.echo(f"  [{unit['source_project']}] {unit['title']}")
+        typer.echo(f"    ID: {unit['id']}")
+
+    store.close()
+
+
+@app.command()
 def central(
     limit: int = typer.Option(10, "--limit", "-n", help="Max results"),
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),

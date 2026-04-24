@@ -848,6 +848,54 @@ class GraphService:
         gaps.sort(key=lambda g: g["score"], reverse=True)
         return gaps
 
+    def find_orphan_units(
+        self,
+        *,
+        source_project: str | None = None,
+        content_type: str | None = None,
+        tag: str | None = None,
+        limit: int = 20,
+    ) -> dict:
+        """Return units with no incoming or outgoing edges."""
+        units = self.store.get_all_units(limit=1000000000)
+        connected_unit_ids: set[str] = set()
+        for edge in self.store.get_all_edges():
+            connected_unit_ids.add(edge.from_unit_id)
+            connected_unit_ids.add(edge.to_unit_id)
+
+        filters = {
+            "source_project": source_project,
+            "content_type": content_type,
+            "tag": tag,
+            "limit": max(0, int(limit)),
+        }
+
+        def _matches(unit) -> bool:
+            return (
+                unit.id not in connected_unit_ids
+                and (source_project is None or str(unit.source_project) == source_project)
+                and (content_type is None or str(unit.content_type) == content_type)
+                and (tag is None or tag in unit.tags)
+            )
+
+        matching_units = [unit for unit in units if _matches(unit)]
+        matching_units.sort(
+            key=lambda unit: (
+                str(unit.source_project),
+                str(unit.content_type),
+                unit.title.lower(),
+                unit.id,
+            )
+        )
+        returned_units = matching_units[: filters["limit"]]
+
+        return {
+            "total_count": len(matching_units),
+            "returned_count": len(returned_units),
+            "filters": filters,
+            "units": [self._unit_export_data(unit) for unit in returned_units],
+        }
+
     def cross_project_connections(self) -> list[dict]:
         """Analyze cross-project edge density."""
         project_pairs: dict[tuple[str, str], int] = {}

@@ -3067,6 +3067,93 @@ def test_analyze_source_coverage_tool_returns_service_payload(tmp_path, monkeypa
     assert by_source[("sota", "paper")]["unit_count"] == 0
 
 
+def test_find_orphan_units_tool_returns_counts_filters_and_units(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    source = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="source",
+            source_entity_type="knowledge_node",
+            title="Source node",
+            content="Has outgoing edge",
+            content_type=ContentType.FINDING,
+            tags=["energy"],
+        )
+    )
+    target = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="target",
+            source_entity_type="knowledge_node",
+            title="Target node",
+            content="Has incoming edge",
+            content_type=ContentType.FINDING,
+            tags=["energy"],
+        )
+    )
+    max_orphan = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="max-orphan",
+            source_entity_type="insight",
+            title="Max orphan",
+            content="No edges",
+            content_type=ContentType.INSIGHT,
+            tags=["energy"],
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.PRESENCE,
+            source_id="presence-orphan",
+            source_entity_type="knowledge_item",
+            title="Presence orphan",
+            content="No edges",
+            content_type=ContentType.ARTIFACT,
+            tags=["archive"],
+        )
+    )
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=source.id,
+            to_unit_id=target.id,
+            relation=EdgeRelation.BUILDS_ON,
+        )
+    )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    orphan_tool = next(tool for tool in tools if tool.name == "find_orphan_units")
+    assert orphan_tool.inputSchema["properties"]["limit"]["default"] == 20
+    assert "source_project" in orphan_tool.inputSchema["properties"]
+
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "find_orphan_units",
+            {
+                "source_project": "max",
+                "content_type": "insight",
+                "tag": "energy",
+                "limit": 5,
+            },
+        )
+    )
+    payload = json.loads(response[0].text)
+
+    assert payload["total_count"] == 1
+    assert payload["returned_count"] == 1
+    assert payload["filters"] == {
+        "source_project": "max",
+        "content_type": "insight",
+        "tag": "energy",
+        "limit": 5,
+    }
+    assert [unit["id"] for unit in payload["units"]] == [max_orphan.id]
+
+
 def test_infer_edges_tool_returns_counts_and_inserts_edges(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))

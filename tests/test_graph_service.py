@@ -768,6 +768,85 @@ class TestGraphService:
         isolated = [g for g in gaps if g["gap_type"] == "isolated"]
         assert len(isolated) == 1
 
+    def test_find_orphan_units_excludes_incoming_and_outgoing_and_filters(
+        self, store: Store
+    ):
+        source = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="source",
+                source_entity_type="knowledge_node",
+                title="Source node",
+                content="Has outgoing edge",
+                content_type=ContentType.FINDING,
+                tags=["energy"],
+            )
+        )
+        target = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="target",
+                source_entity_type="knowledge_node",
+                title="Target node",
+                content="Has incoming edge",
+                content_type=ContentType.FINDING,
+                tags=["energy"],
+            )
+        )
+        max_orphan = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="max-orphan",
+                source_entity_type="insight",
+                title="Max orphan",
+                content="No edges",
+                content_type=ContentType.INSIGHT,
+                tags=["energy", "solar"],
+            )
+        )
+        store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.PRESENCE,
+                source_id="presence-orphan",
+                source_entity_type="knowledge_item",
+                title="Presence orphan",
+                content="No edges",
+                content_type=ContentType.ARTIFACT,
+                tags=["archive"],
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=source.id,
+                to_unit_id=target.id,
+                relation=EdgeRelation.BUILDS_ON,
+            )
+        )
+
+        result = GraphService(store).find_orphan_units(
+            source_project="max",
+            content_type="insight",
+            tag="energy",
+            limit=1,
+        )
+
+        assert result["total_count"] == 1
+        assert result["returned_count"] == 1
+        assert result["filters"] == {
+            "source_project": "max",
+            "content_type": "insight",
+            "tag": "energy",
+            "limit": 1,
+        }
+        assert [unit["id"] for unit in result["units"]] == [max_orphan.id]
+
+        all_orphans = GraphService(store).find_orphan_units(limit=10)
+        assert all_orphans["total_count"] == 2
+        assert {unit["title"] for unit in all_orphans["units"]} == {
+            "Max orphan",
+            "Presence orphan",
+        }
+
     def test_cross_project_connections(self, populated_store: Store):
         gs = GraphService(populated_store)
         gs.rebuild()

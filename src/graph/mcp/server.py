@@ -567,6 +567,30 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="find_orphan_units",
+            description="Find knowledge units with no incoming or outgoing edges.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "source_project": {
+                        "type": "string",
+                        "enum": SUPPORTED_SYNC_PROJECTS,
+                        "description": "Filter by source project",
+                    },
+                    "content_type": {
+                        "type": "string",
+                        "enum": [content_type.value for content_type in ContentType],
+                        "description": "Filter by content type",
+                    },
+                    "tag": {
+                        "type": "string",
+                        "description": "Require an exact graph tag",
+                    },
+                    "limit": {"type": "integer", "default": 20},
+                },
+            },
+        ),
+        Tool(
             name="analyze_central",
             description="Find the most central/important knowledge units by PageRank.",
             inputSchema={
@@ -1812,6 +1836,16 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     )
 
             return [TextContent(type="text", text=json.dumps(results))]
+
+        elif name == "find_orphan_units":
+            gs = GraphService(store)
+            result = gs.find_orphan_units(
+                source_project=arguments.get("source_project"),
+                content_type=arguments.get("content_type"),
+                tag=arguments.get("tag"),
+                limit=arguments.get("limit", 20),
+            )
+            return [TextContent(type="text", text=json.dumps(result))]
 
         elif name == "analyze_central":
             gs = GraphService(store)
