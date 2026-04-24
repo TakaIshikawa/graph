@@ -60,6 +60,42 @@ def _populate_tags_graph(store: Store) -> None:
         store.insert_unit(unit)
 
 
+def _populate_timeline_graph(store: Store) -> None:
+    for unit in [
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="jan-solar",
+            source_entity_type="insight",
+            title="January solar",
+            content="Solar storage",
+            content_type=ContentType.INSIGHT,
+            tags=["energy", "solar"],
+            created_at=datetime.fromisoformat("2026-01-15T10:00:00+00:00"),
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="feb-grid",
+            source_entity_type="knowledge_node",
+            title="February grid",
+            content="Grid finding",
+            content_type=ContentType.FINDING,
+            tags=["energy", "grid"],
+            created_at=datetime.fromisoformat("2026-02-05T10:00:00+00:00"),
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="feb-battery",
+            source_entity_type="insight",
+            title="February battery",
+            content="Battery storage",
+            content_type=ContentType.INSIGHT,
+            tags=["energy", "storage"],
+            created_at=datetime.fromisoformat("2026-02-20T10:00:00+00:00"),
+        ),
+    ]:
+        store.insert_unit(unit)
+
+
 def _populate_tag_synonym_graph(store: Store) -> None:
     for unit in [
         KnowledgeUnit(
@@ -1335,6 +1371,63 @@ def test_analyze_tags_tool_returns_summary_and_detail_json(tmp_path, monkeypatch
         "battery",
         "solar",
     ]
+
+
+def test_timeline_tool_matches_service_schema_and_validates_inputs(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    _populate_timeline_graph(store)
+    store.close()
+
+    monkeypatch.setattr(
+        mcp_server,
+        "_get_store",
+        lambda: Store(str(db_path)),
+    )
+
+    tools = asyncio.run(mcp_server.list_tools())
+    timeline_tool = next(tool for tool in tools if tool.name == "timeline")
+    assert timeline_tool.inputSchema["properties"]["bucket"]["enum"] == [
+        "day",
+        "week",
+        "month",
+        "year",
+    ]
+    assert timeline_tool.inputSchema["properties"]["field"]["enum"] == [
+        "created_at",
+        "ingested_at",
+        "updated_at",
+    ]
+
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "timeline",
+            {
+                "bucket": "month",
+                "source_project": "max",
+                "content_type": "insight",
+            },
+        )
+    )
+    payload = json.loads(response[0].text)
+    assert payload["field"] == "created_at"
+    assert payload["total"] == 2
+    assert [item["bucket"] for item in payload["buckets"]] == ["2026-01", "2026-02"]
+    assert payload["buckets"][1]["content_types"] == {"insight": 1}
+
+    try:
+        asyncio.run(mcp_server.call_tool("timeline", {"bucket": "quarter"}))
+    except ValueError as exc:
+        assert "Unsupported timeline bucket" in str(exc)
+    else:
+        raise AssertionError("timeline should reject unsupported buckets")
+
+    try:
+        asyncio.run(mcp_server.call_tool("timeline", {"field": "deleted_at"}))
+    except ValueError as exc:
+        assert "Unsupported timeline field" in str(exc)
+    else:
+        raise AssertionError("timeline should reject unsupported fields")
 
 
 def test_suggest_tag_synonyms_tool_matches_service_structure(tmp_path, monkeypatch):

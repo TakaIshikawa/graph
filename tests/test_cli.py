@@ -298,6 +298,42 @@ def _populate_tags_graph(store: Store) -> None:
         store.insert_unit(unit)
 
 
+def _populate_timeline_graph(store: Store) -> None:
+    for unit in [
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="jan-solar",
+            source_entity_type="insight",
+            title="January solar",
+            content="Solar storage",
+            content_type=ContentType.INSIGHT,
+            tags=["energy", "solar", "storage"],
+            created_at=datetime.fromisoformat("2026-01-15T10:00:00+00:00"),
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="feb-grid",
+            source_entity_type="knowledge_node",
+            title="February grid",
+            content="Grid finding",
+            content_type=ContentType.FINDING,
+            tags=["energy", "grid"],
+            created_at=datetime.fromisoformat("2026-02-05T10:00:00+00:00"),
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="feb-battery",
+            source_entity_type="insight",
+            title="February battery",
+            content="Battery storage",
+            content_type=ContentType.INSIGHT,
+            tags=["energy", "storage"],
+            created_at=datetime.fromisoformat("2026-02-20T10:00:00+00:00"),
+        ),
+    ]:
+        store.insert_unit(unit)
+
+
 def _populate_tag_synonym_graph(store: Store) -> None:
     for unit in [
         KnowledgeUnit(
@@ -1599,6 +1635,60 @@ def test_tags_command_lists_top_tags_with_breakdowns(monkeypatch):
         assert [item["tag"] for item in payload["tags"]] == ["energy", "solar"]
         assert payload["tags"][0]["source_projects"] == {"max": 2, "forty_two": 1}
         assert payload["tags"][0]["content_types"] == {"insight": 2, "finding": 1}
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_timeline_command_returns_sorted_json_buckets_and_filters(monkeypatch):
+    store = _make_store()
+    _populate_timeline_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "timeline",
+                "--bucket",
+                "month",
+                "--source-project",
+                "max",
+                "--content-type",
+                "insight",
+                "--tag",
+                "storage",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["total"] == 2
+        assert [item["bucket"] for item in payload["buckets"]] == [
+            "2026-01",
+            "2026-02",
+        ]
+        assert payload["buckets"][0]["source_projects"] == {"max": 1}
+        assert payload["buckets"][1]["top_tags"][0] == {"tag": "energy", "count": 1}
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_timeline_command_empty_graph_returns_empty_buckets(monkeypatch):
+    store = _make_store()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(app, ["timeline", "--bucket", "month", "--json"])
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["total"] == 0
+        assert payload["buckets"] == []
     finally:
         store.close()
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]

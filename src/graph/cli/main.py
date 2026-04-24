@@ -2358,6 +2358,84 @@ def source_coverage(
 
 
 @app.command()
+def timeline(
+    bucket: str = typer.Option(
+        "month",
+        "--bucket",
+        help="Bucket size: day | week | month | year",
+    ),
+    field: str = typer.Option(
+        "created_at",
+        "--field",
+        help="Timestamp field: created_at | ingested_at | updated_at",
+    ),
+    start: str | None = typer.Option(None, "--start", help="ISO-8601 inclusive start"),
+    end: str | None = typer.Option(None, "--end", help="ISO-8601 inclusive end"),
+    limit: int | None = typer.Option(None, "--limit", "-n", help="Max buckets to return"),
+    source_project: str | None = typer.Option(
+        None,
+        "--source-project",
+        "--project",
+        "-p",
+        help="Filter by source project",
+    ),
+    content_type: str | None = typer.Option(None, "--content-type", help="Filter by content type"),
+    tag: str | None = typer.Option(None, "--tag", help="Require an exact graph tag"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Analyze knowledge growth over time."""
+    from graph.graph.service import GraphService
+
+    store = _get_store()
+    gs = GraphService(store)
+    try:
+        result = gs.analyze_timeline(
+            bucket=bucket,
+            field=field,
+            start=start,
+            end=end,
+            limit=limit,
+            source_project=source_project,
+            content_type=content_type,
+            tag=tag,
+        )
+    except ValueError as exc:
+        store.close()
+        raise typer.BadParameter(str(exc)) from exc
+
+    if json_output:
+        _json_echo(result)
+        store.close()
+        return
+
+    typer.echo(
+        f"Timeline: {result['total']} units by {result['bucket']} using {result['field']}"
+    )
+    if not result["buckets"]:
+        typer.echo("No timeline buckets found.")
+        store.close()
+        return
+
+    for item in result["buckets"]:
+        projects = ", ".join(
+            f"{project}:{count}" for project, count in item["source_projects"].items()
+        )
+        content_types = ", ".join(
+            f"{found_content_type}:{count}"
+            for found_content_type, count in item["content_types"].items()
+        )
+        tags = ", ".join(
+            f"{found_tag['tag']}:{found_tag['count']}" for found_tag in item["top_tags"]
+        )
+        typer.echo(f"{item['bucket']}: {item['count']} units")
+        typer.echo(f"  Projects: {projects or '-'}")
+        typer.echo(f"  Content types: {content_types or '-'}")
+        typer.echo(f"  Top tags: {tags or '-'}")
+
+    store.close()
+
+
+@app.command()
 def tags(
     limit: int = typer.Option(20, "--limit", "-n", help="Max tags or matching units"),
     source_project: str | None = typer.Option(

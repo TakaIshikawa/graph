@@ -210,11 +210,125 @@ def external_link_store(store: Store):
     return store
 
 
+@pytest.fixture
+def timeline_store(store: Store):
+    units = [
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="jan-solar",
+            source_entity_type="insight",
+            title="January solar",
+            content="Solar storage",
+            content_type=ContentType.INSIGHT,
+            tags=["energy", "solar"],
+            created_at=datetime.fromisoformat("2026-01-15T10:00:00+00:00"),
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="feb-grid",
+            source_entity_type="knowledge_node",
+            title="February grid",
+            content="Grid finding",
+            content_type=ContentType.FINDING,
+            tags=["energy", "grid"],
+            created_at=datetime.fromisoformat("2026-02-05T10:00:00+00:00"),
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="feb-battery",
+            source_entity_type="insight",
+            title="February battery",
+            content="Battery storage",
+            content_type=ContentType.INSIGHT,
+            tags=["energy", "storage"],
+            created_at=datetime.fromisoformat("2026-02-20T10:00:00+00:00"),
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.PRESENCE,
+            source_id="mar-writing",
+            source_entity_type="knowledge_item",
+            title="March writing",
+            content="Writing artifact",
+            content_type=ContentType.ARTIFACT,
+            tags=["writing"],
+            created_at=datetime.fromisoformat("2026-03-01T10:00:00+00:00"),
+        ),
+    ]
+    inserted = [store.insert_unit(unit) for unit in units]
+    store.conn.execute(
+        "UPDATE knowledge_units SET ingested_at = ? WHERE id = ?",
+        ("2026-04-01T00:00:00+00:00", inserted[0].id),
+    )
+    store.conn.execute(
+        "UPDATE knowledge_units SET ingested_at = ? WHERE id = ?",
+        ("2026-04-02T00:00:00+00:00", inserted[1].id),
+    )
+    store.conn.commit()
+    return store
+
+
 class TestGraphService:
     def test_rebuild(self, populated_store: Store):
         gs = GraphService(populated_store)
         count = gs.rebuild()
         assert count == 4
+
+    def test_analyze_timeline_month_buckets_are_chronological(self, timeline_store: Store):
+        result = GraphService(timeline_store).analyze_timeline(bucket="month")
+
+        assert result["total"] == 4
+        assert [item["bucket"] for item in result["buckets"]] == [
+            "2026-01",
+            "2026-02",
+            "2026-03",
+        ]
+        assert [item["count"] for item in result["buckets"]] == [1, 2, 1]
+        february = result["buckets"][1]
+        assert february["source_projects"] == {"forty_two": 1, "max": 1}
+        assert february["content_types"] == {"finding": 1, "insight": 1}
+        assert february["top_tags"][0] == {"tag": "energy", "count": 2}
+
+    def test_analyze_timeline_filters_and_date_range_change_totals(self, timeline_store: Store):
+        result = GraphService(timeline_store).analyze_timeline(
+            bucket="month",
+            start="2026-02-01",
+            end="2026-02-28T23:59:59+00:00",
+            source_project="max",
+            content_type="insight",
+            tag="storage",
+        )
+
+        assert result["total"] == 1
+        assert [item["bucket"] for item in result["buckets"]] == ["2026-02"]
+        assert result["buckets"][0]["source_projects"] == {"max": 1}
+        assert result["buckets"][0]["content_types"] == {"insight": 1}
+
+    def test_analyze_timeline_uses_requested_field_and_limit(self, timeline_store: Store):
+        result = GraphService(timeline_store).analyze_timeline(
+            bucket="day",
+            field="ingested_at",
+            start="2026-04-01",
+            end="2026-04-02T23:59:59+00:00",
+            limit=1,
+        )
+
+        assert result["field"] == "ingested_at"
+        assert result["total"] == 2
+        assert [item["bucket"] for item in result["buckets"]] == ["2026-04-01"]
+
+    def test_analyze_timeline_empty_graph(self, store: Store):
+        result = GraphService(store).analyze_timeline()
+
+        assert result["total"] == 0
+        assert result["buckets"] == []
+
+    def test_analyze_timeline_validates_bucket_and_field(self, store: Store):
+        gs = GraphService(store)
+
+        with pytest.raises(ValueError, match="Unsupported timeline bucket"):
+            gs.analyze_timeline(bucket="quarter")
+        with pytest.raises(ValueError, match="Unsupported timeline field"):
+            gs.analyze_timeline(field="deleted_at")
 
     def test_get_neighbors_depth_1(self, populated_store: Store):
         gs = GraphService(populated_store)

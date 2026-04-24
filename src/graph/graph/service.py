@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 import json
 from pathlib import Path
@@ -19,6 +19,8 @@ _NORMALIZED_TEXT_RE = re.compile(r"[^a-z0-9]+")
 _TTL_LOCAL_NAME_RE = re.compile(r"[^A-Za-z0-9_]")
 _EXTERNAL_URL_RE = re.compile(r"https?://[^\s<>\"]+", re.IGNORECASE)
 _TRAILING_URL_PUNCTUATION = ".,;:!?)]}'\""
+_TIMELINE_BUCKETS = {"day", "week", "month", "year"}
+_TIMELINE_FIELDS = {"created_at", "ingested_at", "updated_at"}
 
 
 def _normalize_text(value: str) -> str:
@@ -131,6 +133,63 @@ def _ensure_aware(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+
+
+def _parse_timeline_datetime(value: str | datetime | None, *, name: str) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        raw = str(value).strip()
+        if raw.endswith("Z"):
+            raw = f"{raw[:-1]}+00:00"
+        try:
+            parsed = datetime.fromisoformat(raw)
+        except ValueError as exc:
+            raise ValueError(f"{name} must be an ISO-8601 date or datetime.") from exc
+    return _ensure_aware(parsed)
+
+
+def _timeline_bucket_start(value: datetime, bucket: str) -> datetime:
+    value = _ensure_aware(value)
+    if bucket == "day":
+        return value.replace(hour=0, minute=0, second=0, microsecond=0)
+    if bucket == "week":
+        day = value.replace(hour=0, minute=0, second=0, microsecond=0)
+        return day - timedelta(days=day.weekday())
+    if bucket == "month":
+        return value.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if bucket == "year":
+        return value.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    raise ValueError(f"Unsupported timeline bucket: {bucket}. Use day, week, month, or year.")
+
+
+def _timeline_bucket_end(start: datetime, bucket: str) -> datetime:
+    if bucket == "day":
+        return start + timedelta(days=1)
+    if bucket == "week":
+        return start + timedelta(days=7)
+    if bucket == "month":
+        if start.month == 12:
+            return start.replace(year=start.year + 1, month=1)
+        return start.replace(month=start.month + 1)
+    if bucket == "year":
+        return start.replace(year=start.year + 1)
+    raise ValueError(f"Unsupported timeline bucket: {bucket}. Use day, week, month, or year.")
+
+
+def _timeline_bucket_label(start: datetime, bucket: str) -> str:
+    if bucket == "day":
+        return start.date().isoformat()
+    if bucket == "week":
+        year, week, _ = start.isocalendar()
+        return f"{year}-W{week:02d}"
+    if bucket == "month":
+        return f"{start.year:04d}-{start.month:02d}"
+    if bucket == "year":
+        return f"{start.year:04d}"
+    raise ValueError(f"Unsupported timeline bucket: {bucket}. Use day, week, month, or year.")
 
 
 class GraphService:
@@ -684,6 +743,107 @@ class GraphService:
 
         tags.sort(key=lambda item: (-item["count"], item["tag"]))
         return {"tags": tags[:limit], "filters": filters}
+
+    def analyze_timeline(
+        self,
+        *,
+        bucket: str = "month",
+        field: str = "created_at",
+        start: str | datetime | None = None,
+        end: str | datetime | None = None,
+        limit: int | None = None,
+        source_project: str | None = None,
+        content_type: str | None = None,
+        tag: str | None = None,
+    ) -> dict:
+        """Bucket knowledge units over time with per-bucket breakdowns."""
+        if bucket not in _TIMELINE_BUCKETS:
+            raise ValueError(
+                f"Unsupported timeline bucket: {bucket}. Use day, week, month, or year."
+            )
+        if field not in _TIMELINE_FIELDS:
+            raise ValueError(
+                f"Unsupported timeline field: {field}. Use created_at, ingested_at, or updated_at."
+            )
+        if limit is not None and limit < 0:
+            raise ValueError("limit must be greater than or equal to 0.")
+
+        start_at = _parse_timeline_datetime(start, name="start")
+        end_at = _parse_timeline_datetime(end, name="end")
+        if start_at and end_at and start_at > end_at:
+            raise ValueError("start must be before or equal to end.")
+
+        buckets: dict[datetime, dict] = {}
+        total = 0
+
+        for unit in self.store.get_all_units(limit=1000000000):
+            if source_project is not None and str(unit.source_project) != source_project:
+                continue
+            if content_type is not None and str(unit.content_type) != content_type:
+                continue
+            if tag is not None and tag not in unit.tags:
+                continue
+
+            raw_value = getattr(unit, field)
+            if isinstance(raw_value, datetime):
+                value = raw_value
+            else:
+                value = datetime.fromisoformat(str(raw_value))
+            value = _ensure_aware(value)
+            if start_at is not None and value < start_at:
+                continue
+            if end_at is not None and value > end_at:
+                continue
+
+            bucket_start = _timeline_bucket_start(value, bucket)
+            entry = buckets.setdefault(
+                bucket_start,
+                {
+                    "bucket": _timeline_bucket_label(bucket_start, bucket),
+                    "start": bucket_start.isoformat(),
+                    "end": _timeline_bucket_end(bucket_start, bucket).isoformat(),
+                    "count": 0,
+                    "source_projects": Counter(),
+                    "content_types": Counter(),
+                    "tags": Counter(),
+                },
+            )
+            entry["count"] += 1
+            entry["source_projects"][str(unit.source_project)] += 1
+            entry["content_types"][str(unit.content_type)] += 1
+            entry["tags"].update(str(unit_tag) for unit_tag in unit.tags)
+            total += 1
+
+        bucket_items = []
+        for _, item in sorted(buckets.items(), key=lambda pair: pair[0]):
+            tag_counts = item.pop("tags")
+            item["source_projects"] = dict(item["source_projects"])
+            item["content_types"] = dict(item["content_types"])
+            item["top_tags"] = [
+                {"tag": name, "count": count}
+                for name, count in sorted(
+                    tag_counts.items(), key=lambda tag_item: (-tag_item[1], tag_item[0])
+                )[:10]
+            ]
+            bucket_items.append(item)
+
+        if limit is not None:
+            bucket_items = bucket_items[:limit]
+
+        return {
+            "bucket": bucket,
+            "field": field,
+            "total": total,
+            "buckets": bucket_items,
+            "filters": {
+                "source_project": source_project,
+                "content_type": content_type,
+                "tag": tag,
+                "start": start,
+                "end": end,
+                "limit": limit,
+            },
+        }
 
     def suggest_tag_synonyms(
         self, limit: int = 20, min_similarity: float = 0.8

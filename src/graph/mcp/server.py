@@ -386,6 +386,48 @@ async def list_tools() -> list[Tool]:
             inputSchema={"type": "object", "properties": {}},
         ),
         Tool(
+            name="timeline",
+            description="Bucket knowledge units over time by created_at, ingested_at, or updated_at.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "bucket": {
+                        "type": "string",
+                        "enum": ["day", "week", "month", "year"],
+                        "default": "month",
+                    },
+                    "field": {
+                        "type": "string",
+                        "enum": ["created_at", "ingested_at", "updated_at"],
+                        "default": "created_at",
+                    },
+                    "start": {
+                        "type": "string",
+                        "description": "Inclusive ISO-8601 start date/datetime",
+                    },
+                    "end": {
+                        "type": "string",
+                        "description": "Inclusive ISO-8601 end date/datetime",
+                    },
+                    "limit": {"type": "integer", "description": "Max buckets to return"},
+                    "source_project": {
+                        "type": "string",
+                        "enum": SUPPORTED_SYNC_PROJECTS,
+                        "description": "Filter by source project",
+                    },
+                    "content_type": {
+                        "type": "string",
+                        "enum": [content_type.value for content_type in ContentType],
+                        "description": "Filter by content type",
+                    },
+                    "tag": {
+                        "type": "string",
+                        "description": "Require an exact graph tag",
+                    },
+                },
+            },
+        ),
+        Tool(
             name="analyze_tags",
             description="Analyze graph tags with counts, source/type breakdowns, matching units, and co-occurrences.",
             inputSchema={
@@ -1119,6 +1161,20 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         elif name == "analyze_source_coverage":
             gs = GraphService(store)
             result = gs.analyze_source_coverage()
+            return [TextContent(type="text", text=json.dumps(result))]
+
+        elif name == "timeline":
+            gs = GraphService(store)
+            result = gs.analyze_timeline(
+                bucket=arguments.get("bucket", "month"),
+                field=arguments.get("field", "created_at"),
+                start=arguments.get("start"),
+                end=arguments.get("end"),
+                limit=arguments.get("limit"),
+                source_project=arguments.get("source_project"),
+                content_type=arguments.get("content_type"),
+                tag=arguments.get("tag"),
+            )
             return [TextContent(type="text", text=json.dumps(result))]
 
         elif name == "analyze_tags":
