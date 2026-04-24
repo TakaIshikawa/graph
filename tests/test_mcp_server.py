@@ -150,34 +150,36 @@ def _populate_duplicates_graph(store: Store) -> None:
     for unit in [
         KnowledgeUnit(
             source_project=SourceProject.MAX,
-            source_id="same-title-a",
+            source_id="canonical-a",
             source_entity_type="insight",
-            title="Repeated Import",
-            content="First independent note about sales workflow cleanup.",
+            title="Canonical A",
+            content="Canonical duplicate A.",
+            content_type=ContentType.INSIGHT,
+            metadata={"canonical_url": "https://example.com/shared"},
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="canonical-b",
+            source_entity_type="insight",
+            title="Canonical B",
+            content="Canonical duplicate B.",
+            content_type=ContentType.INSIGHT,
+            metadata={"canonical_url": "https://example.com/shared"},
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="title-a",
+            source_entity_type="insight",
+            title="Solar storage roadmap",
+            content="Title duplicate A.",
             content_type=ContentType.INSIGHT,
         ),
         KnowledgeUnit(
             source_project=SourceProject.MAX,
-            source_id="same-title-b",
+            source_id="title-b",
             source_entity_type="insight",
-            title=" repeated   import ",
-            content="Second independent note about onboarding research.",
-            content_type=ContentType.INSIGHT,
-        ),
-        KnowledgeUnit(
-            source_project=SourceProject.MAX,
-            source_id="same-content-a",
-            source_entity_type="insight",
-            title="Storage market signal",
-            content="Solar storage adoption is accelerating across midmarket operations teams this quarter.",
-            content_type=ContentType.INSIGHT,
-        ),
-        KnowledgeUnit(
-            source_project=SourceProject.MAX,
-            source_id="same-content-b",
-            source_entity_type="insight",
-            title="Battery adoption memo",
-            content="Solar storage adoption is accelerating across midmarket operations teams this quarter rapidly.",
+            title="Solar storage road map",
+            content="Title duplicate B.",
             content_type=ContentType.INSIGHT,
         ),
         KnowledgeUnit(
@@ -2869,6 +2871,7 @@ def test_analyze_duplicates_tool_returns_reasons_units_and_filters(tmp_path, mon
     analyze_tool = next(tool for tool in tools if tool.name == "analyze_duplicates")
     assert "source_project" in analyze_tool.inputSchema["properties"]
     assert "content_type" in analyze_tool.inputSchema["properties"]
+    assert analyze_tool.inputSchema["properties"]["min_title_similarity"]["default"] == 0.92
 
     response = asyncio.run(
         mcp_server.call_tool(
@@ -2876,22 +2879,26 @@ def test_analyze_duplicates_tool_returns_reasons_units_and_filters(tmp_path, mon
             {
                 "source_project": "max",
                 "content_type": "insight",
+                "min_title_similarity": 0.85,
             },
         )
     )
     payload = json.loads(response[0].text)
-    by_reason = {item["reason"]: item for item in payload["results"]}
-    assert set(by_reason) == {"same_title", "similar_content"}
-    assert {unit["source_id"] for unit in by_reason["same_title"]["units"]} == {
-        "same-title-a",
-        "same-title-b",
+    by_reason = {item["reason"]: item for item in payload["groups"]}
+    assert set(by_reason) == {"canonical_url", "title_similarity"}
+    assert all(item["id"].startswith("dup_") for item in payload["groups"])
+    assert "canonical_url" in by_reason["canonical_url"]["reasons"]
+    assert {unit["source_id"] for unit in by_reason["canonical_url"]["units"]} == {
+        "canonical-a",
+        "canonical-b",
     }
-    assert {unit["source_id"] for unit in by_reason["similar_content"]["units"]} == {
-        "same-content-a",
-        "same-content-b",
+    assert by_reason["title_similarity"]["score"] >= 0.85
+    assert {unit["source_id"] for unit in by_reason["title_similarity"]["units"]} == {
+        "title-a",
+        "title-b",
     }
     assert all(
-        unit["source_project"] == "max" for item in payload["results"] for unit in item["units"]
+        unit["source_project"] == "max" for item in payload["groups"] for unit in item["units"]
     )
 
 

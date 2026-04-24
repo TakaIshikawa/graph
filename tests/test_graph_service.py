@@ -1408,84 +1408,143 @@ class TestGraphService:
         assert unit is not None
         assert unit.tags == ["ai-agent"]
 
-    def test_analyze_duplicates_finds_titles_content_and_applies_filters(
+    def test_analyze_duplicates_reports_candidate_groups_and_remains_read_only(
         self, store: Store
     ):
-        for unit in [
+        units = [
             KnowledgeUnit(
                 source_project=SourceProject.MAX,
-                source_id="same-title-a",
+                source_id="canonical-a",
                 source_entity_type="insight",
-                title="Repeated Import",
-                content="First independent note about sales workflow cleanup.",
+                title="Canonical A",
+                content="Canonical duplicate A.",
+                content_type=ContentType.INSIGHT,
+                metadata={"canonical_url": "HTTPS://Example.com/Shared"},
+            ),
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="canonical-b",
+                source_entity_type="insight",
+                title="Canonical B",
+                content="Canonical duplicate B.",
+                content_type=ContentType.INSIGHT,
+                metadata={"canonical_url": "https://example.com/Shared"},
+            ),
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id=" Link Import ",
+                source_entity_type="insight",
+                title="Link duplicate A",
+                content="Link duplicate A.",
+                content_type=ContentType.INSIGHT,
+                metadata={"link": "https://example.com/link"},
+            ),
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="link-import",
+                source_entity_type="insight",
+                title="Link duplicate B",
+                content="Link duplicate B.",
+                content_type=ContentType.INSIGHT,
+                metadata={"link": "https://example.com/link"},
+            ),
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="title-a",
+                source_entity_type="insight",
+                title="Solar storage roadmap",
+                content="Title duplicate A.",
                 content_type=ContentType.INSIGHT,
             ),
             KnowledgeUnit(
                 source_project=SourceProject.MAX,
-                source_id="same-title-b",
+                source_id="title-b",
                 source_entity_type="insight",
-                title=" repeated   import ",
-                content="Second independent note about onboarding research.",
-                content_type=ContentType.INSIGHT,
-            ),
-            KnowledgeUnit(
-                source_project=SourceProject.MAX,
-                source_id="same-content-a",
-                source_entity_type="insight",
-                title="Storage market signal",
-                content="Solar storage adoption is accelerating across midmarket operations teams this quarter.",
-                content_type=ContentType.INSIGHT,
-            ),
-            KnowledgeUnit(
-                source_project=SourceProject.MAX,
-                source_id="same-content-b",
-                source_entity_type="insight",
-                title="Battery adoption memo",
-                content="Solar storage adoption is accelerating across midmarket operations teams this quarter rapidly.",
-                content_type=ContentType.INSIGHT,
-            ),
-            KnowledgeUnit(
-                source_project=SourceProject.MAX,
-                source_id="unique",
-                source_entity_type="insight",
-                title="Unique note",
-                content="A completely different topic about meeting notes and planning.",
+                title="Solar storage road map",
+                content="Title duplicate B.",
                 content_type=ContentType.INSIGHT,
             ),
             KnowledgeUnit(
                 source_project=SourceProject.FORTY_TWO,
                 source_id="filtered-title",
                 source_entity_type="knowledge_node",
-                title="Repeated Import",
+                title="Solar storage roadmap",
                 content="Outside project duplicate title.",
                 content_type=ContentType.FINDING,
             ),
-        ]:
+        ]
+        for unit in units:
             store.insert_unit(unit)
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=store.get_unit_by_source("max", "canonical-a", "insight").id,
+                to_unit_id=store.get_unit_by_source("max", "title-a", "insight").id,
+                relation=EdgeRelation.RELATES_TO,
+                source=EdgeSource.MANUAL,
+            )
+        )
+        store.update_embedding(
+            store.get_unit_by_source("max", "canonical-a", "insight").id,
+            serialize_embedding([0.1, 0.2, 0.3]),
+        )
+        before = {
+            "units": store.count_units(),
+            "edges": len(store.get_all_edges()),
+            "embeddings": len(store.get_units_with_embeddings()),
+            "fts": len(store.fts_search("Canonical")),
+        }
 
         gs = GraphService(store)
-        result = gs.analyze_duplicates(source_project="max", content_type="insight")
+        result = gs.analyze_duplicates(
+            source_project="max",
+            content_type="insight",
+            min_title_similarity=0.85,
+        )
 
-        by_reason = {item["reason"]: item for item in result["results"]}
-        assert set(by_reason) == {"same_title", "similar_content"}
+        after = {
+            "units": store.count_units(),
+            "edges": len(store.get_all_edges()),
+            "embeddings": len(store.get_units_with_embeddings()),
+            "fts": len(store.fts_search("Canonical")),
+        }
+        assert after == before
 
-        assert by_reason["same_title"]["score"] == 1.0
-        assert {unit["source_id"] for unit in by_reason["same_title"]["units"]} == {
-            "same-title-a",
-            "same-title-b",
+        assert result["groups"] == result["results"]
+        by_reason = {item["reason"]: item for item in result["groups"]}
+        assert set(by_reason) == {
+            "canonical_url",
+            "link",
+            "title_similarity",
         }
-        assert {
-            unit["source_id"] for unit in by_reason["similar_content"]["units"]
-        } == {
-            "same-content-a",
-            "same-content-b",
+        assert all(item["id"].startswith("dup_") for item in result["groups"])
+        assert by_reason["canonical_url"]["reasons"] == ["canonical_url", "title_similarity"]
+        assert by_reason["canonical_url"]["score"] == 1.0
+        assert {unit["source_id"] for unit in by_reason["canonical_url"]["units"]} == {
+            "canonical-a",
+            "canonical-b",
         }
-        assert by_reason["similar_content"]["score"] >= 0.9
+        assert by_reason["link"]["reasons"] == ["link", "source_identity", "title_similarity"]
+        assert {unit["source_id"] for unit in by_reason["link"]["units"]} == {
+            " Link Import ",
+            "link-import",
+        }
+        assert {unit["source_id"] for unit in by_reason["title_similarity"]["units"]} == {
+            "title-a",
+            "title-b",
+        }
+        assert by_reason["title_similarity"]["score"] >= 0.85
         assert all(
             unit["source_project"] == "max"
-            for item in result["results"]
+            for item in result["groups"]
             for unit in item["units"]
         )
+
+        stricter = gs.analyze_duplicates(
+            source_project="max",
+            content_type="insight",
+            min_title_similarity=0.99,
+        )
+        assert "title_similarity" not in {item["reason"] for item in stricter["groups"]}
 
     def test_build_review_queue_ranks_old_isolated_unreviewed_and_filters(
         self, store: Store

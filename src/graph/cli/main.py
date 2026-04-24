@@ -4655,6 +4655,11 @@ def suggest_edges(
 @app.command(name="duplicates")
 def duplicates(
     limit: int = typer.Option(20, "--limit", "-n", help="Max duplicate groups"),
+    min_title_similarity: float = typer.Option(
+        0.92,
+        "--min-title-similarity",
+        help="Minimum normalized title similarity for title-based groups",
+    ),
     source_project: str | None = typer.Option(
         None,
         "--source-project",
@@ -4674,6 +4679,7 @@ def duplicates(
         limit=limit,
         source_project=source_project,
         content_type=content_type,
+        min_title_similarity=min_title_similarity,
     )
 
     if json_output:
@@ -4681,14 +4687,14 @@ def duplicates(
         store.close()
         return
 
-    found = result["results"]
+    found = result["groups"]
     if not found:
         typer.echo("No duplicates found.")
         store.close()
         return
 
     for item in found:
-        typer.echo(f"[{item['reason']}] score: {item['score']:.3f}")
+        typer.echo(f"[{', '.join(item['reasons'])}] {item['id']} score: {item['score']:.3f}")
         for unit in item["units"]:
             typer.echo(f"  [{unit['source_project']}] {unit['title']} ({unit['content_type']})")
             typer.echo(f"    ID: {unit['id']}")

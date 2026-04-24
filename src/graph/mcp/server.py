@@ -888,11 +888,16 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="analyze_duplicates",
-            description="Find likely duplicate knowledge units by repeated titles and near-identical content.",
+            description="Report duplicate candidate knowledge units without writing data.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "limit": {"type": "integer", "default": 20},
+                    "min_title_similarity": {
+                        "type": "number",
+                        "default": 0.92,
+                        "description": "Minimum normalized title similarity for title-based groups",
+                    },
                     "source_project": {
                         "type": "string",
                         "enum": SUPPORTED_SYNC_PROJECTS,
@@ -2020,6 +2025,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 limit=arguments.get("limit", 20),
                 source_project=arguments.get("source_project"),
                 content_type=arguments.get("content_type"),
+                min_title_similarity=arguments.get("min_title_similarity", 0.92),
             )
             return [TextContent(type="text", text=json.dumps(result))]
 

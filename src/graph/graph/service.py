@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
+import hashlib
 from itertools import combinations
 import html
 import json
@@ -50,6 +51,7 @@ _EDGE_SUGGESTION_STOPWORDS = {
     "with",
 }
 _REFERENCE_URL_METADATA_FIELDS = {"url", "link", "canonical_url", "source_url", "source_id"}
+_DUPLICATE_URL_METADATA_FIELDS = {"canonical_url", "link"}
 
 
 def _normalize_text(value: str) -> str:
@@ -211,6 +213,23 @@ def _metadata_url_field_values(value: object, path: str = "metadata") -> list[tu
         strings = []
         for index, child in enumerate(value):
             strings.extend(_metadata_url_field_values(child, f"{path}[{index}]"))
+        return strings
+    return []
+
+
+def _metadata_duplicate_url_values(value: object, path: str = "metadata") -> list[tuple[str, str]]:
+    if isinstance(value, dict):
+        strings = []
+        for key, child in value.items():
+            child_path = f"{path}.{key}"
+            if str(key).lower() in _DUPLICATE_URL_METADATA_FIELDS and isinstance(child, str):
+                strings.append((str(key).lower(), child))
+            strings.extend(_metadata_duplicate_url_values(child, child_path))
+        return strings
+    if isinstance(value, list):
+        strings = []
+        for index, child in enumerate(value):
+            strings.extend(_metadata_duplicate_url_values(child, f"{path}[{index}]"))
         return strings
     return []
 
@@ -1620,9 +1639,10 @@ class GraphService:
         limit: int = 20,
         source_project: str | None = None,
         content_type: str | None = None,
-        content_similarity: float = 0.9,
+        min_title_similarity: float = 0.92,
+        content_similarity: float | None = None,
     ) -> dict:
-        """Find likely duplicate units by normalized title and content similarity."""
+        """Find likely duplicate units without modifying graph state."""
         units = [
             unit
             for unit in self.store.get_all_units(limit=1000000000)
@@ -1648,84 +1668,182 @@ class GraphService:
                 "utility_score": unit.utility_score,
             }
 
-        results = []
-
-        title_groups: dict[str, list] = {}
-        for unit in units:
-            normalized_title = _normalize_text(unit.title)
-            if normalized_title:
-                title_groups.setdefault(normalized_title, []).append(unit)
-
-        for normalized_title, matching_units in title_groups.items():
-            if len(matching_units) < 2:
-                continue
-            results.append(
-                {
-                    "reason": "same_title",
-                    "score": 1.0,
-                    "normalized_title": normalized_title,
-                    "units": [_unit_summary(unit) for unit in matching_units],
-                }
-            )
-
-        fingerprints = {
-            unit.id: _content_tokens(unit.content)
-            for unit in units
-            if _normalize_text(unit.content)
-        }
-        adjacency: dict[str, set[str]] = {unit_id: set() for unit_id in fingerprints}
-        pair_scores: dict[tuple[str, str], float] = {}
         unit_by_id = {unit.id: unit for unit in units}
-        unit_ids = list(fingerprints)
 
-        for index, left_id in enumerate(unit_ids):
-            for right_id in unit_ids[index + 1 :]:
-                score = _counter_similarity(fingerprints[left_id], fingerprints[right_id])
-                if score >= content_similarity:
-                    adjacency[left_id].add(right_id)
-                    adjacency[right_id].add(left_id)
-                    pair_scores[tuple(sorted((left_id, right_id)))] = score
+        def _stable_group_id(reasons: list[str], unit_ids: list[str]) -> str:
+            digest = hashlib.sha1(
+                f"{'|'.join(sorted(reasons))}|{'|'.join(sorted(unit_ids))}".encode("utf-8")
+            ).hexdigest()[:12]
+            return f"dup_{digest}"
 
-        seen: set[str] = set()
-        for unit_id in unit_ids:
-            if unit_id in seen or not adjacency[unit_id]:
+        def _group(reason: str, key: str, score: float, unit_ids: list[str], **extra) -> dict:
+            ordered_ids = sorted(
+                unit_ids,
+                key=lambda unit_id: (
+                    str(unit_by_id[unit_id].source_project),
+                    unit_by_id[unit_id].title,
+                    unit_by_id[unit_id].source_id,
+                    unit_id,
+                ),
+            )
+            return {
+                "id": "",
+                "reason": reason,
+                "reasons": [reason],
+                "score": round(score, 6),
+                "units": [_unit_summary(unit_by_id[unit_id]) for unit_id in ordered_ids],
+                "evidence": [
+                    {
+                        "reason": reason,
+                        "value": key,
+                        "score": round(score, 6),
+                    }
+                ],
+                **extra,
+            }
+
+        groups = []
+
+        url_groups: dict[tuple[str, str], list[str]] = {}
+        for unit in units:
+            for field, raw_value in _metadata_duplicate_url_values(unit.metadata):
+                url = _normalize_external_url(raw_value)
+                if url is not None:
+                    url_groups.setdefault((field, url), []).append(unit.id)
+
+        for (field, url), unit_ids in url_groups.items():
+            unique_ids = sorted(set(unit_ids))
+            if len(unique_ids) < 2:
                 continue
-            stack = [unit_id]
-            component = []
-            seen.add(unit_id)
-            while stack:
-                current = stack.pop()
-                component.append(current)
-                for neighbor in sorted(adjacency[current]):
-                    if neighbor not in seen:
-                        seen.add(neighbor)
-                        stack.append(neighbor)
+            groups.append(_group(field, url, 1.0, unique_ids, value=url))
 
-            if len(component) < 2:
+        identity_groups: dict[str, list[str]] = {}
+        for unit in units:
+            normalized_source_id = _normalize_text(unit.source_id)
+            normalized_entity_type = _normalize_text(unit.source_entity_type)
+            if normalized_source_id and normalized_entity_type:
+                key = f"{str(unit.source_project)}:{normalized_entity_type}:{normalized_source_id}"
+                identity_groups.setdefault(key, []).append(unit.id)
+
+        for identity, unit_ids in identity_groups.items():
+            unique_ids = sorted(set(unit_ids))
+            if len(unique_ids) < 2:
                 continue
-            component.sort(key=lambda current_id: (unit_by_id[current_id].title, current_id))
-            component_pair_scores = [
-                score
-                for pair, score in pair_scores.items()
-                if pair[0] in component and pair[1] in component
-            ]
-            results.append(
-                {
-                    "reason": "similar_content",
-                    "score": round(min(component_pair_scores), 6),
-                    "units": [_unit_summary(unit_by_id[current_id]) for current_id in component],
-                }
+            groups.append(_group("source_identity", identity, 1.0, unique_ids, value=identity))
+
+        title_units = [
+            unit
+            for unit in units
+            if _normalize_text(unit.title)
+        ]
+        by_project: dict[str, list] = {}
+        for unit in title_units:
+            by_project.setdefault(str(unit.source_project), []).append(unit)
+
+        for project, project_units in by_project.items():
+            adjacency: dict[str, set[str]] = {unit.id: set() for unit in project_units}
+            pair_scores: dict[tuple[str, str], float] = {}
+            normalized_titles = {
+                unit.id: _normalize_text(unit.title)
+                for unit in project_units
+            }
+            for index, left in enumerate(project_units):
+                for right in project_units[index + 1 :]:
+                    score = SequenceMatcher(
+                        None,
+                        normalized_titles[left.id],
+                        normalized_titles[right.id],
+                    ).ratio()
+                    if score >= min_title_similarity:
+                        adjacency[left.id].add(right.id)
+                        adjacency[right.id].add(left.id)
+                        pair_scores[tuple(sorted((left.id, right.id)))] = score
+
+            seen: set[str] = set()
+            for unit in project_units:
+                if unit.id in seen or not adjacency[unit.id]:
+                    continue
+                stack = [unit.id]
+                component = []
+                seen.add(unit.id)
+                while stack:
+                    current = stack.pop()
+                    component.append(current)
+                    for neighbor in sorted(adjacency[current]):
+                        if neighbor not in seen:
+                            seen.add(neighbor)
+                            stack.append(neighbor)
+
+                if len(component) < 2:
+                    continue
+                component_pairs = [
+                    score
+                    for pair, score in pair_scores.items()
+                    if pair[0] in component and pair[1] in component
+                ]
+                groups.append(
+                    _group(
+                        "title_similarity",
+                        (
+                            f"{project}:"
+                            f"{'|'.join(sorted(normalized_titles[unit_id] for unit_id in component))}"
+                        ),
+                        min(component_pairs) if component_pairs else 1.0,
+                        component,
+                        source_project=project,
+                        min_title_similarity=min_title_similarity,
+                    )
+                )
+
+        merged_by_units: dict[tuple[str, ...], dict] = {}
+        reason_rank = {
+            "canonical_url": 0,
+            "link": 1,
+            "source_identity": 2,
+            "title_similarity": 3,
+        }
+        for group in groups:
+            unit_ids = tuple(sorted(unit["id"] for unit in group["units"]))
+            existing = merged_by_units.get(unit_ids)
+            if existing is None:
+                merged_by_units[unit_ids] = dict(group)
+                continue
+            reasons = list(existing["reasons"])
+            if group["reason"] not in reasons:
+                reasons.append(group["reason"])
+            reasons.sort(key=lambda reason: (reason_rank.get(reason, 99), reason))
+            existing["reasons"] = reasons
+            existing["reason"] = reasons[0]
+            existing["score"] = round(max(existing["score"], group["score"]), 6)
+            existing["evidence"].extend(group["evidence"])
+
+        groups = list(merged_by_units.values())
+        for group in groups:
+            group["id"] = _stable_group_id(
+                group["reasons"],
+                [unit["id"] for unit in group["units"]],
+            )
+            group["evidence"].sort(
+                key=lambda item: (reason_rank.get(item["reason"], 99), item["reason"])
             )
 
-        results.sort(
+        groups.sort(
             key=lambda item: (
                 -item["score"],
-                item["reason"],
+                item["reasons"],
                 -len(item["units"]),
                 item["units"][0]["title"],
+                item["id"],
             )
         )
-        return {"results": results[:limit], "filters": filters}
+        limited = groups[:limit]
+        return {
+            "groups": limited,
+            "results": limited,
+            "limit": limit,
+            "min_title_similarity": min_title_similarity,
+            "filters": filters,
+        }
 
     def build_review_queue(
         self,
