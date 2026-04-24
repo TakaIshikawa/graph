@@ -259,6 +259,37 @@ async def list_tools() -> list[Tool]:
             inputSchema={"type": "object", "properties": {}},
         ),
         Tool(
+            name="analyze_tags",
+            description="Analyze graph tags with counts, source/type breakdowns, matching units, and co-occurrences.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "default": 20},
+                    "source_project": {
+                        "type": "string",
+                        "enum": SUPPORTED_SYNC_PROJECTS,
+                        "description": "Filter by source project",
+                    },
+                    "content_type": {
+                        "type": "string",
+                        "enum": [
+                            "insight",
+                            "finding",
+                            "idea",
+                            "design_brief",
+                            "artifact",
+                            "metadata",
+                        ],
+                        "description": "Filter by content type",
+                    },
+                    "tag": {
+                        "type": "string",
+                        "description": "Show detail for one exact tag",
+                    },
+                },
+            },
+        ),
+        Tool(
             name="add_unit",
             description="Manually add a knowledge unit to the graph.",
             inputSchema={
@@ -604,6 +635,16 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             gs.rebuild()
             connections = gs.cross_project_connections()
             return [TextContent(type="text", text=json.dumps(connections))]
+
+        elif name == "analyze_tags":
+            gs = GraphService(store)
+            result = gs.analyze_tags(
+                tag=arguments.get("tag"),
+                limit=arguments.get("limit", 20),
+                source_project=arguments.get("source_project"),
+                content_type=arguments.get("content_type"),
+            )
+            return [TextContent(type="text", text=json.dumps(result))]
 
         elif name == "sync_status":
             statuses = []

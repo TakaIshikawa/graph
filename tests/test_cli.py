@@ -244,6 +244,39 @@ def _populate_design_briefs(store: Store) -> None:
         store.insert_unit(brief)
 
 
+def _populate_tags_graph(store: Store) -> None:
+    for unit in [
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="solar-storage",
+            source_entity_type="insight",
+            title="Solar storage",
+            content="Solar storage insight",
+            content_type=ContentType.INSIGHT,
+            tags=["energy", "solar", "storage"],
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="solar-grid",
+            source_entity_type="knowledge_node",
+            title="Solar grid",
+            content="Solar grid finding",
+            content_type=ContentType.FINDING,
+            tags=["energy", "solar", "grid"],
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="battery-storage",
+            source_entity_type="insight",
+            title="Battery storage",
+            content="Battery storage insight",
+            content_type=ContentType.INSIGHT,
+            tags=["energy", "storage", "battery"],
+        ),
+    ]:
+        store.insert_unit(unit)
+
+
 def _cleanup_db(path: str) -> None:
     db_path = Path(path)
     for candidate in (
@@ -686,6 +719,64 @@ def test_analytics_commands_emit_parseable_json(monkeypatch):
         assert cross_project_payload["results"] == [
             {"edge_count": 1, "projects": ["forty_two", "max"]}
         ]
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_tags_command_lists_top_tags_with_breakdowns(monkeypatch):
+    store = _make_store()
+    _populate_tags_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(app, ["tags", "--limit", "2", "--json"])
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert [item["tag"] for item in payload["tags"]] == ["energy", "solar"]
+        assert payload["tags"][0]["source_projects"] == {"max": 2, "forty_two": 1}
+        assert payload["tags"][0]["content_types"] == {"insight": 2, "finding": 1}
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_tags_command_detail_applies_filters_and_co_occurrences(monkeypatch):
+    store = _make_store()
+    _populate_tags_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "tags",
+                "--tag",
+                "energy",
+                "--source-project",
+                "max",
+                "--content-type",
+                "insight",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["count"] == 2
+        assert {unit["title"] for unit in payload["units"]} == {
+            "Solar storage",
+            "Battery storage",
+        }
+        assert [item["tag"] for item in payload["co_occurring_tags"]] == [
+            "storage",
+            "battery",
+            "solar",
+        ]
+        assert [item["count"] for item in payload["co_occurring_tags"]] == [2, 1, 1]
     finally:
         store.close()
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]

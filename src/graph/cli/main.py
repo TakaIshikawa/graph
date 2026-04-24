@@ -1093,6 +1093,86 @@ def cross_project(
     store.close()
 
 
+@app.command()
+def tags(
+    limit: int = typer.Option(20, "--limit", "-n", help="Max tags or matching units"),
+    source_project: str | None = typer.Option(
+        None,
+        "--source-project",
+        "--project",
+        "-p",
+        help="Filter by source project",
+    ),
+    content_type: str | None = typer.Option(None, "--content-type", help="Filter by content type"),
+    tag: str | None = typer.Option(None, "--tag", help="Show detail for one exact tag"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Explore tag taxonomy and co-occurring topics."""
+    from graph.graph.service import GraphService
+
+    store = _get_store()
+    gs = GraphService(store)
+    result = gs.analyze_tags(
+        tag=tag,
+        limit=limit,
+        source_project=source_project,
+        content_type=content_type,
+    )
+
+    if json_output:
+        _json_echo(result)
+        store.close()
+        return
+
+    if tag:
+        typer.echo(f"Tag: {result['tag']} ({result['count']} units)")
+        typer.echo("By source project:")
+        for project, count in result["source_projects"].items():
+            typer.echo(f"  {project}: {count}")
+        typer.echo("By content type:")
+        for found_content_type, count in result["content_types"].items():
+            typer.echo(f"  {found_content_type}: {count}")
+
+        co_occurring_tags = result["co_occurring_tags"]
+        if co_occurring_tags:
+            typer.echo("Co-occurring tags:")
+            for item in co_occurring_tags:
+                typer.echo(f"  {item['tag']}: {item['count']}")
+
+        units = result["units"]
+        if units:
+            typer.echo("Matching units:")
+            for unit in units:
+                typer.echo(f"  [{unit['source_project']}] {unit['title']}")
+                typer.echo(
+                    f"    ID: {unit['id']} | Type: {unit['content_type']} | "
+                    f"Tags: {', '.join(unit['tags'])}"
+                )
+        store.close()
+        return
+
+    found_tags = result["tags"]
+    if not found_tags:
+        typer.echo("No tags found.")
+        store.close()
+        return
+
+    typer.echo("Top tags:")
+    for item in found_tags:
+        projects = ", ".join(
+            f"{project}:{count}" for project, count in item["source_projects"].items()
+        )
+        content_types = ", ".join(
+            f"{found_content_type}:{count}"
+            for found_content_type, count in item["content_types"].items()
+        )
+        typer.echo(f"  {item['tag']}: {item['count']}")
+        typer.echo(f"    Projects: {projects or '-'}")
+        typer.echo(f"    Content types: {content_types or '-'}")
+
+    store.close()
+
+
 def _do_export_obsidian(
     store: Store,
     vault_path: str | None = None,

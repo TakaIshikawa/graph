@@ -186,6 +186,89 @@ class GraphService:
             )
         ]
 
+    def analyze_tags(
+        self,
+        *,
+        tag: str | None = None,
+        limit: int = 20,
+        source_project: str | None = None,
+        content_type: str | None = None,
+    ) -> dict:
+        """Analyze tag counts, filtered breakdowns, and co-occurrences."""
+        units = [
+            unit
+            for unit in self.store.get_all_units(limit=1000000000)
+            if (source_project is None or str(unit.source_project) == source_project)
+            and (content_type is None or str(unit.content_type) == content_type)
+        ]
+
+        filters = {
+            "source_project": source_project,
+            "content_type": content_type,
+        }
+
+        def _breakdowns(matching_units) -> tuple[dict[str, int], dict[str, int]]:
+            return (
+                dict(Counter(str(unit.source_project) for unit in matching_units)),
+                dict(Counter(str(unit.content_type) for unit in matching_units)),
+            )
+
+        def _unit_summary(unit) -> dict:
+            return {
+                "id": unit.id,
+                "title": unit.title,
+                "source_project": str(unit.source_project),
+                "source_entity_type": unit.source_entity_type,
+                "content_type": str(unit.content_type),
+                "tags": unit.tags,
+                "utility_score": unit.utility_score,
+            }
+
+        if tag:
+            matching_units = [unit for unit in units if tag in unit.tags]
+            source_projects, content_types = _breakdowns(matching_units)
+            co_counts = Counter(
+                other_tag
+                for unit in matching_units
+                for other_tag in unit.tags
+                if other_tag != tag
+            )
+            co_occurring_tags = [
+                {"tag": name, "count": count}
+                for name, count in sorted(
+                    co_counts.items(), key=lambda item: (-item[1], item[0])
+                )[:limit]
+            ]
+            return {
+                "tag": tag,
+                "count": len(matching_units),
+                "source_projects": source_projects,
+                "content_types": content_types,
+                "units": [_unit_summary(unit) for unit in matching_units[:limit]],
+                "co_occurring_tags": co_occurring_tags,
+                "filters": filters,
+            }
+
+        by_tag: dict[str, list] = {}
+        for unit in units:
+            for unit_tag in unit.tags:
+                by_tag.setdefault(unit_tag, []).append(unit)
+
+        tags = []
+        for unit_tag, matching_units in by_tag.items():
+            source_projects, content_types = _breakdowns(matching_units)
+            tags.append(
+                {
+                    "tag": unit_tag,
+                    "count": len(matching_units),
+                    "source_projects": source_projects,
+                    "content_types": content_types,
+                }
+            )
+
+        tags.sort(key=lambda item: (-item["count"], item["tag"]))
+        return {"tags": tags[:limit], "filters": filters}
+
     def stats(self) -> dict:
         """Graph summary statistics."""
         if not self.G.nodes:

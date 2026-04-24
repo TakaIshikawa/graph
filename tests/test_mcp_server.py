@@ -22,6 +22,39 @@ class FakeAdapter:
         return self.result
 
 
+def _populate_tags_graph(store: Store) -> None:
+    for unit in [
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="solar-storage",
+            source_entity_type="insight",
+            title="Solar storage",
+            content="Solar storage insight",
+            content_type=ContentType.INSIGHT,
+            tags=["energy", "solar", "storage"],
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="solar-grid",
+            source_entity_type="knowledge_node",
+            title="Solar grid",
+            content="Solar grid finding",
+            content_type=ContentType.FINDING,
+            tags=["energy", "solar", "grid"],
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="battery-storage",
+            source_entity_type="insight",
+            title="Battery storage",
+            content="Battery storage insight",
+            content_type=ContentType.INSIGHT,
+            tags=["energy", "storage", "battery"],
+        ),
+    ]:
+        store.insert_unit(unit)
+
+
 def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(
     tmp_path, monkeypatch
 ):
@@ -388,3 +421,49 @@ def test_json_backup_tools_export_and_import_idempotently(tmp_path, monkeypatch)
         assert target.fts_search("searchable")
     finally:
         target.close()
+
+
+def test_analyze_tags_tool_returns_summary_and_detail_json(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    _populate_tags_graph(store)
+    store.close()
+
+    monkeypatch.setattr(
+        mcp_server,
+        "_get_store",
+        lambda: Store(str(db_path)),
+    )
+
+    tools = asyncio.run(mcp_server.list_tools())
+    analyze_tool = next(tool for tool in tools if tool.name == "analyze_tags")
+    assert "source_project" in analyze_tool.inputSchema["properties"]
+    assert "content_type" in analyze_tool.inputSchema["properties"]
+
+    summary_response = asyncio.run(
+        mcp_server.call_tool("analyze_tags", {"limit": 2})
+    )
+    summary = json.loads(summary_response[0].text)
+    assert [item["tag"] for item in summary["tags"]] == ["energy", "solar"]
+
+    detail_response = asyncio.run(
+        mcp_server.call_tool(
+            "analyze_tags",
+            {
+                "tag": "energy",
+                "source_project": "max",
+                "content_type": "insight",
+            },
+        )
+    )
+    detail = json.loads(detail_response[0].text)
+    assert detail["count"] == 2
+    assert {unit["title"] for unit in detail["units"]} == {
+        "Solar storage",
+        "Battery storage",
+    }
+    assert [item["tag"] for item in detail["co_occurring_tags"]] == [
+        "storage",
+        "battery",
+        "solar",
+    ]

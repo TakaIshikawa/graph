@@ -85,6 +85,55 @@ def populated_store(store: Store):
     return store
 
 
+@pytest.fixture
+def tagged_store(store: Store):
+    """Store with overlapping tags across projects and content types."""
+    units = [
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="solar-storage",
+            source_entity_type="insight",
+            title="Solar storage",
+            content="Solar storage insight",
+            content_type=ContentType.INSIGHT,
+            tags=["energy", "solar", "storage"],
+            utility_score=0.9,
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="solar-grid",
+            source_entity_type="knowledge_node",
+            title="Solar grid",
+            content="Solar grid finding",
+            content_type=ContentType.FINDING,
+            tags=["energy", "solar", "grid"],
+            utility_score=0.7,
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="battery-storage",
+            source_entity_type="insight",
+            title="Battery storage",
+            content="Battery storage insight",
+            content_type=ContentType.INSIGHT,
+            tags=["energy", "storage", "battery"],
+            utility_score=0.8,
+        ),
+        KnowledgeUnit(
+            source_project=SourceProject.PRESENCE,
+            source_id="writing",
+            source_entity_type="knowledge_item",
+            title="Writing workflow",
+            content="Writing artifact",
+            content_type=ContentType.ARTIFACT,
+            tags=["writing"],
+        ),
+    ]
+    for unit in units:
+        store.insert_unit(unit)
+    return store
+
+
 class TestGraphService:
     def test_rebuild(self, populated_store: Store):
         gs = GraphService(populated_store)
@@ -182,3 +231,54 @@ class TestGraphService:
         assert gs.get_central_nodes() == []
         assert gs.get_bridges() == []
         assert gs.find_gaps() == []
+
+    def test_analyze_tags_lists_counts_and_breakdowns(self, tagged_store: Store):
+        gs = GraphService(tagged_store)
+        result = gs.analyze_tags(limit=3)
+
+        assert [item["tag"] for item in result["tags"]] == [
+            "energy",
+            "solar",
+            "storage",
+        ]
+        energy = result["tags"][0]
+        assert energy["count"] == 3
+        assert energy["source_projects"] == {"max": 2, "forty_two": 1}
+        assert energy["content_types"] == {"insight": 2, "finding": 1}
+
+    def test_analyze_tags_applies_filters(self, tagged_store: Store):
+        gs = GraphService(tagged_store)
+        result = gs.analyze_tags(source_project="max", content_type="insight")
+
+        counts = {item["tag"]: item["count"] for item in result["tags"]}
+        assert counts == {
+            "energy": 2,
+            "storage": 2,
+            "battery": 1,
+            "solar": 1,
+        }
+        assert result["filters"] == {
+            "source_project": "max",
+            "content_type": "insight",
+        }
+
+    def test_analyze_tags_detail_includes_units_and_ordered_co_occurrences(
+        self, tagged_store: Store
+    ):
+        gs = GraphService(tagged_store)
+        result = gs.analyze_tags(tag="energy", limit=10)
+
+        assert result["tag"] == "energy"
+        assert result["count"] == 3
+        assert [item["tag"] for item in result["co_occurring_tags"]] == [
+            "solar",
+            "storage",
+            "battery",
+            "grid",
+        ]
+        assert [item["count"] for item in result["co_occurring_tags"]] == [2, 2, 1, 1]
+        assert {unit["title"] for unit in result["units"]} == {
+            "Solar storage",
+            "Solar grid",
+            "Battery storage",
+        }
