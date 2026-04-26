@@ -11,7 +11,7 @@ from graph.rag.embeddings import (
     deserialize_embedding,
     serialize_embedding,
 )
-from graph.store.db import Store
+from graph.store.db import Store, metadata_path_matches
 from graph.types.enums import EdgeRelation, EdgeSource
 from graph.types.models import KnowledgeEdge
 from graph.types.models import KnowledgeUnit
@@ -197,6 +197,8 @@ def _unit_matches_filters(
     content_type: str | None = None,
     tag: str | None = None,
     exclude_tag: str | None = None,
+    metadata_key: str | None = None,
+    metadata_value: object | None = None,
 ) -> bool:
     if source_project and str(unit.source_project) != source_project:
         return False
@@ -206,6 +208,9 @@ def _unit_matches_filters(
         return False
     if exclude_tag and exclude_tag in unit.tags:
         return False
+    if metadata_key is not None and metadata_value is not None:
+        if not metadata_path_matches(unit.metadata, metadata_key, metadata_value):
+            return False
     return True
 
 
@@ -330,6 +335,8 @@ class RAGService:
         created_before: datetime | str | None = None,
         updated_after: datetime | str | None = None,
         updated_before: datetime | str | None = None,
+        metadata_key: str | None = None,
+        metadata_value: object | None = None,
         sort: str = "relevance",
     ) -> list[tuple[KnowledgeUnit, float]]:
         """Semantic search. Returns (unit, similarity) pairs."""
@@ -345,6 +352,8 @@ class RAGService:
             created_before=created_before,
             updated_after=updated_after,
             updated_before=updated_before,
+            metadata_key=metadata_key,
+            metadata_value=metadata_value,
         )
 
         results = []
@@ -355,6 +364,8 @@ class RAGService:
                 content_type=content_type,
                 tag=tag,
                 exclude_tag=exclude_tag,
+                metadata_key=metadata_key,
+                metadata_value=metadata_value,
             ):
                 continue
             emb = deserialize_embedding(emb_bytes)
@@ -381,6 +392,8 @@ class RAGService:
         created_before: datetime | str | None = None,
         updated_after: datetime | str | None = None,
         updated_before: datetime | str | None = None,
+        metadata_key: str | None = None,
+        metadata_value: object | None = None,
         sort: str = "relevance",
     ) -> list[tuple[KnowledgeUnit, float]]:
         """Combined semantic + full-text search."""
@@ -398,6 +411,8 @@ class RAGService:
             created_before=created_before,
             updated_after=updated_after,
             updated_before=updated_before,
+            metadata_key=metadata_key,
+            metadata_value=metadata_value,
         )
         semantic_scores = {unit.id: sim for unit, sim in semantic_results}
 
@@ -409,6 +424,8 @@ class RAGService:
             created_before=created_before,
             updated_after=updated_after,
             updated_before=updated_before,
+            metadata_key=metadata_key,
+            metadata_value=metadata_value,
         )
         fts_scores: dict[str, float] = {}
         if fts_results:
@@ -436,6 +453,8 @@ class RAGService:
                 content_type=content_type,
                 tag=tag,
                 exclude_tag=exclude_tag,
+                metadata_key=metadata_key,
+                metadata_value=metadata_value,
             ):
                 results.append((unit, score))
         results = sort_search_results(results, sort)

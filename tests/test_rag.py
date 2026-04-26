@@ -228,6 +228,50 @@ class TestRAGService:
         assert all("solar" not in unit.tags for unit, _score in semantic)
         assert all("solar" not in unit.tags for unit, _score in hybrid)
 
+    def test_semantic_and_hybrid_search_filter_by_nested_metadata(
+        self, store: Store, rag_service: RAGService
+    ):
+        keep = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="metadata-keep",
+                source_entity_type="insight",
+                title="Solar metadata keep",
+                content="Solar energy storage",
+                content_type=ContentType.INSIGHT,
+                metadata={"project": {"area": "grid"}},
+            )
+        )
+        skip = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="metadata-skip",
+                source_entity_type="insight",
+                title="Solar metadata skip",
+                content="Solar energy storage",
+                content_type=ContentType.INSIGHT,
+                metadata={"project": {"area": "storage"}},
+            )
+        )
+        for unit in [keep, skip]:
+            store.fts_index_unit(unit)
+        rag_service.embed_batch_and_store([keep.id, skip.id])
+
+        semantic = rag_service.search(
+            "solar energy",
+            min_similarity=0.0,
+            metadata_key="project.area",
+            metadata_value="grid",
+        )
+        hybrid = rag_service.hybrid_search(
+            "solar",
+            metadata_key="project.area",
+            metadata_value="grid",
+        )
+
+        assert [unit.id for unit, _score in semantic] == [keep.id]
+        assert [unit.id for unit, _score in hybrid] == [keep.id]
+
     def test_semantic_search_can_sort_by_created_at_desc(
         self, store: Store, rag_service: RAGService
     ):

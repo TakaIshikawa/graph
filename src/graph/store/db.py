@@ -204,11 +204,50 @@ def _metadata_path_parts(path: str) -> list[str]:
     parts = path.split(".")
     if not path or any(part == "" for part in parts):
         raise MetadataPathError("Metadata path must be a non-empty dotted path.")
+    for part in parts:
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", part):
+            raise MetadataPathError(
+                "Metadata path parts may only contain letters, numbers, underscores, and hyphens."
+            )
     return parts
 
 
 def _format_metadata_path(parts: list[str]) -> str:
     return ".".join(parts)
+
+
+def _metadata_json_path(path: str) -> str:
+    return "$" + "".join(f'."{part}"' for part in _metadata_path_parts(path))
+
+
+def metadata_path_value(metadata: dict, path: str):
+    current = metadata
+    for part in _metadata_path_parts(path):
+        if not isinstance(current, dict):
+            return None
+        if part not in current:
+            return None
+        current = current[part]
+    return current
+
+
+def metadata_path_matches(metadata: dict, path: str, value: object) -> bool:
+    return metadata_path_value(metadata, path) == value
+
+
+def _metadata_filter_sql(
+    field: str,
+    *,
+    metadata_key: str | None = None,
+    metadata_value: object | None = None,
+) -> tuple[str, list[object]]:
+    has_key = metadata_key is not None
+    has_value = metadata_value is not None
+    if has_key != has_value:
+        raise ValueError("metadata_key and metadata_value must be supplied together.")
+    if not has_key:
+        return "", []
+    return f" AND json_extract({field}, ?) = ?", [_metadata_json_path(str(metadata_key)), metadata_value]
 
 
 class Store:
@@ -321,6 +360,8 @@ class Store:
         created_before: datetime | str | None = None,
         updated_after: datetime | str | None = None,
         updated_before: datetime | str | None = None,
+        metadata_key: str | None = None,
+        metadata_value: object | None = None,
     ) -> list[tuple[KnowledgeUnit, bytes]]:
         query = "SELECT * FROM knowledge_units WHERE embedding IS NOT NULL"
         params: list = []
@@ -337,6 +378,13 @@ class Store:
             for where_part in clause[0]:
                 query += f" AND {where_part}"
             params.extend(clause[1])
+        metadata_sql, metadata_params = _metadata_filter_sql(
+            "metadata",
+            metadata_key=metadata_key,
+            metadata_value=metadata_value,
+        )
+        query += metadata_sql
+        params.extend(metadata_params)
         rows = self.conn.execute(query, params).fetchall()
         return [(_row_to_unit(r), r["embedding"]) for r in rows]
 
@@ -2532,6 +2580,8 @@ class Store:
         created_before: datetime | str | None = None,
         updated_after: datetime | str | None = None,
         updated_before: datetime | str | None = None,
+        metadata_key: str | None = None,
+        metadata_value: object | None = None,
     ) -> list[dict]:
         date_clauses: list[str] = []
         date_params: list[object] = []
@@ -2542,6 +2592,13 @@ class Store:
             date_clauses.extend(clauses)
             date_params.extend(params)
         date_sql = "".join(f" AND ku.{clause}" for clause in date_clauses)
+        metadata_sql = ""
+        metadata_params: list[object] = []
+        metadata_sql, metadata_params = _metadata_filter_sql(
+            "ku.metadata",
+            metadata_key=metadata_key,
+            metadata_value=metadata_value,
+        )
         try:
             rows = self.conn.execute(
                 """SELECT unit_id,
@@ -2550,10 +2607,10 @@ class Store:
                    FROM knowledge_fts
                    JOIN knowledge_units ku ON ku.id = knowledge_fts.unit_id
                    WHERE knowledge_fts MATCH ?
-                   """ + date_sql + """
+                   """ + date_sql + metadata_sql + """
                    ORDER BY rank
                    LIMIT ?""",
-                (query, *date_params, limit),
+                (query, *date_params, *metadata_params, limit),
             ).fetchall()
             results = [
                 {
@@ -2584,12 +2641,13 @@ class Store:
                 pattern = f"%{term}%"
                 params.extend([pattern, pattern, pattern])
             params.extend(date_params)
+            params.extend(metadata_params)
             params.append(limit)
             date_sql = "".join(f" AND {clause}" for clause in date_clauses)
             rows = self.conn.execute(
                 f"""SELECT id as unit_id, content, -1.0 as rank
                    FROM knowledge_units
-                   WHERE ({clauses}){date_sql}
+                   WHERE ({clauses}){date_sql}{metadata_sql.replace("ku.", "")}
                    LIMIT ?""",
                 params,
             ).fetchall()

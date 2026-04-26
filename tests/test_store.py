@@ -230,6 +230,40 @@ class TestUnitCRUD:
         assert store.set_unit_metadata_path("missing", "review.owner", "alice") is None
         assert store.remove_unit_metadata_path("missing", "review.owner") is None
 
+    def test_fts_search_filters_by_nested_metadata_path(self, store: Store):
+        keep = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="metadata-keep",
+                source_entity_type="insight",
+                title="Solar metadata keep",
+                content="Solar metadata search content",
+                metadata={"project": {"area": "grid"}},
+            )
+        )
+        skip = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="metadata-skip",
+                source_entity_type="insight",
+                title="Solar metadata skip",
+                content="Solar metadata search content",
+                metadata={"project": {"area": "storage"}},
+            )
+        )
+        store.fts_index_unit(keep)
+        store.fts_index_unit(skip)
+
+        results = store.fts_search(
+            "solar",
+            metadata_key="project.area",
+            metadata_value="grid",
+        )
+
+        assert [row["unit_id"] for row in results] == [keep.id]
+        with pytest.raises(ValueError, match="non-empty dotted path"):
+            store.fts_search("solar", metadata_key="project.", metadata_value="grid")
+
     def test_pin_and_unpin_unit_preserves_existing_fields_and_metadata(
         self, store: Store, sample_unit: KnowledgeUnit
     ):

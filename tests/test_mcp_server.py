@@ -492,12 +492,17 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_pa
     assert search_tool.inputSchema["properties"]["created_after"]["type"] == "string"
     assert search_tool.inputSchema["properties"]["min_utility"]["type"] == "number"
     assert search_tool.inputSchema["properties"]["min_confidence"]["type"] == "number"
+    assert search_tool.inputSchema["properties"]["metadata_key"]["type"] == "string"
+    assert search_tool.inputSchema["properties"]["metadata_value"]["type"] == "string"
     assert search_tool.inputSchema["properties"]["snippet_length"]["type"] == "integer"
     assert search_tool.inputSchema["properties"]["snippet_length"]["minimum"] == 1
     assert "created_at_desc" in search_tool.inputSchema["properties"]["sort"]["enum"]
     search_facets_tool = next(tool for tool in tools if tool.name == "search_facets")
     assert search_facets_tool.inputSchema["properties"]["tag"]["type"] == "string"
     assert search_facets_tool.inputSchema["properties"]["exclude_tag"]["type"] == "string"
+    context_tool = next(tool for tool in tools if tool.name == "context_pack")
+    assert context_tool.inputSchema["properties"]["metadata_key"]["type"] == "string"
+    assert context_tool.inputSchema["properties"]["metadata_value"]["type"] == "string"
     assert search_facets_tool.inputSchema["properties"]["mode"]["enum"] == [
         "hybrid",
         "semantic",
@@ -1527,6 +1532,59 @@ def test_search_tool_rejects_identical_tag_and_exclude_tag(tmp_path, monkeypatch
     assert payload["error"] == "tag and exclude_tag cannot be identical."
 
 
+def test_search_tool_filters_by_metadata_path_and_validates_pair(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    keep = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="metadata-keep",
+            source_entity_type="insight",
+            title="Solar metadata keep",
+            content="Solar metadata search",
+            content_type=ContentType.INSIGHT,
+            metadata={"project": {"area": "grid"}},
+        )
+    )
+    skip = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="metadata-skip",
+            source_entity_type="insight",
+            title="Solar metadata skip",
+            content="Solar metadata search",
+            content_type=ContentType.INSIGHT,
+            metadata={"project": {"area": "storage"}},
+        )
+    )
+    store.fts_index_unit(keep)
+    store.fts_index_unit(skip)
+    store.close()
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "search",
+            {
+                "query": "solar",
+                "metadata_key": "project.area",
+                "metadata_value": "grid",
+            },
+        )
+    )
+    results = json.loads(response[0].text)
+    assert [result["title"] for result in results] == ["Solar metadata keep"]
+
+    error_response = asyncio.run(
+        mcp_server.call_tool(
+            "search",
+            {"query": "solar", "metadata_key": "project.area"},
+        )
+    )
+    payload = json.loads(error_response[0].text)
+    assert payload["error"] == "metadata_key and metadata_value must be supplied together."
+
+
 def test_search_tool_respects_snippet_length(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))
@@ -1594,6 +1652,7 @@ def test_context_pack_tool_returns_filtered_results_and_graph_context(tmp_path, 
             content="Solar context content " * 10,
             content_type=ContentType.INSIGHT,
             tags=["solar"],
+            metadata={"project": {"area": "grid"}},
         )
     )
     filtered_out = store.insert_unit(
@@ -1605,6 +1664,7 @@ def test_context_pack_tool_returns_filtered_results_and_graph_context(tmp_path, 
             content="Solar content from another project",
             content_type=ContentType.FINDING,
             tags=["solar"],
+            metadata={"project": {"area": "storage"}},
         )
     )
     neighbor = store.insert_unit(
@@ -1656,6 +1716,8 @@ def test_context_pack_tool_returns_filtered_results_and_graph_context(tmp_path, 
                 "mode": "fulltext",
                 "source_project": "max",
                 "exclude_tag": "archive",
+                "metadata_key": "project.area",
+                "metadata_value": "grid",
                 "sort": "updated_at_desc",
                 "limit": 5,
                 "neighbor_depth": 2,
@@ -1667,7 +1729,12 @@ def test_context_pack_tool_returns_filtered_results_and_graph_context(tmp_path, 
     assert payload["sort"] == "updated_at_desc"
     assert payload["metadata"]["sort"] == "updated_at_desc"
     assert [unit["id"] for unit in payload["ranked_units"]] == [center.id]
-    assert payload["filters"] == {"exclude_tag": "archive", "source_project": "max"}
+    assert payload["filters"] == {
+        "exclude_tag": "archive",
+        "metadata_key": "project.area",
+        "metadata_value": "grid",
+        "source_project": "max",
+    }
     assert archived.id not in {unit["id"] for unit in payload["ranked_units"]}
     assert payload["neighbors"][0]["id"] == neighbor.id
     assert payload["selected_edges"][0]["relation"] == "relates_to"

@@ -143,7 +143,7 @@ def _populate_search_graph(store: Store) -> None:
             title="Solar approved insight",
             content="Solar energy storage market growth",
             content_type=ContentType.INSIGHT,
-            metadata={"review_state": "approved"},
+            metadata={"review_state": "approved", "project": {"area": "grid"}},
             tags=["energy", "solar"],
             utility_score=0.92,
             created_at=datetime.fromisoformat("2026-04-22T00:00:00+00:00"),
@@ -155,7 +155,7 @@ def _populate_search_graph(store: Store) -> None:
             title="Solar rejected insight",
             content="Solar energy storage market risk",
             content_type=ContentType.INSIGHT,
-            metadata={"review_state": "rejected"},
+            metadata={"review_state": "rejected", "project": {"area": "storage"}},
             tags=["energy", "solar"],
             utility_score=0.4,
             created_at=datetime.fromisoformat("2026-04-23T00:00:00+00:00"),
@@ -3814,6 +3814,59 @@ def test_search_command_rejects_identical_tag_and_exclude_tag(monkeypatch):
         assert result.exit_code == 0
         payload = json.loads(result.output)
         assert payload["error"] == "tag and exclude_tag cannot be identical."
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("mode", ["fulltext", "semantic", "hybrid"])
+def test_search_command_filters_by_metadata_path_in_all_modes(monkeypatch, mode):
+    store = _make_store()
+    _populate_search_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    monkeypatch.setattr(
+        "graph.rag.embeddings.get_embedding_provider",
+        lambda *args, **kwargs: MockEmbeddingProvider(),
+    )
+
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "search",
+                "solar",
+                "--mode",
+                mode,
+                "--metadata-key",
+                "project.area",
+                "--metadata-value",
+                "grid",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["filters"]["metadata_key"] == "project.area"
+        assert payload["filters"]["metadata_value"] == "grid"
+        assert [item["title"] for item in payload["results"]] == ["Solar approved insight"]
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_search_command_requires_metadata_key_and_value_together(monkeypatch):
+    store = _make_store()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(app, ["search", "solar", "--metadata-key", "project.area", "--json"])
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["error"] == "metadata_key and metadata_value must be supplied together."
     finally:
         store.close()
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]

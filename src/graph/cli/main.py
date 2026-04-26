@@ -18,7 +18,7 @@ from graph.rag.search import (
     validate_search_sort,
     validate_snippet_length,
 )
-from graph.store.db import MetadataPathError, Store
+from graph.store.db import MetadataPathError, Store, metadata_path_matches
 from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
 from graph.types.models import KnowledgeUnit, SyncState
 
@@ -1024,6 +1024,15 @@ def _validate_date_range(
 def _validate_search_filters(filters: dict) -> None:
     if filters.get("tag") and filters.get("tag") == filters.get("exclude_tag"):
         raise ValueError("tag and exclude_tag cannot be identical.")
+    has_metadata_key = filters.get("metadata_key") is not None
+    has_metadata_value = filters.get("metadata_value") is not None
+    if has_metadata_key != has_metadata_value:
+        raise ValueError("metadata_key and metadata_value must be supplied together.")
+    if has_metadata_key:
+        try:
+            metadata_path_matches({}, str(filters["metadata_key"]), filters["metadata_value"])
+        except MetadataPathError as exc:
+            raise ValueError(f"Invalid metadata_key: {exc}") from exc
     _validate_date_range(
         filters.get("created_after"),
         filters.get("created_before"),
@@ -1143,6 +1152,8 @@ def _unit_matches_search_filters(
     max_utility: float | str | None = None,
     min_confidence: float | str | None = None,
     max_confidence: float | str | None = None,
+    metadata_key: str | None = None,
+    metadata_value: object | None = None,
 ) -> bool:
     if source_project and str(unit.source_project) != source_project:
         return False
@@ -1154,6 +1165,9 @@ def _unit_matches_search_filters(
         return False
     if review_state and unit.metadata.get("review_state") != review_state:
         return False
+    if metadata_key is not None and metadata_value is not None:
+        if not metadata_path_matches(unit.metadata, metadata_key, metadata_value):
+            return False
     created_after_dt = _parse_datetime_filter(created_after, name="created_after")
     created_before_dt = _parse_datetime_filter(created_before, name="created_before")
     if created_after_dt or created_before_dt:
@@ -1207,6 +1221,8 @@ def _search_fulltext_with_filters(
     max_utility: float | str | None = None,
     min_confidence: float | str | None = None,
     max_confidence: float | str | None = None,
+    metadata_key: str | None = None,
+    metadata_value: object | None = None,
     sort: str = "relevance",
     snippet_length: int = DEFAULT_SEARCH_SNIPPET_LENGTH,
 ) -> list[tuple[object, str]]:
@@ -1223,6 +1239,8 @@ def _search_fulltext_with_filters(
             created_before=created_before,
             updated_after=updated_after,
             updated_before=updated_before,
+            metadata_key=metadata_key,
+            metadata_value=metadata_value,
         )
         filtered = []
         for r in results:
@@ -1242,6 +1260,8 @@ def _search_fulltext_with_filters(
                 max_utility=max_utility,
                 min_confidence=min_confidence,
                 max_confidence=max_confidence,
+                metadata_key=metadata_key,
+                metadata_value=metadata_value,
             ):
                 filtered.append(
                     (
@@ -1276,6 +1296,8 @@ def _search_scored_with_filters(
     max_utility: float | str | None = None,
     min_confidence: float | str | None = None,
     max_confidence: float | str | None = None,
+    metadata_key: str | None = None,
+    metadata_value: object | None = None,
     sort: str = "relevance",
 ) -> list[tuple[object, float]]:
     validate_search_sort(sort)
@@ -1301,6 +1323,8 @@ def _search_scored_with_filters(
                 max_utility=max_utility,
                 min_confidence=min_confidence,
                 max_confidence=max_confidence,
+                metadata_key=metadata_key,
+                metadata_value=metadata_value,
             ):
                 filtered.append((unit, score))
                 if sort == "relevance" and len(filtered) >= limit:
@@ -1327,6 +1351,8 @@ def _search_filters_dict(
     max_utility: float | None = None,
     min_confidence: float | None = None,
     max_confidence: float | None = None,
+    metadata_key: str | None = None,
+    metadata_value: str | None = None,
     sort: str | None = None,
 ) -> dict:
     filters = {
@@ -1345,6 +1371,8 @@ def _search_filters_dict(
             "max_utility": max_utility,
             "min_confidence": min_confidence,
             "max_confidence": max_confidence,
+            "metadata_key": metadata_key,
+            "metadata_value": metadata_value,
             "sort": sort,
         }.items()
         if value is not None
@@ -1393,6 +1421,8 @@ def _do_search(
             max_utility=filters.get("max_utility"),
             min_confidence=filters.get("min_confidence"),
             max_confidence=filters.get("max_confidence"),
+            metadata_key=filters.get("metadata_key"),
+            metadata_value=filters.get("metadata_value"),
             sort=sort,
             snippet_length=snippet_length,
         )
@@ -1431,6 +1461,8 @@ def _do_search(
                 created_before=filters.get("created_before"),
                 updated_after=filters.get("updated_after"),
                 updated_before=filters.get("updated_before"),
+                metadata_key=filters.get("metadata_key"),
+                metadata_value=filters.get("metadata_value"),
             ),
             query,
             limit=limit,
@@ -1447,6 +1479,8 @@ def _do_search(
             max_utility=filters.get("max_utility"),
             min_confidence=filters.get("min_confidence"),
             max_confidence=filters.get("max_confidence"),
+            metadata_key=filters.get("metadata_key"),
+            metadata_value=filters.get("metadata_value"),
             sort=sort,
         )
         snippets = {
@@ -1466,6 +1500,8 @@ def _do_search(
                 created_before=filters.get("created_before"),
                 updated_after=filters.get("updated_after"),
                 updated_before=filters.get("updated_before"),
+                metadata_key=filters.get("metadata_key"),
+                metadata_value=filters.get("metadata_value"),
             ),
             query,
             limit=limit,
@@ -1482,6 +1518,8 @@ def _do_search(
             max_utility=filters.get("max_utility"),
             min_confidence=filters.get("min_confidence"),
             max_confidence=filters.get("max_confidence"),
+            metadata_key=filters.get("metadata_key"),
+            metadata_value=filters.get("metadata_value"),
             sort=sort,
         )
         snippets = {
@@ -1616,6 +1654,8 @@ def _do_search_facets(
                 created_before=filters.get("created_before"),
                 updated_after=filters.get("updated_after"),
                 updated_before=filters.get("updated_before"),
+                metadata_key=filters.get("metadata_key"),
+                metadata_value=filters.get("metadata_value"),
             )
             for row in results:
                 unit = store.get_unit(row["unit_id"])
@@ -1634,6 +1674,8 @@ def _do_search_facets(
                     max_utility=filters.get("max_utility"),
                     min_confidence=filters.get("min_confidence"),
                     max_confidence=filters.get("max_confidence"),
+                    metadata_key=filters.get("metadata_key"),
+                    metadata_value=filters.get("metadata_value"),
                 ):
                     add_unit(unit)
             if len(results) < fetch_limit:
@@ -1663,6 +1705,8 @@ def _do_search_facets(
             created_before=filters.get("created_before"),
             updated_after=filters.get("updated_after"),
             updated_before=filters.get("updated_before"),
+            metadata_key=filters.get("metadata_key"),
+            metadata_value=filters.get("metadata_value"),
         )
     else:
         fetch_results = lambda q, fetch_limit: rag.hybrid_search(  # noqa: E731
@@ -1676,6 +1720,8 @@ def _do_search_facets(
             created_before=filters.get("created_before"),
             updated_after=filters.get("updated_after"),
             updated_before=filters.get("updated_before"),
+            metadata_key=filters.get("metadata_key"),
+            metadata_value=filters.get("metadata_value"),
         )
 
     fetch_limit = 100
@@ -1697,6 +1743,8 @@ def _do_search_facets(
                 max_utility=filters.get("max_utility"),
                 min_confidence=filters.get("min_confidence"),
                 max_confidence=filters.get("max_confidence"),
+                metadata_key=filters.get("metadata_key"),
+                metadata_value=filters.get("metadata_value"),
             ):
                 add_unit(unit)
         if len(pairs) < fetch_limit:
@@ -3517,6 +3565,16 @@ def search(
         "--review-state",
         help="Filter by review state metadata",
     ),
+    metadata_key: str | None = typer.Option(
+        None,
+        "--metadata-key",
+        help="Dotted metadata path to filter by",
+    ),
+    metadata_value: str | None = typer.Option(
+        None,
+        "--metadata-value",
+        help="Exact metadata value required at --metadata-key",
+    ),
     created_after: str | None = typer.Option(
         None,
         "--created-after",
@@ -3580,6 +3638,8 @@ def search(
                 tag=tag,
                 exclude_tag=exclude_tag,
                 review_state=review_state,
+                metadata_key=metadata_key,
+                metadata_value=metadata_value,
                 created_after=created_after,
                 created_before=created_before,
                 updated_after=updated_after,
@@ -3667,6 +3727,16 @@ def search_facets(
         "--review-state",
         help="Filter by review state metadata",
     ),
+    metadata_key: str | None = typer.Option(
+        None,
+        "--metadata-key",
+        help="Dotted metadata path to filter by",
+    ),
+    metadata_value: str | None = typer.Option(
+        None,
+        "--metadata-value",
+        help="Exact metadata value required at --metadata-key",
+    ),
     created_after: str | None = typer.Option(
         None,
         "--created-after",
@@ -3723,6 +3793,8 @@ def search_facets(
                 tag=tag,
                 exclude_tag=exclude_tag,
                 review_state=review_state,
+                metadata_key=metadata_key,
+                metadata_value=metadata_value,
                 created_after=created_after,
                 created_before=created_before,
                 updated_after=updated_after,
@@ -3770,6 +3842,16 @@ def context(
         None,
         "--review-state",
         help="Filter by review state metadata",
+    ),
+    metadata_key: str | None = typer.Option(
+        None,
+        "--metadata-key",
+        help="Dotted metadata path to filter by",
+    ),
+    metadata_value: str | None = typer.Option(
+        None,
+        "--metadata-value",
+        help="Exact metadata value required at --metadata-key",
     ),
     created_after: str | None = typer.Option(
         None,
@@ -3828,6 +3910,8 @@ def context(
                 tag=tag,
                 exclude_tag=exclude_tag,
                 review_state=review_state,
+                metadata_key=metadata_key,
+                metadata_value=metadata_value,
                 created_after=created_after,
                 created_before=created_before,
                 updated_after=updated_after,
