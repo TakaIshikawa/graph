@@ -1591,8 +1591,8 @@ def test_ingest_bookmarks_command_uses_configured_path_and_updates_by_url(tmp_pa
 def test_ingest_csv_command_uses_configured_path_and_indexes_fulltext(tmp_path, monkeypatch):
     csv_path = tmp_path / "knowledge.csv"
     csv_path.write_text(
-        "source_id,title,content,content_type,tags,utility_score,confidence,created_at,metadata_json\n"
-        'csv-1,CSV Import,"Spreadsheet search phrase.",artifact,"spreadsheet, import",9.1,0.8,2025-04-24T12:00:00Z,"{""tool"": ""sheet""}"\n',
+        "source_id,title,content,content_type,tags,utility_score,confidence,created_at,updated_at,metadata,origin\n"
+        'csv-1,CSV Import,"Spreadsheet search phrase.",artifact,"spreadsheet, import",9.1,0.8,2025-04-24T12:00:00Z,2025-04-25T12:00:00Z,"{""tool"": ""sheet""}",spreadsheet\n',
         encoding="utf-8",
     )
 
@@ -1614,7 +1614,8 @@ def test_ingest_csv_command_uses_configured_path_and_indexes_fulltext(tmp_path, 
         assert unit.tags == ["spreadsheet", "import"]
         assert unit.utility_score == 9.1
         assert unit.confidence == 0.8
-        assert unit.metadata == {"tool": "sheet"}
+        assert unit.updated_at.isoformat() == "2025-04-25T12:00:00+00:00"
+        assert unit.metadata == {"tool": "sheet", "fields": {"origin": "spreadsheet"}}
 
         search = runner.invoke(
             app,

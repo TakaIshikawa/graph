@@ -1101,8 +1101,8 @@ class TestCsvAdapter:
     def test_ingest_csv_rows_with_optional_fields(self, tmp_path):
         csv_path = tmp_path / "notes.csv"
         csv_path.write_text(
-            "source_id,title,content,content_type,tags,utility_score,confidence,created_at,metadata_json\n"
-            'note-1,Solar note,"Storage doubled.",finding,"energy, solar",8.5,0.75,2025-04-24T12:00:00Z,"{""url"": ""https://example.com"", ""rank"": 3}"\n',
+            "source_id,title,content,content_type,tags,utility_score,confidence,created_at,updated_at,metadata,source,priority\n"
+            'note-1,Solar note,"Storage doubled.",finding,"energy, solar",8.5,0.75,2025-04-24T12:00:00Z,2025-04-25T12:00:00Z,"{""url"": ""https://example.com"", ""rank"": 3}",spreadsheet,high\n',
             encoding="utf-8",
         )
 
@@ -1120,7 +1120,37 @@ class TestCsvAdapter:
         assert unit.utility_score == 8.5
         assert unit.confidence == 0.75
         assert unit.created_at.isoformat() == "2025-04-24T12:00:00+00:00"
-        assert unit.metadata == {"url": "https://example.com", "rank": 3}
+        assert unit.updated_at.isoformat() == "2025-04-25T12:00:00+00:00"
+        assert unit.metadata == {
+            "url": "https://example.com",
+            "rank": 3,
+            "fields": {"source": "spreadsheet", "priority": "high"},
+        }
+
+    def test_ingest_csv_rows_from_directory(self, tmp_path):
+        root = tmp_path / "exports"
+        nested = root / "nested"
+        nested.mkdir(parents=True)
+        (root / "notes.csv").write_text(
+            "source_id,title,content,tags,metadata_json\n"
+            'root-1,Root row,Root content,"alpha, beta","{""tool"": ""sheet""}"\n',
+            encoding="utf-8",
+        )
+        (nested / "more.csv").write_text(
+            "source_id,title,content,owner\nnested-1,Nested row,Nested content,Taka\n",
+            encoding="utf-8",
+        )
+        (nested / "ignore.txt").write_text(
+            "source_id,title,content\nignored,Ignored,Ignored\n",
+            encoding="utf-8",
+        )
+
+        result = CsvAdapter(path=str(root)).ingest()
+
+        assert [unit.source_id for unit in result.units] == ["nested-1", "root-1"]
+        assert result.units[0].metadata == {"fields": {"owner": "Taka"}}
+        assert result.units[1].tags == ["alpha", "beta"]
+        assert result.units[1].metadata == {"tool": "sheet"}
 
     def test_missing_optional_columns_and_source_id_are_handled(self, tmp_path):
         csv_path = tmp_path / "minimal.csv"
@@ -1142,17 +1172,36 @@ class TestCsvAdapter:
         assert unit.utility_score is None
         assert unit.confidence is None
 
-    def test_malformed_metadata_falls_back_without_crashing(self, tmp_path):
+    def test_malformed_values_fall_back_without_crashing(self, tmp_path):
         csv_path = tmp_path / "bad-metadata.csv"
         csv_path.write_text(
-            "title,content,metadata_json\nBad metadata,Still imported,{not json\n",
+            "title,content,content_type,created_at,updated_at,metadata,source\n"
+            "Bad metadata,Still imported,unknown-date,bad-date,also-bad,{not json,sheet\n",
             encoding="utf-8",
         )
 
         result = CsvAdapter(path=str(csv_path)).ingest()
 
         assert len(result.units) == 1
-        assert result.units[0].metadata == {"metadata_json": "{not json"}
+        assert result.units[0].content_type == "insight"
+        assert result.units[0].metadata == {
+            "metadata": "{not json",
+            "fields": {"source": "sheet"},
+        }
+
+    def test_extra_fields_do_not_overwrite_explicit_metadata_fields(self, tmp_path):
+        csv_path = tmp_path / "explicit-fields.csv"
+        csv_path.write_text(
+            "title,content,metadata,owner,priority\n"
+            'Explicit fields,Imported,"{""fields"": {""owner"": ""metadata""}}",column,high\n',
+            encoding="utf-8",
+        )
+
+        result = CsvAdapter(path=str(csv_path)).ingest()
+
+        assert result.units[0].metadata == {
+            "fields": {"owner": "metadata", "priority": "high"}
+        }
 
     def test_missing_path_and_missing_required_headers_return_empty_result(self, tmp_path):
         missing = CsvAdapter(path=str(tmp_path / "missing.csv")).ingest()

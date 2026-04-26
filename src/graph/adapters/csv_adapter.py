@@ -8,6 +8,7 @@ import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from graph.adapters.base import IngestResult, SourceAdapter
 from graph.types.enums import ContentType, SourceProject
@@ -50,28 +51,29 @@ class CsvAdapter(SourceAdapter):
                     continue
 
                 created_at = self._parse_datetime(self._cell(row, "created_at"))
-                if sync_at and created_at and created_at <= sync_at:
+                updated_at = self._parse_datetime(self._cell(row, "updated_at"))
+                sync_candidate = updated_at or created_at
+                if sync_at and sync_candidate and sync_candidate <= sync_at:
                     continue
 
-                result.units.append(
-                    KnowledgeUnit(
-                        source_project=SourceProject.CSV,
-                        source_id=self._source_id(row, row_number, title),
-                        source_entity_type="csv_row",
-                        title=title,
-                        content=content,
-                        content_type=self._parse_content_type(
-                            self._cell(row, "content_type")
-                        ),
-                        metadata=self._parse_metadata(self._cell(row, "metadata_json")),
-                        tags=self._parse_tags(self._cell(row, "tags")),
-                        confidence=self._parse_float(self._cell(row, "confidence")),
-                        utility_score=self._parse_float(
-                            self._cell(row, "utility_score")
-                        ),
-                        created_at=created_at or datetime.now(timezone.utc),
-                    )
+                unit = KnowledgeUnit(
+                    source_project=SourceProject.CSV,
+                    source_id=self._source_id(row, row_number, title),
+                    source_entity_type="csv_row",
+                    title=title,
+                    content=content,
+                    content_type=self._parse_content_type(
+                        self._cell(row, "content_type")
+                    ),
+                    metadata=self._metadata(row),
+                    tags=self._parse_tags(self._cell(row, "tags")),
+                    confidence=self._parse_float(self._cell(row, "confidence")),
+                    utility_score=self._parse_float(self._cell(row, "utility_score")),
+                    created_at=created_at or datetime.now(timezone.utc),
                 )
+                if updated_at is not None:
+                    unit.updated_at = updated_at
+                result.units.append(unit)
 
         return result
 
@@ -90,7 +92,7 @@ class CsvAdapter(SourceAdapter):
                 paths.append(path)
         return paths
 
-    def _read_rows(self, path: Path) -> list[tuple[int, dict[str, str]]]:
+    def _read_rows(self, path: Path) -> list[tuple[int, dict[str, Any]]]:
         with path.open(newline="", encoding="utf-8-sig") as handle:
             reader = csv.DictReader(handle)
             if reader.fieldnames is None:
@@ -98,15 +100,23 @@ class CsvAdapter(SourceAdapter):
             fields = {field.strip() for field in reader.fieldnames if field}
             if not {"title", "content"}.issubset(fields):
                 return []
-            return [(index, row) for index, row in enumerate(reader, start=2)]
+            rows: list[tuple[int, dict[str, Any]]] = []
+            for index, row in enumerate(reader, start=2):
+                normalized = {
+                    str(key).strip(): value
+                    for key, value in row.items()
+                    if key is not None
+                }
+                rows.append((index, normalized))
+            return rows
 
-    def _cell(self, row: dict[str, str], key: str) -> str:
+    def _cell(self, row: dict[str, Any], key: str) -> str:
         value = row.get(key)
         if value is None:
             return ""
         return str(value).strip()
 
-    def _source_id(self, row: dict[str, str], row_number: int, title: str) -> str:
+    def _source_id(self, row: dict[str, Any], row_number: int, title: str) -> str:
         explicit = self._cell(row, "source_id")
         if explicit:
             return explicit
@@ -124,16 +134,53 @@ class CsvAdapter(SourceAdapter):
                 tags.append(normalized)
         return tags
 
+    def _metadata(self, row: dict[str, Any]) -> dict:
+        value = self._cell(row, "metadata") or self._cell(row, "metadata_json")
+        metadata = self._parse_metadata(value)
+        fields = self._extra_fields(row)
+        if not fields:
+            return metadata
+
+        existing_fields = metadata.get("fields")
+        if existing_fields is None:
+            metadata["fields"] = fields
+        elif isinstance(existing_fields, dict):
+            metadata["fields"] = {**fields, **existing_fields}
+        else:
+            metadata["extra_fields"] = fields
+        return metadata
+
+    def _extra_fields(self, row: dict[str, Any]) -> dict[str, Any]:
+        core_columns = {
+            "source_id",
+            "title",
+            "content",
+            "content_type",
+            "tags",
+            "metadata",
+            "metadata_json",
+            "created_at",
+            "updated_at",
+            "confidence",
+            "utility_score",
+        }
+        fields: dict[str, Any] = {}
+        for key, value in row.items():
+            if key in core_columns or value is None or value == "":
+                continue
+            fields[key] = value
+        return fields
+
     def _parse_metadata(self, value: str) -> dict:
         if not value:
             return {}
         try:
             parsed = json.loads(value)
         except json.JSONDecodeError:
-            return {"metadata_json": value}
+            return {"metadata": value}
         if isinstance(parsed, dict):
             return parsed
-        return {"metadata_json": parsed}
+        return {"metadata": parsed}
 
     def _parse_float(self, value: str) -> float | None:
         if not value:
