@@ -192,6 +192,44 @@ class TestUnitCRUD:
     def test_update_unit_fields_missing_unit(self, store: Store):
         assert store.update_unit_fields("missing", title="Nope") is None
 
+    def test_unit_metadata_path_set_remove_and_validate(
+        self, store: Store, sample_unit: KnowledgeUnit
+    ):
+        sample_unit.metadata = {
+            "owner": "me",
+            "review": {"state": "draft", "priority": "low"},
+        }
+        inserted = store.insert_unit(sample_unit)
+        store.fts_index_unit(inserted)
+        original = store.get_unit(inserted.id)
+
+        updated = store.set_unit_metadata_path(inserted.id, "review.owner", "alice")
+
+        assert updated is not None
+        assert updated.metadata == {
+            "owner": "me",
+            "review": {"state": "draft", "priority": "low", "owner": "alice"},
+        }
+        assert str(updated.updated_at) != str(original.updated_at)
+
+        removed = store.remove_unit_metadata_path(inserted.id, "review.priority")
+
+        assert removed is not None
+        assert removed.metadata == {
+            "owner": "me",
+            "review": {"state": "draft", "owner": "alice"},
+        }
+        assert store.find_units_missing_fts_rows()["count"] == 0
+
+        with pytest.raises(ValueError, match="non-object value"):
+            store.set_unit_metadata_path(inserted.id, "owner.name", "alice")
+        with pytest.raises(ValueError, match="non-empty dotted path"):
+            store.remove_unit_metadata_path(inserted.id, "review.")
+
+    def test_unit_metadata_path_missing_unit(self, store: Store):
+        assert store.set_unit_metadata_path("missing", "review.owner", "alice") is None
+        assert store.remove_unit_metadata_path("missing", "review.owner") is None
+
     def test_pin_and_unpin_unit_preserves_existing_fields_and_metadata(
         self, store: Store, sample_unit: KnowledgeUnit
     ):

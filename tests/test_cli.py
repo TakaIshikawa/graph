@@ -4143,6 +4143,70 @@ def test_units_merge_cli_json_dry_run_and_apply(monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_units_metadata_set_remove_cli_json_and_errors(monkeypatch):
+    store = _make_store()
+    unit = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="manual-metadata",
+            source_entity_type="manual",
+            title="Metadata target",
+            content="Metadata content",
+            metadata={"owner": "me", "review": {"state": "draft", "priority": "low"}},
+        )
+    )
+    store.fts_index_unit(unit)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        set_result = runner.invoke(
+            app,
+            ["units", "metadata-set", unit.id, "review.owner", '"alice"', "--json"],
+        )
+
+        assert set_result.exit_code == 0
+        set_payload = json.loads(set_result.output)
+        assert set_payload["updated"] is True
+        assert set_payload["unit"]["metadata"]["review"] == {
+            "owner": "alice",
+            "priority": "low",
+            "state": "draft",
+        }
+
+        remove_result = runner.invoke(
+            app,
+            ["units", "metadata-remove", unit.id, "review.priority", "--json"],
+        )
+
+        assert remove_result.exit_code == 0
+        remove_payload = json.loads(remove_result.output)
+        assert remove_payload["updated"] is True
+        assert remove_payload["unit"]["metadata"] == {
+            "owner": "me",
+            "review": {"owner": "alice", "state": "draft"},
+        }
+
+        invalid_result = runner.invoke(
+            app,
+            ["units", "metadata-set", unit.id, "owner.name", '"alice"', "--json"],
+        )
+        assert invalid_result.exit_code == 0
+        invalid_payload = json.loads(invalid_result.output)
+        assert invalid_payload["error"] == "invalid_metadata_path"
+        assert "non-object value" in invalid_payload["message"]
+
+        missing_result = runner.invoke(
+            app,
+            ["units", "metadata-remove", "missing", "review.owner", "--json"],
+        )
+        assert missing_result.exit_code == 0
+        assert json.loads(missing_result.output)["error"] == "unit_not_found"
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_pin_and_unpin_unit_cli_json_preserves_metadata(monkeypatch):
     store = _make_store()
     unit = store.insert_unit(

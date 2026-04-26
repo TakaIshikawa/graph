@@ -21,6 +21,10 @@ if TYPE_CHECKING:
     from graph.adapters.base import IngestResult
 
 
+class MetadataPathError(ValueError):
+    """Raised when a dotted metadata path cannot be applied safely."""
+
+
 class _EmbeddingStatus(dict):
     def __eq__(self, other: object) -> bool:
         if isinstance(other, dict) and "percent_fresh" not in other:
@@ -165,6 +169,17 @@ def _row_to_saved_query(row: sqlite3.Row) -> dict:
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
+
+
+def _metadata_path_parts(path: str) -> list[str]:
+    parts = path.split(".")
+    if not path or any(part == "" for part in parts):
+        raise MetadataPathError("Metadata path must be a non-empty dotted path.")
+    return parts
+
+
+def _format_metadata_path(parts: list[str]) -> str:
+    return ".".join(parts)
 
 
 class Store:
@@ -587,6 +602,70 @@ class Store:
                 now,
                 unit.id,
             ),
+        )
+        self.conn.commit()
+        updated = self.get_unit(unit_id)
+        if updated is not None:
+            self.fts_index_unit(updated)
+        return updated
+
+    def set_unit_metadata_path(
+        self,
+        unit_id: str,
+        path: str,
+        value: object,
+    ) -> KnowledgeUnit | None:
+        unit = self.get_unit(unit_id)
+        if unit is None:
+            return None
+
+        parts = _metadata_path_parts(path)
+        metadata = dict(unit.metadata)
+        current = metadata
+        for index, part in enumerate(parts[:-1]):
+            next_value = current.get(part)
+            if next_value is None:
+                next_value = {}
+                current[part] = next_value
+            if not isinstance(next_value, dict):
+                traversed = _format_metadata_path(parts[: index + 1])
+                raise MetadataPathError(
+                    f"Metadata path cannot traverse non-object value at '{traversed}'."
+                )
+            current = next_value
+        current[parts[-1]] = value
+        return self._replace_unit_metadata(unit_id, metadata)
+
+    def remove_unit_metadata_path(self, unit_id: str, path: str) -> KnowledgeUnit | None:
+        unit = self.get_unit(unit_id)
+        if unit is None:
+            return None
+
+        parts = _metadata_path_parts(path)
+        metadata = dict(unit.metadata)
+        current = metadata
+        for index, part in enumerate(parts[:-1]):
+            next_value = current.get(part)
+            if next_value is None:
+                return unit
+            if not isinstance(next_value, dict):
+                traversed = _format_metadata_path(parts[: index + 1])
+                raise MetadataPathError(
+                    f"Metadata path cannot traverse non-object value at '{traversed}'."
+                )
+            current = next_value
+        if parts[-1] not in current:
+            return unit
+        current.pop(parts[-1])
+        return self._replace_unit_metadata(unit_id, metadata)
+
+    def _replace_unit_metadata(self, unit_id: str, metadata: dict) -> KnowledgeUnit | None:
+        now = _utcnow_iso()
+        self.conn.execute(
+            """UPDATE knowledge_units
+               SET metadata = ?, updated_at = ?
+               WHERE id = ?""",
+            (json.dumps(metadata), now, unit_id),
         )
         self.conn.commit()
         updated = self.get_unit(unit_id)

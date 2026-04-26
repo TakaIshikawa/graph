@@ -41,6 +41,8 @@ from graph.cli.main import (
     _do_rename_tag,
     _do_tag_graph,
     _do_unpin_unit,
+    _do_remove_unit_metadata,
+    _do_set_unit_metadata,
     _do_update_edge,
     _do_search,
     _do_search_facets,
@@ -1100,6 +1102,39 @@ async def list_tools() -> list[Tool]:
                     },
                 },
                 "required": ["unit_id"],
+            },
+        ),
+        Tool(
+            name="unit_metadata_set",
+            description="Set one knowledge unit metadata value by dotted path and refresh full-text search.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "unit_id": {"type": "string", "description": "Knowledge unit ID"},
+                    "path": {
+                        "type": "string",
+                        "description": "Dotted metadata path, e.g. review.owner",
+                    },
+                    "value": {
+                        "description": "JSON-compatible value to store at the path",
+                    },
+                },
+                "required": ["unit_id", "path", "value"],
+            },
+        ),
+        Tool(
+            name="unit_metadata_remove",
+            description="Remove one knowledge unit metadata value by dotted path and refresh full-text search.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "unit_id": {"type": "string", "description": "Knowledge unit ID"},
+                    "path": {
+                        "type": "string",
+                        "description": "Dotted metadata path, e.g. review.owner",
+                    },
+                },
+                "required": ["unit_id", "path"],
             },
         ),
         Tool(
@@ -2248,6 +2283,24 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     "updated": False,
                     "error": str(exc),
                 }
+            return [TextContent(type="text", text=json.dumps(payload, default=str))]
+
+        elif name == "unit_metadata_set":
+            payload = _do_set_unit_metadata(
+                store,
+                arguments["unit_id"],
+                arguments["path"],
+                arguments.get("value"),
+                parse_json_string=False,
+            )
+            return [TextContent(type="text", text=json.dumps(payload, default=str))]
+
+        elif name == "unit_metadata_remove":
+            payload = _do_remove_unit_metadata(
+                store,
+                arguments["unit_id"],
+                arguments["path"],
+            )
             return [TextContent(type="text", text=json.dumps(payload, default=str))]
 
         elif name == "delete_unit":

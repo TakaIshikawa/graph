@@ -18,7 +18,7 @@ from graph.rag.search import (
     validate_search_sort,
     validate_snippet_length,
 )
-from graph.store.db import Store
+from graph.store.db import MetadataPathError, Store
 from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
 from graph.types.models import KnowledgeUnit, SyncState
 
@@ -446,6 +446,15 @@ def _parse_metadata_json(value: str | dict | None) -> dict:
     return parsed
 
 
+def _parse_metadata_value(value: str | object) -> object:
+    if not isinstance(value, str):
+        return value
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ValueError("--value must be valid JSON.") from exc
+
+
 def _do_create_unit(
     store: Store,
     *,
@@ -507,6 +516,54 @@ def _do_update_unit(
             "message": f"Unit not found: {unit_id}",
         }
     return {"unit_id": unit_id, "updated": True, "unit": _unit_to_json(updated)}
+
+
+def _do_set_unit_metadata(
+    store: Store,
+    unit_id: str,
+    path: str,
+    value: str | object,
+    *,
+    parse_json_string: bool = True,
+) -> dict:
+    parsed_value = _parse_metadata_value(value) if parse_json_string else value
+    try:
+        updated = store.set_unit_metadata_path(unit_id, path, parsed_value)
+    except MetadataPathError as exc:
+        return {
+            "unit_id": unit_id,
+            "updated": False,
+            "error": "invalid_metadata_path",
+            "message": str(exc),
+        }
+    if updated is None:
+        return {
+            "unit_id": unit_id,
+            "updated": False,
+            "error": "unit_not_found",
+            "message": f"Unit not found: {unit_id}",
+        }
+    return {"unit_id": unit_id, "updated": True, "path": path, "unit": _unit_to_json(updated)}
+
+
+def _do_remove_unit_metadata(store: Store, unit_id: str, path: str) -> dict:
+    try:
+        updated = store.remove_unit_metadata_path(unit_id, path)
+    except MetadataPathError as exc:
+        return {
+            "unit_id": unit_id,
+            "updated": False,
+            "error": "invalid_metadata_path",
+            "message": str(exc),
+        }
+    if updated is None:
+        return {
+            "unit_id": unit_id,
+            "updated": False,
+            "error": "unit_not_found",
+            "message": f"Unit not found: {unit_id}",
+        }
+    return {"unit_id": unit_id, "updated": True, "path": path, "unit": _unit_to_json(updated)}
 
 
 def _do_pin_unit(store: Store, unit_id: str, *, reason: str | None = None) -> dict:
@@ -2525,6 +2582,73 @@ def update_unit(
 
     unit = payload["unit"]
     typer.echo(f"Updated unit {unit['id']}: {unit['title']}")
+
+
+@units_app.command(name="metadata-set")
+def units_metadata_set(
+    unit_id: str = typer.Argument(..., help="Knowledge unit ID"),
+    path: str = typer.Argument(..., help="Dotted metadata path, e.g. review.owner"),
+    value: str = typer.Argument(..., help="JSON value to store at the path"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Set one metadata value by dotted path."""
+    store = _get_store()
+    try:
+        payload = _do_set_unit_metadata(store, unit_id, path, value)
+    except ValueError as exc:
+        if json_output:
+            _json_echo(
+                {
+                    "unit_id": unit_id,
+                    "updated": False,
+                    "error": "invalid_json_value",
+                    "message": str(exc),
+                }
+            )
+            return
+        raise typer.BadParameter(str(exc)) from exc
+    finally:
+        store.close()
+
+    if payload.get("error"):
+        if json_output:
+            _json_echo(payload)
+            return
+        typer.echo(payload["message"])
+        raise typer.Exit(code=1)
+
+    if json_output:
+        _json_echo(payload)
+        return
+
+    unit = payload["unit"]
+    typer.echo(f"Set metadata {path} on unit {unit['id']}: {unit['title']}")
+
+
+@units_app.command(name="metadata-remove")
+def units_metadata_remove(
+    unit_id: str = typer.Argument(..., help="Knowledge unit ID"),
+    path: str = typer.Argument(..., help="Dotted metadata path, e.g. review.owner"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Remove one metadata value by dotted path."""
+    store = _get_store()
+    payload = _do_remove_unit_metadata(store, unit_id, path)
+    store.close()
+
+    if payload.get("error"):
+        if json_output:
+            _json_echo(payload)
+            return
+        typer.echo(payload["message"])
+        raise typer.Exit(code=1)
+
+    if json_output:
+        _json_echo(payload)
+        return
+
+    unit = payload["unit"]
+    typer.echo(f"Removed metadata {path} from unit {unit['id']}: {unit['title']}")
 
 
 @app.command(name="pin-unit")

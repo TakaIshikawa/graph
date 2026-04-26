@@ -1610,6 +1610,74 @@ def test_update_and_delete_unit_tools_reindex_and_clean_edges(tmp_path, monkeypa
         verify.close()
 
 
+def test_unit_metadata_tools_set_remove_and_report_errors(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    unit = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="manual-metadata",
+            source_entity_type="manual",
+            title="Metadata target",
+            content="Metadata content",
+            metadata={"owner": "me", "review": {"state": "draft", "priority": "low"}},
+        )
+    )
+    store.fts_index_unit(unit)
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    tool_names = {tool.name for tool in tools}
+    assert {"unit_metadata_set", "unit_metadata_remove"} <= tool_names
+
+    set_response = asyncio.run(
+        mcp_server.call_tool(
+            "unit_metadata_set",
+            {"unit_id": unit.id, "path": "review.owner", "value": "alice"},
+        )
+    )
+    set_payload = json.loads(set_response[0].text)
+    assert set_payload["updated"] is True
+    assert set_payload["unit"]["metadata"]["review"] == {
+        "owner": "alice",
+        "priority": "low",
+        "state": "draft",
+    }
+
+    remove_response = asyncio.run(
+        mcp_server.call_tool(
+            "unit_metadata_remove",
+            {"unit_id": unit.id, "path": "review.priority"},
+        )
+    )
+    remove_payload = json.loads(remove_response[0].text)
+    assert remove_payload["updated"] is True
+    assert remove_payload["unit"]["metadata"] == {
+        "owner": "me",
+        "review": {"owner": "alice", "state": "draft"},
+    }
+
+    invalid_response = asyncio.run(
+        mcp_server.call_tool(
+            "unit_metadata_set",
+            {"unit_id": unit.id, "path": "owner.name", "value": "alice"},
+        )
+    )
+    invalid_payload = json.loads(invalid_response[0].text)
+    assert invalid_payload["error"] == "invalid_metadata_path"
+    assert "non-object value" in invalid_payload["message"]
+
+    missing_response = asyncio.run(
+        mcp_server.call_tool(
+            "unit_metadata_remove",
+            {"unit_id": "missing", "path": "review.owner"},
+        )
+    )
+    assert json.loads(missing_response[0].text)["error"] == "unit_not_found"
+
+
 def test_create_unit_tool_validates_metadata_and_indexes_unit(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))
