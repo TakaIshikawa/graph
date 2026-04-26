@@ -488,6 +488,12 @@ class TestMarkdownAdapter:
         (tmp_path / "Some Note.md").write_text(
             "---\n"
             "title: Custom Title\n"
+            "created_at: 2024-01-02T03:04:05-05:00\n"
+            "updated_at: 2024-02-03\n"
+            "content_type: finding\n"
+            "confidence: 0.75\n"
+            "utility_score: '0.8'\n"
+            "status: evergreen\n"
             "tags:\n"
             "  - front\n"
             "  - research\n"
@@ -511,6 +517,19 @@ class TestMarkdownAdapter:
         assert by_source["Some Note.md"].source_entity_type == "markdown_note"
         assert by_source["Some Note.md"].title == "Custom Title"
         assert by_source["Some Note.md"].content.startswith("Body with")
+        assert "---" not in by_source["Some Note.md"].content
+        assert by_source["Some Note.md"].content_type == "finding"
+        assert by_source["Some Note.md"].confidence == 0.75
+        assert by_source["Some Note.md"].utility_score == 0.8
+        assert by_source["Some Note.md"].created_at == datetime(
+            2024, 1, 2, 8, 4, 5, tzinfo=timezone.utc
+        )
+        assert by_source["Some Note.md"].updated_at == datetime(
+            2024, 2, 3, 0, 0, 0, tzinfo=timezone.utc
+        )
+        assert by_source["Some Note.md"].metadata["front_matter"] == {
+            "status": "evergreen"
+        }
         assert by_source["Some Note.md"].tags == ["front", "research", "inline", "nested/tag"]
         assert by_source["Other Note.md"].title == "Other Note"
         assert by_source["Other Note.md"].tags == ["other"]
@@ -527,6 +546,23 @@ class TestMarkdownAdapter:
 
         assert result.units == []
         assert result.edges == []
+
+    def test_ingest_markdown_note_without_front_matter_keeps_existing_behavior(self, tmp_path):
+        note = tmp_path / "Plain.md"
+        note.write_text("Plain body with #tag.\n", encoding="utf-8")
+
+        result = MarkdownAdapter(root_path=str(tmp_path)).ingest()
+
+        assert len(result.units) == 1
+        unit = result.units[0]
+        assert unit.source_id == "Plain.md"
+        assert unit.title == "Plain"
+        assert unit.content == "Plain body with #tag.\n"
+        assert unit.content_type == "insight"
+        assert unit.tags == ["tag"]
+        assert unit.metadata == {"path": "Plain.md", "front_matter": {}}
+        assert unit.created_at.tzinfo is not None
+        assert unit.updated_at.tzinfo is not None
 
 
 class TestTextAdapter:
