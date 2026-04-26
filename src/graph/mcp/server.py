@@ -49,6 +49,7 @@ from graph.cli.main import (
     _do_pin_unit,
     _do_pinned_units,
     _do_remove_tag,
+    _do_rename_edge_relation,
     _do_rename_tag,
     _do_tag_graph,
     _do_unpin_unit,
@@ -1413,6 +1414,29 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="rename_edge_relation",
+            description="Rename one exact relation across matching graph edges, with optional dry run.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "old_relation": {
+                        "type": "string",
+                        "description": "Exact edge relation to replace",
+                    },
+                    "new_relation": {
+                        "type": "string",
+                        "description": "Replacement edge relation",
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Preview changes without writing",
+                    },
+                },
+                "required": ["old_relation", "new_relation"],
+            },
+        ),
+        Tool(
             name="update_edge",
             description="Update an edge by ID.",
             inputSchema={
@@ -2750,6 +2774,32 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 payload = {
                     "unit_id": arguments.get("unit_id"),
                     "edges": [],
+                    "error": str(exc),
+                }
+            return [TextContent(type="text", text=json.dumps(payload, default=str))]
+
+        elif name == "rename_edge_relation":
+            try:
+                payload = _do_rename_edge_relation(
+                    store,
+                    arguments["old_relation"],
+                    arguments["new_relation"],
+                    dry_run=arguments.get("dry_run", False),
+                )
+            except ValueError as exc:
+                payload = {
+                    "old_relation": arguments.get("old_relation", ""),
+                    "new_relation": arguments.get("new_relation", ""),
+                    "dry_run": arguments.get("dry_run", False),
+                    "matched_count": 0,
+                    "updated_count": 0,
+                    "changed_count": 0,
+                    "affected_count": 0,
+                    "affected_edge_ids": [],
+                    "sample_edge_ids": [],
+                    "changed_edges": [],
+                    "affected_edges": [],
+                    "sample_edges": [],
                     "error": str(exc),
                 }
             return [TextContent(type="text", text=json.dumps(payload, default=str))]

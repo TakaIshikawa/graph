@@ -3509,6 +3509,82 @@ def test_rename_tag_command_dry_run_json_and_execute(monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_relation_rename_command_dry_run_json_execute_and_errors(monkeypatch):
+    store = _make_store()
+    source = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="relation-cli-source",
+            source_entity_type="manual",
+            title="Source",
+            content="Source content",
+        )
+    )
+    target = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="relation-cli-target",
+            source_entity_type="manual",
+            title="Target",
+            content="Target content",
+        )
+    )
+    edge = store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=source.id,
+            to_unit_id=target.id,
+            relation=EdgeRelation.RELATES_TO,
+        )
+    )
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        dry_run = runner.invoke(
+            app,
+            ["relation-rename", "relates_to", "references", "--dry-run", "--json"],
+        )
+
+        assert dry_run.exit_code == 0
+        dry_payload = json.loads(dry_run.output)
+        assert dry_payload["dry_run"] is True
+        assert dry_payload["matched_count"] == 1
+        assert dry_payload["updated_count"] == 1
+        assert dry_payload["affected_edge_ids"] == [edge.id]
+        assert dry_payload["sample_edge_ids"] == [edge.id]
+        assert store.get_edge(edge.id).relation == EdgeRelation.RELATES_TO  # type: ignore[union-attr]
+
+        executed = runner.invoke(
+            app,
+            ["edge-relation-rename", "relates_to", "references", "--json"],
+        )
+
+        assert executed.exit_code == 0
+        execute_payload = json.loads(executed.output)
+        assert execute_payload["matched_count"] == 1
+        assert execute_payload["updated_count"] == 1
+        assert store.get_edge(edge.id).relation == EdgeRelation.REFERENCES  # type: ignore[union-attr]
+
+        no_match = runner.invoke(
+            app,
+            ["edges", "rename-relation", "relates_to", "references", "--json"],
+        )
+        assert no_match.exit_code == 0
+        assert json.loads(no_match.output)["matched_count"] == 0
+
+        invalid = runner.invoke(
+            app,
+            ["relation-rename", "references", "references", "--json"],
+        )
+        invalid_payload = json.loads(invalid.output)
+        assert invalid.exit_code == 0
+        assert invalid_payload["updated_count"] == 0
+        assert "must be different" in invalid_payload["error"]
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_remove_tag_command_dry_run_json_execute_and_alias(monkeypatch):
     store = _make_store()
     target = store.insert_unit(

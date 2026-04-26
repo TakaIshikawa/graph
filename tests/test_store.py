@@ -977,6 +977,94 @@ class TestEdgeCRUD:
         assert store.get_all_edges() == []
         assert store.delete_edge(edge.id) == {"edge_id": edge.id, "deleted": False}
 
+    def test_rename_edge_relation_dry_run_execute_no_match_and_validation(self, store: Store):
+        u1 = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="rename-n1",
+                source_entity_type="knowledge_node",
+                title="Rename Unit 1",
+                content="Content 1",
+            )
+        )
+        u2 = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="rename-n2",
+                source_entity_type="knowledge_node",
+                title="Rename Unit 2",
+                content="Content 2",
+            )
+        )
+        u3 = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="rename-n3",
+                source_entity_type="knowledge_node",
+                title="Rename Unit 3",
+                content="Content 3",
+            )
+        )
+        first = store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=u1.id,
+                to_unit_id=u2.id,
+                relation=EdgeRelation.RELATES_TO,
+                source=EdgeSource.MANUAL,
+                metadata={"keep": "metadata"},
+            )
+        )
+        second = store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=u2.id,
+                to_unit_id=u3.id,
+                relation=EdgeRelation.RELATES_TO,
+            )
+        )
+        untouched = store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=u1.id,
+                to_unit_id=u3.id,
+                relation=EdgeRelation.INSPIRES,
+            )
+        )
+        original_created_at = store.get_edge(first.id).created_at  # type: ignore[union-attr]
+
+        dry_run = store.rename_edge_relation("relates_to", "references", dry_run=True)
+
+        assert dry_run["dry_run"] is True
+        assert dry_run["matched_count"] == 2
+        assert dry_run["updated_count"] == 2
+        assert set(dry_run["affected_edge_ids"]) == {first.id, second.id}
+        assert set(dry_run["sample_edge_ids"]) == {first.id, second.id}
+        assert store.get_edge(first.id).relation == EdgeRelation.RELATES_TO  # type: ignore[union-attr]
+
+        result = store.rename_edge_relation("relates_to", "references")
+
+        assert result["dry_run"] is False
+        assert result["matched_count"] == 2
+        assert result["updated_count"] == 2
+        assert set(result["affected_edge_ids"]) == {first.id, second.id}
+        renamed = store.get_edge(first.id)
+        assert renamed is not None
+        assert renamed.relation == EdgeRelation.REFERENCES
+        assert renamed.metadata == {"keep": "metadata"}
+        assert renamed.created_at == original_created_at
+        assert store.get_edge(second.id).relation == EdgeRelation.REFERENCES  # type: ignore[union-attr]
+        assert store.get_edge(untouched.id).relation == EdgeRelation.INSPIRES  # type: ignore[union-attr]
+
+        no_match = store.rename_edge_relation("relates_to", "references", dry_run=True)
+        assert no_match["matched_count"] == 0
+        assert no_match["updated_count"] == 0
+        assert no_match["affected_edge_ids"] == []
+
+        with pytest.raises(ValueError, match="old_relation must not be empty"):
+            store.rename_edge_relation(" ", "references")
+        with pytest.raises(ValueError, match="new_relation must not be empty"):
+            store.rename_edge_relation("references", " ")
+        with pytest.raises(ValueError, match="must be different"):
+            store.rename_edge_relation("references", "references")
+
     def test_find_and_delete_edges_respects_bulk_filters(self, store: Store):
         ft = store.insert_unit(
             KnowledgeUnit(

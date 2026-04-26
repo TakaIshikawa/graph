@@ -2122,6 +2122,83 @@ class Store:
         ).fetchone()
         return row is not None
 
+    def rename_edge_relation(
+        self,
+        old_relation: str,
+        new_relation: str,
+        *,
+        dry_run: bool = False,
+        sample_limit: int = 10,
+    ) -> dict:
+        old_relation = old_relation.strip()
+        new_relation = new_relation.strip()
+        if not old_relation:
+            raise ValueError("old_relation must not be empty.")
+        if not new_relation:
+            raise ValueError("new_relation must not be empty.")
+        if old_relation == new_relation:
+            raise ValueError("old_relation and new_relation must be different.")
+
+        rows = self.conn.execute(
+            """SELECT *
+               FROM edges
+               WHERE relation = ?
+               ORDER BY created_at DESC, id""",
+            (old_relation,),
+        ).fetchall()
+        edges = [_row_to_edge(row) for row in rows]
+        changed_edges = [
+            {
+                "id": edge.id,
+                "from_unit_id": edge.from_unit_id,
+                "to_unit_id": edge.to_unit_id,
+                "old_relation": old_relation,
+                "new_relation": new_relation,
+                "weight": edge.weight,
+                "source": str(edge.source),
+                "metadata": edge.metadata,
+                "created_at": edge.created_at,
+            }
+            for edge in edges
+        ]
+
+        if not dry_run and edges:
+            columns = {
+                row["name"]
+                for row in self.conn.execute("PRAGMA table_info(edges)").fetchall()
+            }
+            if "updated_at" in columns:
+                self.conn.execute(
+                    """UPDATE edges
+                       SET relation = ?, updated_at = ?
+                       WHERE relation = ?""",
+                    (new_relation, _utcnow_iso(), old_relation),
+                )
+            else:
+                self.conn.execute(
+                    "UPDATE edges SET relation = ? WHERE relation = ?",
+                    (new_relation, old_relation),
+                )
+            self.conn.commit()
+
+        sample_edges = changed_edges[:sample_limit]
+        sample_edge_ids = [edge["id"] for edge in sample_edges]
+        return {
+            "old_relation": old_relation,
+            "new_relation": new_relation,
+            "dry_run": dry_run,
+            "matched_count": len(edges),
+            "updated_count": len(edges),
+            "changed_count": len(edges),
+            "affected_count": len(edges),
+            "affected_edge_ids": [edge["id"] for edge in changed_edges],
+            "sample_edge_ids": sample_edge_ids,
+            "changed_edges": changed_edges,
+            "affected_edges": changed_edges,
+            "sample_edges": sample_edges,
+            "sample_limit": sample_limit,
+        }
+
     def update_edge_fields(
         self,
         edge_id: str,

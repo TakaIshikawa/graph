@@ -936,6 +936,16 @@ def _do_import_edges_csv(store: Store, path: str | Path, *, dry_run: bool = Fals
     return store.import_edges_csv(path, dry_run=dry_run)
 
 
+def _do_rename_edge_relation(
+    store: Store,
+    old_relation: str,
+    new_relation: str,
+    *,
+    dry_run: bool = False,
+) -> dict:
+    return store.rename_edge_relation(old_relation, new_relation, dry_run=dry_run)
+
+
 def _content_excerpt(content: str, *, length: int = DEFAULT_SEARCH_SNIPPET_LENGTH) -> str:
     return build_search_snippet(content, "", length=length)
 
@@ -3506,6 +3516,94 @@ def delete_edges_bulk(
             f"    To: [{to_unit.get('source_project', 'unknown')}] "
             f"{to_unit.get('title', edge['to_unit_id'])}"
         )
+
+
+@edges_app.command(name="rename-relation")
+def edges_rename_relation(
+    old_relation: str = typer.Argument(..., help="Exact edge relation to replace"),
+    new_relation: str = typer.Argument(..., help="Replacement edge relation"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without writing"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Rename one exact relation across matching edges."""
+    store = _get_store()
+    try:
+        payload = _do_rename_edge_relation(
+            store,
+            old_relation,
+            new_relation,
+            dry_run=dry_run,
+        )
+    except ValueError as exc:
+        if json_output:
+            _json_echo(
+                {
+                    "old_relation": old_relation,
+                    "new_relation": new_relation,
+                    "dry_run": dry_run,
+                    "matched_count": 0,
+                    "updated_count": 0,
+                    "changed_count": 0,
+                    "affected_count": 0,
+                    "affected_edge_ids": [],
+                    "sample_edge_ids": [],
+                    "changed_edges": [],
+                    "affected_edges": [],
+                    "sample_edges": [],
+                    "error": str(exc),
+                }
+            )
+            return
+        raise typer.BadParameter(str(exc)) from exc
+    finally:
+        store.close()
+
+    if json_output:
+        _json_echo(payload)
+        return
+
+    action = "Would update" if dry_run else "Updated"
+    typer.echo(
+        f"{action} {payload['updated_count']} of {payload['matched_count']} matched edges: "
+        f"{payload['old_relation']} -> {payload['new_relation']}"
+    )
+    for edge in payload["sample_edges"]:
+        typer.echo(
+            f"  {edge['id']}: {edge['from_unit_id'][:8]}... --{edge['new_relation']}--> "
+            f"{edge['to_unit_id'][:8]}..."
+        )
+
+
+@app.command(name="edge-relation-rename")
+def edge_relation_rename(
+    old_relation: str = typer.Argument(..., help="Exact edge relation to replace"),
+    new_relation: str = typer.Argument(..., help="Replacement edge relation"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without writing"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Rename one exact relation across matching edges."""
+    edges_rename_relation(
+        old_relation=old_relation,
+        new_relation=new_relation,
+        dry_run=dry_run,
+        json_output=json_output,
+    )
+
+
+@app.command(name="relation-rename")
+def relation_rename(
+    old_relation: str = typer.Argument(..., help="Exact edge relation to replace"),
+    new_relation: str = typer.Argument(..., help="Replacement edge relation"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without writing"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Rename one exact edge relation across matching edges."""
+    edge_relation_rename(
+        old_relation=old_relation,
+        new_relation=new_relation,
+        dry_run=dry_run,
+        json_output=json_output,
+    )
 
 
 @app.command(name="update-edge")

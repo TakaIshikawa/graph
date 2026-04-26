@@ -2380,6 +2380,108 @@ def test_edge_management_tools_list_update_delete_and_report_errors(tmp_path, mo
         verify.close()
 
 
+def test_rename_edge_relation_tool_dry_run_execute_no_match_and_errors(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    source = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="relation-tool-source",
+            source_entity_type="manual",
+            title="Source",
+            content="Source content",
+        )
+    )
+    target = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="relation-tool-target",
+            source_entity_type="manual",
+            title="Target",
+            content="Target content",
+        )
+    )
+    edge = store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=source.id,
+            to_unit_id=target.id,
+            relation=EdgeRelation.RELATES_TO,
+        )
+    )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    rename_tool = next(tool for tool in tools if tool.name == "rename_edge_relation")
+    assert rename_tool.inputSchema["properties"]["dry_run"]["default"] is False
+    assert rename_tool.inputSchema["required"] == ["old_relation", "new_relation"]
+
+    dry_run = asyncio.run(
+        mcp_server.call_tool(
+            "rename_edge_relation",
+            {
+                "old_relation": "relates_to",
+                "new_relation": "references",
+                "dry_run": True,
+            },
+        )
+    )
+    dry_payload = json.loads(dry_run[0].text)
+    assert dry_payload["dry_run"] is True
+    assert dry_payload["matched_count"] == 1
+    assert dry_payload["updated_count"] == 1
+    assert dry_payload["affected_edge_ids"] == [edge.id]
+    assert dry_payload["sample_edge_ids"] == [edge.id]
+
+    verify = Store(str(db_path))
+    assert verify.get_edge(edge.id).relation == EdgeRelation.RELATES_TO  # type: ignore[union-attr]
+    verify.close()
+
+    executed = asyncio.run(
+        mcp_server.call_tool(
+            "rename_edge_relation",
+            {
+                "old_relation": "relates_to",
+                "new_relation": "references",
+            },
+        )
+    )
+    execute_payload = json.loads(executed[0].text)
+    assert execute_payload["dry_run"] is False
+    assert execute_payload["matched_count"] == 1
+    assert execute_payload["updated_count"] == 1
+
+    verify = Store(str(db_path))
+    assert verify.get_edge(edge.id).relation == EdgeRelation.REFERENCES  # type: ignore[union-attr]
+    verify.close()
+
+    no_match = asyncio.run(
+        mcp_server.call_tool(
+            "rename_edge_relation",
+            {
+                "old_relation": "relates_to",
+                "new_relation": "references",
+                "dry_run": True,
+            },
+        )
+    )
+    assert json.loads(no_match[0].text)["matched_count"] == 0
+
+    invalid = asyncio.run(
+        mcp_server.call_tool(
+            "rename_edge_relation",
+            {
+                "old_relation": "references",
+                "new_relation": "references",
+            },
+        )
+    )
+    invalid_payload = json.loads(invalid[0].text)
+    assert invalid_payload["updated_count"] == 0
+    assert "must be different" in invalid_payload["error"]
+
+
 def test_delete_edges_bulk_tool_dry_run_confirm_and_filters(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))
