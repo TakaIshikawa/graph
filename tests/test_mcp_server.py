@@ -7,6 +7,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 import networkx as nx
+import yaml
 
 from graph.adapters.base import IngestResult
 from graph.graph.service import GraphService
@@ -2623,6 +2624,81 @@ def test_export_turtle_tool_returns_path_counts_and_base_uri(tmp_path, monkeypat
     assert 'graph:title "Node \\"A\\""' in text
     assert 'graph:tag "energy"' in text
     assert f"graph:builds_on <https://example.test/unit/{b.id}>" in text
+
+
+def test_export_markdown_tool_returns_counts_path_and_filters(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    export_dir = tmp_path / "markdown"
+
+    store = Store(str(db_path))
+    matching = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="matching",
+            source_entity_type="insight",
+            title="Matching Unit",
+            content="Matching insight",
+            content_type=ContentType.INSIGHT,
+            tags=["energy", "solar"],
+            metadata={"source": "test"},
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="other",
+            source_entity_type="knowledge_node",
+            title="Other Unit",
+            content="Other content",
+            content_type=ContentType.INSIGHT,
+            tags=["energy"],
+        )
+    )
+    store.close()
+
+    export_dir.mkdir()
+    (export_dir / "stale.md").write_text("old")
+
+    tools = asyncio.run(mcp_server.list_tools())
+    export_tool = next(tool for tool in tools if tool.name == "export_markdown")
+    assert export_tool.inputSchema["properties"]["clean"]["default"] is False
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "export_markdown",
+            {
+                "path": str(export_dir),
+                "clean": True,
+                "tag": "solar",
+                "source_project": "max",
+                "content_type": "insight",
+            },
+        )
+    )
+    payload = json.loads(response[0].text)
+
+    assert payload["path"] == str(export_dir)
+    assert payload["units_exported"] == 1
+    assert payload["files_written"] == 1
+    assert payload["filters"] == {
+        "tag": "solar",
+        "source_project": "max",
+        "content_type": "insight",
+    }
+    assert not (export_dir / "stale.md").exists()
+
+    files = list(export_dir.glob("*.md"))
+    assert len(files) == 1
+    raw_front_matter = files[0].read_text().split("---", 2)[1]
+    front_matter = yaml.safe_load(raw_front_matter)
+    assert front_matter["id"] == matching.id
+    assert front_matter["source_project"] == "max"
+    assert front_matter["source_id"] == "matching"
+    assert front_matter["source_entity_type"] == "insight"
+    assert front_matter["content_type"] == "insight"
+    assert front_matter["tags"] == ["energy", "solar"]
+    assert front_matter["metadata"] == {"source": "test"}
 
 
 def test_export_mermaid_tool_returns_path_counts_and_capped_flag(tmp_path, monkeypatch):

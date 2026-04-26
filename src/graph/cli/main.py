@@ -184,6 +184,29 @@ def _do_export_turtle(
     return gs.export_turtle(path, base_uri=base_uri)
 
 
+def _do_export_markdown(
+    store: Store,
+    path: str | Path,
+    *,
+    clean: bool = False,
+    tag: str | None = None,
+    source_project: str | None = None,
+    content_type: str | None = None,
+) -> dict:
+    from graph.graph.service import GraphService
+
+    if content_type is not None:
+        content_type = ContentType(content_type).value
+    gs = GraphService(store)
+    return gs.export_markdown_folder(
+        path,
+        clean=clean,
+        tag=tag,
+        source_project=source_project,
+        content_type=content_type,
+    )
+
+
 def _do_export_neighborhood(
     store: Store, unit_id: str, path: str | Path, *, depth: int = 1
 ) -> dict:
@@ -1950,6 +1973,38 @@ def export_turtle(
     typer.echo(
         f"Exported {stats['node_count']} nodes and {stats['edge_count']} edges to {stats['path']}"
     )
+
+
+@app.command(name="export-markdown")
+def export_markdown(
+    path: Path = typer.Argument(..., help="Destination Markdown folder path"),
+    clean: bool = typer.Option(False, "--clean", help="Remove target folder contents first"),
+    tag: str | None = typer.Option(None, "--tag", help="Require an exact graph tag"),
+    source_project: str | None = typer.Option(
+        None,
+        "--source-project",
+        help="Filter by source project",
+    ),
+    content_type: str | None = typer.Option(None, "--content-type", help="Filter by content type"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Export matching units as portable Markdown files with YAML front matter."""
+    store = _get_store()
+    stats = _do_export_markdown(
+        store,
+        path,
+        clean=clean,
+        tag=tag,
+        source_project=source_project,
+        content_type=content_type,
+    )
+    store.close()
+
+    if json_output:
+        _json_echo(stats)
+        return
+
+    typer.echo(f"Exported {stats['units_exported']} Markdown files to {stats['path']}")
 
 
 @app.command(name="export-neighborhood")

@@ -10,6 +10,7 @@ from pathlib import Path
 
 import networkx as nx
 import pytest
+import yaml
 from typer.testing import CliRunner
 
 from graph.cli.main import app
@@ -649,6 +650,58 @@ def test_export_graphml_command_writes_valid_graphml(tmp_path, monkeypatch):
         assert exported.nodes[a_id]["created_at"]
         assert exported.get_edge_data(a_id, b_id)["relation"] == "builds_on"
         assert exported.get_edge_data(a_id, b_id)["source"] == "inferred"
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_export_markdown_command_writes_filtered_folder_and_json_stats(tmp_path, monkeypatch):
+    store = _make_store()
+    a_id, b_id, c_id, _ = _populate_graph(store)
+    export_dir = tmp_path / "markdown"
+    export_dir.mkdir()
+    (export_dir / "stale.md").write_text("old content")
+
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    result = runner.invoke(
+        app,
+        [
+            "export-markdown",
+            str(export_dir),
+            "--source-project",
+            "forty_two",
+            "--content-type",
+            "insight",
+            "--clean",
+            "--json",
+        ],
+    )
+
+    try:
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["path"] == str(export_dir)
+        assert payload["units_exported"] == 2
+        assert payload["files_written"] == 2
+        assert payload["filters"] == {
+            "tag": None,
+            "source_project": "forty_two",
+            "content_type": "insight",
+        }
+        assert not (export_dir / "stale.md").exists()
+
+        files = sorted(export_dir.glob("*.md"))
+        assert len(files) == 2
+        front_matters = {}
+        for path in files:
+            raw_front_matter = path.read_text().split("---", 2)[1]
+            data = yaml.safe_load(raw_front_matter)
+            front_matters[data["id"]] = data
+        assert set(front_matters) == {a_id, b_id}
+        assert c_id not in front_matters
+        assert all(data["source_project"] == "forty_two" for data in front_matters.values())
+        assert all(data["content_type"] == "insight" for data in front_matters.values())
     finally:
         store.close()
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]

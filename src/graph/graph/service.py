@@ -11,9 +11,11 @@ import html
 import json
 from pathlib import Path
 import re
+import shutil
 from urllib.parse import quote, urlsplit, urlunsplit
 
 import networkx as nx
+import yaml
 
 from graph.store.db import Store
 from graph.types.enums import EdgeRelation, EdgeSource
@@ -27,6 +29,7 @@ _TRAILING_URL_PUNCTUATION = ".,;:!?)]}'\""
 _TIMELINE_BUCKETS = {"day", "week", "month", "year"}
 _TIMELINE_FIELDS = {"created_at", "ingested_at", "updated_at"}
 _MERMAID_WHITESPACE_RE = re.compile(r"\s+")
+_MARKDOWN_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
 _EDGE_SUGGESTION_STOPWORDS = {
     "a",
     "an",
@@ -153,6 +156,12 @@ def _external_url_domain(url: str) -> str | None:
 
 def _json_value(value: object) -> object:
     return value.isoformat() if hasattr(value, "isoformat") else value
+
+
+def _markdown_filename_stem(title: str) -> str:
+    stem = _MARKDOWN_FILENAME_RE.sub("-", title.strip().lower())
+    stem = re.sub(r"-{2,}", "-", stem).strip(" .-_")
+    return stem[:80].strip(" .-_") or "untitled"
 
 
 def _mermaid_label(value: object) -> str:
@@ -612,6 +621,108 @@ class GraphService:
             "node_count": len(units),
             "edge_count": len(edges),
             "base_uri": base_uri,
+        }
+
+    def export_markdown_folder(
+        self,
+        path: str | Path,
+        *,
+        clean: bool = False,
+        tag: str | None = None,
+        source_project: str | None = None,
+        content_type: str | None = None,
+    ) -> dict:
+        """Write one portable Markdown file per matching unit."""
+        output_path = Path(path)
+        output_path.mkdir(parents=True, exist_ok=True)
+        if clean:
+            for child in output_path.iterdir():
+                if child.is_dir():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
+
+        units = [
+            unit
+            for unit in self.store.get_all_units(limit=1000000000)
+            if (source_project is None or str(unit.source_project) == source_project)
+            and (content_type is None or str(unit.content_type) == content_type)
+            and (tag is None or tag in unit.tags)
+        ]
+        units.sort(
+            key=lambda unit: (
+                str(unit.source_project),
+                str(unit.content_type),
+                unit.title.lower(),
+                unit.id,
+            )
+        )
+
+        files: list[str] = []
+        used_names: set[str] = set()
+        for unit in units:
+            source_key = ":".join(
+                [
+                    str(unit.source_project),
+                    unit.source_entity_type,
+                    unit.source_id,
+                    unit.id,
+                ]
+            )
+            digest = hashlib.sha256(source_key.encode("utf-8")).hexdigest()[:10]
+            base_name = f"{_markdown_filename_stem(unit.title)}--{digest}"
+            filename = f"{base_name}.md"
+            if filename in used_names:
+                collision_index = 2
+                while f"{base_name}-{collision_index}.md" in used_names:
+                    collision_index += 1
+                filename = f"{base_name}-{collision_index}.md"
+            used_names.add(filename)
+
+            front_matter = {
+                "id": unit.id,
+                "source_project": str(unit.source_project),
+                "source_id": unit.source_id,
+                "source_entity_type": unit.source_entity_type,
+                "content_type": str(unit.content_type),
+                "tags": list(unit.tags),
+                "confidence": unit.confidence,
+                "utility_score": unit.utility_score,
+                "created_at": _json_value(unit.created_at),
+                "updated_at": _json_value(unit.updated_at),
+                "metadata": unit.metadata,
+            }
+            text = "\n".join(
+                [
+                    "---",
+                    yaml.safe_dump(
+                        front_matter,
+                        sort_keys=False,
+                        allow_unicode=True,
+                    ).rstrip(),
+                    "---",
+                    "",
+                    f"# {unit.title}",
+                    "",
+                    unit.content.rstrip(),
+                    "",
+                ]
+            )
+            unit_path = output_path / filename
+            unit_path.write_text(text, encoding="utf-8")
+            files.append(filename)
+
+        return {
+            "path": str(output_path),
+            "units_exported": len(units),
+            "files_written": len(files),
+            "filters": {
+                "tag": tag,
+                "source_project": source_project,
+                "content_type": content_type,
+            },
+            "clean": clean,
+            "files": files,
         }
 
     def _unit_export_data(self, unit) -> dict:

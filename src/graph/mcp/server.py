@@ -18,6 +18,7 @@ from graph.cli.main import (
     _do_export_cytoscape,
     _do_export_graphml,
     _do_export_json,
+    _do_export_markdown,
     _do_export_mermaid,
     _do_export_neighborhood,
     _do_export_obsidian,
@@ -1520,6 +1521,39 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="export_markdown",
+            description="Export matching knowledge units to a folder of portable Markdown files with YAML front matter.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Destination Markdown folder path",
+                    },
+                    "clean": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Remove the target folder contents before writing files",
+                    },
+                    "tag": {
+                        "type": "string",
+                        "description": "Require an exact graph tag",
+                    },
+                    "source_project": {
+                        "type": "string",
+                        "enum": SUPPORTED_SYNC_PROJECTS,
+                        "description": "Filter by source project",
+                    },
+                    "content_type": {
+                        "type": "string",
+                        "enum": [content_type.value for content_type in ContentType],
+                        "description": "Filter by content type",
+                    },
+                },
+                "required": ["path"],
+            },
+        ),
+        Tool(
             name="export_neighborhood",
             description="Export a focused JSON subgraph around one knowledge unit.",
             inputSchema={
@@ -2511,6 +2545,17 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 store,
                 arguments["path"],
                 base_uri=arguments.get("base_uri", "https://graph.local/unit/"),
+            )
+            return [TextContent(type="text", text=json.dumps(stats))]
+
+        elif name == "export_markdown":
+            stats = _do_export_markdown(
+                store,
+                arguments["path"],
+                clean=arguments.get("clean", False),
+                tag=arguments.get("tag"),
+                source_project=arguments.get("source_project"),
+                content_type=arguments.get("content_type"),
             )
             return [TextContent(type="text", text=json.dumps(stats))]
 

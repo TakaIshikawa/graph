@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 import networkx as nx
 import pytest
+import yaml
 
 from graph.graph.service import GraphService
 from graph.rag.embeddings import serialize_embedding
@@ -275,6 +276,99 @@ class TestGraphService:
         gs = GraphService(populated_store)
         count = gs.rebuild()
         assert count == 4
+
+    def test_export_markdown_folder_filters_front_matter_collisions_and_clean(
+        self, store: Store, tmp_path
+    ):
+        first = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="same-a",
+                source_entity_type="insight",
+                title="Same/Title?",
+                content="First insight",
+                content_type=ContentType.INSIGHT,
+                tags=["energy", "solar"],
+                metadata={"nested": {"url": "https://example.test/a"}},
+                confidence=0.8,
+                utility_score=0.9,
+            )
+        )
+        second = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="same-b",
+                source_entity_type="insight",
+                title="Same/Title?",
+                content="Second insight",
+                content_type=ContentType.INSIGHT,
+                tags=["energy"],
+            )
+        )
+        store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.PRESENCE,
+                source_id="other",
+                source_entity_type="knowledge_item",
+                title="Other",
+                content="Other artifact",
+                content_type=ContentType.ARTIFACT,
+                tags=["energy"],
+            )
+        )
+        output_dir = tmp_path / "markdown"
+        output_dir.mkdir()
+        (output_dir / "stale.md").write_text("old")
+        keep_dir = output_dir / "old-subdir"
+        keep_dir.mkdir()
+        (keep_dir / "old.txt").write_text("old")
+
+        stats = GraphService(store).export_markdown_folder(
+            output_dir,
+            clean=True,
+            tag="energy",
+            source_project="max",
+            content_type="insight",
+        )
+
+        assert stats["path"] == str(output_dir)
+        assert stats["units_exported"] == 2
+        assert stats["files_written"] == 2
+        assert stats["filters"] == {
+            "tag": "energy",
+            "source_project": "max",
+            "content_type": "insight",
+        }
+        assert not (output_dir / "stale.md").exists()
+        assert not keep_dir.exists()
+
+        files = sorted(output_dir.glob("*.md"))
+        assert len(files) == 2
+        assert len({path.name for path in files}) == 2
+        assert all(path.name.startswith("same-title--") for path in files)
+
+        front_matters = {}
+        for path in files:
+            text = path.read_text()
+            assert text.startswith("---\n")
+            raw_front_matter = text.split("---", 2)[1]
+            data = yaml.safe_load(raw_front_matter)
+            front_matters[data["id"]] = data
+
+        assert set(front_matters) == {first.id, second.id}
+        first_front_matter = front_matters[first.id]
+        assert first_front_matter["source_project"] == "max"
+        assert first_front_matter["source_id"] == "same-a"
+        assert first_front_matter["source_entity_type"] == "insight"
+        assert first_front_matter["content_type"] == "insight"
+        assert first_front_matter["tags"] == ["energy", "solar"]
+        assert first_front_matter["confidence"] == 0.8
+        assert first_front_matter["utility_score"] == 0.9
+        assert first_front_matter["created_at"]
+        assert first_front_matter["updated_at"]
+        assert first_front_matter["metadata"] == {
+            "nested": {"url": "https://example.test/a"}
+        }
 
     def test_analyze_timeline_month_buckets_are_chronological(self, timeline_store: Store):
         result = GraphService(timeline_store).analyze_timeline(bucket="month")
