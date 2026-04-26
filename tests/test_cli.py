@@ -2090,6 +2090,24 @@ def test_similar_command_fallback_json_respects_filters(monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_similar_command_rejects_identical_tag_and_exclude_tag(monkeypatch):
+    store = _make_store()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(
+            app,
+            ["similar", "missing", "--tag", "archive", "--exclude-tag", "archive", "--json"],
+        )
+
+        assert result.exit_code == 0
+        assert json.loads(result.output)["error"] == "tag and exclude_tag cannot be identical."
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_context_command_emits_ranked_units_neighbors_and_budget(monkeypatch):
     store = _make_store()
     center = store.insert_unit(
@@ -2113,8 +2131,20 @@ def test_context_command_emits_ranked_units_neighbors_and_budget(monkeypatch):
             content_type=ContentType.FINDING,
         )
     )
+    archived = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="context-archive",
+            source_entity_type="insight",
+            title="Solar archived context",
+            content="Solar archived context content",
+            content_type=ContentType.INSIGHT,
+            tags=["archive"],
+        )
+    )
     store.fts_index_unit(center)
     store.fts_index_unit(neighbor)
+    store.fts_index_unit(archived)
     store.insert_edge(
         KnowledgeEdge(
             from_unit_id=neighbor.id,
@@ -2140,6 +2170,8 @@ def test_context_command_emits_ranked_units_neighbors_and_budget(monkeypatch):
                 "9",
                 "--char-budget",
                 "40",
+                "--exclude-tag",
+                "archive",
                 "--json",
             ],
         )
@@ -2147,7 +2179,9 @@ def test_context_command_emits_ranked_units_neighbors_and_budget(monkeypatch):
         assert result.exit_code == 0
         payload = json.loads(result.output)
         assert payload["query"] == "solar"
+        assert payload["filters"] == {"exclude_tag": "archive"}
         assert payload["ranked_units"][0]["id"] == center.id
+        assert archived.id not in {unit["id"] for unit in payload["ranked_units"]}
         assert payload["neighbors"][0]["id"] == neighbor.id
         assert payload["selected_edges"][0]["relation"] == "builds_on"
         assert payload["metadata"]["neighbor_depth"] == 2
@@ -3649,6 +3683,61 @@ def test_search_command_applies_filters_in_all_modes(monkeypatch, mode):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+@pytest.mark.parametrize("mode", ["fulltext", "semantic", "hybrid"])
+def test_search_command_excludes_exact_tag_in_all_modes(monkeypatch, mode):
+    store = _make_store()
+    _populate_search_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    monkeypatch.setattr(
+        "graph.rag.embeddings.get_embedding_provider",
+        lambda *args, **kwargs: MockEmbeddingProvider(),
+    )
+
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "search",
+                "solar",
+                "--mode",
+                mode,
+                "--limit",
+                "10",
+                "--exclude-tag",
+                "research",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["filters"] == {"exclude_tag": "research"}
+        assert "Solar research insight" not in {item["title"] for item in payload["results"]}
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_search_command_rejects_identical_tag_and_exclude_tag(monkeypatch):
+    store = _make_store()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(
+            app,
+            ["search", "solar", "--tag", "archive", "--exclude-tag", "archive", "--json"],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["error"] == "tag and exclude_tag cannot be identical."
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_search_command_emits_active_date_and_utility_filters_in_json(monkeypatch):
     store = _make_store()
     _populate_search_graph(store)
@@ -3822,6 +3911,40 @@ def test_search_facets_command_emits_fulltext_json(monkeypatch):
         }
         assert payload["facets"]["tag"]["solar"] == 5
         assert payload["facets"]["tag"]["energy"] == 4
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("mode", ["fulltext", "semantic", "hybrid"])
+def test_search_facets_command_excludes_exact_tag(monkeypatch, mode):
+    store = _make_store()
+    _populate_search_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    monkeypatch.setattr(
+        "graph.rag.embeddings.get_embedding_provider",
+        lambda *args, **kwargs: MockEmbeddingProvider(),
+    )
+
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "search-facets",
+                "solar",
+                "--mode",
+                mode,
+                "--exclude-tag",
+                "research",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["filters"] == {"exclude_tag": "research"}
+        assert "research" not in payload["facets"]["tag"]
     finally:
         store.close()
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]

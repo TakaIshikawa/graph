@@ -218,6 +218,16 @@ class TestRAGService:
         assert len(results) > 0
         assert all(isinstance(sim, float) for _, sim in results)
 
+    def test_semantic_and_hybrid_search_exclude_exact_tag(
+        self, populated_store_with_embeddings: Store, rag_service: RAGService
+    ):
+        semantic = rag_service.search("solar energy panels", min_similarity=0.0, exclude_tag="solar")
+        hybrid = rag_service.hybrid_search("solar", exclude_tag="solar")
+
+        assert semantic
+        assert all("solar" not in unit.tags for unit, _score in semantic)
+        assert all("solar" not in unit.tags for unit, _score in hybrid)
+
     def test_semantic_search_can_sort_by_created_at_desc(
         self, store: Store, rag_service: RAGService
     ):
@@ -389,6 +399,53 @@ class TestRAGService:
         assert result["source_mode"] == "local_search"
         assert [item["unit"].id for item in result["results"]] == [match.id]
         assert result["results"][0]["reason"] == "seed_text_fulltext"
+
+    def test_similar_units_excludes_exact_tag(self, store: Store):
+        seed = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="seed",
+                source_entity_type="insight",
+                title="Solar storage seed",
+                content="Solar storage adoption",
+                content_type=ContentType.INSIGHT,
+                tags=["energy"],
+            )
+        )
+        keep = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="keep",
+                source_entity_type="insight",
+                title="Solar storage match",
+                content="Solar storage growth",
+                content_type=ContentType.INSIGHT,
+                tags=["energy"],
+            )
+        )
+        skip = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="skip",
+                source_entity_type="insight",
+                title="Solar archived match",
+                content="Solar storage archive",
+                content_type=ContentType.INSIGHT,
+                tags=["energy", "archive"],
+            )
+        )
+        store.update_embedding(seed.id, serialize_embedding([1.0, 0.0]))
+        store.update_embedding(keep.id, serialize_embedding([0.9, 0.1]))
+        store.update_embedding(skip.id, serialize_embedding([0.8, 0.2]))
+
+        result = RAGService(store, provider=None).similar_units(
+            seed.id,
+            limit=5,
+            exclude_tag="archive",
+        )
+
+        assert result["filters"] == {"exclude_tag": "archive"}
+        assert [item["unit"].id for item in result["results"]] == [keep.id]
 
     def test_search_no_embeddings(self, store: Store, rag_service: RAGService):
         # No units with embeddings
@@ -652,3 +709,67 @@ class TestRAGService:
             second_hop.id,
         }
         assert third_hop.id not in {unit["id"] for unit in payload["neighbors"]}
+
+    def test_context_pack_excludes_tagged_neighbors_and_edges(
+        self, store: Store, rag_service: RAGService
+    ):
+        center = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="center",
+                source_entity_type="insight",
+                title="Solar center",
+                content="Solar content",
+                content_type=ContentType.INSIGHT,
+            )
+        )
+        keep = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="keep",
+                source_entity_type="insight",
+                title="Keep neighbor",
+                content="Keep content",
+                content_type=ContentType.INSIGHT,
+            )
+        )
+        archived = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="archived",
+                source_entity_type="insight",
+                title="Archived neighbor",
+                content="Archived content",
+                content_type=ContentType.INSIGHT,
+                tags=["archive"],
+            )
+        )
+        keep_edge = store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=center.id,
+                to_unit_id=keep.id,
+                relation=EdgeRelation.RELATES_TO,
+            )
+        )
+        archived_edge = store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=center.id,
+                to_unit_id=archived.id,
+                relation=EdgeRelation.RELATES_TO,
+            )
+        )
+
+        payload = rag_service.context_pack(
+            {
+                "query": "solar",
+                "mode": "fulltext",
+                "filters": {"exclude_tag": "archive"},
+                "results": [{"id": center.id}],
+            },
+            neighbor_depth=1,
+        )
+
+        assert [unit["id"] for unit in payload["neighbors"]] == [keep.id]
+        assert {edge["id"] for edge in payload["selected_edges"]} == {keep_edge.id}
+        assert archived.id not in {unit["id"] for unit in payload["neighbors"]}
+        assert archived_edge.id not in {edge["id"] for edge in payload["selected_edges"]}

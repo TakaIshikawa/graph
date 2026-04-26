@@ -100,6 +100,10 @@ SEARCH_FILTER_SCHEMA = {
         "type": "string",
         "description": "Require an exact graph tag",
     },
+    "exclude_tag": {
+        "type": "string",
+        "description": "Exclude units with this exact graph tag",
+    },
     "created_after": {
         "type": "string",
         "description": "Filter to units created on or after an ISO-8601 date/datetime",
@@ -418,7 +422,7 @@ async def list_tools() -> list[Tool]:
                     **SEARCH_FILTER_SCHEMA,
                     "filters": {
                         "type": "object",
-                        "description": "Structured filters such as source_project, content_type, tag, review_state, created_after, created_before, updated_after, updated_before, min_utility, max_utility",
+                        "description": "Structured filters such as source_project, content_type, tag, exclude_tag, review_state, created_after, created_before, updated_after, updated_before, min_utility, max_utility",
                         "additionalProperties": True,
                         "default": {},
                     },
@@ -1715,6 +1719,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     content_type=arguments.get("content_type"),
                     review_state=arguments.get("review_state"),
                     tag=arguments.get("tag"),
+                    exclude_tag=arguments.get("exclude_tag"),
                     created_after=arguments.get("created_after"),
                     created_before=arguments.get("created_before"),
                     updated_after=arguments.get("updated_after"),
@@ -1758,17 +1763,21 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return [TextContent(type="text", text=json.dumps(payload, default=str))]
 
         elif name == "similar_units":
-            filters = _search_filters_dict(
-                source_project=arguments.get("source_project"),
-                content_type=arguments.get("content_type"),
-                tag=arguments.get("tag"),
-            )
-            payload = _do_similar(
-                store,
-                arguments["unit_id"],
-                limit=arguments.get("limit", 10),
-                filters=filters,
-            )
+            try:
+                filters = _search_filters_dict(
+                    source_project=arguments.get("source_project"),
+                    content_type=arguments.get("content_type"),
+                    tag=arguments.get("tag"),
+                    exclude_tag=arguments.get("exclude_tag"),
+                )
+                payload = _do_similar(
+                    store,
+                    arguments["unit_id"],
+                    limit=arguments.get("limit", 10),
+                    filters=filters,
+                )
+            except ValueError as exc:
+                payload = {"error": str(exc)}
             return [TextContent(type="text", text=json.dumps(payload))]
 
         elif name == "search_facets":
@@ -1779,6 +1788,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     content_type=arguments.get("content_type"),
                     review_state=arguments.get("review_state"),
                     tag=arguments.get("tag"),
+                    exclude_tag=arguments.get("exclude_tag"),
                     created_after=arguments.get("created_after"),
                     created_before=arguments.get("created_before"),
                     updated_after=arguments.get("updated_after"),
@@ -1811,6 +1821,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     content_type=arguments.get("content_type"),
                     review_state=arguments.get("review_state"),
                     tag=arguments.get("tag"),
+                    exclude_tag=arguments.get("exclude_tag"),
                     created_after=arguments.get("created_after"),
                     created_before=arguments.get("created_before"),
                     updated_after=arguments.get("updated_after"),
@@ -1856,6 +1867,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                         content_type=arguments.get("content_type"),
                         review_state=arguments.get("review_state"),
                         tag=arguments.get("tag"),
+                        exclude_tag=arguments.get("exclude_tag"),
                         created_after=arguments.get("created_after"),
                         created_before=arguments.get("created_before"),
                         updated_after=arguments.get("updated_after"),
@@ -2244,6 +2256,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 content_type=arguments.get("content_type"),
                 review_state=arguments.get("review_state"),
                 tag=arguments.get("tag"),
+                exclude_tag=arguments.get("exclude_tag"),
                 created_after=arguments.get("created_after"),
                 created_before=arguments.get("created_before"),
                 updated_after=arguments.get("updated_after"),

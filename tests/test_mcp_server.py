@@ -441,6 +441,7 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_pa
     assert "created_at_desc" in search_tool.inputSchema["properties"]["sort"]["enum"]
     search_facets_tool = next(tool for tool in tools if tool.name == "search_facets")
     assert search_facets_tool.inputSchema["properties"]["tag"]["type"] == "string"
+    assert search_facets_tool.inputSchema["properties"]["exclude_tag"]["type"] == "string"
     assert search_facets_tool.inputSchema["properties"]["mode"]["enum"] == [
         "hybrid",
         "semantic",
@@ -1320,6 +1321,17 @@ def test_search_facets_tool_returns_parseable_json(tmp_path, monkeypatch):
             utility_score=0.95,
             created_at=datetime.fromisoformat("2026-04-21T00:00:00+00:00"),
         ),
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="archived",
+            source_entity_type="insight",
+            title="Solar archived insight",
+            content="Solar archived energy storage market",
+            content_type=ContentType.INSIGHT,
+            tags=["energy", "solar", "archive"],
+            utility_score=0.7,
+            created_at=datetime.fromisoformat("2026-04-20T00:00:00+00:00"),
+        ),
     ]
     for unit in units:
         inserted = store.insert_unit(unit)
@@ -1336,13 +1348,18 @@ def test_search_facets_tool_returns_parseable_json(tmp_path, monkeypatch):
                 "mode": "fulltext",
                 "source_project": "max",
                 "tag": "energy",
+                "exclude_tag": "archive",
             },
         )
     )
     payload = json.loads(response[0].text)
     assert payload["query"] == "solar"
     assert payload["mode"] == "fulltext"
-    assert payload["filters"] == {"source_project": "max", "tag": "energy"}
+    assert payload["filters"] == {
+        "exclude_tag": "archive",
+        "source_project": "max",
+        "tag": "energy",
+    }
     assert payload["total_matches"] == 2
     assert payload["facets"]["source_project"] == {"max": 2}
     assert payload["facets"]["source_entity_type"] == {
@@ -1391,6 +1408,22 @@ def test_search_tool_hybrid_results_include_scores_and_snippets(tmp_path, monkey
     assert results[0]["title"] == "Solar hybrid insight"
     assert isinstance(results[0]["score"], float)
     assert results[0]["snippet"]
+
+
+def test_search_tool_rejects_identical_tag_and_exclude_tag(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    Store(str(db_path)).close()
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "search",
+            {"query": "solar", "tag": "archive", "exclude_tag": "archive"},
+        )
+    )
+
+    payload = json.loads(response[0].text)
+    assert payload["error"] == "tag and exclude_tag cannot be identical."
 
 
 def test_search_tool_respects_snippet_length(tmp_path, monkeypatch):
@@ -1483,8 +1516,20 @@ def test_context_pack_tool_returns_filtered_results_and_graph_context(tmp_path, 
             content_type=ContentType.INSIGHT,
         )
     )
+    archived = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="context-archive",
+            source_entity_type="insight",
+            title="Solar archived context",
+            content="Solar archived context content",
+            content_type=ContentType.INSIGHT,
+            tags=["archive"],
+        )
+    )
     store.fts_index_unit(center)
     store.fts_index_unit(filtered_out)
+    store.fts_index_unit(archived)
     store.insert_edge(
         KnowledgeEdge(
             from_unit_id=center.id,
@@ -1509,6 +1554,7 @@ def test_context_pack_tool_returns_filtered_results_and_graph_context(tmp_path, 
                 "query": "solar",
                 "mode": "fulltext",
                 "source_project": "max",
+                "exclude_tag": "archive",
                 "sort": "updated_at_desc",
                 "limit": 5,
                 "neighbor_depth": 2,
@@ -1520,7 +1566,8 @@ def test_context_pack_tool_returns_filtered_results_and_graph_context(tmp_path, 
     assert payload["sort"] == "updated_at_desc"
     assert payload["metadata"]["sort"] == "updated_at_desc"
     assert [unit["id"] for unit in payload["ranked_units"]] == [center.id]
-    assert payload["filters"] == {"source_project": "max"}
+    assert payload["filters"] == {"exclude_tag": "archive", "source_project": "max"}
+    assert archived.id not in {unit["id"] for unit in payload["ranked_units"]}
     assert payload["neighbors"][0]["id"] == neighbor.id
     assert payload["selected_edges"][0]["relation"] == "relates_to"
     assert payload["metadata"]["content_chars_used"] <= 35

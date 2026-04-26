@@ -958,6 +958,8 @@ def _validate_date_range(
 
 
 def _validate_search_filters(filters: dict) -> None:
+    if filters.get("tag") and filters.get("tag") == filters.get("exclude_tag"):
+        raise ValueError("tag and exclude_tag cannot be identical.")
     _validate_date_range(
         filters.get("created_after"),
         filters.get("created_before"),
@@ -1067,6 +1069,7 @@ def _unit_matches_search_filters(
     source_project: str | None = None,
     content_type: str | None = None,
     tag: str | None = None,
+    exclude_tag: str | None = None,
     review_state: str | None = None,
     created_after: str | datetime | None = None,
     created_before: str | datetime | None = None,
@@ -1082,6 +1085,8 @@ def _unit_matches_search_filters(
     if content_type and str(unit.content_type) != content_type:
         return False
     if tag and tag not in unit.tags:
+        return False
+    if exclude_tag and exclude_tag in unit.tags:
         return False
     if review_state and unit.metadata.get("review_state") != review_state:
         return False
@@ -1128,6 +1133,7 @@ def _search_fulltext_with_filters(
     source_project: str | None = None,
     content_type: str | None = None,
     tag: str | None = None,
+    exclude_tag: str | None = None,
     review_state: str | None = None,
     created_after: str | datetime | None = None,
     created_before: str | datetime | None = None,
@@ -1162,6 +1168,7 @@ def _search_fulltext_with_filters(
                 source_project=source_project,
                 content_type=content_type,
                 tag=tag,
+                exclude_tag=exclude_tag,
                 review_state=review_state,
                 created_after=created_after,
                 created_before=created_before,
@@ -1195,6 +1202,7 @@ def _search_scored_with_filters(
     source_project: str | None = None,
     content_type: str | None = None,
     tag: str | None = None,
+    exclude_tag: str | None = None,
     review_state: str | None = None,
     created_after: str | datetime | None = None,
     created_before: str | datetime | None = None,
@@ -1219,6 +1227,7 @@ def _search_scored_with_filters(
                 source_project=source_project,
                 content_type=content_type,
                 tag=tag,
+                exclude_tag=exclude_tag,
                 review_state=review_state,
                 created_after=created_after,
                 created_before=created_before,
@@ -1244,6 +1253,7 @@ def _search_filters_dict(
     source_project: str | None = None,
     content_type: str | None = None,
     tag: str | None = None,
+    exclude_tag: str | None = None,
     review_state: str | None = None,
     created_after: str | None = None,
     created_before: str | None = None,
@@ -1261,6 +1271,7 @@ def _search_filters_dict(
             "source_project": source_project,
             "content_type": content_type,
             "tag": tag,
+            "exclude_tag": exclude_tag,
             "review_state": review_state,
             "created_after": created_after,
             "created_before": created_before,
@@ -1308,6 +1319,7 @@ def _do_search(
             source_project=filters.get("source_project"),
             content_type=filters.get("content_type"),
             tag=filters.get("tag"),
+            exclude_tag=filters.get("exclude_tag"),
             review_state=filters.get("review_state"),
             created_after=filters.get("created_after"),
             created_before=filters.get("created_before"),
@@ -1347,6 +1359,10 @@ def _do_search(
                 q,
                 limit=fetch_limit,
                 min_similarity=0.3,
+                source_project=filters.get("source_project"),
+                content_type=filters.get("content_type"),
+                tag=filters.get("tag"),
+                exclude_tag=filters.get("exclude_tag"),
                 created_after=filters.get("created_after"),
                 created_before=filters.get("created_before"),
                 updated_after=filters.get("updated_after"),
@@ -1357,6 +1373,7 @@ def _do_search(
             source_project=filters.get("source_project"),
             content_type=filters.get("content_type"),
             tag=filters.get("tag"),
+            exclude_tag=filters.get("exclude_tag"),
             review_state=filters.get("review_state"),
             created_after=filters.get("created_after"),
             created_before=filters.get("created_before"),
@@ -1377,6 +1394,10 @@ def _do_search(
             lambda q, fetch_limit: rag.hybrid_search(
                 q,
                 limit=fetch_limit,
+                source_project=filters.get("source_project"),
+                content_type=filters.get("content_type"),
+                tag=filters.get("tag"),
+                exclude_tag=filters.get("exclude_tag"),
                 created_after=filters.get("created_after"),
                 created_before=filters.get("created_before"),
                 updated_after=filters.get("updated_after"),
@@ -1387,6 +1408,7 @@ def _do_search(
             source_project=filters.get("source_project"),
             content_type=filters.get("content_type"),
             tag=filters.get("tag"),
+            exclude_tag=filters.get("exclude_tag"),
             review_state=filters.get("review_state"),
             created_after=filters.get("created_after"),
             created_before=filters.get("created_before"),
@@ -1538,6 +1560,7 @@ def _do_search_facets(
                     source_project=filters.get("source_project"),
                     content_type=filters.get("content_type"),
                     tag=filters.get("tag"),
+                    exclude_tag=filters.get("exclude_tag"),
                     review_state=filters.get("review_state"),
                     created_after=filters.get("created_after"),
                     created_before=filters.get("created_before"),
@@ -1568,6 +1591,10 @@ def _do_search_facets(
             q,
             limit=fetch_limit,
             min_similarity=0.3,
+            source_project=filters.get("source_project"),
+            content_type=filters.get("content_type"),
+            tag=filters.get("tag"),
+            exclude_tag=filters.get("exclude_tag"),
             created_after=filters.get("created_after"),
             created_before=filters.get("created_before"),
             updated_after=filters.get("updated_after"),
@@ -1577,6 +1604,10 @@ def _do_search_facets(
         fetch_results = lambda q, fetch_limit: rag.hybrid_search(  # noqa: E731
             q,
             limit=fetch_limit,
+            source_project=filters.get("source_project"),
+            content_type=filters.get("content_type"),
+            tag=filters.get("tag"),
+            exclude_tag=filters.get("exclude_tag"),
             created_after=filters.get("created_after"),
             created_before=filters.get("created_before"),
             updated_after=filters.get("updated_after"),
@@ -1592,6 +1623,7 @@ def _do_search_facets(
                 source_project=filters.get("source_project"),
                 content_type=filters.get("content_type"),
                 tag=filters.get("tag"),
+                exclude_tag=filters.get("exclude_tag"),
                 review_state=filters.get("review_state"),
                 created_after=filters.get("created_after"),
                 created_before=filters.get("created_before"),
@@ -1682,6 +1714,7 @@ def _do_similar(
     from graph.rag.search import RAGService
 
     filters = filters or {}
+    _validate_search_filters(filters)
     rag = RAGService(store, provider=None)
     payload = rag.similar_units(
         unit_id,
@@ -1689,6 +1722,7 @@ def _do_similar(
         source_project=filters.get("source_project"),
         content_type=filters.get("content_type"),
         tag=filters.get("tag"),
+        exclude_tag=filters.get("exclude_tag"),
     )
     return _similar_payload_to_json(payload)
 
@@ -3187,6 +3221,7 @@ def search(
     ),
     content_type: str | None = typer.Option(None, "--content-type", help="Filter by content type"),
     tag: str | None = typer.Option(None, "--tag", help="Require an exact tag"),
+    exclude_tag: str | None = typer.Option(None, "--exclude-tag", help="Exclude an exact tag"),
     review_state: str | None = typer.Option(
         None,
         "--review-state",
@@ -3253,6 +3288,7 @@ def search(
                 source_project=source_project,
                 content_type=content_type,
                 tag=tag,
+                exclude_tag=exclude_tag,
                 review_state=review_state,
                 created_after=created_after,
                 created_before=created_before,
@@ -3292,20 +3328,25 @@ def similar(
     ),
     content_type: str | None = typer.Option(None, "--content-type", help="Filter by content type"),
     tag: str | None = typer.Option(None, "--tag", help="Require an exact tag"),
+    exclude_tag: str | None = typer.Option(None, "--exclude-tag", help="Exclude an exact tag"),
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
     """Find units similar to an existing unit."""
     store = _get_store()
-    payload = _do_similar(
-        store,
-        unit_id,
-        limit=limit,
-        filters=_search_filters_dict(
-            source_project=source_project,
-            content_type=content_type,
-            tag=tag,
-        ),
-    )
+    try:
+        payload = _do_similar(
+            store,
+            unit_id,
+            limit=limit,
+            filters=_search_filters_dict(
+                source_project=source_project,
+                content_type=content_type,
+                tag=tag,
+                exclude_tag=exclude_tag,
+            ),
+        )
+    except ValueError as exc:
+        payload = {"error": str(exc)}
     _render_similar_payload(payload, json_output=json_output)
     store.close()
 
@@ -3330,6 +3371,7 @@ def search_facets(
     ),
     content_type: str | None = typer.Option(None, "--content-type", help="Filter by content type"),
     tag: str | None = typer.Option(None, "--tag", help="Require an exact tag"),
+    exclude_tag: str | None = typer.Option(None, "--exclude-tag", help="Exclude an exact tag"),
     review_state: str | None = typer.Option(
         None,
         "--review-state",
@@ -3389,6 +3431,7 @@ def search_facets(
                 source_project=source_project,
                 content_type=content_type,
                 tag=tag,
+                exclude_tag=exclude_tag,
                 review_state=review_state,
                 created_after=created_after,
                 created_before=created_before,
@@ -3432,6 +3475,7 @@ def context(
     ),
     content_type: str | None = typer.Option(None, "--content-type", help="Filter by content type"),
     tag: str | None = typer.Option(None, "--tag", help="Require an exact tag"),
+    exclude_tag: str | None = typer.Option(None, "--exclude-tag", help="Exclude an exact tag"),
     review_state: str | None = typer.Option(
         None,
         "--review-state",
@@ -3492,6 +3536,7 @@ def context(
                 source_project=source_project,
                 content_type=content_type,
                 tag=tag,
+                exclude_tag=exclude_tag,
                 review_state=review_state,
                 created_after=created_after,
                 created_before=created_before,
@@ -3550,6 +3595,7 @@ def save_query(
     ),
     content_type: str | None = typer.Option(None, "--content-type", help="Filter by content type"),
     tag: str | None = typer.Option(None, "--tag", help="Require an exact tag"),
+    exclude_tag: str | None = typer.Option(None, "--exclude-tag", help="Exclude an exact tag"),
     review_state: str | None = typer.Option(
         None,
         "--review-state",
@@ -3595,6 +3641,7 @@ def save_query(
             source_project=source_project,
             content_type=content_type,
             tag=tag,
+            exclude_tag=exclude_tag,
             review_state=review_state,
             created_after=created_after,
             created_before=created_before,
@@ -4827,6 +4874,7 @@ def tags_apply_search(
     ),
     content_type: str | None = typer.Option(None, "--content-type", help="Filter by content type"),
     tag: str | None = typer.Option(None, "--tag", help="Require an exact existing tag"),
+    exclude_tag: str | None = typer.Option(None, "--exclude-tag", help="Exclude an exact tag"),
     review_state: str | None = typer.Option(
         None,
         "--review-state",
@@ -4881,6 +4929,7 @@ def tags_apply_search(
         source_project=source_project,
         content_type=content_type,
         tag=tag,
+        exclude_tag=exclude_tag,
         review_state=review_state,
         created_after=created_after,
         created_before=created_before,

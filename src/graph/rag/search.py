@@ -196,12 +196,15 @@ def _unit_matches_filters(
     source_project: str | None = None,
     content_type: str | None = None,
     tag: str | None = None,
+    exclude_tag: str | None = None,
 ) -> bool:
     if source_project and str(unit.source_project) != source_project:
         return False
     if content_type and str(unit.content_type) != content_type:
         return False
     if tag and tag not in unit.tags:
+        return False
+    if exclude_tag and exclude_tag in unit.tags:
         return False
     return True
 
@@ -321,6 +324,8 @@ class RAGService:
         min_similarity: float = 0.5,
         source_project: str | None = None,
         content_type: str | None = None,
+        tag: str | None = None,
+        exclude_tag: str | None = None,
         created_after: datetime | str | None = None,
         created_before: datetime | str | None = None,
         updated_after: datetime | str | None = None,
@@ -344,6 +349,14 @@ class RAGService:
 
         results = []
         for unit, emb_bytes in candidates:
+            if not _unit_matches_filters(
+                unit,
+                source_project=source_project,
+                content_type=content_type,
+                tag=tag,
+                exclude_tag=exclude_tag,
+            ):
+                continue
             emb = deserialize_embedding(emb_bytes)
             sim = cosine_similarity(query_embedding, emb)
             if sim >= min_similarity:
@@ -360,6 +373,10 @@ class RAGService:
         limit: int = 10,
         semantic_weight: float = 0.6,
         fts_weight: float = 0.4,
+        source_project: str | None = None,
+        content_type: str | None = None,
+        tag: str | None = None,
+        exclude_tag: str | None = None,
         created_after: datetime | str | None = None,
         created_before: datetime | str | None = None,
         updated_after: datetime | str | None = None,
@@ -373,6 +390,10 @@ class RAGService:
             query,
             limit=limit * 2,
             min_similarity=0.3,
+            source_project=source_project,
+            content_type=content_type,
+            tag=tag,
+            exclude_tag=exclude_tag,
             created_after=created_after,
             created_before=created_before,
             updated_after=updated_after,
@@ -409,7 +430,13 @@ class RAGService:
         results = []
         for uid, score in combined:
             unit = self.store.get_unit(uid)
-            if unit:
+            if unit and _unit_matches_filters(
+                unit,
+                source_project=source_project,
+                content_type=content_type,
+                tag=tag,
+                exclude_tag=exclude_tag,
+            ):
                 results.append((unit, score))
         results = sort_search_results(results, sort)
         return results[:limit]
@@ -422,6 +449,7 @@ class RAGService:
         source_project: str | None = None,
         content_type: str | None = None,
         tag: str | None = None,
+        exclude_tag: str | None = None,
     ) -> dict:
         """Find units similar to an existing unit without embedding the seed text."""
         seed = self.store.get_unit(unit_id)
@@ -437,6 +465,7 @@ class RAGService:
                         "source_project": source_project,
                         "content_type": content_type,
                         "tag": tag,
+                        "exclude_tag": exclude_tag,
                     }.items()
                     if value is not None
                 },
@@ -459,6 +488,7 @@ class RAGService:
                 "source_project": source_project,
                 "content_type": content_type,
                 "tag": tag,
+                "exclude_tag": exclude_tag,
             }.items()
             if value is not None
         }
@@ -473,6 +503,7 @@ class RAGService:
                     source_project=source_project,
                     content_type=content_type,
                     tag=tag,
+                    exclude_tag=exclude_tag,
                 ):
                     continue
                 score = cosine_similarity(seed_embedding, deserialize_embedding(blob))
@@ -514,6 +545,7 @@ class RAGService:
                 source_project=source_project,
                 content_type=content_type,
                 tag=tag,
+                exclude_tag=exclude_tag,
             ):
                 continue
             results.append(
@@ -553,10 +585,13 @@ class RAGService:
         ranked_units = []
         selected_edges: dict[str, dict] = {}
         neighbor_units: dict[str, dict] = {}
+        exclude_tag = search_payload.get("filters", {}).get("exclude_tag")
 
         for rank, result in enumerate(search_payload.get("results", []), start=1):
             unit = self.store.get_unit(result["id"])
             if unit is None:
+                continue
+            if exclude_tag and exclude_tag in unit.tags:
                 continue
 
             unit_payload = _context_unit_payload(
@@ -582,6 +617,8 @@ class RAGService:
                 neighbor = self.store.get_unit(neighbor_id)
                 if neighbor is None:
                     continue
+                if exclude_tag and exclude_tag in neighbor.tags:
+                    continue
                 neighbor_payload = _context_unit_payload(neighbor)
                 neighbor_payload["content_excerpt"] = _consume_budget(
                     neighbor.content,
@@ -592,8 +629,14 @@ class RAGService:
 
             for edge_id in context["edge_ids"]:
                 edge = self.store.get_edge(edge_id)
-                if edge is not None:
-                    selected_edges[edge.id] = _context_edge_payload(edge)
+                if edge is None:
+                    continue
+                if exclude_tag and (
+                    self._unit_has_tag(edge.from_unit_id, exclude_tag)
+                    or self._unit_has_tag(edge.to_unit_id, exclude_tag)
+                ):
+                    continue
+                selected_edges[edge.id] = _context_edge_payload(edge)
 
         return {
             "query": search_payload.get("query"),
@@ -613,6 +656,10 @@ class RAGService:
                 "sort": search_payload.get("sort", "relevance"),
             },
         }
+
+    def _unit_has_tag(self, unit_id: str, tag: str) -> bool:
+        unit = self.store.get_unit(unit_id)
+        return unit is not None and tag in unit.tags
 
     def _neighbor_context(self, unit_id: str, depth: int) -> dict:
         if depth <= 0:
