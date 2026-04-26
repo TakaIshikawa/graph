@@ -458,6 +458,7 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_pa
         "text": ["text_document"],
         "html": ["html_document"],
         "ical": ["calendar_event"],
+        "ipynb": ["notebook"],
     }
     monkeypatch.setattr(
         mcp_server,
@@ -477,6 +478,7 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_pa
     assert "text" in ingest_tool.inputSchema["properties"]["project"]["enum"]
     assert "html" in ingest_tool.inputSchema["properties"]["project"]["enum"]
     assert "ical" in ingest_tool.inputSchema["properties"]["project"]["enum"]
+    assert "ipynb" in ingest_tool.inputSchema["properties"]["project"]["enum"]
 
     search_tool = next(tool for tool in tools if tool.name == "search")
     assert "kindle" in search_tool.inputSchema["properties"]["source_project"]["enum"]
@@ -489,6 +491,7 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_pa
     assert "text" in search_tool.inputSchema["properties"]["source_project"]["enum"]
     assert "html" in search_tool.inputSchema["properties"]["source_project"]["enum"]
     assert "ical" in search_tool.inputSchema["properties"]["source_project"]["enum"]
+    assert "ipynb" in search_tool.inputSchema["properties"]["source_project"]["enum"]
     assert search_tool.inputSchema["properties"]["created_after"]["type"] == "string"
     assert search_tool.inputSchema["properties"]["min_utility"]["type"] == "number"
     assert search_tool.inputSchema["properties"]["min_confidence"]["type"] == "number"
@@ -907,6 +910,7 @@ def test_ingest_all_includes_sota_and_search_can_filter_sota(tmp_path, monkeypat
         "text",
         "html",
         "ical",
+        "ipynb",
     ]
     assert payload == {"units_inserted": 1, "units_skipped": 0, "edges_inserted": 0}
 
@@ -1018,6 +1022,58 @@ END:VCALENDAR
         assert unit.metadata["uid"] == "mcp-event-1"
 
         state = store.get_sync_state("ical", "calendar_event")
+        assert state is not None
+        assert state.items_synced == 1
+    finally:
+        store.close()
+
+
+def test_ingest_tool_syncs_configured_ipynb_fixture(tmp_path, monkeypatch):
+    root = tmp_path / "notebooks"
+    root.mkdir()
+    notebook = root / "mcp.ipynb"
+    notebook.write_text(
+        json.dumps(
+            {
+                "metadata": {
+                    "title": "MCP Notebook",
+                    "tags": ["mcp", "notebook"],
+                    "kernelspec": {"language": "python", "name": "python3"},
+                    "language_info": {"name": "python"},
+                },
+                "cells": [
+                    {
+                        "cell_type": "markdown",
+                        "source": "Read through the MCP ingest tool.",
+                    },
+                    {"cell_type": "code", "source": ["value = 42\n", "value\n"]},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    db_path = tmp_path / "graph.db"
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+    monkeypatch.setattr(mcp_server.settings, "ipynb_root", str(root))
+
+    response = asyncio.run(
+        mcp_server.call_tool("ingest", {"project": "ipynb", "full": True})
+    )
+    payload = json.loads(response[0].text)
+
+    assert payload == {"units_inserted": 1, "units_skipped": 0, "edges_inserted": 0}
+
+    store = Store(str(db_path))
+    try:
+        unit = store.get_unit_by_source("me", "mcp.ipynb", "notebook")
+        assert unit is not None
+        assert unit.title == "MCP Notebook"
+        assert unit.tags == ["mcp", "notebook"]
+        assert "Read through the MCP ingest tool." in unit.content
+        assert unit.metadata["code_cell_count"] == 1
+
+        state = store.get_sync_state("ipynb", "notebook")
         assert state is not None
         assert state.items_synced == 1
     finally:

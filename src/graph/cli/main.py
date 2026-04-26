@@ -48,6 +48,7 @@ SUPPORTED_SYNC_PROJECTS = [
     "text",
     "html",
     "ical",
+    "ipynb",
 ]
 
 
@@ -62,6 +63,7 @@ def _get_adapter_for_project(name: str):
     from graph.adapters.forty_two import FortyTwoAdapter
     from graph.adapters.html import HtmlAdapter
     from graph.adapters.ical import ICalAdapter
+    from graph.adapters.ipynb import IpynbAdapter
     from graph.adapters.jsonl_adapter import JsonlAdapter
     from graph.adapters.kindle import KindleAdapter
     from graph.adapters.markdown import MarkdownAdapter
@@ -92,6 +94,7 @@ def _get_adapter_for_project(name: str):
         "text": lambda: TextAdapter(root_path=settings.text_root),
         "html": lambda: HtmlAdapter(root_path=settings.html_root),
         "ical": lambda: ICalAdapter(path=settings.ical_path),
+        "ipynb": lambda: IpynbAdapter(root_path=settings.ipynb_root),
     }
     factory = mapping.get(name)
     if factory is None:
@@ -1987,6 +1990,7 @@ def _do_ingest(
             "text",
             "html",
             "ical",
+            "ipynb",
         ]
         if project == "all"
         else [project]

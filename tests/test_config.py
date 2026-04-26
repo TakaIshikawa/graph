@@ -23,6 +23,7 @@ def test_source_path_settings_honor_environment_overrides(monkeypatch):
         "GRAPH_TEXT_ROOT": "/tmp/text",
         "GRAPH_HTML_ROOT": "/tmp/html",
         "GRAPH_ICAL_PATH": "/tmp/calendar.ics",
+        "GRAPH_IPYNB_ROOT": "/tmp/notebooks",
         "GRAPH_OBSIDIAN_VAULT_PATH": "/tmp/obsidian",
     }
     for key, value in overrides.items():
@@ -46,4 +47,5 @@ def test_source_path_settings_honor_environment_overrides(monkeypatch):
     assert loaded.text_root == "/tmp/text"
     assert loaded.html_root == "/tmp/html"
     assert loaded.ical_path == "/tmp/calendar.ics"
+    assert loaded.ipynb_root == "/tmp/notebooks"
     assert loaded.obsidian_vault_path == "/tmp/obsidian"

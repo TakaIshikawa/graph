@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     text_root: str = ""
     html_root: str = ""
     ical_path: str = ""
+    ipynb_root: str = ""
     obsidian_vault_path: str = "/Users/taka/ObsidianVaults/note"
 
     embedding_provider: str = "voyage"

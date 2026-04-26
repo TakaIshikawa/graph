@@ -19,6 +19,7 @@ from graph.adapters.feed import FeedAdapter
 from graph.adapters.forty_two import FortyTwoAdapter
 from graph.adapters.html import HtmlAdapter
 from graph.adapters.ical import ICalAdapter
+from graph.adapters.ipynb import IpynbAdapter
 from graph.adapters.jsonl_adapter import JsonlAdapter
 from graph.adapters.markdown import MarkdownAdapter
 from graph.adapters.max_adapter import MaxAdapter
@@ -727,6 +728,104 @@ class TestHtmlAdapter:
         assert missing.units == []
 
 
+class TestIpynbAdapter:
+    def test_ingest_notebooks_with_content_metadata_and_tags(self, tmp_path):
+        root = tmp_path / "notebooks"
+        nested = root / "research"
+        nested.mkdir(parents=True)
+        notebook = nested / "analysis.ipynb"
+        notebook.write_text(
+            json.dumps(
+                {
+                    "metadata": {
+                        "title": "Research Analysis",
+                        "tags": ["research", "#notebook", "research"],
+                        "kernelspec": {
+                            "display_name": "Python 3",
+                            "language": "python",
+                            "name": "python3",
+                        },
+                        "language_info": {"name": "python", "version": "3.12.0"},
+                    },
+                    "cells": [
+                        {
+                            "cell_type": "markdown",
+                            "source": ["# Finding\n", "Searchable markdown insight."],
+                        },
+                        {
+                            "cell_type": "code",
+                            "source": ["import pandas as pd\n", "df.describe()\n"],
+                        },
+                        {"cell_type": "raw", "source": "ignored raw"},
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        (root / "skip.txt").write_text("Not a notebook.\n", encoding="utf-8")
+
+        result = IpynbAdapter(root_path=str(root)).ingest()
+
+        assert len(result.units) == 1
+        unit = result.units[0]
+        assert unit.source_project == "me"
+        assert unit.source_id == "research/analysis.ipynb"
+        assert unit.source_entity_type == "notebook"
+        assert unit.title == "Research Analysis"
+        assert unit.content_type == "artifact"
+        assert "# Finding" in unit.content
+        assert "Searchable markdown insight." in unit.content
+        assert "Code cell 2 (python, 2 lines):" in unit.content
+        assert "import pandas as pd" in unit.content
+        assert unit.tags == ["research", "notebook"]
+        assert unit.metadata["path"] == "research/analysis.ipynb"
+        assert unit.metadata["cell_count"] == 3
+        assert unit.metadata["markdown_cell_count"] == 1
+        assert unit.metadata["code_cell_count"] == 1
+        assert unit.metadata["raw_cell_count"] == 1
+        assert unit.metadata["kernelspec"]["name"] == "python3"
+        assert unit.metadata["language_info"]["version"] == "3.12.0"
+        assert unit.metadata["language"] == "python"
+        assert unit.metadata["notebook_tags"] == ["research", "notebook"]
+        assert unit.created_at.tzinfo is not None
+        assert unit.updated_at.tzinfo is not None
+        assert result.edges == []
+
+    def test_sync_filter_and_invalid_notebooks_are_skipped(self, tmp_path):
+        old_path = tmp_path / "old.ipynb"
+        new_path = tmp_path / "new.ipynb"
+        invalid_path = tmp_path / "invalid.ipynb"
+        old_path.write_text(json.dumps({"cells": []}), encoding="utf-8")
+        new_path.write_text(
+            json.dumps(
+                {
+                    "metadata": {},
+                    "cells": [{"cell_type": "markdown", "source": "New notebook body"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+        invalid_path.write_text("{not valid json", encoding="utf-8")
+        os.utime(old_path, (1_700_000_000, 1_700_000_000))
+        os.utime(new_path, (1_700_100_000, 1_700_100_000))
+        os.utime(invalid_path, (1_700_100_000, 1_700_100_000))
+
+        result = IpynbAdapter(root_path=str(tmp_path)).ingest(
+            since=SyncState(
+                source_project="ipynb",
+                source_entity_type="notebook",
+                last_sync_at=datetime.fromtimestamp(1_700_050_000, tz=timezone.utc),
+            )
+        )
+        filtered = IpynbAdapter(root_path=str(tmp_path)).ingest(entity_types=["text_document"])
+        missing = IpynbAdapter(root_path=str(tmp_path / "missing")).ingest()
+
+        assert [unit.source_id for unit in result.units] == ["new.ipynb"]
+        assert result.units[0].title == "new"
+        assert filtered.units == []
+        assert missing.units == []
+
+
 class TestPdfAdapter:
     def test_ingest_pdf_documents_with_mocked_reader(self, tmp_path, monkeypatch):
         root = tmp_path / "pdfs"
@@ -1387,6 +1486,7 @@ class TestRegistry:
             "text",
             "html",
             "ical",
+            "ipynb",
         }
 
     def test_get_adapter(self):
@@ -1410,6 +1510,9 @@ class TestRegistry:
 
         ical_adapter = get_adapter("ical", path="/tmp/calendar.ics")
         assert ical_adapter.name == "ical"
+
+        ipynb_adapter = get_adapter("ipynb", root_path="/tmp/notebooks")
+        assert ipynb_adapter.name == "ipynb"
 
         feed_adapter = get_adapter("feed", sources="/tmp/feed.xml")
         assert feed_adapter.name == "feed"

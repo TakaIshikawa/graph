@@ -1894,6 +1894,67 @@ END:VCALENDAR
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_ingest_ipynb_command_uses_configured_root_and_indexes_fulltext(
+    tmp_path, monkeypatch
+):
+    root = tmp_path / "notebooks"
+    root.mkdir()
+    notebook = root / "analysis.ipynb"
+    notebook.write_text(
+        json.dumps(
+            {
+                "metadata": {
+                    "title": "CLI Notebook",
+                    "tags": ["research", "cli"],
+                    "kernelspec": {"language": "python", "name": "python3"},
+                    "language_info": {"name": "python"},
+                },
+                "cells": [
+                    {
+                        "cell_type": "markdown",
+                        "source": "Notebook fulltext search phrase.",
+                    },
+                    {"cell_type": "code", "source": "answer = 42\nanswer"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    store = _make_store()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    monkeypatch.setattr("graph.cli.main.settings.ipynb_root", str(root))
+
+    try:
+        result = runner.invoke(app, ["ingest", "ipynb"])
+
+        assert result.exit_code == 0
+        assert "Ingesting from ipynb" in result.output
+        assert "ipynb: 1 new" in result.output
+        unit = store.get_unit_by_source("me", "analysis.ipynb", "notebook")
+        assert unit is not None
+        assert unit.title == "CLI Notebook"
+        assert unit.tags == ["research", "cli"]
+        assert "Notebook fulltext search phrase." in unit.content
+        assert "Code cell 2 (python, 2 lines):" in unit.content
+        assert unit.metadata["cell_count"] == 2
+        sync_state = store.get_sync_state("ipynb", "notebook")
+        assert sync_state is not None
+        assert sync_state.items_synced == 1
+
+        search = runner.invoke(
+            app,
+            ["search", "Notebook fulltext", "--mode", "fulltext", "--limit", "1"],
+        )
+
+        assert search.exit_code == 0
+        assert "CLI Notebook" in search.output
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_shortest_path_command_prints_readable_path(monkeypatch):
     store = _make_store()
     a_id, _, c_id, _ = _populate_graph(store)
