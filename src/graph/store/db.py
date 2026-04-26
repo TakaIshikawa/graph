@@ -174,6 +174,20 @@ def _row_to_saved_query(row: sqlite3.Row) -> dict:
     }
 
 
+def _row_to_collection(row: sqlite3.Row) -> dict:
+    data = {
+        "id": row["id"],
+        "name": row["name"],
+        "description": row["description"],
+        "metadata": json.loads(row["metadata"]),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+    if "unit_count" in row.keys():
+        data["unit_count"] = row["unit_count"]
+    return data
+
+
 def _normalize_query_schedule(schedule: str | None) -> str | None:
     if schedule is None:
         return None
@@ -1185,6 +1199,229 @@ class Store:
             "unit_id": unit_id,
             "deleted": unit_cursor.rowcount > 0,
             "edges_deleted": edge_cursor.rowcount,
+        }
+
+    # --- Collections ---
+
+    def create_collection(
+        self,
+        name: str,
+        *,
+        description: str = "",
+        metadata: dict | None = None,
+    ) -> dict:
+        name = name.strip()
+        if not name:
+            raise ValueError("collection name must not be empty.")
+
+        existing = self.get_collection(name)
+        if existing is not None:
+            return {**existing, "created": False}
+
+        now = _utcnow_iso()
+        collection_id = _new_id()
+        self.conn.execute(
+            """INSERT INTO collections
+               (id, name, description, metadata, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (
+                collection_id,
+                name,
+                description,
+                json.dumps(metadata or {}, sort_keys=True),
+                now,
+                now,
+            ),
+        )
+        self.conn.commit()
+        created = self.get_collection(name)
+        if created is None:
+            raise RuntimeError(f"Collection was not written: {name}")
+        return {**created, "created": True}
+
+    def get_collection(self, name: str) -> dict | None:
+        row = self.conn.execute(
+            """SELECT c.*, COUNT(cu.unit_id) AS unit_count
+               FROM collections c
+               LEFT JOIN collection_units cu ON cu.collection_id = c.id
+               WHERE c.name = ?
+               GROUP BY c.id""",
+            (name,),
+        ).fetchone()
+        return _row_to_collection(row) if row else None
+
+    def list_collections(self) -> list[dict]:
+        rows = self.conn.execute(
+            """SELECT c.*, COUNT(cu.unit_id) AS unit_count
+               FROM collections c
+               LEFT JOIN collection_units cu ON cu.collection_id = c.id
+               GROUP BY c.id
+               ORDER BY c.name"""
+        ).fetchall()
+        return [_row_to_collection(row) for row in rows]
+
+    def rename_collection(self, old_name: str, new_name: str) -> dict:
+        old_name = old_name.strip()
+        new_name = new_name.strip()
+        if not old_name:
+            raise ValueError("old collection name must not be empty.")
+        if not new_name:
+            raise ValueError("new collection name must not be empty.")
+
+        collection = self.get_collection(old_name)
+        if collection is None:
+            return {
+                "old_name": old_name,
+                "new_name": new_name,
+                "renamed": False,
+                "error": "collection_not_found",
+                "message": f"Collection not found: {old_name}",
+            }
+        if old_name == new_name:
+            return {"old_name": old_name, "new_name": new_name, "renamed": True, "collection": collection}
+        if self.get_collection(new_name) is not None:
+            return {
+                "old_name": old_name,
+                "new_name": new_name,
+                "renamed": False,
+                "error": "collection_exists",
+                "message": f"Collection already exists: {new_name}",
+            }
+
+        now = _utcnow_iso()
+        self.conn.execute(
+            "UPDATE collections SET name = ?, updated_at = ? WHERE id = ?",
+            (new_name, now, collection["id"]),
+        )
+        self.conn.commit()
+        renamed = self.get_collection(new_name)
+        return {
+            "old_name": old_name,
+            "new_name": new_name,
+            "renamed": True,
+            "collection": renamed,
+        }
+
+    def delete_collection(self, name: str) -> dict:
+        collection = self.get_collection(name)
+        if collection is None:
+            return {
+                "name": name,
+                "deleted": False,
+                "memberships_deleted": 0,
+                "error": "collection_not_found",
+                "message": f"Collection not found: {name}",
+            }
+
+        membership_count = collection.get("unit_count", 0)
+        cursor = self.conn.execute("DELETE FROM collections WHERE id = ?", (collection["id"],))
+        self.conn.commit()
+        return {
+            "name": name,
+            "deleted": cursor.rowcount > 0,
+            "memberships_deleted": membership_count,
+        }
+
+    def add_unit_to_collection(self, collection_name: str, unit_id: str) -> dict:
+        collection = self.get_collection(collection_name)
+        if collection is None:
+            return {
+                "collection": collection_name,
+                "unit_id": unit_id,
+                "added": False,
+                "error": "collection_not_found",
+                "message": f"Collection not found: {collection_name}",
+            }
+        unit = self.get_unit(unit_id)
+        if unit is None:
+            return {
+                "collection": collection_name,
+                "unit_id": unit_id,
+                "added": False,
+                "error": "unit_not_found",
+                "message": f"Unit not found: {unit_id}",
+            }
+
+        before = self.conn.total_changes
+        self.conn.execute(
+            """INSERT INTO collection_units (collection_id, unit_id, added_at)
+               VALUES (?, ?, ?)
+               ON CONFLICT(collection_id, unit_id) DO NOTHING""",
+            (collection["id"], unit_id, _utcnow_iso()),
+        )
+        self.conn.commit()
+        inserted = self.conn.total_changes > before
+        return {
+            "collection": self.get_collection(collection_name),
+            "unit_id": unit_id,
+            "added": inserted,
+            "already_member": not inserted,
+            "unit": self.collection_unit_summary(unit),
+        }
+
+    def remove_unit_from_collection(self, collection_name: str, unit_id: str) -> dict:
+        collection = self.get_collection(collection_name)
+        if collection is None:
+            return {
+                "collection": collection_name,
+                "unit_id": unit_id,
+                "removed": False,
+                "error": "collection_not_found",
+                "message": f"Collection not found: {collection_name}",
+            }
+        cursor = self.conn.execute(
+            "DELETE FROM collection_units WHERE collection_id = ? AND unit_id = ?",
+            (collection["id"], unit_id),
+        )
+        self.conn.commit()
+        return {
+            "collection": self.get_collection(collection_name),
+            "unit_id": unit_id,
+            "removed": cursor.rowcount > 0,
+        }
+
+    def list_collection_members(self, collection_name: str, *, limit: int | None = None) -> dict:
+        collection = self.get_collection(collection_name)
+        if collection is None:
+            return {
+                "collection": collection_name,
+                "members": [],
+                "error": "collection_not_found",
+                "message": f"Collection not found: {collection_name}",
+            }
+
+        params: list[object] = [collection["id"]]
+        query = """SELECT ku.*, cu.added_at
+                   FROM collection_units cu
+                   JOIN knowledge_units ku ON ku.id = cu.unit_id
+                   WHERE cu.collection_id = ?
+                   ORDER BY cu.added_at DESC, ku.created_at DESC"""
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(max(0, limit))
+        rows = self.conn.execute(query, params).fetchall()
+        return {
+            "collection": collection,
+            "members": [
+                {
+                    **self.collection_unit_summary(_row_to_unit(row)),
+                    "added_at": row["added_at"],
+                }
+                for row in rows
+            ],
+        }
+
+    def collection_unit_summary(self, unit: KnowledgeUnit) -> dict:
+        return {
+            "id": unit.id,
+            "title": unit.title,
+            "source_project": str(unit.source_project),
+            "source_id": unit.source_id,
+            "source_entity_type": unit.source_entity_type,
+            "content_type": str(unit.content_type),
+            "tags": unit.tags,
+            "created_at": _json_value(unit.created_at),
+            "updated_at": _json_value(unit.updated_at),
         }
 
     # --- JSON import/export ---

@@ -368,6 +368,61 @@ def _populate_backlinks_graph(store: Store) -> tuple[str, str, str]:
     return a.id, b.id, c.id
 
 
+def test_mcp_collection_tools_manage_members_with_unit_summaries(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    unit = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="manual-collection-1",
+            source_entity_type="manual",
+            title="MCP collection unit",
+            content="Unit content",
+        )
+    )
+    store.close()
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    tool_names = {tool.name for tool in tools}
+    assert "collection_create" in tool_names
+    assert "collection_members" in tool_names
+
+    created = asyncio.run(
+        mcp_server.call_tool(
+            "collection_create",
+            {"name": "reading", "description": "Reading list"},
+        )
+    )
+    added = asyncio.run(
+        mcp_server.call_tool("collection_add", {"name": "reading", "unit_id": unit.id})
+    )
+    duplicate = asyncio.run(
+        mcp_server.call_tool("collection_add", {"name": "reading", "unit_id": unit.id})
+    )
+    members = asyncio.run(mcp_server.call_tool("collection_members", {"name": "reading"}))
+    deleted = asyncio.run(mcp_server.call_tool("collection_delete", {"name": "reading"}))
+
+    created_payload = json.loads(created[0].text)
+    added_payload = json.loads(added[0].text)
+    duplicate_payload = json.loads(duplicate[0].text)
+    members_payload = json.loads(members[0].text)
+    deleted_payload = json.loads(deleted[0].text)
+
+    assert created_payload["created"] is True
+    assert added_payload["added"] is True
+    assert duplicate_payload["already_member"] is True
+    assert members_payload["members"][0]["id"] == unit.id
+    assert members_payload["members"][0]["title"] == "MCP collection unit"
+    assert deleted_payload["deleted"] is True
+
+    verify = Store(str(db_path))
+    try:
+        assert verify.get_unit(unit.id) is not None
+    finally:
+        verify.close()
+
+
 def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))

@@ -1578,10 +1578,108 @@ class TestSavedQueries:
             }
             assert "embedding_updated_at" in columns
             version = store.conn.execute("SELECT version FROM schema_version").fetchone()[0]
-            assert version == 3
+            assert version == 4
         finally:
             store.close()
 
+    def test_schema_creates_collections_for_existing_database(self, tmp_path):
+        db_path = tmp_path / "existing-collections.db"
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
+            conn.execute("INSERT INTO schema_version (version) VALUES (3)")
+            conn.commit()
+        finally:
+            conn.close()
+
+        store = Store(str(db_path))
+        try:
+            collections = store.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'collections'"
+            ).fetchone()
+            collection_units = store.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'collection_units'"
+            ).fetchone()
+            version = store.conn.execute("SELECT version FROM schema_version").fetchone()[0]
+
+            assert collections is not None
+            assert collection_units is not None
+            assert version == 4
+        finally:
+            store.close()
+
+
+class TestCollections:
+    def test_collection_crud_memberships_and_delete_preserves_units(
+        self, store: Store, sample_unit: KnowledgeUnit
+    ):
+        unit = store.insert_unit(sample_unit)
+        other = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="idea-001",
+                source_entity_type="insight",
+                title="Market note",
+                content="Market content",
+            )
+        )
+
+        created = store.create_collection(
+            "project packet",
+            description="Review packet",
+            metadata={"owner": "alice"},
+        )
+        duplicate = store.create_collection("project packet")
+
+        assert created["created"] is True
+        assert created["name"] == "project packet"
+        assert created["metadata"] == {"owner": "alice"}
+        assert duplicate["created"] is False
+        assert duplicate["id"] == created["id"]
+
+        first_add = store.add_unit_to_collection("project packet", unit.id)
+        second_add = store.add_unit_to_collection("project packet", unit.id)
+        store.add_unit_to_collection("project packet", other.id)
+        second_collection = store.create_collection("review set")
+        store.add_unit_to_collection("review set", unit.id)
+
+        assert first_add["added"] is True
+        assert second_add["added"] is False
+        assert second_add["already_member"] is True
+        assert store.get_collection("project packet")["unit_count"] == 2
+        assert store.get_collection("review set")["unit_count"] == 1
+
+        members = store.list_collection_members("project packet")
+        assert {member["id"] for member in members["members"]} == {unit.id, other.id}
+        assert members["members"][0]["title"] in {"Solar panel efficiency test", "Market note"}
+
+        renamed = store.rename_collection("review set", "weekly review")
+        assert renamed["renamed"] is True
+        assert store.get_collection("review set") is None
+        assert store.get_collection("weekly review")["id"] == second_collection["id"]
+
+        removed = store.remove_unit_from_collection("project packet", unit.id)
+        assert removed["removed"] is True
+        assert store.get_collection("project packet")["unit_count"] == 1
+
+        deleted = store.delete_collection("project packet")
+        assert deleted["deleted"] is True
+        assert deleted["memberships_deleted"] == 1
+        assert store.get_collection("project packet") is None
+        assert store.get_unit(unit.id) is not None
+        assert store.get_unit(other.id) is not None
+
+    def test_collection_errors_are_explicit(self, store: Store, sample_unit: KnowledgeUnit):
+        unit = store.insert_unit(sample_unit)
+        store.create_collection("reading")
+
+        assert store.add_unit_to_collection("missing", unit.id)["error"] == "collection_not_found"
+        assert store.add_unit_to_collection("reading", "missing")["error"] == "unit_not_found"
+        assert store.list_collection_members("missing")["error"] == "collection_not_found"
+        assert store.delete_collection("missing")["deleted"] is False
+
+
+class TestSavedQueryCrud:
     def test_saved_query_crud(self, store: Store):
         saved = store.save_query(
             name="approved-solar",
@@ -1821,7 +1919,7 @@ class TestJsonBackup:
 
         payload = store.export_json()
 
-        assert payload["schema_version"] == 3
+        assert payload["schema_version"] == 4
         assert payload["exported_at"]
         assert len(payload["units"]) == 1
         assert payload["units"][0]["id"] == inserted.id

@@ -560,6 +560,61 @@ def _cleanup_db(path: str) -> None:
         candidate.unlink(missing_ok=True)
 
 
+def test_collection_cli_create_add_members_remove_and_delete(monkeypatch):
+    store = _make_store()
+    unit = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="manual-collection-1",
+            source_entity_type="manual",
+            title="Collection unit",
+            content="Unit content",
+        )
+    )
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        created = runner.invoke(
+            app,
+            [
+                "collection-create",
+                "reading",
+                "--description",
+                "Reading list",
+                "--json",
+            ],
+        )
+        assert created.exit_code == 0
+        created_payload = json.loads(created.output)
+        assert created_payload["created"] is True
+        assert created_payload["collection"]["name"] == "reading"
+
+        added = runner.invoke(app, ["collection-add", "reading", unit.id, "--json"])
+        duplicate = runner.invoke(app, ["collection-add", "reading", unit.id, "--json"])
+        members = runner.invoke(app, ["collection-members", "reading", "--json"])
+
+        assert added.exit_code == 0
+        assert duplicate.exit_code == 0
+        assert members.exit_code == 0
+        assert json.loads(added.output)["added"] is True
+        assert json.loads(duplicate.output)["already_member"] is True
+        members_payload = json.loads(members.output)
+        assert members_payload["collection"]["unit_count"] == 1
+        assert members_payload["members"][0]["id"] == unit.id
+        assert members_payload["members"][0]["title"] == "Collection unit"
+
+        removed = runner.invoke(app, ["collection-remove", "reading", unit.id, "--json"])
+        deleted = runner.invoke(app, ["collection-delete", "reading", "--yes", "--json"])
+
+        assert json.loads(removed.output)["removed"] is True
+        assert json.loads(deleted.output)["deleted"] is True
+        assert store.get_unit(unit.id) is not None
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_export_obsidian_uses_configured_vault_default(tmp_path, monkeypatch):
     store = _make_store()
     store.insert_unit(
@@ -597,7 +652,7 @@ def test_json_export_and_import_commands_round_trip(tmp_path, monkeypatch):
     assert export_result.exit_code == 0
     assert export_path.exists()
     exported = json.loads(export_path.read_text())
-    assert exported["schema_version"] == 3
+    assert exported["schema_version"] == 4
     assert exported["exported_at"]
     assert len(exported["units"]) == 4
     assert len(exported["edges"]) == 2
