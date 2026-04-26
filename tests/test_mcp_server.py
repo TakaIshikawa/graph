@@ -1696,6 +1696,55 @@ def test_search_tool_invalid_sort_returns_clear_error(tmp_path, monkeypatch):
     assert "created_at_desc" in payload["valid_sorts"]
 
 
+def test_export_search_html_tool_invocation_writes_report(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    export_path = tmp_path / "search.html"
+    store = Store(str(db_path))
+    unit = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="html-export",
+            source_entity_type="insight",
+            title="Solar MCP <unsafe>",
+            content="Solar MCP export content",
+            content_type=ContentType.INSIGHT,
+            tags=["solar"],
+            metadata={"review_state": "approved"},
+        )
+    )
+    store.fts_index_unit(unit)
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+    tools = asyncio.run(mcp_server.list_tools())
+    export_tool = next(tool for tool in tools if tool.name == "export_search_html")
+    assert export_tool.inputSchema["properties"]["snippet_length"]["minimum"] == 1
+
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "export_search_html",
+            {
+                "path": str(export_path),
+                "query": "solar",
+                "mode": "fulltext",
+                "source_project": "max",
+                "review_state": "approved",
+                "snippet_length": 40,
+            },
+        )
+    )
+    payload = json.loads(response[0].text)
+    html = export_path.read_text(encoding="utf-8")
+
+    assert payload["path"] == str(export_path)
+    assert payload["result_count"] == 1
+    assert payload["query"] == "solar"
+    assert payload["mode"] == "fulltext"
+    assert payload["filters"] == {"review_state": "approved", "source_project": "max"}
+    assert "Solar MCP &lt;unsafe&gt;" in html
+    assert "Solar MCP <unsafe>" not in html
+
+
 def test_context_pack_tool_returns_filtered_results_and_graph_context(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))

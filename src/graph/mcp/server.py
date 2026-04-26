@@ -27,6 +27,7 @@ from graph.cli.main import (
     _do_export_obsidian,
     _do_export_queries,
     _do_export_report,
+    _do_export_search_html,
     _do_export_turtle,
     _do_extract_references,
     _do_embeddings_status,
@@ -1799,6 +1800,42 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="export_search_html",
+            description="Run a search query and export the results as a standalone HTML report.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Destination HTML file path",
+                    },
+                    "query": {"type": "string", "description": "Search query"},
+                    "limit": {"type": "integer", "default": 10},
+                    "snippet_length": {
+                        "type": "integer",
+                        "default": DEFAULT_SEARCH_SNIPPET_LENGTH,
+                        "minimum": 1,
+                        "maximum": 2000,
+                        "description": "Maximum characters to include in each result snippet",
+                    },
+                    "sort": {
+                        "type": "string",
+                        "enum": list(SEARCH_SORTS),
+                        "default": "relevance",
+                        "description": "Result ordering",
+                    },
+                    **SEARCH_FILTER_SCHEMA,
+                    "mode": {
+                        "type": "string",
+                        "enum": ["hybrid", "semantic", "fulltext"],
+                        "default": "fulltext",
+                        "description": "Search mode",
+                    },
+                },
+                "required": ["path", "query"],
+            },
+        ),
+        Tool(
             name="export_neighborhood",
             description="Export a focused JSON subgraph around one knowledge unit.",
             inputSchema={
@@ -2954,6 +2991,45 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 source_project=arguments.get("source_project"),
                 content_type=arguments.get("content_type"),
             )
+            return [TextContent(type="text", text=json.dumps(stats))]
+
+        elif name == "export_search_html":
+            try:
+                filters = _search_filters_dict(
+                    source_project=arguments.get("source_project"),
+                    content_type=arguments.get("content_type"),
+                    review_state=arguments.get("review_state"),
+                    tag=arguments.get("tag"),
+                    exclude_tag=arguments.get("exclude_tag"),
+                    metadata_key=arguments.get("metadata_key"),
+                    metadata_value=arguments.get("metadata_value"),
+                    created_after=arguments.get("created_after"),
+                    created_before=arguments.get("created_before"),
+                    updated_after=arguments.get("updated_after"),
+                    updated_before=arguments.get("updated_before"),
+                    min_utility=arguments.get("min_utility"),
+                    max_utility=arguments.get("max_utility"),
+                    min_confidence=arguments.get("min_confidence"),
+                    max_confidence=arguments.get("max_confidence"),
+                )
+                stats = _do_export_search_html(
+                    store,
+                    arguments["path"],
+                    arguments["query"],
+                    limit=arguments.get("limit", 10),
+                    mode=arguments.get("mode", "fulltext"),
+                    filters=filters,
+                    sort=arguments.get("sort", "relevance"),
+                    snippet_length=arguments.get(
+                        "snippet_length", DEFAULT_SEARCH_SNIPPET_LENGTH
+                    ),
+                )
+            except ValueError as exc:
+                stats = {
+                    "error": str(exc),
+                    "valid_modes": ["fulltext", "semantic", "hybrid"],
+                    "valid_sorts": list(SEARCH_SORTS),
+                }
             return [TextContent(type="text", text=json.dumps(stats))]
 
         elif name == "export_neighborhood":

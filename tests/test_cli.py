@@ -4261,6 +4261,121 @@ def test_search_command_invalid_sort_emits_clear_json_error(monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_export_search_html_command_escapes_content_and_reports_json(monkeypatch, tmp_path):
+    store = _make_store()
+    unit = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="unsafe",
+            source_entity_type="insight",
+            title='Solar <script>alert("title")</script>',
+            content='Solar snippet with <b onclick="bad()">unsafe</b> content',
+            content_type=ContentType.INSIGHT,
+            tags=['energy<script>', 'quote"tag'],
+            metadata={"source": '<img src=x onerror="bad()">'},
+        )
+    )
+    linked = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="linked",
+            source_entity_type="insight",
+            title="Linked unit",
+            content="Linked content",
+            content_type=ContentType.INSIGHT,
+        )
+    )
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=unit.id,
+            to_unit_id=linked.id,
+            relation=EdgeRelation.RELATES_TO,
+        )
+    )
+    store.fts_index_unit(unit)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    output_path = tmp_path / "search.html"
+
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "export-search-html",
+                "solar",
+                "--output",
+                str(output_path),
+                "--mode",
+                "fulltext",
+                "--limit",
+                "1",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["path"] == str(output_path)
+        assert payload["result_count"] == 1
+        assert payload["query"] == "solar"
+        assert payload["mode"] == "fulltext"
+        assert payload["filters"] == {}
+
+        html = output_path.read_text(encoding="utf-8")
+        assert "<script>" not in html
+        assert "<b onclick" not in html
+        assert "&lt;script&gt;alert(&quot;title&quot;)&lt;/script&gt;" in html
+        assert "&lt;b onclick=&quot;bad()&quot;&gt;unsafe&lt;/b&gt;" in html
+        assert "energy&lt;script&gt;" in html
+        assert "&lt;img src=x onerror=" in html
+        assert "1 links" in html
+        assert "0 backlinks" in html
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_export_search_html_command_honors_filters_sort_and_empty_results(monkeypatch, tmp_path):
+    store = _make_store()
+    _populate_search_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    output_path = tmp_path / "empty.html"
+
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "export-search-html",
+                "solar",
+                "--output",
+                str(output_path),
+                "--mode",
+                "fulltext",
+                "--sort",
+                "created_at_desc",
+                "--source-project",
+                "max",
+                "--tag",
+                "missing-tag",
+                "--snippet-length",
+                "80",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["result_count"] == 0
+        assert payload["sort"] == "created_at_desc"
+        assert payload["filters"] == {"source_project": "max", "tag": "missing-tag"}
+        assert payload["snippet_length"] == 80
+        assert "No results found." in output_path.read_text(encoding="utf-8")
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_search_facets_command_emits_fulltext_json(monkeypatch):
     store = _make_store()
     _populate_search_graph(store)
