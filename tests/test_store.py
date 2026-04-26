@@ -1925,6 +1925,58 @@ class TestJsonBackup:
         assert payload["units"][0]["id"] == inserted.id
         assert payload["edges"] == []
 
+    def test_export_jsonl_records_filters_and_orders_by_created_at_then_id(self, store: Store):
+        later = store.insert_unit(
+            KnowledgeUnit(
+                id="unit-b",
+                source_project=SourceProject.MAX,
+                source_id="b",
+                source_entity_type="insight",
+                title="Later unit",
+                content="Later content",
+                content_type=ContentType.INSIGHT,
+                metadata={"rank": 2},
+                tags=["later"],
+                created_at=datetime.fromisoformat("2026-01-02T00:00:00+00:00"),
+            )
+        )
+        earlier = store.insert_unit(
+            KnowledgeUnit(
+                id="unit-a",
+                source_project=SourceProject.FORTY_TWO,
+                source_id="a",
+                source_entity_type="knowledge_node",
+                title="Earlier unit",
+                content="Earlier content",
+                content_type=ContentType.FINDING,
+                metadata={"rank": 1},
+                tags=["earlier"],
+                created_at=datetime.fromisoformat("2026-01-01T00:00:00+00:00"),
+            )
+        )
+        edge = store.insert_edge(
+            KnowledgeEdge(
+                id="edge-a",
+                from_unit_id=earlier.id,
+                to_unit_id=later.id,
+                relation=EdgeRelation.BUILDS_ON,
+                source=EdgeSource.MANUAL,
+                metadata={"why": "test"},
+                created_at=datetime.fromisoformat("2026-01-03T00:00:00+00:00"),
+            )
+        )
+
+        records = store.export_jsonl_records()
+
+        assert [record["id"] for record in records] == [earlier.id, later.id, edge.id]
+        assert [record["record_type"] for record in records] == ["unit", "unit", "edge"]
+        assert records[0]["metadata"] == {"rank": 1}
+        assert records[0]["tags"] == ["earlier"]
+        assert records[2]["relation"] == "builds_on"
+        assert records[2]["source"] == "manual"
+        assert store.export_jsonl_records(record_type="units") == records[:2]
+        assert store.export_jsonl_records(record_type="edges") == [records[2]]
+
     def test_import_export_round_trip_recreates_graph_and_fts_idempotently(self, tmp_path):
         source_path = tmp_path / "source.db"
         target_path = tmp_path / "target.db"

@@ -875,6 +875,32 @@ def test_export_markdown_command_writes_filtered_folder_and_json_stats(tmp_path,
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_export_jsonl_command_writes_filtered_newline_records(tmp_path, monkeypatch):
+    store = _make_store()
+    a_id, b_id, _, _ = _populate_graph(store)
+    export_path = tmp_path / "graph.jsonl"
+
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    result = runner.invoke(
+        app,
+        ["export-jsonl", str(export_path), "--record-type", "edges"],
+    )
+
+    try:
+        assert result.exit_code == 0
+        assert f"0 units and 2 edges to {export_path}" in result.output
+        records = [json.loads(line) for line in export_path.read_text().splitlines()]
+        assert [record["record_type"] for record in records] == ["edge", "edge"]
+        assert records[0]["from_unit_id"] == a_id
+        assert records[0]["to_unit_id"] == b_id
+        assert records[0]["relation"] == "builds_on"
+        assert records[0]["source"] == "inferred"
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_edges_import_csv_cli_json_dry_run_and_apply(tmp_path, monkeypatch):
     store = _make_store()
     u1 = store.insert_unit(

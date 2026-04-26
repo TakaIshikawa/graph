@@ -19,6 +19,7 @@ from graph.cli.main import (
     _do_export_cytoscape,
     _do_export_graphml,
     _do_export_json,
+    _do_export_jsonl,
     _do_export_markdown,
     _do_export_mermaid,
     _do_export_neighborhood,
@@ -1580,6 +1581,26 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="export_jsonl",
+            description="Export units and/or edges as newline-delimited JSON records.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Destination JSONL export path",
+                    },
+                    "record_type": {
+                        "type": "string",
+                        "enum": ["both", "units", "edges"],
+                        "default": "both",
+                        "description": "Record set to export",
+                    },
+                },
+                "required": ["path"],
+            },
+        ),
+        Tool(
             name="export_graphml",
             description="Export the graph to a GraphML file for tools like Gephi and yEd.",
             inputSchema={
@@ -2740,6 +2761,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
         elif name == "export_json":
             stats = _do_export_json(store, arguments["path"])
+            return [TextContent(type="text", text=json.dumps(stats))]
+
+        elif name == "export_jsonl":
+            stats = _do_export_jsonl(
+                store,
+                arguments["path"],
+                record_type=str(arguments.get("record_type") or "both").lower(),
+            )
             return [TextContent(type="text", text=json.dumps(stats))]
 
         elif name == "export_graphml":

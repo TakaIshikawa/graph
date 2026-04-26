@@ -454,6 +454,7 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_pa
         "csv": ["csv_row"],
         "jsonl": ["jsonl_record"],
         "opml": ["outline"],
+        "pdf": ["pdf_document"],
         "text": ["text_document"],
         "html": ["html_document"],
         "ical": ["calendar_event"],
@@ -897,6 +898,7 @@ def test_ingest_all_includes_sota_and_search_can_filter_sota(tmp_path, monkeypat
         "csv",
         "jsonl",
         "opml",
+        "pdf",
         "text",
         "html",
         "ical",
@@ -2556,6 +2558,66 @@ def test_shortest_path_tool_returns_structured_path_and_errors(tmp_path, monkeyp
     assert disconnected_payload["error"] == "not_connected"
     assert disconnected_payload["path"] == []
     assert disconnected_payload["edges"] == []
+
+
+def test_export_jsonl_tool_returns_counts_and_writes_selected_records(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    export_path = tmp_path / "graph.jsonl"
+    store = Store(str(db_path))
+    first = store.insert_unit(
+        KnowledgeUnit(
+            id="unit-a",
+            source_project=SourceProject.FORTY_TWO,
+            source_id="a",
+            source_entity_type="knowledge_node",
+            title="Node A",
+            content="First node",
+            created_at=datetime.fromisoformat("2026-01-01T00:00:00+00:00"),
+        )
+    )
+    second = store.insert_unit(
+        KnowledgeUnit(
+            id="unit-b",
+            source_project=SourceProject.MAX,
+            source_id="b",
+            source_entity_type="insight",
+            title="Node B",
+            content="Second node",
+            created_at=datetime.fromisoformat("2026-01-02T00:00:00+00:00"),
+        )
+    )
+    store.insert_edge(
+        KnowledgeEdge(
+            id="edge-a",
+            from_unit_id=first.id,
+            to_unit_id=second.id,
+            relation=EdgeRelation.RELATES_TO,
+            source=EdgeSource.MANUAL,
+            created_at=datetime.fromisoformat("2026-01-03T00:00:00+00:00"),
+        )
+    )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+    tools = asyncio.run(mcp_server.list_tools())
+    assert any(tool.name == "export_jsonl" for tool in tools)
+
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "export_jsonl",
+            {"path": str(export_path), "record_type": "units"},
+        )
+    )
+    payload = json.loads(response[0].text)
+    records = [json.loads(line) for line in export_path.read_text().splitlines()]
+
+    assert payload["path"] == str(export_path)
+    assert payload["record_type"] == "units"
+    assert payload["records_exported"] == 2
+    assert payload["units_exported"] == 2
+    assert payload["edges_exported"] == 0
+    assert [record["record_type"] for record in records] == ["unit", "unit"]
+    assert [record["id"] for record in records] == ["unit-a", "unit-b"]
 
 
 def test_export_obsidian_tool_exports_same_vault_structure_as_cli(tmp_path, monkeypatch):

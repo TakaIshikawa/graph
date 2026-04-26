@@ -9,7 +9,7 @@ import uuid
 import csv
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from graph.store.migrations import SCHEMA_VERSION, ensure_schema
 from graph.types.enums import EdgeRelation, EdgeSource
@@ -1466,6 +1466,65 @@ class Store:
             "units": units,
             "edges": edges,
         }
+
+    def export_jsonl_records(
+        self,
+        *,
+        record_type: Literal["both", "units", "edges"] = "both",
+    ) -> list[dict]:
+        """Return JSONL-ready graph records ordered deterministically."""
+        if record_type not in {"both", "units", "edges"}:
+            raise ValueError("record_type must be one of: both, units, edges")
+
+        records: list[dict] = []
+        if record_type in {"both", "units"}:
+            rows = self.conn.execute(
+                "SELECT * FROM knowledge_units ORDER BY created_at ASC, id ASC"
+            ).fetchall()
+            records.extend(
+                {
+                    "record_type": "unit",
+                    "id": unit.id,
+                    "source_project": str(unit.source_project),
+                    "source_id": unit.source_id,
+                    "source_entity_type": unit.source_entity_type,
+                    "title": unit.title,
+                    "content": unit.content,
+                    "content_type": str(unit.content_type),
+                    "metadata": unit.metadata,
+                    "tags": unit.tags,
+                    "confidence": unit.confidence,
+                    "utility_score": unit.utility_score,
+                    "created_at": _json_value(unit.created_at),
+                    "ingested_at": _json_value(unit.ingested_at),
+                    "updated_at": _json_value(unit.updated_at),
+                }
+                for unit in (_row_to_unit(row) for row in rows)
+            )
+
+        if record_type in {"both", "edges"}:
+            rows = self.conn.execute(
+                "SELECT * FROM edges ORDER BY created_at ASC, id ASC"
+            ).fetchall()
+            records.extend(
+                {
+                    "record_type": "edge",
+                    "id": edge.id,
+                    "from_unit_id": edge.from_unit_id,
+                    "to_unit_id": edge.to_unit_id,
+                    "relation": str(edge.relation),
+                    "weight": edge.weight,
+                    "source": str(edge.source),
+                    "metadata": edge.metadata,
+                    "created_at": _json_value(edge.created_at),
+                }
+                for edge in (_row_to_edge(row) for row in rows)
+            )
+
+        return sorted(
+            records,
+            key=lambda record: (record["created_at"] or "", record["id"]),
+        )
 
     def import_json(self, payload: dict) -> dict:
         """Import a portable graph backup idempotently.

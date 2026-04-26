@@ -140,6 +140,25 @@ def _do_export_json(store: Store, path: str | Path) -> dict:
     }
 
 
+def _do_export_jsonl(store: Store, path: str | Path, *, record_type: str = "both") -> dict:
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    records = store.export_jsonl_records(record_type=record_type)
+    output_path.write_text(
+        "".join(json.dumps(record, sort_keys=True) + "\n" for record in records),
+        encoding="utf-8",
+    )
+    units_exported = sum(1 for record in records if record["record_type"] == "unit")
+    edges_exported = sum(1 for record in records if record["record_type"] == "edge")
+    return {
+        "path": str(output_path),
+        "record_type": record_type,
+        "records_exported": len(records),
+        "units_exported": units_exported,
+        "edges_exported": edges_exported,
+    }
+
+
 def _do_export_graphml(store: Store, path: str | Path) -> dict:
     from graph.graph.service import GraphService
 
@@ -1954,6 +1973,30 @@ def export_json(
     store = _get_store()
     stats = _do_export_json(store, path)
     store.close()
+    typer.echo(
+        f"Exported {stats['units_exported']} units and "
+        f"{stats['edges_exported']} edges to {stats['path']}"
+    )
+
+
+@app.command(name="export-jsonl")
+def export_jsonl(
+    path: Path = typer.Argument(..., help="Destination JSONL export path"),
+    record_type: str = typer.Option(
+        "both",
+        "--record-type",
+        case_sensitive=False,
+        help="Record set to export: both, units, or edges",
+    ),
+) -> None:
+    """Export the graph as newline-delimited JSON records."""
+    store = _get_store()
+    try:
+        stats = _do_export_jsonl(store, path, record_type=record_type.lower())
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    finally:
+        store.close()
     typer.echo(
         f"Exported {stats['units_exported']} units and "
         f"{stats['edges_exported']} edges to {stats['path']}"
