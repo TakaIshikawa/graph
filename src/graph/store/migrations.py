@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -53,6 +53,25 @@ CREATE TABLE IF NOT EXISTS edges (
 CREATE INDEX IF NOT EXISTS idx_edges_from ON edges(from_unit_id);
 CREATE INDEX IF NOT EXISTS idx_edges_to ON edges(to_unit_id);
 CREATE INDEX IF NOT EXISTS idx_edges_relation ON edges(relation);
+
+CREATE TABLE IF NOT EXISTS collections (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    metadata TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS collection_units (
+    collection_id TEXT NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+    unit_id TEXT NOT NULL REFERENCES knowledge_units(id) ON DELETE CASCADE,
+    added_at TEXT NOT NULL,
+    PRIMARY KEY(collection_id, unit_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_collection_units_unit
+    ON collection_units(unit_id);
 
 CREATE TABLE IF NOT EXISTS sync_state (
     source_project TEXT NOT NULL,

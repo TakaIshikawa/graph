@@ -646,6 +646,48 @@ def _do_pinned_units(
     }
 
 
+def _do_collection_create(
+    store: Store,
+    name: str,
+    *,
+    description: str = "",
+    metadata: dict | str | None = None,
+) -> dict:
+    metadata_values = _parse_metadata_json(metadata)
+    collection = store.create_collection(
+        name,
+        description=description,
+        metadata=metadata_values,
+    )
+    created = collection.pop("created", False)
+    return {"collection": collection, "created": created}
+
+
+def _do_collection_list(store: Store) -> dict:
+    collections = store.list_collections()
+    return {"collections": collections, "count": len(collections)}
+
+
+def _do_collection_rename(store: Store, name: str, new_name: str) -> dict:
+    return store.rename_collection(name, new_name)
+
+
+def _do_collection_delete(store: Store, name: str) -> dict:
+    return store.delete_collection(name)
+
+
+def _do_collection_add(store: Store, name: str, unit_id: str) -> dict:
+    return store.add_unit_to_collection(name, unit_id)
+
+
+def _do_collection_remove(store: Store, name: str, unit_id: str) -> dict:
+    return store.remove_unit_from_collection(name, unit_id)
+
+
+def _do_collection_members(store: Store, name: str, *, limit: int | None = None) -> dict:
+    return store.list_collection_members(name, limit=limit)
+
+
 def _do_rename_tag(
     store: Store,
     old_tag: str,
@@ -2866,6 +2908,208 @@ def pinned(
         typer.echo(
             f"{unit['pinned_at']} {unit['id']} [{unit['source_project']}] {unit['title']}{reason}"
         )
+
+
+@app.command(name="collection-create")
+def collection_create(
+    name: str = typer.Argument(..., help="Collection name"),
+    description: str = typer.Option("", "--description", help="Optional collection description"),
+    metadata_json: str | None = typer.Option(
+        None,
+        "--metadata-json",
+        help="JSON object metadata for the collection",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Create a named collection for manually grouped units."""
+    store = _get_store()
+    try:
+        payload = _do_collection_create(
+            store,
+            name,
+            description=description,
+            metadata=metadata_json,
+        )
+    except ValueError as exc:
+        if json_output:
+            _json_echo({"name": name, "created": False, "error": str(exc)})
+            return
+        raise typer.BadParameter(str(exc)) from exc
+    finally:
+        store.close()
+
+    if json_output:
+        _json_echo(payload)
+        return
+
+    collection = payload["collection"]
+    action = "Created" if payload["created"] else "Found"
+    typer.echo(f"{action} collection {collection['name']} ({collection['id']}).")
+
+
+@app.command(name="collection-list")
+def collection_list(
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """List named collections."""
+    store = _get_store()
+    payload = _do_collection_list(store)
+    store.close()
+
+    if json_output:
+        _json_echo(payload)
+        return
+
+    if not payload["collections"]:
+        typer.echo("No collections found.")
+        return
+    for collection in payload["collections"]:
+        typer.echo(
+            f"{collection['name']} ({collection['unit_count']} units): {collection['id']}"
+        )
+
+
+@app.command(name="collection-rename")
+def collection_rename(
+    name: str = typer.Argument(..., help="Current collection name"),
+    new_name: str = typer.Argument(..., help="New collection name"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Rename a collection."""
+    store = _get_store()
+    try:
+        payload = _do_collection_rename(store, name, new_name)
+    except ValueError as exc:
+        if json_output:
+            _json_echo({"old_name": name, "new_name": new_name, "renamed": False, "error": str(exc)})
+            return
+        raise typer.BadParameter(str(exc)) from exc
+    finally:
+        store.close()
+
+    if payload.get("error"):
+        if json_output:
+            _json_echo(payload)
+            return
+        typer.echo(payload["message"])
+        raise typer.Exit(code=1)
+
+    if json_output:
+        _json_echo(payload)
+        return
+
+    typer.echo(f"Renamed collection {name} to {new_name}.")
+
+
+@app.command(name="collection-delete")
+def collection_delete(
+    name: str = typer.Argument(..., help="Collection name"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Delete without prompting"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Delete a collection without deleting its units."""
+    if not yes:
+        typer.confirm(f"Delete collection {name}? Knowledge units will be kept.", abort=True)
+
+    store = _get_store()
+    payload = _do_collection_delete(store, name)
+    store.close()
+
+    if payload.get("error"):
+        if json_output:
+            _json_echo(payload)
+            return
+        typer.echo(payload["message"])
+        raise typer.Exit(code=1)
+
+    if json_output:
+        _json_echo(payload)
+        return
+
+    typer.echo(
+        f"Deleted collection {name}; removed {payload['memberships_deleted']} memberships."
+    )
+
+
+@app.command(name="collection-add")
+def collection_add(
+    name: str = typer.Argument(..., help="Collection name"),
+    unit_id: str = typer.Argument(..., help="Knowledge unit ID"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Add a knowledge unit to a collection."""
+    store = _get_store()
+    payload = _do_collection_add(store, name, unit_id)
+    store.close()
+
+    if payload.get("error"):
+        if json_output:
+            _json_echo(payload)
+            return
+        typer.echo(payload["message"])
+        raise typer.Exit(code=1)
+
+    if json_output:
+        _json_echo(payload)
+        return
+
+    action = "Already in" if payload["already_member"] else "Added to"
+    typer.echo(f"{action} collection {name}: {payload['unit']['title']}")
+
+
+@app.command(name="collection-remove")
+def collection_remove(
+    name: str = typer.Argument(..., help="Collection name"),
+    unit_id: str = typer.Argument(..., help="Knowledge unit ID"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Remove a knowledge unit from a collection."""
+    store = _get_store()
+    payload = _do_collection_remove(store, name, unit_id)
+    store.close()
+
+    if payload.get("error"):
+        if json_output:
+            _json_echo(payload)
+            return
+        typer.echo(payload["message"])
+        raise typer.Exit(code=1)
+
+    if json_output:
+        _json_echo(payload)
+        return
+
+    action = "Removed" if payload["removed"] else "Not a member"
+    typer.echo(f"{action}: {unit_id} in {name}.")
+
+
+@app.command(name="collection-members")
+def collection_members(
+    name: str = typer.Argument(..., help="Collection name"),
+    limit: int | None = typer.Option(None, "--limit", "-n", min=0, help="Maximum members"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """List units in a collection."""
+    store = _get_store()
+    payload = _do_collection_members(store, name, limit=limit)
+    store.close()
+
+    if payload.get("error"):
+        if json_output:
+            _json_echo(payload)
+            return
+        typer.echo(payload["message"])
+        raise typer.Exit(code=1)
+
+    if json_output:
+        _json_echo(payload)
+        return
+
+    if not payload["members"]:
+        typer.echo("No collection members found.")
+        return
+    for member in payload["members"]:
+        typer.echo(f"{member['added_at']} {member['id']} [{member['source_project']}] {member['title']}")
 
 
 @app.command(name="delete-unit")

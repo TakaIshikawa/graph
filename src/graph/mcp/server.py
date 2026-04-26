@@ -30,6 +30,13 @@ from graph.cli.main import (
     _do_embeddings_status,
     _do_stats_snapshot,
     _do_apply_tags_to_search,
+    _do_collection_add,
+    _do_collection_create,
+    _do_collection_delete,
+    _do_collection_list,
+    _do_collection_members,
+    _do_collection_remove,
+    _do_collection_rename,
     _do_import_json,
     _do_import_edges_csv,
     _do_import_queries,
@@ -339,6 +346,91 @@ async def list_tools() -> list[Tool]:
                     "content_type": SEARCH_FILTER_SCHEMA["content_type"],
                     "tag": SEARCH_FILTER_SCHEMA["tag"],
                 },
+            },
+        ),
+        Tool(
+            name="collection_create",
+            description="Create a named collection for manually grouped knowledge units.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Collection name"},
+                    "description": {
+                        "type": "string",
+                        "default": "",
+                        "description": "Optional collection description",
+                    },
+                    "metadata": {
+                        "type": "object",
+                        "default": {},
+                        "description": "Optional collection metadata",
+                    },
+                },
+                "required": ["name"],
+            },
+        ),
+        Tool(
+            name="collection_list",
+            description="List named collections with membership counts.",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="collection_rename",
+            description="Rename a collection.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Current collection name"},
+                    "new_name": {"type": "string", "description": "New collection name"},
+                },
+                "required": ["name", "new_name"],
+            },
+        ),
+        Tool(
+            name="collection_delete",
+            description="Delete a collection and its memberships without deleting units.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Collection name"},
+                },
+                "required": ["name"],
+            },
+        ),
+        Tool(
+            name="collection_add",
+            description="Add a knowledge unit to a collection idempotently.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Collection name"},
+                    "unit_id": {"type": "string", "description": "Knowledge unit ID"},
+                },
+                "required": ["name", "unit_id"],
+            },
+        ),
+        Tool(
+            name="collection_remove",
+            description="Remove a knowledge unit from a collection.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Collection name"},
+                    "unit_id": {"type": "string", "description": "Knowledge unit ID"},
+                },
+                "required": ["name", "unit_id"],
+            },
+        ),
+        Tool(
+            name="collection_members",
+            description="List collection members with unit summaries.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Collection name"},
+                    "limit": {"type": "integer", "description": "Maximum members to return"},
+                },
+                "required": ["name"],
             },
         ),
         Tool(
@@ -1767,6 +1859,58 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 tag=arguments.get("tag"),
                 limit=arguments.get("limit", 20),
                 include_content=arguments.get("include_content", False),
+            )
+            return [TextContent(type="text", text=json.dumps(payload, default=str))]
+
+        elif name == "collection_create":
+            try:
+                payload = _do_collection_create(
+                    store,
+                    arguments["name"],
+                    description=arguments.get("description", ""),
+                    metadata=arguments.get("metadata", {}),
+                )
+            except ValueError as exc:
+                payload = {"name": arguments.get("name"), "created": False, "error": str(exc)}
+            return [TextContent(type="text", text=json.dumps(payload, default=str))]
+
+        elif name == "collection_list":
+            payload = _do_collection_list(store)
+            return [TextContent(type="text", text=json.dumps(payload, default=str))]
+
+        elif name == "collection_rename":
+            try:
+                payload = _do_collection_rename(
+                    store,
+                    arguments["name"],
+                    arguments["new_name"],
+                )
+            except ValueError as exc:
+                payload = {
+                    "old_name": arguments.get("name"),
+                    "new_name": arguments.get("new_name"),
+                    "renamed": False,
+                    "error": str(exc),
+                }
+            return [TextContent(type="text", text=json.dumps(payload, default=str))]
+
+        elif name == "collection_delete":
+            payload = _do_collection_delete(store, arguments["name"])
+            return [TextContent(type="text", text=json.dumps(payload, default=str))]
+
+        elif name == "collection_add":
+            payload = _do_collection_add(store, arguments["name"], arguments["unit_id"])
+            return [TextContent(type="text", text=json.dumps(payload, default=str))]
+
+        elif name == "collection_remove":
+            payload = _do_collection_remove(store, arguments["name"], arguments["unit_id"])
+            return [TextContent(type="text", text=json.dumps(payload, default=str))]
+
+        elif name == "collection_members":
+            payload = _do_collection_members(
+                store,
+                arguments["name"],
+                limit=arguments.get("limit"),
             )
             return [TextContent(type="text", text=json.dumps(payload, default=str))]
 
