@@ -1585,6 +1585,39 @@ def _do_apply_tags_to_search(
     return result
 
 
+def _do_suggest_tags(
+    store: Store,
+    unit_id: str,
+    *,
+    limit: int = 10,
+    min_score: float = 0.25,
+    apply: bool = False,
+    tags: list[str] | None = None,
+) -> dict:
+    from graph.graph.service import GraphService
+
+    gs = GraphService(store)
+    result = gs.suggest_tags(unit_id, limit=limit, min_score=min_score)
+    if not apply:
+        return result
+
+    suggested_by_tag = {suggestion["tag"]: suggestion for suggestion in result["suggestions"]}
+    requested_tags = list(dict.fromkeys(tag.strip() for tag in (tags or []) if tag.strip()))
+    selected_tags = requested_tags or list(suggested_by_tag)
+    assigned_tags = set(result["unit"]["tags"])
+    invalid_tags = [
+        tag for tag in selected_tags if tag not in suggested_by_tag and tag not in assigned_tags
+    ]
+    if invalid_tags:
+        raise ValueError(
+            "Applied tags must be present in current suggestions: " + ", ".join(invalid_tags)
+        )
+
+    result["selected_tags"] = selected_tags
+    result["applied"] = store.apply_tags_to_units([unit_id], add_tags=selected_tags)
+    return result
+
+
 def _sorted_counts(counts: dict[str, int]) -> dict[str, int]:
     return dict(sorted(counts.items(), key=lambda item: (-item[1], item[0])))
 
@@ -5610,6 +5643,59 @@ def tag_synonyms(
         )
         for variant in suggestion["variants"]:
             typer.echo(f"    {variant['tag']}: {variant['count']}")
+
+    store.close()
+
+
+@app.command(name="suggest-tags")
+def suggest_tags(
+    unit_id: str = typer.Argument(..., help="Knowledge unit ID to tag"),
+    limit: int = typer.Option(10, "--limit", "-n", help="Max tag suggestions"),
+    min_score: float = typer.Option(0.25, "--min-score", help="Minimum suggestion score"),
+    apply: bool = typer.Option(False, "--apply", help="Add selected suggestions to the unit"),
+    tag: list[str] = typer.Option(
+        [],
+        "--tag",
+        help="Suggested tag to apply. Repeat to apply multiple tags; omit with --apply to apply all.",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Suggest existing graph tags for a unit."""
+    store = _get_store()
+    try:
+        result = _do_suggest_tags(
+            store,
+            unit_id,
+            limit=limit,
+            min_score=min_score,
+            apply=apply,
+            tags=tag,
+        )
+    except ValueError as exc:
+        store.close()
+        raise typer.BadParameter(str(exc)) from exc
+
+    if json_output:
+        _json_echo(result)
+        store.close()
+        return
+
+    suggestions = result["suggestions"]
+    if not suggestions:
+        typer.echo("No tag suggestions found.")
+    else:
+        typer.echo(f"Tag suggestions for {result['unit']['title']}:")
+        for suggestion in suggestions:
+            typer.echo(f"  {suggestion['tag']} score={suggestion['score']:.3f}")
+            for reason in suggestion["reasons"]:
+                typer.echo(f"    - {reason}")
+
+    if apply:
+        applied = result["applied"]
+        typer.echo(
+            f"Applied {applied['affected_count']} unit update with "
+            f"{len(result['selected_tags'])} selected tags."
+        )
 
     store.close()
 

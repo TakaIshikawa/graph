@@ -330,6 +330,21 @@ class Store:
         ).fetchall()
         return [_row_to_unit(r) for r in rows]
 
+    def tag_vocabulary(self, *, exclude_unit_id: str | None = None) -> dict[str, int]:
+        """Return existing graph tags and counts, optionally excluding one unit."""
+        query = """SELECT json_each.value AS tag, COUNT(*) AS count
+                   FROM knowledge_units, json_each(knowledge_units.tags)"""
+        params: list[object] = []
+        where_parts = ["TRIM(json_each.value) != ''"]
+        if exclude_unit_id is not None:
+            where_parts.append("knowledge_units.id != ?")
+            params.append(exclude_unit_id)
+        query += " WHERE " + " AND ".join(where_parts)
+        query += " GROUP BY json_each.value ORDER BY tag"
+
+        rows = self.conn.execute(query, params).fetchall()
+        return {str(row["tag"]): row["count"] for row in rows}
+
     def get_units(
         self,
         *,

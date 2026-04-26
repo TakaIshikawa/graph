@@ -53,6 +53,26 @@ _EDGE_SUGGESTION_STOPWORDS = {
     "to",
     "with",
 }
+_TAG_SUGGESTION_STOPWORDS = _EDGE_SUGGESTION_STOPWORDS | {
+    "about",
+    "after",
+    "all",
+    "also",
+    "can",
+    "into",
+    "its",
+    "more",
+    "not",
+    "our",
+    "their",
+    "there",
+    "these",
+    "they",
+    "was",
+    "will",
+    "you",
+    "your",
+}
 _REFERENCE_URL_METADATA_FIELDS = {"url", "link", "canonical_url", "source_url", "source_id"}
 _DUPLICATE_URL_METADATA_FIELDS = {"canonical_url", "link"}
 
@@ -96,6 +116,17 @@ def _edge_suggestion_tokens(*values: str) -> set[str]:
             if len(token) < 3 or token in _EDGE_SUGGESTION_STOPWORDS:
                 continue
             tokens.add(_singularize_token(token))
+    return tokens
+
+
+def _tag_suggestion_tokens(*values: str) -> set[str]:
+    tokens = set()
+    for value in values:
+        for token in _normalize_text(value or "").split():
+            normalized = _singularize_token(token)
+            if len(normalized) < 2 or normalized in _TAG_SUGGESTION_STOPWORDS:
+                continue
+            tokens.add(normalized)
     return tokens
 
 
@@ -1686,6 +1717,86 @@ class GraphService:
             "suggestions": suggestions[:limit],
             "limit": limit,
             "min_similarity": min_similarity,
+        }
+
+    def suggest_tags(
+        self,
+        unit_id: str,
+        limit: int = 10,
+        min_score: float = 0.25,
+    ) -> dict:
+        """Suggest existing graph tags for one unit without modifying stored data."""
+        if limit < 0:
+            raise ValueError("limit must be greater than or equal to 0.")
+
+        unit = self.store.get_unit(unit_id)
+        if unit is None:
+            raise ValueError(f"Unit not found: {unit_id}")
+
+        assigned_tags = {str(tag) for tag in unit.tags}
+        unit_tokens = _tag_suggestion_tokens(unit.title, unit.content)
+        title_tokens = _tag_suggestion_tokens(unit.title)
+        vocabulary = self.store.tag_vocabulary(exclude_unit_id=unit_id)
+
+        suggestions = []
+        for tag, count in sorted(vocabulary.items()):
+            if tag in assigned_tags:
+                continue
+            tag_tokens = _tag_suggestion_tokens(tag)
+            if not tag_tokens:
+                continue
+
+            matched_tokens = sorted(tag_tokens & unit_tokens)
+            if not matched_tokens:
+                continue
+
+            score = len(matched_tokens) / len(tag_tokens)
+            if tag_tokens & title_tokens:
+                score += 0.1
+            score = min(score, 1.0)
+            score = round(score, 6)
+            if score < min_score:
+                continue
+
+            reasons = [
+                "matched terms: " + ", ".join(matched_tokens),
+                f"tag used on {count} other unit{'s' if count != 1 else ''}",
+            ]
+            title_matches = sorted(tag_tokens & title_tokens)
+            if title_matches:
+                reasons.append("title matched terms: " + ", ".join(title_matches))
+
+            suggestions.append(
+                {
+                    "tag": tag,
+                    "score": score,
+                    "matched_terms": matched_tokens,
+                    "usage_count": count,
+                    "reasons": reasons,
+                }
+            )
+
+        suggestions.sort(
+            key=lambda item: (
+                -item["score"],
+                -item["usage_count"],
+                item["tag"].lower(),
+                item["tag"],
+            )
+        )
+        return {
+            "unit_id": unit.id,
+            "unit": {
+                "id": unit.id,
+                "title": unit.title,
+                "source_project": str(unit.source_project),
+                "source_entity_type": unit.source_entity_type,
+                "content_type": str(unit.content_type),
+                "tags": unit.tags,
+            },
+            "suggestions": suggestions[:limit],
+            "limit": limit,
+            "min_score": min_score,
         }
 
     def suggest_edges(

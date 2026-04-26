@@ -94,6 +94,34 @@ class TestUnitCRUD:
         units = store.get_all_units()
         assert len(units) == 5
 
+    def test_tag_vocabulary_counts_existing_tags_and_can_exclude_unit(self, store: Store):
+        target = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="target",
+                source_entity_type="insight",
+                title="Target",
+                content="Target content",
+                tags=["solar", "draft"],
+            )
+        )
+        store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="other",
+                source_entity_type="insight",
+                title="Other",
+                content="Other content",
+                tags=["solar", "storage"],
+            )
+        )
+
+        assert store.tag_vocabulary() == {"draft": 1, "solar": 2, "storage": 1}
+        assert store.tag_vocabulary(exclude_unit_id=target.id) == {
+            "solar": 1,
+            "storage": 1,
+        }
+
     def test_get_units_filters_and_limits_source_units(self, store: Store):
         store.insert_unit(
             KnowledgeUnit(

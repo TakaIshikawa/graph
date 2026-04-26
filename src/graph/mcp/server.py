@@ -54,6 +54,7 @@ from graph.cli.main import (
     _do_unpin_unit,
     _do_remove_unit_metadata,
     _do_set_unit_metadata,
+    _do_suggest_tags,
     _do_update_edge,
     _do_search,
     _do_search_facets,
@@ -926,6 +927,26 @@ async def list_tools() -> list[Tool]:
                         "description": "Minimum normalized character similarity",
                     },
                 },
+            },
+        ),
+        Tool(
+            name="suggest_tags",
+            description="Suggest existing graph tags for one unit without modifying stored data.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "unit_id": {
+                        "type": "string",
+                        "description": "Knowledge unit ID to tag",
+                    },
+                    "limit": {"type": "integer", "default": 10},
+                    "min_score": {
+                        "type": "number",
+                        "default": 0.25,
+                        "description": "Minimum suggestion score",
+                    },
+                },
+                "required": ["unit_id"],
             },
         ),
         Tool(
@@ -2445,6 +2466,16 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             result = gs.suggest_tag_synonyms(
                 limit=arguments.get("limit", 20),
                 min_similarity=arguments.get("min_similarity", 0.8),
+            )
+            return [TextContent(type="text", text=json.dumps(result))]
+
+        elif name == "suggest_tags":
+            result = _do_suggest_tags(
+                store,
+                arguments["unit_id"],
+                limit=arguments.get("limit", 10),
+                min_score=arguments.get("min_score", 0.25),
+                apply=False,
             )
             return [TextContent(type="text", text=json.dumps(result))]
 

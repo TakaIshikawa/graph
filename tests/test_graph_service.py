@@ -1407,6 +1407,66 @@ class TestGraphService:
         }
         assert after == before
 
+    def test_suggest_tags_uses_existing_elsewhere_excludes_assigned_and_is_sorted(
+        self, store: Store
+    ):
+        target = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="target",
+                source_entity_type="insight",
+                title="Solar battery planning",
+                content="Battery storage roadmap for grid operations.",
+                content_type=ContentType.INSIGHT,
+                tags=["solar"],
+            )
+        )
+        store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="battery",
+                source_entity_type="insight",
+                title="Battery note",
+                content="Existing battery note",
+                tags=["battery", "energy"],
+            )
+        )
+        store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="storage",
+                source_entity_type="knowledge_node",
+                title="Storage note",
+                content="Existing storage note",
+                tags=["energy", "storage"],
+            )
+        )
+        store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.PRESENCE,
+                source_id="writing",
+                source_entity_type="knowledge_item",
+                title="Writing",
+                content="Unrelated note",
+                tags=["writing"],
+            )
+        )
+
+        before = {unit.id: list(unit.tags) for unit in store.get_all_units(limit=100)}
+        result = GraphService(store).suggest_tags(target.id, limit=10, min_score=0.25)
+
+        assert result["unit_id"] == target.id
+        assert [item["tag"] for item in result["suggestions"]] == [
+            "battery",
+            "storage",
+        ]
+        assert "solar" not in {item["tag"] for item in result["suggestions"]}
+        assert "writing" not in {item["tag"] for item in result["suggestions"]}
+        assert result["suggestions"][0]["score"] >= result["suggestions"][1]["score"]
+        assert result["suggestions"][0]["reasons"]
+        after = {unit.id: list(unit.tags) for unit in store.get_all_units(limit=100)}
+        assert after == before
+
     def test_suggest_edges_scores_reasons_excludes_existing_and_filters(
         self, store: Store
     ):

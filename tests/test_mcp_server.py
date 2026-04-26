@@ -3519,6 +3519,66 @@ def test_suggest_tag_synonyms_tool_matches_service_structure(tmp_path, monkeypat
     }
 
 
+def test_suggest_tags_tool_returns_suggestions_without_mutating(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    target = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="target-suggest-tags",
+            source_entity_type="insight",
+            title="Solar battery planning",
+            content="Battery storage roadmap for grid operations.",
+            content_type=ContentType.INSIGHT,
+            tags=["solar"],
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="battery-tag-source",
+            source_entity_type="insight",
+            title="Battery source",
+            content="Existing battery source",
+            tags=["battery"],
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="storage-tag-source",
+            source_entity_type="knowledge_node",
+            title="Storage source",
+            content="Existing storage source",
+            tags=["storage"],
+        )
+    )
+    store.close()
+
+    monkeypatch.setattr(
+        mcp_server,
+        "_get_store",
+        lambda: Store(str(db_path)),
+    )
+
+    tools = asyncio.run(mcp_server.list_tools())
+    suggest_tool = next(tool for tool in tools if tool.name == "suggest_tags")
+    assert "unit_id" in suggest_tool.inputSchema["required"]
+
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "suggest_tags",
+            {"unit_id": target.id, "limit": 5, "min_score": 0.25},
+        )
+    )
+    payload = json.loads(response[0].text)
+
+    assert [item["tag"] for item in payload["suggestions"]] == ["battery", "storage"]
+    reopened = Store(str(db_path))
+    assert reopened.get_unit(target.id).tags == ["solar"]  # type: ignore[union-attr]
+    reopened.close()
+
+
 def test_rename_tag_tool_dry_run_and_execute_match_service_counts(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))

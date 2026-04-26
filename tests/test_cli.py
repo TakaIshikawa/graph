@@ -3319,6 +3319,84 @@ def test_tag_synonyms_command_emits_json_and_readable_output(monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_suggest_tags_command_json_readable_and_apply_selected(monkeypatch):
+    store = _make_store()
+    target = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="target-suggest-tags",
+            source_entity_type="insight",
+            title="Solar battery planning",
+            content="Battery storage roadmap for grid operations.",
+            content_type=ContentType.INSIGHT,
+            tags=["solar"],
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="battery-tag-source",
+            source_entity_type="insight",
+            title="Battery source",
+            content="Existing battery source",
+            tags=["battery"],
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="storage-tag-source",
+            source_entity_type="knowledge_node",
+            title="Storage source",
+            content="Existing storage source",
+            tags=["storage"],
+        )
+    )
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        json_result = runner.invoke(
+            app,
+            ["suggest-tags", target.id, "--limit", "5", "--min-score", "0.25", "--json"],
+        )
+
+        assert json_result.exit_code == 0
+        payload = json.loads(json_result.output)
+        assert [item["tag"] for item in payload["suggestions"]] == ["battery", "storage"]
+        assert store.get_unit(target.id).tags == ["solar"]  # type: ignore[union-attr]
+
+        readable_result = runner.invoke(app, ["suggest-tags", target.id])
+
+        assert readable_result.exit_code == 0
+        assert "Tag suggestions for Solar battery planning:" in readable_result.output
+        assert "battery score=" in readable_result.output
+
+        applied = runner.invoke(
+            app,
+            ["suggest-tags", target.id, "--apply", "--tag", "storage", "--json"],
+        )
+
+        assert applied.exit_code == 0
+        applied_payload = json.loads(applied.output)
+        assert applied_payload["selected_tags"] == ["storage"]
+        assert applied_payload["applied"]["affected_count"] == 1
+        assert store.get_unit(target.id).tags == ["solar", "storage"]  # type: ignore[union-attr]
+
+        applied_again = runner.invoke(
+            app,
+            ["suggest-tags", target.id, "--apply", "--tag", "storage", "--json"],
+        )
+
+        assert applied_again.exit_code == 0
+        again_payload = json.loads(applied_again.output)
+        assert again_payload["applied"]["affected_count"] == 0
+        assert store.get_unit(target.id).tags == ["solar", "storage"]  # type: ignore[union-attr]
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_rename_tag_command_dry_run_json_and_execute(monkeypatch):
     store = _make_store()
     _populate_tag_synonym_graph(store)
