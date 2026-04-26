@@ -2561,6 +2561,35 @@ def test_backlinks_tool_returns_expanded_json_filters_and_missing_error(tmp_path
     assert json.loads(missing[0].text)["error"] == "unit_not_found"
 
 
+def test_ego_tool_returns_cli_helper_payload_shape(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    _, b_id, _ = _populate_backlinks_graph(store)
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    tool = next(tool for tool in tools if tool.name == "ego")
+    assert tool.inputSchema["properties"]["depth"]["maximum"] == 3
+
+    response = asyncio.run(mcp_server.call_tool("ego", {"unit_id": b_id, "depth": 9}))
+    payload = json.loads(response[0].text)
+
+    assert set(payload) == {"unit_id", "center", "metrics", "relation_counts", "depth"}
+    assert payload["center"]["title"] == "Node B"
+    assert payload["depth"] == 3
+    assert payload["metrics"]["in_degree"] == 1
+    assert payload["metrics"]["out_degree"] == 1
+    assert payload["relation_counts"] == {"builds_on": 1, "inspires": 1}
+
+    missing = asyncio.run(mcp_server.call_tool("ego", {"unit_id": "missing"}))
+    missing_payload = json.loads(missing[0].text)
+    assert missing_payload["error"] == "unit_not_found"
+    assert missing_payload["metrics"] == {}
+    assert missing_payload["relation_counts"] == {}
+
+
 def test_shortest_path_tool_returns_structured_path_and_errors(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))

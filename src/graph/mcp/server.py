@@ -16,6 +16,7 @@ from graph.cli.main import (
     _do_create_unit,
     _do_delete_edge,
     _do_delete_edges_bulk,
+    _do_ego_metrics,
     _do_export_cytoscape,
     _do_export_graphml,
     _do_export_json,
@@ -613,6 +614,23 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "unit_id": {"type": "string"},
                     "depth": {"type": "integer", "default": 1, "maximum": 3},
+                },
+                "required": ["unit_id"],
+            },
+        ),
+        Tool(
+            name="ego",
+            description="Compute ego-network metrics for one knowledge unit.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "unit_id": {"type": "string", "description": "Knowledge unit ID"},
+                    "depth": {
+                        "type": "integer",
+                        "default": 1,
+                        "maximum": 3,
+                        "description": "Traversal depth for reachable neighbor count; capped at 3",
+                    },
                 },
                 "required": ["unit_id"],
             },
@@ -2199,6 +2217,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     ),
                 )
             ]
+
+        elif name == "ego":
+            payload = _do_ego_metrics(
+                store,
+                arguments["unit_id"],
+                depth=arguments.get("depth", 1),
+            )
+            return [TextContent(type="text", text=json.dumps(payload, default=str))]
 
         elif name == "backlinks":
             direction = arguments.get("direction", "incoming")

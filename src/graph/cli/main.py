@@ -239,6 +239,14 @@ def _do_export_neighborhood(
     return gs.export_neighborhood(unit_id, path, depth=depth)
 
 
+def _do_ego_metrics(store: Store, unit_id: str, *, depth: int = 1) -> dict:
+    from graph.graph.service import GraphService
+
+    gs = GraphService(store)
+    gs.rebuild()
+    return gs.get_ego_metrics(unit_id, depth=depth)
+
+
 def _do_export_report(store: Store, path: str | Path, *, limit: int = 10) -> dict:
     from graph.graph.service import GraphService
 
@@ -4627,6 +4635,51 @@ def neighbors(
     typer.echo(f"  Edges ({len(result['edges'])}):")
     for e in result["edges"]:
         typer.echo(f"    {e['from'][:8]}... --{e['relation']}--> {e['to'][:8]}...")
+
+    store.close()
+
+
+@app.command()
+def ego(
+    unit_id: str = typer.Argument(..., help="Unit ID"),
+    depth: int = typer.Option(1, "--depth", "-d", help="Traversal depth (max 3)"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Show per-unit ego-network metrics."""
+    store = _get_store()
+    payload = _do_ego_metrics(store, unit_id, depth=depth)
+
+    if json_output:
+        _json_echo(payload)
+        store.close()
+        return
+
+    if payload.get("error"):
+        typer.echo(payload["message"])
+        store.close()
+        return
+
+    center = payload["center"]
+    metrics = payload["metrics"]
+    typer.echo(f"Center: [{center['source_project']}] {center['title']}")
+    typer.echo(f"  Degree: {metrics['degree']}")
+    typer.echo(f"  In degree: {metrics['in_degree']}")
+    typer.echo(f"  Out degree: {metrics['out_degree']}")
+    typer.echo(
+        f"  Reachable neighbors (depth {payload['depth']}): "
+        f"{metrics['reachable_neighbor_count']}"
+    )
+    typer.echo(
+        "  Local clustering coefficient: "
+        f"{metrics['local_clustering_coefficient']:.6f}"
+    )
+    typer.echo(f"  Bridge score: {metrics['bridge_score']:.6f}")
+    typer.echo("  Relation counts:")
+    if payload["relation_counts"]:
+        for relation, count in payload["relation_counts"].items():
+            typer.echo(f"    {relation}: {count}")
+    else:
+        typer.echo("    None")
 
     store.close()
 

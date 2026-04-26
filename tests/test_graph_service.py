@@ -487,6 +487,34 @@ class TestGraphService:
         result = gs.get_neighbors("nonexistent")
         assert result["center"] is None
 
+    def test_get_ego_metrics_counts_incident_edges_and_caps_depth(
+        self, populated_store: Store
+    ):
+        gs = GraphService(populated_store)
+        gs.rebuild()
+
+        b = populated_store.get_unit_by_source("forty_two", "b", "knowledge_node")
+        result = gs.get_ego_metrics(b.id, depth=9)
+
+        assert result["center"]["title"] == "Node B"
+        assert result["depth"] == 3
+        assert result["metrics"]["degree"] == 2
+        assert result["metrics"]["in_degree"] == 1
+        assert result["metrics"]["out_degree"] == 1
+        assert result["metrics"]["reachable_neighbor_count"] == 2
+        assert result["metrics"]["local_clustering_coefficient"] == 0
+        assert result["metrics"]["bridge_score"] > 0
+        assert result["relation_counts"] == {"builds_on": 1, "inspires": 1}
+
+    def test_get_ego_metrics_missing_unit_returns_empty_payload(self, populated_store: Store):
+        result = GraphService(populated_store).get_ego_metrics("missing", depth=0)
+
+        assert result["center"] is None
+        assert result["metrics"] == {}
+        assert result["relation_counts"] == {}
+        assert result["depth"] == 1
+        assert result["error"] == "unit_not_found"
+
     def test_shortest_path(self, populated_store: Store):
         gs = GraphService(populated_store)
         gs.rebuild()

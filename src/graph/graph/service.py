@@ -981,6 +981,59 @@ class GraphService:
             "edges": edge_list,
         }
 
+    def get_ego_metrics(self, unit_id: str, depth: int = 1) -> dict:
+        """Compute stable metrics for one unit's ego network."""
+        if not self.G:
+            self.rebuild()
+
+        capped_depth = max(1, min(int(depth), 3))
+        if unit_id not in self.G:
+            return {
+                "unit_id": unit_id,
+                "center": None,
+                "metrics": {},
+                "relation_counts": {},
+                "depth": capped_depth,
+                "error": "unit_not_found",
+                "message": f"Unit not found: {unit_id}",
+            }
+
+        undirected = self.G.to_undirected()
+        reachable = (
+            set(
+                nx.single_source_shortest_path_length(
+                    undirected,
+                    unit_id,
+                    cutoff=capped_depth,
+                ).keys()
+            )
+            - {unit_id}
+        )
+        relation_counts = Counter()
+        for edge in self.store.get_all_edges():
+            if edge.from_unit_id == unit_id or edge.to_unit_id == unit_id:
+                relation_counts[str(edge.relation)] += 1
+
+        bridge_score = 0.0
+        if self.G.nodes:
+            bridge_score = nx.betweenness_centrality(undirected).get(unit_id, 0.0)
+
+        center = self.store.get_unit(unit_id)
+        return {
+            "unit_id": unit_id,
+            "center": self._unit_summary_data(center),
+            "metrics": {
+                "degree": int(self.G.degree(unit_id)),
+                "in_degree": int(self.G.in_degree(unit_id)),
+                "out_degree": int(self.G.out_degree(unit_id)),
+                "reachable_neighbor_count": len(reachable),
+                "local_clustering_coefficient": nx.clustering(undirected, unit_id),
+                "bridge_score": bridge_score,
+            },
+            "relation_counts": dict(sorted(relation_counts.items())),
+            "depth": capped_depth,
+        }
+
     def shortest_path(self, from_id: str, to_id: str) -> list[str] | None:
         """Find shortest path between two units."""
         try:

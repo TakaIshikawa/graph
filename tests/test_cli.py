@@ -2783,6 +2783,36 @@ def test_neighbors_command_emits_json_with_edge_relations(monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_ego_command_emits_json_metrics_and_missing_payload(monkeypatch):
+    store = _make_store()
+    _, b_id, _, _ = _populate_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(app, ["ego", b_id, "--depth", "9", "--json"])
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["center"]["title"] == "Node B"
+        assert payload["depth"] == 3
+        assert payload["metrics"]["degree"] == 2
+        assert payload["metrics"]["in_degree"] == 1
+        assert payload["metrics"]["out_degree"] == 1
+        assert payload["metrics"]["reachable_neighbor_count"] == 2
+        assert payload["relation_counts"] == {"builds_on": 1, "inspires": 1}
+
+        missing = runner.invoke(app, ["ego", "missing", "--json"])
+        assert missing.exit_code == 0
+        missing_payload = json.loads(missing.output)
+        assert missing_payload["error"] == "unit_not_found"
+        assert missing_payload["metrics"] == {}
+        assert missing_payload["relation_counts"] == {}
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_backlinks_command_emits_expanded_json_and_applies_filters(monkeypatch):
     store = _make_store()
     _, b_id, _, _ = _populate_graph(store)
