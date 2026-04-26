@@ -1595,6 +1595,57 @@ def test_ingest_html_command_uses_configured_root_and_indexes_fulltext(tmp_path,
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_ingest_ical_command_uses_configured_path_and_indexes_fulltext(tmp_path, monkeypatch):
+    calendar = tmp_path / "calendar.ics"
+    calendar.write_text(
+        """BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:cli-event-1
+SUMMARY:CLI Calendar Event
+DESCRIPTION:Calendar search phrase.
+LOCATION:Online
+DTSTART:20260424T090000Z
+CATEGORIES:calendar,cli
+END:VEVENT
+END:VCALENDAR
+""",
+        encoding="utf-8",
+    )
+
+    store = _make_store()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    monkeypatch.setattr("graph.cli.main.settings.ical_path", str(calendar))
+
+    try:
+        result = runner.invoke(app, ["ingest", "ical"])
+
+        assert result.exit_code == 0
+        assert "Ingesting from ical" in result.output
+        assert "ical: 1 new" in result.output
+        unit = store.get_unit_by_source("me", "calendar.ics#cli-event-1", "calendar_event")
+        assert unit is not None
+        assert unit.title == "CLI Calendar Event"
+        assert unit.tags == ["calendar", "cli"]
+        assert unit.metadata["uid"] == "cli-event-1"
+        assert unit.metadata["source_path"] == "calendar.ics"
+        sync_state = store.get_sync_state("ical", "calendar_event")
+        assert sync_state is not None
+        assert sync_state.items_synced == 1
+
+        search = runner.invoke(
+            app,
+            ["search", "Calendar search", "--mode", "fulltext", "--limit", "1"],
+        )
+
+        assert search.exit_code == 0
+        assert "CLI Calendar Event" in search.output
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_shortest_path_command_prints_readable_path(monkeypatch):
     store = _make_store()
     a_id, _, c_id, _ = _populate_graph(store)

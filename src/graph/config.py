@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     markdown_root: str = ""
     text_root: str = ""
     html_root: str = ""
+    ical_path: str = ""
     obsidian_vault_path: str = "/Users/taka/ObsidianVaults/note"
 
     embedding_provider: str = "voyage"

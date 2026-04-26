@@ -400,6 +400,7 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_pa
         "opml": ["outline"],
         "text": ["text_document"],
         "html": ["html_document"],
+        "ical": ["calendar_event"],
     }
     monkeypatch.setattr(
         mcp_server,
@@ -418,6 +419,7 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_pa
     assert "opml" in ingest_tool.inputSchema["properties"]["project"]["enum"]
     assert "text" in ingest_tool.inputSchema["properties"]["project"]["enum"]
     assert "html" in ingest_tool.inputSchema["properties"]["project"]["enum"]
+    assert "ical" in ingest_tool.inputSchema["properties"]["project"]["enum"]
 
     search_tool = next(tool for tool in tools if tool.name == "search")
     assert "kindle" in search_tool.inputSchema["properties"]["source_project"]["enum"]
@@ -429,6 +431,7 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_pa
     assert "opml" in search_tool.inputSchema["properties"]["source_project"]["enum"]
     assert "text" in search_tool.inputSchema["properties"]["source_project"]["enum"]
     assert "html" in search_tool.inputSchema["properties"]["source_project"]["enum"]
+    assert "ical" in search_tool.inputSchema["properties"]["source_project"]["enum"]
     assert search_tool.inputSchema["properties"]["created_after"]["type"] == "string"
     assert search_tool.inputSchema["properties"]["min_utility"]["type"] == "number"
     assert search_tool.inputSchema["properties"]["min_confidence"]["type"] == "number"
@@ -834,6 +837,7 @@ def test_ingest_all_includes_sota_and_search_can_filter_sota(tmp_path, monkeypat
         "opml",
         "text",
         "html",
+        "ical",
     ]
     assert payload == {"units_inserted": 1, "units_skipped": 0, "edges_inserted": 0}
 
@@ -904,6 +908,47 @@ def test_ingest_tool_syncs_configured_feed_fixture(tmp_path, monkeypatch):
         assert metadata["link"] == "https://example.com/mcp-feed"
 
         state = store.get_sync_state("feed", "feed_item")
+        assert state is not None
+        assert state.items_synced == 1
+    finally:
+        store.close()
+
+
+def test_ingest_tool_syncs_configured_ical_fixture(tmp_path, monkeypatch):
+    calendar = tmp_path / "calendar.ics"
+    calendar.write_text(
+        """BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:mcp-event-1
+SUMMARY:MCP Calendar Event
+DESCRIPTION:Read through the MCP ingest tool.
+DTSTART:20260424T123000Z
+CATEGORIES:mcp
+END:VEVENT
+END:VCALENDAR
+""",
+        encoding="utf-8",
+    )
+    db_path = tmp_path / "graph.db"
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+    monkeypatch.setattr(mcp_server.settings, "ical_path", str(calendar))
+
+    response = asyncio.run(mcp_server.call_tool("ingest", {"project": "ical", "full": True}))
+    payload = json.loads(response[0].text)
+
+    assert payload == {"units_inserted": 1, "units_skipped": 0, "edges_inserted": 0}
+
+    store = Store(str(db_path))
+    try:
+        unit = store.get_unit_by_source("me", "calendar.ics#mcp-event-1", "calendar_event")
+        assert unit is not None
+        assert unit.title == "MCP Calendar Event"
+        assert unit.tags == ["mcp"]
+        assert unit.metadata["uid"] == "mcp-event-1"
+
+        state = store.get_sync_state("ical", "calendar_event")
         assert state is not None
         assert state.items_synced == 1
     finally:

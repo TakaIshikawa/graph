@@ -8,6 +8,7 @@ from graph.adapters.csv_adapter import CsvAdapter
 from graph.adapters.feed import FeedAdapter
 from graph.adapters.forty_two import FortyTwoAdapter
 from graph.adapters.html import HtmlAdapter
+from graph.adapters.ical import ICalAdapter
 from graph.adapters.jsonl_adapter import JsonlAdapter
 from graph.adapters.kindle import KindleAdapter
 from graph.adapters.markdown import MarkdownAdapter
@@ -33,6 +34,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "opml": OpmlAdapter,
     "text": TextAdapter,
     "html": HtmlAdapter,
+    "ical": ICalAdapter,
 }
 
 

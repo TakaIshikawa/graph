@@ -46,6 +46,7 @@ SUPPORTED_SYNC_PROJECTS = [
     "opml",
     "text",
     "html",
+    "ical",
 ]
 
 
@@ -59,6 +60,7 @@ def _get_adapter_for_project(name: str):
     from graph.adapters.feed import FeedAdapter
     from graph.adapters.forty_two import FortyTwoAdapter
     from graph.adapters.html import HtmlAdapter
+    from graph.adapters.ical import ICalAdapter
     from graph.adapters.jsonl_adapter import JsonlAdapter
     from graph.adapters.kindle import KindleAdapter
     from graph.adapters.markdown import MarkdownAdapter
@@ -86,6 +88,7 @@ def _get_adapter_for_project(name: str):
         "opml": lambda: OpmlAdapter(path=settings.opml_path),
         "text": lambda: TextAdapter(root_path=settings.text_root),
         "html": lambda: HtmlAdapter(root_path=settings.html_root),
+        "ical": lambda: ICalAdapter(path=settings.ical_path),
     }
     factory = mapping.get(name)
     if factory is None:
@@ -1663,6 +1666,7 @@ def _do_ingest(
             "opml",
             "text",
             "html",
+            "ical",
         ]
         if project == "all"
         else [project]

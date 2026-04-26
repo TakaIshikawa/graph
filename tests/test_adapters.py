@@ -16,6 +16,7 @@ from graph.adapters.csv_adapter import CsvAdapter
 from graph.adapters.feed import FeedAdapter
 from graph.adapters.forty_two import FortyTwoAdapter
 from graph.adapters.html import HtmlAdapter
+from graph.adapters.ical import ICalAdapter
 from graph.adapters.jsonl_adapter import JsonlAdapter
 from graph.adapters.markdown import MarkdownAdapter
 from graph.adapters.max_adapter import MaxAdapter
@@ -687,6 +688,141 @@ class TestHtmlAdapter:
         assert missing.units == []
 
 
+class TestICalAdapter:
+    def test_ingest_single_ics_event_with_metadata_tags_and_content(self, tmp_path):
+        calendar = tmp_path / "calendar.ics"
+        calendar.write_text(
+            """BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:event-1@example.com
+SUMMARY:Planning Meeting
+DESCRIPTION:Discuss launch plan\\nand follow-ups.
+LOCATION:Conference Room
+DTSTART:20260424T090000Z
+DTEND:20260424T100000Z
+CREATED:20260420T120000Z
+LAST-MODIFIED:20260423T180000Z
+ORGANIZER;CN=Alice:mailto:alice@example.com
+ATTENDEE;CN=Bob:mailto:bob@example.com
+CATEGORIES:work,planning
+END:VEVENT
+END:VCALENDAR
+""",
+            encoding="utf-8",
+        )
+
+        result = ICalAdapter(path=str(calendar)).ingest()
+
+        assert len(result.units) == 1
+        unit = result.units[0]
+        assert unit.source_project == "me"
+        assert unit.source_id == "calendar.ics#event-1@example.com"
+        assert unit.source_entity_type == "calendar_event"
+        assert unit.title == "Planning Meeting"
+        assert unit.content_type == "artifact"
+        assert "Discuss launch plan\nand follow-ups." in unit.content
+        assert "Start: 2026-04-24T09:00:00+00:00" in unit.content
+        assert "Location: Conference Room" in unit.content
+        assert unit.tags == ["work", "planning"]
+        assert unit.metadata == {
+            "uid": "event-1@example.com",
+            "start": "2026-04-24T09:00:00+00:00",
+            "end": "2026-04-24T10:00:00+00:00",
+            "location": "Conference Room",
+            "organizer": "Alice <alice@example.com>",
+            "attendees": ["Bob <bob@example.com>"],
+            "source_path": "calendar.ics",
+            "created": "2026-04-20T12:00:00+00:00",
+            "updated": "2026-04-23T18:00:00+00:00",
+        }
+        assert unit.created_at.isoformat() == "2026-04-24T09:00:00+00:00"
+        assert result.edges == []
+
+    def test_folder_recurses_and_skips_malformed_events(self, tmp_path):
+        nested = tmp_path / "calendars" / "nested"
+        nested.mkdir(parents=True)
+        (tmp_path / "calendars" / "root.ics").write_text(
+            """BEGIN:VCALENDAR
+BEGIN:VEVENT
+UID:root-event
+SUMMARY:Root Event
+DTSTART:20260425T120000Z
+END:VEVENT
+BEGIN:VEVENT
+UID:bad-date
+SUMMARY:Broken Event
+DTSTART:not-a-date
+END:VEVENT
+END:VCALENDAR
+""",
+            encoding="utf-8",
+        )
+        (nested / "nested.ics").write_text(
+            """BEGIN:VCALENDAR
+BEGIN:VEVENT
+UID:nested-event
+SUMMARY:Nested Event
+DTSTART:20260426
+END:VEVENT
+END:VCALENDAR
+""",
+            encoding="utf-8",
+        )
+        (nested / "skip.txt").write_text("BEGIN:VEVENT\nUID:skip\nEND:VEVENT\n", encoding="utf-8")
+
+        result = ICalAdapter(path=str(tmp_path / "calendars")).ingest()
+
+        assert [unit.source_id for unit in result.units] == [
+            "nested/nested.ics#nested-event",
+            "root.ics#root-event",
+        ]
+        assert {unit.title for unit in result.units} == {"Nested Event", "Root Event"}
+
+    def test_since_and_entity_type_filter_use_event_timestamps(self, tmp_path):
+        calendar = tmp_path / "calendar.ics"
+        calendar.write_text(
+            """BEGIN:VCALENDAR
+BEGIN:VEVENT
+UID:old-event
+SUMMARY:Old Event
+DTSTART:20260420T090000Z
+CREATED:20260419T090000Z
+LAST-MODIFIED:20260420T100000Z
+END:VEVENT
+BEGIN:VEVENT
+UID:updated-event
+SUMMARY:Updated Event
+DTSTART:20260420T090000Z
+LAST-MODIFIED:20260425T100000Z
+END:VEVENT
+BEGIN:VEVENT
+UID:new-start-event
+SUMMARY:New Start Event
+DTSTART:20260426T090000Z
+END:VEVENT
+END:VCALENDAR
+""",
+            encoding="utf-8",
+        )
+
+        result = ICalAdapter(path=str(calendar)).ingest(
+            since=SyncState(
+                source_project="ical",
+                source_entity_type="calendar_event",
+                last_sync_at=datetime.fromisoformat("2026-04-24T00:00:00+00:00"),
+            )
+        )
+        filtered = ICalAdapter(path=str(calendar)).ingest(entity_types=["feed_item"])
+
+        assert [unit.source_id for unit in result.units] == [
+            "calendar.ics#updated-event",
+            "calendar.ics#new-start-event",
+        ]
+        assert filtered.units == []
+        assert filtered.edges == []
+
+
 class TestFeedAdapter:
     def test_ingest_rss_items_with_stable_metadata_and_tags(self, tmp_path):
         feed = tmp_path / "research.xml"
@@ -1061,6 +1197,7 @@ class TestRegistry:
             "opml",
             "text",
             "html",
+            "ical",
         }
 
     def test_get_adapter(self):
@@ -1078,6 +1215,9 @@ class TestRegistry:
 
         html_adapter = get_adapter("html", root_path="/tmp/html")
         assert html_adapter.name == "html"
+
+        ical_adapter = get_adapter("ical", path="/tmp/calendar.ics")
+        assert ical_adapter.name == "ical"
 
         feed_adapter = get_adapter("feed", sources="/tmp/feed.xml")
         assert feed_adapter.name == "feed"

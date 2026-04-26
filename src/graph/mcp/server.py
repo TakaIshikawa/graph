@@ -72,6 +72,7 @@ SUPPORTED_SYNC_PROJECTS = [
     "opml",
     "text",
     "html",
+    "ical",
 ]
 
 SEARCH_FILTER_SCHEMA = {
@@ -139,6 +140,7 @@ def _get_adapter(name: str):
     from graph.adapters.feed import FeedAdapter
     from graph.adapters.forty_two import FortyTwoAdapter
     from graph.adapters.html import HtmlAdapter
+    from graph.adapters.ical import ICalAdapter
     from graph.adapters.jsonl_adapter import JsonlAdapter
     from graph.adapters.kindle import KindleAdapter
     from graph.adapters.max_adapter import MaxAdapter
@@ -164,6 +166,7 @@ def _get_adapter(name: str):
         "opml": lambda: OpmlAdapter(path=settings.opml_path),
         "text": lambda: TextAdapter(root_path=settings.text_root),
         "html": lambda: HtmlAdapter(root_path=settings.html_root),
+        "ical": lambda: ICalAdapter(path=settings.ical_path),
     }
     return mapping[name]()
 
