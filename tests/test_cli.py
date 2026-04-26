@@ -2026,6 +2026,61 @@ def test_shortest_path_command_reports_no_path(monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_path_command_prints_ordered_hops(monkeypatch):
+    store = _make_store()
+    a_id, b_id, c_id, _ = _populate_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(app, ["path", a_id, c_id])
+
+        assert result.exit_code == 0
+        assert "Shortest path (3 nodes):" in result.output
+        assert f"1. [forty_two] Node A" in result.output
+        assert f"   ID: {a_id}" in result.output
+        assert f"2. [forty_two] Node B" in result.output
+        assert f"   ID: {b_id}" in result.output
+        assert f"3. [max] Node C" in result.output
+        assert f"   ID: {c_id}" in result.output
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_path_command_reports_disconnected_nodes(monkeypatch):
+    store = _make_store()
+    a_id, _, _, d_id = _populate_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(app, ["path", a_id, d_id])
+
+        assert result.exit_code == 1
+        assert f"Error: no path found between {a_id} and {d_id}." in result.output
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_path_command_reports_missing_node(monkeypatch):
+    store = _make_store()
+    a_id, _, _, _ = _populate_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        missing_id = "missing-node-id"
+        result = runner.invoke(app, ["path", a_id, missing_id])
+
+        assert result.exit_code == 1
+        assert f"Error: unit not found: {missing_id}" in result.output
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_search_command_preserves_default_format(monkeypatch):
     store = _make_store()
     _populate_search_graph(store)
