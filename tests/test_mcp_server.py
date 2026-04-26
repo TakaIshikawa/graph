@@ -3039,6 +3039,100 @@ def test_rename_tag_tool_dry_run_and_execute_match_service_counts(tmp_path, monk
     store.close()
 
 
+def test_remove_tag_tool_dry_run_and_execute_reindexes_fts(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    target = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="mcp-remove-target",
+            source_entity_type="insight",
+            title="MCP remove target",
+            content="MCP removable content",
+            content_type=ContentType.INSIGHT,
+            tags=["retire_tag", "keep"],
+        )
+    )
+    other = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="mcp-remove-other",
+            source_entity_type="knowledge_node",
+            title="MCP remove other",
+            content="Other removable content",
+            content_type=ContentType.FINDING,
+            tags=["retire_tag"],
+        )
+    )
+    for unit in [target, other]:
+        store.fts_index_unit(unit)
+    store.close()
+
+    monkeypatch.setattr(
+        mcp_server,
+        "_get_store",
+        lambda: Store(str(db_path)),
+    )
+
+    tools = asyncio.run(mcp_server.list_tools())
+    remove_tool = next(tool for tool in tools if tool.name == "remove_tag")
+    assert remove_tool.inputSchema["properties"]["dry_run"]["default"] is False
+    assert "source_project" in remove_tool.inputSchema["properties"]
+    assert "limit" in remove_tool.inputSchema["properties"]
+
+    dry_response = asyncio.run(
+        mcp_server.call_tool(
+            "remove_tag",
+            {
+                "tag": "retire_tag",
+                "source_project": "max",
+                "content_type": "insight",
+                "limit": 10,
+                "dry_run": True,
+            },
+        )
+    )
+    dry_payload = json.loads(dry_response[0].text)
+    assert dry_payload["dry_run"] is True
+    assert dry_payload["matched_count"] == 1
+    assert dry_payload["removed_count"] == 1
+    assert dry_payload["changed_units"][0]["id"] == target.id
+
+    store = Store(str(db_path))
+    unit = store.get_unit(target.id)
+    assert unit is not None
+    assert unit.tags == ["retire_tag", "keep"]
+    assert target.id in {row["unit_id"] for row in store.fts_search("retire_tag")}
+    store.close()
+
+    execute_response = asyncio.run(
+        mcp_server.call_tool(
+            "remove_tag",
+            {
+                "tag": "retire_tag",
+                "source_project": "max",
+                "content_type": "insight",
+                "limit": 10,
+            },
+        )
+    )
+    execute_payload = json.loads(execute_response[0].text)
+    assert execute_payload["dry_run"] is False
+    assert execute_payload["matched_count"] == dry_payload["matched_count"]
+    assert execute_payload["removed_count"] == dry_payload["removed_count"]
+    assert execute_payload["affected_unit_ids"] == dry_payload["affected_unit_ids"]
+
+    store = Store(str(db_path))
+    unit = store.get_unit(target.id)
+    skipped = store.get_unit(other.id)
+    assert unit is not None
+    assert skipped is not None
+    assert unit.tags == ["keep"]
+    assert skipped.tags == ["retire_tag"]
+    assert target.id not in {row["unit_id"] for row in store.fts_search("retire_tag")}
+    store.close()
+
+
 def test_apply_tags_to_search_tool_returns_counts_summaries_and_updates(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))

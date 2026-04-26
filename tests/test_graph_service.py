@@ -1486,6 +1486,63 @@ class TestGraphService:
         assert unit is not None
         assert unit.tags == ["ai-agent"]
 
+    def test_remove_tag_dry_run_and_execute_return_same_sample_schema(self, store: Store):
+        unit = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="service-remove",
+                source_entity_type="insight",
+                title="Service remove tag",
+                content="Service removable content",
+                content_type=ContentType.INSIGHT,
+                tags=["retire_tag", "keep"],
+            )
+        )
+        filtered = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="service-remove-filtered",
+                source_entity_type="knowledge_node",
+                title="Service remove filtered",
+                content="Filtered removable content",
+                content_type=ContentType.FINDING,
+                tags=["retire_tag"],
+            )
+        )
+        store.fts_index_unit(unit)
+        store.fts_index_unit(filtered)
+        gs = GraphService(store)
+
+        dry_run = gs.remove_tag(
+            "retire_tag",
+            dry_run=True,
+            source_project="max",
+            content_type="insight",
+            limit=10,
+        )
+
+        assert dry_run["dry_run"] is True
+        assert dry_run["matched_count"] == 1
+        assert dry_run["changed_count"] == 1
+        assert dry_run["sample_units"] == dry_run["changed_units"]
+        assert store.get_unit(unit.id).tags == ["retire_tag", "keep"]  # type: ignore[union-attr]
+
+        result = gs.remove_tag(
+            "retire_tag",
+            source_project="max",
+            content_type="insight",
+            limit=10,
+        )
+
+        assert result["dry_run"] is False
+        assert result["matched_count"] == dry_run["matched_count"]
+        assert result["changed_count"] == dry_run["changed_count"]
+        assert result["sample_units"][0]["old_tags"] == ["retire_tag", "keep"]
+        assert result["sample_units"][0]["new_tags"] == ["keep"]
+        assert store.get_unit(unit.id).tags == ["keep"]  # type: ignore[union-attr]
+        assert store.get_unit(filtered.id).tags == ["retire_tag"]  # type: ignore[union-attr]
+        assert unit.id not in {row["unit_id"] for row in store.fts_search("retire_tag")}
+
     def test_analyze_duplicates_reports_candidate_groups_and_remains_read_only(
         self, store: Store
     ):

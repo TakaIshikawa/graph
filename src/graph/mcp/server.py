@@ -37,6 +37,7 @@ from graph.cli.main import (
     _do_delete_unit,
     _do_pin_unit,
     _do_pinned_units,
+    _do_remove_tag,
     _do_rename_tag,
     _do_tag_graph,
     _do_unpin_unit,
@@ -830,6 +831,46 @@ async def list_tools() -> list[Tool]:
                     },
                 },
                 "required": ["old_tag", "new_tag"],
+            },
+        ),
+        Tool(
+            name="remove_tag",
+            description="Remove one exact tag from matching units, with optional dry run.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "tag": {
+                        "type": "string",
+                        "description": "Exact tag to remove",
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Preview changes without writing",
+                    },
+                    "source_project": {
+                        "type": "string",
+                        "enum": SUPPORTED_SYNC_PROJECTS,
+                        "description": "Filter by source project",
+                    },
+                    "content_type": {
+                        "type": "string",
+                        "enum": [
+                            "insight",
+                            "finding",
+                            "idea",
+                            "design_brief",
+                            "artifact",
+                            "metadata",
+                        ],
+                        "description": "Filter by content type",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max matching units to update",
+                    },
+                },
+                "required": ["tag"],
             },
         ),
         Tool(
@@ -2068,6 +2109,17 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 dry_run=arguments.get("dry_run", False),
                 source_project=arguments.get("source_project"),
                 content_type=arguments.get("content_type"),
+            )
+            return [TextContent(type="text", text=json.dumps(result))]
+
+        elif name == "remove_tag":
+            result = _do_remove_tag(
+                store,
+                arguments["tag"],
+                dry_run=arguments.get("dry_run", False),
+                source_project=arguments.get("source_project"),
+                content_type=arguments.get("content_type"),
+                limit=arguments.get("limit"),
             )
             return [TextContent(type="text", text=json.dumps(result))]
 

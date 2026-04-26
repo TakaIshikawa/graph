@@ -1729,6 +1729,28 @@ class GraphService:
         result["sample_limit"] = sample_limit
         return result
 
+    def remove_tag(
+        self,
+        tag: str,
+        *,
+        dry_run: bool = False,
+        source_project: str | None = None,
+        content_type: str | None = None,
+        limit: int | None = None,
+        sample_limit: int = 10,
+    ) -> dict:
+        """Remove one exact tag from matching units."""
+        result = self.store.remove_tag(
+            tag,
+            dry_run=dry_run,
+            source_project=source_project,
+            content_type=content_type,
+            limit=limit,
+        )
+        result["sample_units"] = result["changed_units"][:sample_limit]
+        result["sample_limit"] = sample_limit
+        return result
+
     def analyze_duplicates(
         self,
         *,

@@ -565,6 +565,84 @@ class TestUnitCRUD:
         assert {row["unit_id"] for row in store.fts_search("ai-agent")} >= {first.id, second.id}
         assert {row["unit_id"] for row in store.fts_search("ai_agent")} == {skipped.id}
 
+    def test_remove_tag_dry_run_and_execute_filters_limit_and_reindexes_fts(
+        self, store: Store
+    ):
+        first = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="remove-first",
+                source_entity_type="insight",
+                title="Remove tag first",
+                content="First removable content",
+                content_type=ContentType.INSIGHT,
+                tags=["retire_tag", "keep"],
+            )
+        )
+        second = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="remove-second",
+                source_entity_type="insight",
+                title="Remove tag second",
+                content="Second removable content",
+                content_type=ContentType.INSIGHT,
+                tags=["obsolete", "retire_tag", "keep"],
+            )
+        )
+        skipped = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="remove-skipped",
+                source_entity_type="knowledge_node",
+                title="Remove tag skipped",
+                content="Skipped removable content",
+                content_type=ContentType.FINDING,
+                tags=["retire_tag", "keep"],
+            )
+        )
+        for unit in [first, second, skipped]:
+            store.fts_index_unit(unit)
+        original_updated_at = str(store.get_unit(second.id).updated_at)  # type: ignore[union-attr]
+
+        dry_run = store.remove_tag(
+            "retire_tag",
+            dry_run=True,
+            source_project="max",
+            content_type="insight",
+            limit=1,
+        )
+
+        assert dry_run["dry_run"] is True
+        assert dry_run["matched_count"] == 1
+        assert dry_run["removed_count"] == 1
+        assert dry_run["changed_count"] == 1
+        assert dry_run["affected_unit_ids"] == [second.id]
+        assert dry_run["representative_units"] == dry_run["changed_units"]
+        assert dry_run["changed_units"][0]["old_tags"] == ["obsolete", "retire_tag", "keep"]
+        assert dry_run["changed_units"][0]["new_tags"] == ["obsolete", "keep"]
+        assert store.get_unit(second.id).tags == ["obsolete", "retire_tag", "keep"]  # type: ignore[union-attr]
+        assert str(store.get_unit(second.id).updated_at) == original_updated_at  # type: ignore[union-attr]
+        assert second.id in {row["unit_id"] for row in store.fts_search("retire_tag")}
+
+        result = store.remove_tag(
+            "retire_tag",
+            source_project="max",
+            content_type="insight",
+            limit=1,
+        )
+
+        assert result["dry_run"] is False
+        assert result["matched_count"] == dry_run["matched_count"]
+        assert result["removed_count"] == dry_run["removed_count"]
+        assert result["affected_unit_ids"] == dry_run["affected_unit_ids"]
+        assert store.get_unit(second.id).tags == ["obsolete", "keep"]  # type: ignore[union-attr]
+        assert store.get_unit(first.id).tags == ["retire_tag", "keep"]  # type: ignore[union-attr]
+        assert store.get_unit(skipped.id).tags == ["retire_tag", "keep"]  # type: ignore[union-attr]
+        assert str(store.get_unit(second.id).updated_at) != original_updated_at  # type: ignore[union-attr]
+        assert second.id not in {row["unit_id"] for row in store.fts_search("retire_tag")}
+        assert second.id in {row["unit_id"] for row in store.fts_search("obsolete")}
+
     def test_apply_tags_to_units_dry_run_execute_dedupes_and_reindexes_fts(self, store: Store):
         first = store.insert_unit(
             KnowledgeUnit(

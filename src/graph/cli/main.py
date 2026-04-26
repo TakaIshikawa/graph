@@ -586,6 +586,29 @@ def _do_rename_tag(
     )
 
 
+def _do_remove_tag(
+    store: Store,
+    tag: str,
+    *,
+    dry_run: bool = False,
+    source_project: str | None = None,
+    content_type: str | None = None,
+    limit: int | None = None,
+) -> dict:
+    if content_type is not None:
+        content_type = ContentType(content_type).value
+    from graph.graph.service import GraphService
+
+    gs = GraphService(store)
+    return gs.remove_tag(
+        tag,
+        dry_run=dry_run,
+        source_project=source_project,
+        content_type=content_type,
+        limit=limit,
+    )
+
+
 def _do_tag_graph(
     store: Store,
     *,
@@ -4688,6 +4711,74 @@ def tags_rename(
     store.close()
 
 
+@tags_app.command(name="remove")
+def tags_remove(
+    tag: str = typer.Argument(..., help="Exact tag to remove"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without writing"),
+    source_project: str | None = typer.Option(
+        None,
+        "--source-project",
+        "--project",
+        "-p",
+        help="Filter by source project",
+    ),
+    content_type: str | None = typer.Option(None, "--content-type", help="Filter by content type"),
+    limit: int | None = typer.Option(None, "--limit", "-n", help="Max matching units to update"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Remove one exact tag from matching units."""
+    store = _get_store()
+    try:
+        result = _do_remove_tag(
+            store,
+            tag,
+            dry_run=dry_run,
+            source_project=source_project,
+            content_type=content_type,
+            limit=limit,
+        )
+    except ValueError as exc:
+        store.close()
+        if json_output:
+            _json_echo(
+                {
+                    "tag": tag,
+                    "dry_run": dry_run,
+                    "limit": limit,
+                    "matched_count": 0,
+                    "removed_count": 0,
+                    "changed_count": 0,
+                    "affected_count": 0,
+                    "affected_unit_ids": [],
+                    "changed_units": [],
+                    "affected_units": [],
+                    "representative_units": [],
+                    "sample_units": [],
+                    "error": str(exc),
+                }
+            )
+            return
+        raise typer.BadParameter(str(exc)) from exc
+
+    if json_output:
+        _json_echo(result)
+        store.close()
+        return
+
+    action = "Would remove" if dry_run else "Removed"
+    typer.echo(
+        f"{action} {result['removed_count']} of {result['matched_count']} matched units: "
+        f"{result['tag']}"
+    )
+    for unit in result["sample_units"]:
+        typer.echo(f"  [{unit['source_project']}] {unit['title']}")
+        typer.echo(
+            f"    ID: {unit['id']} | Tags: {', '.join(unit['old_tags'])} -> "
+            f"{', '.join(unit['new_tags'])}"
+        )
+    store.close()
+
+
 @app.command(name="tag-synonyms")
 def tag_synonyms(
     limit: int = typer.Option(20, "--limit", "-n", help="Max synonym groups"),
@@ -4752,6 +4843,32 @@ def rename_tag(
         dry_run=dry_run,
         source_project=source_project,
         content_type=content_type,
+        json_output=json_output,
+    )
+
+
+@app.command(name="remove-tag")
+def remove_tag(
+    tag: str = typer.Argument(..., help="Exact tag to remove"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without writing"),
+    source_project: str | None = typer.Option(
+        None,
+        "--source-project",
+        "--project",
+        "-p",
+        help="Filter by source project",
+    ),
+    content_type: str | None = typer.Option(None, "--content-type", help="Filter by content type"),
+    limit: int | None = typer.Option(None, "--limit", "-n", help="Max matching units to update"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Remove one exact tag from matching units."""
+    tags_remove(
+        tag=tag,
+        dry_run=dry_run,
+        source_project=source_project,
+        content_type=content_type,
+        limit=limit,
         json_output=json_output,
     )
 

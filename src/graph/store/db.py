@@ -920,6 +920,90 @@ class Store:
             },
         }
 
+    def remove_tag(
+        self,
+        tag: str,
+        *,
+        dry_run: bool = False,
+        source_project: str | None = None,
+        content_type: str | None = None,
+        limit: int | None = None,
+    ) -> dict:
+        tag = tag.strip()
+        if not tag:
+            raise ValueError("tag must not be empty.")
+
+        where_parts, params = self._unit_filter_parts(
+            source_project=source_project,
+            content_type=content_type,
+        )
+        where_parts.append("EXISTS (SELECT 1 FROM json_each(knowledge_units.tags) WHERE value = ?)")
+        params.append(tag)
+
+        query = "SELECT * FROM knowledge_units WHERE " + " AND ".join(where_parts)
+        query += " ORDER BY created_at DESC"
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(max(0, limit))
+
+        rows = self.conn.execute(query, params).fetchall()
+        matched_units = [_row_to_unit(row) for row in rows]
+
+        changed: list[tuple[KnowledgeUnit, list[str]]] = []
+        for unit in matched_units:
+            next_tags = [unit_tag for unit_tag in unit.tags if unit_tag != tag]
+            if next_tags != unit.tags:
+                changed.append((unit, next_tags))
+
+        changed_units = [
+            {
+                "id": unit.id,
+                "title": unit.title,
+                "source_project": str(unit.source_project),
+                "source_entity_type": unit.source_entity_type,
+                "content_type": str(unit.content_type),
+                "old_tags": unit.tags,
+                "new_tags": next_tags,
+            }
+            for unit, next_tags in changed
+        ]
+
+        if not dry_run and changed:
+            now = _utcnow_iso()
+            with self.conn:
+                for unit, next_tags in changed:
+                    self.conn.execute(
+                        """UPDATE knowledge_units
+                           SET tags = ?, updated_at = ?
+                           WHERE id = ?""",
+                        (json.dumps(next_tags), now, unit.id),
+                    )
+                    unit.tags = next_tags
+                    unit.updated_at = now
+                    self.conn.execute("DELETE FROM knowledge_fts WHERE unit_id = ?", (unit.id,))
+                    self.conn.execute(
+                        "INSERT INTO knowledge_fts (unit_id, title, content, tags) VALUES (?, ?, ?, ?)",
+                        (unit.id, unit.title, unit.content, " ".join(unit.tags)),
+                    )
+
+        return {
+            "tag": tag,
+            "dry_run": dry_run,
+            "limit": limit,
+            "matched_count": len(matched_units),
+            "removed_count": len(changed_units),
+            "changed_count": len(changed_units),
+            "affected_count": len(changed_units),
+            "affected_unit_ids": [unit["id"] for unit in changed_units],
+            "changed_units": changed_units,
+            "affected_units": changed_units,
+            "representative_units": changed_units,
+            "filters": {
+                "source_project": source_project,
+                "content_type": content_type,
+            },
+        }
+
     def apply_tags_to_units(
         self,
         unit_ids: list[str],

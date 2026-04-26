@@ -3058,6 +3058,77 @@ def test_rename_tag_command_dry_run_json_and_execute(monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_remove_tag_command_dry_run_json_execute_and_alias(monkeypatch):
+    store = _make_store()
+    target = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="cli-remove-target",
+            source_entity_type="insight",
+            title="CLI remove target",
+            content="CLI removable content",
+            content_type=ContentType.INSIGHT,
+            tags=["retire_tag", "keep"],
+        )
+    )
+    other = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="cli-remove-other",
+            source_entity_type="knowledge_node",
+            title="CLI remove other",
+            content="Other removable content",
+            content_type=ContentType.FINDING,
+            tags=["retire_tag"],
+        )
+    )
+    for unit in [target, other]:
+        store.fts_index_unit(unit)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        dry_run = runner.invoke(
+            app,
+            [
+                "tags",
+                "remove",
+                "retire_tag",
+                "--source-project",
+                "max",
+                "--content-type",
+                "insight",
+                "--limit",
+                "10",
+                "--dry-run",
+                "--json",
+            ],
+        )
+
+        assert dry_run.exit_code == 0
+        dry_payload = json.loads(dry_run.output)
+        assert dry_payload["dry_run"] is True
+        assert dry_payload["matched_count"] == 1
+        assert dry_payload["removed_count"] == 1
+        assert dry_payload["changed_units"][0]["id"] == target.id
+        assert store.get_unit(target.id).tags == ["retire_tag", "keep"]  # type: ignore[union-attr]
+        assert target.id in {row["unit_id"] for row in store.fts_search("retire_tag")}
+
+        executed = runner.invoke(
+            app,
+            ["remove-tag", "retire_tag", "--source-project", "max", "--content-type", "insight"],
+        )
+
+        assert executed.exit_code == 0
+        assert "Removed 1 of 1 matched units: retire_tag" in executed.output
+        assert store.get_unit(target.id).tags == ["keep"]  # type: ignore[union-attr]
+        assert store.get_unit(other.id).tags == ["retire_tag"]  # type: ignore[union-attr]
+        assert target.id not in {row["unit_id"] for row in store.fts_search("retire_tag")}
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_tags_apply_search_dry_run_execute_filters_and_reindexes(monkeypatch):
     store = _make_store()
     _populate_search_graph(store)
