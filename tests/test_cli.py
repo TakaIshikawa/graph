@@ -597,7 +597,7 @@ def test_json_export_and_import_commands_round_trip(tmp_path, monkeypatch):
     assert export_result.exit_code == 0
     assert export_path.exists()
     exported = json.loads(export_path.read_text())
-    assert exported["schema_version"] == 2
+    assert exported["schema_version"] == 3
     assert exported["exported_at"]
     assert len(exported["units"]) == 4
     assert len(exported["edges"]) == 2
@@ -4052,6 +4052,8 @@ def test_queries_cli_save_list_run_and_delete(monkeypatch):
                 "0.93",
                 "--sort",
                 "utility_desc",
+                "--schedule",
+                "weekly",
                 "--json",
             ],
         )
@@ -4059,6 +4061,8 @@ def test_queries_cli_save_list_run_and_delete(monkeypatch):
         assert save_result.exit_code == 0
         saved = json.loads(save_result.output)
         assert saved["name"] == "approved-solar"
+        assert saved["schedule"] == "weekly"
+        assert saved["last_run_at"] is None
         assert saved["filters"] == {
             "content_type": "insight",
             "created_after": "2026-04-21T00:00:00+00:00",
@@ -4083,6 +4087,10 @@ def test_queries_cli_save_list_run_and_delete(monkeypatch):
         assert payload["query"] == "solar"
         assert payload["mode"] == "fulltext"
         assert payload["sort"] == "utility_desc"
+        assert payload["saved_query"] == "approved-solar"
+        assert payload["schedule"] == "weekly"
+        assert payload["last_run_at"] is not None
+        assert datetime.fromisoformat(payload["last_run_at"]).tzinfo is not None
         assert payload["filters"] == saved["filters"]
         assert [result["title"] for result in payload["results"]] == ["Solar approved insight"]
 
@@ -4120,6 +4128,7 @@ def test_queries_cli_export_and_import_json_round_trip(tmp_path, monkeypatch):
             mode="hybrid",
             limit=5,
             filters={"source_project": "max", "review_state": "approved"},
+            schedule="monthly",
         )
 
         export_result = runner.invoke(app, ["queries", "export", str(export_path), "--json"])
@@ -4127,9 +4136,11 @@ def test_queries_cli_export_and_import_json_round_trip(tmp_path, monkeypatch):
         assert export_result.exit_code == 0
         export_payload = json.loads(export_result.output)
         assert export_payload["exported"] == 1
-        assert export_payload["schema_version"] == 1
+        assert export_payload["schema_version"] == 2
         exported = json.loads(export_path.read_text())
-        assert exported["schema_version"] == 1
+        assert exported["schema_version"] == 2
+        assert exported["queries"][0]["schedule"] == "monthly"
+        assert exported["queries"][0]["last_run_at"] is None
         assert exported["queries"][0]["filters"] == {
             "source_project": "max",
             "review_state": "approved",
@@ -4157,6 +4168,8 @@ def test_queries_cli_export_and_import_json_round_trip(tmp_path, monkeypatch):
         assert saved["query"] == "solar"
         assert saved["mode"] == "hybrid"
         assert saved["limit"] == 5
+        assert saved["schedule"] == "monthly"
+        assert saved["last_run_at"] is None
         assert saved["filters"] == {
             "source_project": "max",
             "review_state": "approved",
@@ -4176,6 +4189,32 @@ def test_queries_cli_export_and_import_json_round_trip(tmp_path, monkeypatch):
         invalid_payload = json.loads(invalid_result.output)
         assert invalid_payload["error"] == "import_failed"
         assert "Unsupported saved queries schema_version 999" in invalid_payload["message"]
+
+        legacy_path = tmp_path / "legacy-queries.json"
+        legacy_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "queries": [
+                        {
+                            "name": "legacy",
+                            "query": "stale",
+                            "mode": "fulltext",
+                            "limit": 10,
+                            "filters": {},
+                        }
+                    ],
+                }
+            )
+        )
+
+        legacy_result = runner.invoke(app, ["queries", "import", str(legacy_path), "--json"])
+
+        assert legacy_result.exit_code == 0
+        legacy = store.get_saved_query("legacy")
+        assert legacy is not None
+        assert legacy["schedule"] is None
+        assert legacy["last_run_at"] is None
     finally:
         store.close()
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]

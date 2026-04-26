@@ -419,6 +419,11 @@ async def list_tools() -> list[Tool]:
                         "default": "relevance",
                         "description": "Sort order saved with the query filters",
                     },
+                    "schedule": {
+                        "type": "string",
+                        "enum": ["daily", "weekly", "monthly"],
+                        "description": "Optional recurrence for review workflows",
+                    },
                     **SEARCH_FILTER_SCHEMA,
                     "filters": {
                         "type": "object",
@@ -1890,6 +1895,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     mode=arguments.get("mode", "fulltext"),
                     limit=arguments.get("limit", 10),
                     filters=filters,
+                    schedule=arguments.get("schedule"),
                 )
             except ValueError as exc:
                 return [TextContent(type="text", text=json.dumps({"error": str(exc)}))]
@@ -1942,6 +1948,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     mode=saved["mode"],
                     filters=saved["filters"],
                 )
+                if "error" not in payload:
+                    saved = store.mark_saved_query_run(arguments["name"]) or saved
             except ValueError as exc:
                 payload = {
                     "error": str(exc),
@@ -1949,6 +1957,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     "valid_sorts": list(SEARCH_SORTS),
                 }
             payload["saved_query"] = saved["name"]
+            payload["schedule"] = saved.get("schedule")
+            payload["last_run_at"] = saved.get("last_run_at")
             return [TextContent(type="text", text=json.dumps(payload))]
 
         elif name == "delete_query":

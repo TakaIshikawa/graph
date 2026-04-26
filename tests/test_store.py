@@ -1532,6 +1532,10 @@ class TestSavedQueries:
                 "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'saved_queries'"
             ).fetchone()
             assert row is not None
+            columns = {
+                row[1] for row in store.conn.execute("PRAGMA table_info(saved_queries)").fetchall()
+            }
+            assert {"schedule", "last_run_at"} <= columns
         finally:
             store.close()
 
@@ -1574,7 +1578,7 @@ class TestSavedQueries:
             }
             assert "embedding_updated_at" in columns
             version = store.conn.execute("SELECT version FROM schema_version").fetchone()[0]
-            assert version == 2
+            assert version == 3
         finally:
             store.close()
 
@@ -1585,6 +1589,7 @@ class TestSavedQueries:
             mode="hybrid",
             limit=5,
             filters={"source_project": "max", "review_state": "approved"},
+            schedule="weekly",
         )
 
         assert saved["name"] == "approved-solar"
@@ -1595,6 +1600,8 @@ class TestSavedQueries:
             "source_project": "max",
             "review_state": "approved",
         }
+        assert saved["schedule"] == "weekly"
+        assert saved["last_run_at"] is None
         assert store.get_saved_query("approved-solar") == saved
         assert store.list_saved_queries() == [saved]
 
@@ -1604,13 +1611,19 @@ class TestSavedQueries:
             mode="fulltext",
             limit=2,
             filters={"tag": "energy"},
+            schedule="daily",
         )
 
         assert updated["query"] == "battery"
         assert updated["mode"] == "fulltext"
         assert updated["limit"] == 2
         assert updated["filters"] == {"tag": "energy"}
+        assert updated["schedule"] == "daily"
         assert len(store.list_saved_queries()) == 1
+        ran = store.mark_saved_query_run("approved-solar")
+        assert ran is not None
+        assert ran["last_run_at"] is not None
+        assert datetime.fromisoformat(ran["last_run_at"]).tzinfo is not None
         assert store.delete_saved_query("approved-solar") is True
         assert store.get_saved_query("approved-solar") is None
         assert store.delete_saved_query("approved-solar") is False
@@ -1625,6 +1638,7 @@ class TestSavedQueries:
                 mode="hybrid",
                 limit=5,
                 filters={"source_project": "max", "review_state": "approved"},
+                schedule="weekly",
             )
             source.save_query(
                 name="battery",
@@ -1636,11 +1650,13 @@ class TestSavedQueries:
 
             payload = source.export_saved_queries()
 
-            assert payload["schema_version"] == 1
+            assert payload["schema_version"] == 2
             assert [query["name"] for query in payload["queries"]] == [
                 "approved-solar",
                 "battery",
             ]
+            assert payload["queries"][0]["schedule"] == "weekly"
+            assert payload["queries"][0]["last_run_at"] is None
 
             target.save_query(
                 name="approved-solar",
@@ -1659,6 +1675,28 @@ class TestSavedQueries:
                 "updated": 0,
                 "skipped": 2,
             }
+
+            legacy_payload = {
+                "schema_version": 1,
+                "queries": [
+                    {
+                        "name": "legacy",
+                        "query": "unread",
+                        "mode": "fulltext",
+                        "limit": 10,
+                        "filters": {},
+                    }
+                ],
+            }
+            assert target.import_saved_queries(legacy_payload) == {
+                "inserted": 1,
+                "updated": 0,
+                "skipped": 0,
+            }
+            legacy = target.get_saved_query("legacy")
+            assert legacy is not None
+            assert legacy["schedule"] is None
+            assert legacy["last_run_at"] is None
         finally:
             source.close()
             target.close()
@@ -1783,7 +1821,7 @@ class TestJsonBackup:
 
         payload = store.export_json()
 
-        assert payload["schema_version"] == 2
+        assert payload["schema_version"] == 3
         assert payload["exported_at"]
         assert len(payload["units"]) == 1
         assert payload["units"][0]["id"] == inserted.id

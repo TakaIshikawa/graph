@@ -455,6 +455,11 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_pa
     assert save_query_tool.inputSchema["properties"]["created_before"]["type"] == "string"
     assert save_query_tool.inputSchema["properties"]["max_utility"]["type"] == "number"
     assert "utility_desc" in save_query_tool.inputSchema["properties"]["sort"]["enum"]
+    assert save_query_tool.inputSchema["properties"]["schedule"]["enum"] == [
+        "daily",
+        "weekly",
+        "monthly",
+    ]
 
     assert any(tool.name == "sync_status" for tool in tools)
 
@@ -1137,6 +1142,7 @@ def test_saved_query_tools_create_list_run_and_delete(tmp_path, monkeypatch):
                 "mode": "fulltext",
                 "limit": 5,
                 "sort": "created_at_desc",
+                "schedule": "weekly",
                 "created_before": "2026-04-23T00:00:00+00:00",
                 "max_utility": 0.93,
                 "filters": {
@@ -1152,6 +1158,8 @@ def test_saved_query_tools_create_list_run_and_delete(tmp_path, monkeypatch):
     )
     saved = json.loads(save_response[0].text)
     assert saved["name"] == "approved-solar"
+    assert saved["schedule"] == "weekly"
+    assert saved["last_run_at"] is None
     assert saved["filters"]["review_state"] == "approved"
     assert saved["filters"]["created_after"] == "2026-04-21T00:00:00+00:00"
     assert saved["filters"]["created_before"] == "2026-04-23T00:00:00+00:00"
@@ -1168,6 +1176,9 @@ def test_saved_query_tools_create_list_run_and_delete(tmp_path, monkeypatch):
     assert payload["saved_query"] == "approved-solar"
     assert payload["query"] == "solar"
     assert payload["sort"] == "created_at_desc"
+    assert payload["schedule"] == "weekly"
+    assert payload["last_run_at"] is not None
+    assert datetime.fromisoformat(payload["last_run_at"]).tzinfo is not None
     assert payload["filters"] == saved["filters"]
     assert [result["title"] for result in payload["results"]] == ["Solar approved insight"]
 
@@ -1223,6 +1234,7 @@ def test_saved_query_import_export_tools_round_trip(tmp_path, monkeypatch):
         mode="hybrid",
         limit=5,
         filters={"source_project": "max", "review_state": "approved"},
+        schedule="monthly",
     )
     store.close()
 
@@ -1237,11 +1249,13 @@ def test_saved_query_import_export_tools_round_trip(tmp_path, monkeypatch):
     )
     export_payload = json.loads(export_response[0].text)
     assert export_payload["exported"] == 1
-    assert export_payload["schema_version"] == 1
+    assert export_payload["schema_version"] == 2
     exported = json.loads(export_path.read_text())
     assert exported["queries"][0]["query"] == "solar"
     assert exported["queries"][0]["mode"] == "hybrid"
     assert exported["queries"][0]["limit"] == 5
+    assert exported["queries"][0]["schedule"] == "monthly"
+    assert exported["queries"][0]["last_run_at"] is None
     assert exported["queries"][0]["filters"] == {
         "source_project": "max",
         "review_state": "approved",
@@ -1280,6 +1294,36 @@ def test_saved_query_import_export_tools_round_trip(tmp_path, monkeypatch):
     invalid_payload = json.loads(invalid_response[0].text)
     assert invalid_payload["error"] == "import_failed"
     assert "Unsupported saved queries schema_version 999" in invalid_payload["message"]
+
+    legacy_path = tmp_path / "legacy-queries.json"
+    legacy_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "queries": [
+                    {
+                        "name": "legacy",
+                        "query": "stale",
+                        "mode": "fulltext",
+                        "limit": 10,
+                        "filters": {},
+                    }
+                ],
+            }
+        )
+    )
+    legacy_response = asyncio.run(
+        mcp_server.call_tool("import_queries", {"path": str(legacy_path)})
+    )
+    assert json.loads(legacy_response[0].text)["inserted"] == 1
+    imported_store = Store(str(db_path))
+    try:
+        legacy = imported_store.get_saved_query("legacy")
+        assert legacy is not None
+        assert legacy["schedule"] is None
+        assert legacy["last_run_at"] is None
+    finally:
+        imported_store.close()
 
 
 def test_search_facets_tool_returns_parseable_json(tmp_path, monkeypatch):

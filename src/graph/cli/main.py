@@ -3586,6 +3586,11 @@ def save_query(
         "--sort",
         help="Sort order saved with the query filters",
     ),
+    schedule: str | None = typer.Option(
+        None,
+        "--schedule",
+        help="Optional recurrence: daily | weekly | monthly",
+    ),
     source_project: str | None = typer.Option(
         None,
         "--source-project",
@@ -3655,19 +3660,25 @@ def save_query(
         raise typer.BadParameter(str(exc)) from exc
 
     store = _get_store()
-    saved = store.save_query(
-        name=name,
-        query=query,
-        mode=mode,
-        limit=limit,
-        filters=filters,
-    )
+    try:
+        saved = store.save_query(
+            name=name,
+            query=query,
+            mode=mode,
+            limit=limit,
+            filters=filters,
+            schedule=schedule,
+        )
+    except ValueError as exc:
+        store.close()
+        raise typer.BadParameter(str(exc)) from exc
     store.close()
 
     if json_output:
         _json_echo(saved)
         return
-    typer.echo(f"Saved query '{name}' ({mode}, limit {limit}).")
+    schedule_suffix = f", {saved['schedule']}" if saved.get("schedule") else ""
+    typer.echo(f"Saved query '{name}' ({mode}, limit {limit}{schedule_suffix}).")
 
 
 @queries_app.command(name="list")
@@ -3689,7 +3700,14 @@ def list_queries(
 
     for saved in queries:
         filters = ", ".join(f"{key}={value}" for key, value in saved["filters"].items())
-        suffix = f" | {filters}" if filters else ""
+        metadata = []
+        if saved.get("schedule"):
+            metadata.append(f"schedule={saved['schedule']}")
+        if saved.get("last_run_at"):
+            metadata.append(f"last_run_at={saved['last_run_at']}")
+        if filters:
+            metadata.append(filters)
+        suffix = f" | {', '.join(metadata)}" if metadata else ""
         typer.echo(
             f"{saved['name']}: {saved['query']} ({saved['mode']}, limit {saved['limit']}){suffix}"
         )
@@ -3766,6 +3784,11 @@ def run_query(
             mode=saved["mode"],
             filters=saved["filters"],
         )
+        if "error" not in payload:
+            saved = store.mark_saved_query_run(name) or saved
+            payload["saved_query"] = saved["name"]
+            payload["schedule"] = saved.get("schedule")
+            payload["last_run_at"] = saved.get("last_run_at")
     except ValueError as exc:
         payload = {
             "error": str(exc),

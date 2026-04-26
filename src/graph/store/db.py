@@ -15,7 +15,8 @@ from graph.store.migrations import SCHEMA_VERSION, ensure_schema
 from graph.types.enums import EdgeRelation, EdgeSource
 from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
-SAVED_QUERIES_SCHEMA_VERSION = 1
+SAVED_QUERIES_SCHEMA_VERSION = 2
+SUPPORTED_QUERY_SCHEDULES = {"daily", "weekly", "monthly"}
 
 if TYPE_CHECKING:
     from graph.adapters.base import IngestResult
@@ -166,9 +167,23 @@ def _row_to_saved_query(row: sqlite3.Row) -> dict:
         "mode": row["mode"],
         "limit": row["limit"],
         "filters": json.loads(row["filters"]),
+        "schedule": row["schedule"],
+        "last_run_at": row["last_run_at"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
+
+
+def _normalize_query_schedule(schedule: str | None) -> str | None:
+    if schedule is None:
+        return None
+    normalized = str(schedule).strip().lower()
+    if not normalized:
+        return None
+    if normalized not in SUPPORTED_QUERY_SCHEDULES:
+        valid = ", ".join(sorted(SUPPORTED_QUERY_SCHEDULES))
+        raise ValueError(f"Unknown saved query schedule: {schedule}. Use one of: {valid}.")
+    return normalized
 
 
 def _metadata_path_parts(path: str) -> list[str]:
@@ -1369,19 +1384,22 @@ class Store:
         mode: str = "fulltext",
         limit: int = 10,
         filters: dict | None = None,
+        schedule: str | None = None,
     ) -> dict:
         now = _utcnow_iso()
         normalized_filters = filters or {}
+        normalized_schedule = _normalize_query_schedule(schedule)
         self.conn.execute(
             """INSERT INTO saved_queries
-               (name, query, mode, "limit", filters, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)
+               (name, query, mode, "limit", filters, schedule, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(name)
                DO UPDATE SET
                    query = excluded.query,
                    mode = excluded.mode,
                    "limit" = excluded."limit",
                    filters = excluded.filters,
+                   schedule = excluded.schedule,
                    updated_at = excluded.updated_at
             """,
             (
@@ -1390,6 +1408,7 @@ class Store:
                 mode,
                 limit,
                 json.dumps(normalized_filters, sort_keys=True),
+                normalized_schedule,
                 now,
                 now,
             ),
@@ -1408,6 +1427,17 @@ class Store:
         rows = self.conn.execute("SELECT * FROM saved_queries ORDER BY name").fetchall()
         return [_row_to_saved_query(row) for row in rows]
 
+    def mark_saved_query_run(self, name: str) -> dict | None:
+        now = _utcnow_iso()
+        cursor = self.conn.execute(
+            "UPDATE saved_queries SET last_run_at = ?, updated_at = ? WHERE name = ?",
+            (now, now, name),
+        )
+        self.conn.commit()
+        if cursor.rowcount == 0:
+            return None
+        return self.get_saved_query(name)
+
     def export_saved_queries(self) -> dict:
         """Return a JSON-serializable saved query backup."""
         return {
@@ -1419,7 +1449,7 @@ class Store:
     def import_saved_queries(self, payload: dict) -> dict:
         """Import saved queries idempotently by name."""
         schema_version = payload.get("schema_version")
-        if schema_version != SAVED_QUERIES_SCHEMA_VERSION:
+        if schema_version not in (1, SAVED_QUERIES_SCHEMA_VERSION):
             raise ValueError(
                 f"Unsupported saved queries schema_version {schema_version!r}; "
                 f"expected {SAVED_QUERIES_SCHEMA_VERSION}"
@@ -1453,6 +1483,8 @@ class Store:
                 "mode": data.get("mode", "fulltext"),
                 "limit": data.get("limit", 10),
                 "filters": filters,
+                "schedule": _normalize_query_schedule(data.get("schedule")),
+                "last_run_at": data.get("last_run_at"),
                 "created_at": data.get("created_at") or (existing["created_at"] if existing else now),
                 "updated_at": data.get("updated_at")
                 or data.get("created_at")
@@ -1465,14 +1497,16 @@ class Store:
 
             self.conn.execute(
                 """INSERT INTO saved_queries
-                   (name, query, mode, "limit", filters, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   (name, query, mode, "limit", filters, schedule, last_run_at, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(name)
                    DO UPDATE SET
                        query = excluded.query,
                        mode = excluded.mode,
                        "limit" = excluded."limit",
                        filters = excluded.filters,
+                       schedule = excluded.schedule,
+                       last_run_at = excluded.last_run_at,
                        created_at = excluded.created_at,
                        updated_at = excluded.updated_at
                 """,
@@ -1482,6 +1516,8 @@ class Store:
                     imported["mode"],
                     imported["limit"],
                     json.dumps(imported["filters"], sort_keys=True),
+                    imported["schedule"],
+                    imported["last_run_at"],
                     imported["created_at"],
                     imported["updated_at"],
                 ),

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -69,6 +69,8 @@ CREATE TABLE IF NOT EXISTS saved_queries (
     mode TEXT NOT NULL DEFAULT 'fulltext',
     "limit" INTEGER NOT NULL DEFAULT 10,
     filters TEXT NOT NULL DEFAULT '{}',
+    schedule TEXT,
+    last_run_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -81,6 +83,8 @@ CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts
 def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA_SQL)
     _ensure_column(conn, "knowledge_units", "embedding_updated_at", "TEXT")
+    _ensure_column(conn, "saved_queries", "schedule", "TEXT")
+    _ensure_column(conn, "saved_queries", "last_run_at", "TEXT")
     cursor = conn.execute("SELECT COUNT(*) FROM schema_version")
     if cursor.fetchone()[0] == 0:
         conn.execute("INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
