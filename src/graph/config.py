@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     csv_path: str = ""
     jsonl_path: str = ""
     opml_path: str = ""
+    pdf_path: str = ""
     me_config: str = ""
     markdown_root: str = ""
     text_root: str = ""

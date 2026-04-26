@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-import os
+import builtins
 import json
+import os
 import sqlite3
 import tempfile
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 import yaml
@@ -22,6 +24,7 @@ from graph.adapters.markdown import MarkdownAdapter
 from graph.adapters.max_adapter import MaxAdapter
 from graph.adapters.me import MeAdapter
 from graph.adapters.opml import OpmlAdapter
+from graph.adapters.pdf import PdfAdapter
 from graph.adapters.presence import PresenceAdapter
 from graph.adapters.registry import get_adapter, list_adapters
 from graph.adapters.text import TextAdapter
@@ -724,6 +727,106 @@ class TestHtmlAdapter:
         assert missing.units == []
 
 
+class TestPdfAdapter:
+    def test_ingest_pdf_documents_with_mocked_reader(self, tmp_path, monkeypatch):
+        root = tmp_path / "pdfs"
+        nested = root / "nested"
+        nested.mkdir(parents=True)
+        first = root / "paper.pdf"
+        second = nested / "appendix.PDF"
+        first.write_bytes(b"%PDF-1.4 first")
+        second.write_bytes(b"%PDF-1.4 second")
+        (root / "skip.txt").write_text("Not a PDF.\n", encoding="utf-8")
+
+        class FakePage:
+            def __init__(self, text=None, error: Exception | None = None):
+                self.text = text
+                self.error = error
+
+            def extract_text(self):
+                if self.error:
+                    raise self.error
+                return self.text
+
+        class FakeReader:
+            def __init__(self, path):
+                name = Path(path).name
+                if name == "paper.pdf":
+                    self.pages = [FakePage("First page text."), FakePage(None)]
+                else:
+                    self.pages = [FakePage("Appendix text."), FakePage(error=ValueError("bad page"))]
+
+        monkeypatch.setattr(PdfAdapter, "_load_pdf_reader", lambda self: FakeReader)
+
+        result = PdfAdapter(path=str(root)).ingest()
+
+        assert [unit.source_id for unit in result.units] == [
+            "nested/appendix.PDF",
+            "paper.pdf",
+        ]
+        by_source = {unit.source_id: unit for unit in result.units}
+        paper = by_source["paper.pdf"]
+        assert paper.source_project == "pdf"
+        assert paper.source_entity_type == "pdf_document"
+        assert paper.title == "paper"
+        assert paper.content == "First page text."
+        assert paper.metadata == {
+            "source_file": str(first),
+            "page_count": 2,
+            "extraction_warnings": [],
+            "file_size": first.stat().st_size,
+        }
+        appendix = by_source["nested/appendix.PDF"]
+        assert appendix.content == "Appendix text."
+        assert appendix.metadata["page_count"] == 2
+        assert appendix.metadata["extraction_warnings"] == ["page_2: bad page"]
+        assert result.edges == []
+
+    def test_ingest_single_pdf_file_sync_and_entity_filter(self, tmp_path, monkeypatch):
+        old_path = tmp_path / "old.pdf"
+        new_path = tmp_path / "new.pdf"
+        old_path.write_bytes(b"%PDF old")
+        new_path.write_bytes(b"%PDF new")
+        os.utime(old_path, (1_700_000_000, 1_700_000_000))
+        os.utime(new_path, (1_700_100_000, 1_700_100_000))
+
+        class FakeReader:
+            def __init__(self, path):
+                self.pages = []
+
+        monkeypatch.setattr(PdfAdapter, "_load_pdf_reader", lambda self: FakeReader)
+
+        result = PdfAdapter(path=str(new_path)).ingest(
+            since=SyncState(
+                source_project="pdf",
+                source_entity_type="pdf_document",
+                last_sync_at=datetime.fromtimestamp(1_700_050_000, tz=timezone.utc),
+            )
+        )
+        filtered = PdfAdapter(path=str(new_path)).ingest(entity_types=["text_document"])
+        missing = PdfAdapter(path=str(tmp_path / "missing")).ingest()
+
+        assert [unit.source_id for unit in result.units] == ["new.pdf"]
+        assert result.units[0].source_project == "pdf"
+        assert filtered.units == []
+        assert missing.units == []
+
+    def test_missing_pypdf_raises_actionable_import_error_when_used(self, tmp_path, monkeypatch):
+        pdf = tmp_path / "paper.pdf"
+        pdf.write_bytes(b"%PDF-1.4")
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "pypdf":
+                raise ImportError("No module named pypdf")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+
+        with pytest.raises(ImportError, match="Install it with `uv sync --extra pdf`"):
+            PdfAdapter(path=str(pdf)).ingest()
+
+
 class TestICalAdapter:
     def test_ingest_single_ics_event_with_metadata_tags_and_content(self, tmp_path):
         calendar = tmp_path / "calendar.ics"
@@ -1231,6 +1334,7 @@ class TestRegistry:
             "csv",
             "jsonl",
             "opml",
+            "pdf",
             "text",
             "html",
             "ical",
@@ -1245,6 +1349,9 @@ class TestRegistry:
 
         opml_adapter = get_adapter("opml", path="/tmp/test.opml")
         assert opml_adapter.name == "opml"
+
+        pdf_adapter = get_adapter("pdf", path="/tmp/test.pdf")
+        assert pdf_adapter.name == "pdf"
 
         text_adapter = get_adapter("text", root_path="/tmp/text")
         assert text_adapter.name == "text"

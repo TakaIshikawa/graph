@@ -44,6 +44,7 @@ SUPPORTED_SYNC_PROJECTS = [
     "csv",
     "jsonl",
     "opml",
+    "pdf",
     "text",
     "html",
     "ical",
@@ -67,6 +68,7 @@ def _get_adapter_for_project(name: str):
     from graph.adapters.max_adapter import MaxAdapter
     from graph.adapters.me import MeAdapter
     from graph.adapters.opml import OpmlAdapter
+    from graph.adapters.pdf import PdfAdapter
     from graph.adapters.presence import PresenceAdapter
     from graph.adapters.sota import SOTAAdapter
     from graph.adapters.text import TextAdapter
@@ -86,6 +88,7 @@ def _get_adapter_for_project(name: str):
         "csv": lambda: CsvAdapter(path=settings.csv_path),
         "jsonl": lambda: JsonlAdapter(path=settings.jsonl_path),
         "opml": lambda: OpmlAdapter(path=settings.opml_path),
+        "pdf": lambda: PdfAdapter(path=settings.pdf_path),
         "text": lambda: TextAdapter(root_path=settings.text_root),
         "html": lambda: HtmlAdapter(root_path=settings.html_root),
         "ical": lambda: ICalAdapter(path=settings.ical_path),

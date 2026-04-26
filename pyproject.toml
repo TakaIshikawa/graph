@@ -20,6 +20,7 @@ dependencies = [
 [project.optional-dependencies]
 voyage = ["voyageai>=0.2.0"]
 openai = ["openai>=1.0"]
+pdf = ["pypdf>=5.0"]
 dev = [
     "pytest>=8.0",
     "ruff>=0.8.0",

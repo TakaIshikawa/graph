@@ -12,6 +12,7 @@ class SourceProject(StrEnum):
     CSV = "csv"
     JSONL = "jsonl"
     OPML = "opml"
+    PDF = "pdf"
 
 
 class ContentType(StrEnum):
