@@ -2109,6 +2109,108 @@ def test_edge_management_tools_list_update_delete_and_report_errors(tmp_path, mo
         verify.close()
 
 
+def test_delete_edges_bulk_tool_dry_run_confirm_and_filters(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    center = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="manual-1",
+            source_entity_type="manual",
+            title="Center",
+            content="Center content",
+        )
+    )
+    neighbor = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="manual-2",
+            source_entity_type="manual",
+            title="Neighbor",
+            content="Neighbor content",
+        )
+    )
+    other = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="max-1",
+            source_entity_type="insight",
+            title="Other",
+            content="Other content",
+        )
+    )
+    target = store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=center.id,
+            to_unit_id=neighbor.id,
+            relation=EdgeRelation.RELATES_TO,
+            source=EdgeSource.INFERRED,
+        )
+    )
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=center.id,
+            to_unit_id=other.id,
+            relation=EdgeRelation.INSPIRES,
+            source=EdgeSource.INFERRED,
+        )
+    )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    assert any(tool.name == "delete_edges_bulk" for tool in tools)
+
+    dry_run = asyncio.run(
+        mcp_server.call_tool(
+            "delete_edges_bulk",
+            {
+                "relation": "relates_to",
+                "source": "inferred",
+                "source_project": "me",
+            },
+        )
+    )
+    dry_payload = json.loads(dry_run[0].text)
+    assert dry_payload["dry_run"] is True
+    assert dry_payload["matched_count"] == 1
+    assert dry_payload["deleted_count"] == 0
+    assert dry_payload["edges"][0]["id"] == target.id
+    assert dry_payload["edges"][0]["to_unit"]["title"] == "Neighbor"
+
+    blocked = asyncio.run(
+        mcp_server.call_tool(
+            "delete_edges_bulk",
+            {"relation": "relates_to", "dry_run": False},
+        )
+    )
+    assert json.loads(blocked[0].text)["error"] == "confirmation_required"
+
+    deleted = asyncio.run(
+        mcp_server.call_tool(
+            "delete_edges_bulk",
+            {
+                "relation": "relates_to",
+                "source": "inferred",
+                "source_project": "me",
+                "dry_run": False,
+                "confirm": True,
+            },
+        )
+    )
+    delete_payload = json.loads(deleted[0].text)
+    assert delete_payload["deleted_count"] == 1
+
+    verify = Store(str(db_path))
+    try:
+        edges = verify.get_all_edges()
+        assert len(edges) == 1
+        assert edges[0].id != target.id
+    finally:
+        verify.close()
+
+
 def test_import_edges_csv_tool_matches_cli_structured_payload(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))

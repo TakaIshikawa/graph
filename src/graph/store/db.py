@@ -1668,6 +1668,56 @@ class Store:
         ).fetchall()
         return [_row_to_edge(r) for r in rows]
 
+    def find_edges(
+        self,
+        *,
+        relation: str | None = None,
+        source: str | None = None,
+        from_unit_id: str | None = None,
+        to_unit_id: str | None = None,
+        source_project: str | None = None,
+        limit: int | None = None,
+    ) -> list[KnowledgeEdge]:
+        clauses: list[str] = []
+        params: list[object] = []
+        joins = ""
+
+        if relation is not None:
+            clauses.append("e.relation = ?")
+            params.append(relation)
+        if source is not None:
+            clauses.append("e.source = ?")
+            params.append(source)
+        if from_unit_id is not None:
+            clauses.append("e.from_unit_id = ?")
+            params.append(from_unit_id)
+        if to_unit_id is not None:
+            clauses.append("e.to_unit_id = ?")
+            params.append(to_unit_id)
+        if source_project is not None:
+            joins = """
+               JOIN knowledge_units from_unit ON from_unit.id = e.from_unit_id
+               JOIN knowledge_units to_unit ON to_unit.id = e.to_unit_id
+            """
+            clauses.append("(from_unit.source_project = ? OR to_unit.source_project = ?)")
+            params.extend([source_project, source_project])
+
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        query = f"""
+            SELECT e.*
+            FROM edges e
+            {joins}
+            {where}
+            ORDER BY e.created_at DESC, e.id
+        """
+        if limit is not None:
+            capped_limit = max(0, limit)
+            query += " LIMIT ?"
+            params.append(capped_limit)
+
+        rows = self.conn.execute(query, params).fetchall()
+        return [_row_to_edge(r) for r in rows]
+
     def edge_exists(self, from_unit_id: str, to_unit_id: str, relation: str) -> bool:
         row = self.conn.execute(
             """SELECT 1 FROM edges
@@ -1721,6 +1771,33 @@ class Store:
         cursor = self.conn.execute("DELETE FROM edges WHERE id = ?", (edge_id,))
         self.conn.commit()
         return {"edge_id": edge_id, "deleted": cursor.rowcount > 0}
+
+    def delete_edges(
+        self,
+        *,
+        relation: str | None = None,
+        source: str | None = None,
+        from_unit_id: str | None = None,
+        to_unit_id: str | None = None,
+        source_project: str | None = None,
+        limit: int | None = None,
+    ) -> list[KnowledgeEdge]:
+        edges = self.find_edges(
+            relation=relation,
+            source=source,
+            from_unit_id=from_unit_id,
+            to_unit_id=to_unit_id,
+            source_project=source_project,
+            limit=limit,
+        )
+        if not edges:
+            return []
+
+        edge_ids = [edge.id for edge in edges]
+        placeholders = ", ".join("?" for _ in edge_ids)
+        self.conn.execute(f"DELETE FROM edges WHERE id IN ({placeholders})", edge_ids)
+        self.conn.commit()
+        return edges
 
     # --- Integrity audit helpers ---
 

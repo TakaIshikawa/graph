@@ -827,6 +827,36 @@ def _do_delete_edge(store: Store, edge_id: str) -> dict:
     return stats
 
 
+def _do_delete_edges_bulk(
+    store: Store,
+    *,
+    relation: str | None = None,
+    source: str | None = None,
+    from_unit_id: str | None = None,
+    to_unit_id: str | None = None,
+    source_project: str | None = None,
+    limit: int | None = None,
+    dry_run: bool = True,
+    confirm: bool = False,
+) -> dict:
+    from graph.graph.service import GraphService
+
+    if relation is not None:
+        relation = EdgeRelation(relation).value
+    if source is not None:
+        source = EdgeSource(source).value
+    return GraphService(store).delete_edges_bulk(
+        relation=relation,
+        source=source,
+        from_unit_id=from_unit_id,
+        to_unit_id=to_unit_id,
+        source_project=source_project,
+        limit=limit,
+        dry_run=dry_run,
+        confirm=confirm,
+    )
+
+
 def _do_import_edges_csv(store: Store, path: str | Path, *, dry_run: bool = False) -> dict:
     return store.import_edges_csv(path, dry_run=dry_run)
 
@@ -2973,6 +3003,91 @@ def import_edges_csv(
         typer.echo(
             f"  Row {invalid['row_number']}: "
             f"{'; '.join(invalid['reasons'])}"
+        )
+
+
+@edges_app.command(name="delete-bulk")
+def delete_edges_bulk(
+    relation: str | None = typer.Option(None, "--relation", help="Filter by edge relation"),
+    source: str | None = typer.Option(None, "--source", help="Filter by edge source"),
+    from_unit_id: str | None = typer.Option(None, "--from-unit-id", help="Filter by source unit ID"),
+    to_unit_id: str | None = typer.Option(None, "--to-unit-id", help="Filter by target unit ID"),
+    source_project: str | None = typer.Option(
+        None,
+        "--source-project",
+        help="Filter when either endpoint belongs to this source project",
+    ),
+    limit: int | None = typer.Option(None, "--limit", "-n", help="Maximum matching edges"),
+    dry_run: bool = typer.Option(
+        True,
+        "--dry-run/--delete",
+        help="Preview matching edges or delete them",
+    ),
+    confirm: bool = typer.Option(
+        False,
+        "--confirm",
+        help="Required with --delete to perform bulk deletion",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Preview or delete edges matching maintenance filters."""
+    store = _get_store()
+    try:
+        payload = _do_delete_edges_bulk(
+            store,
+            relation=relation,
+            source=source,
+            from_unit_id=from_unit_id,
+            to_unit_id=to_unit_id,
+            source_project=source_project,
+            limit=limit,
+            dry_run=dry_run,
+            confirm=confirm,
+        )
+    except ValueError as exc:
+        if json_output:
+            _json_echo(
+                {
+                    "dry_run": dry_run,
+                    "confirmed": confirm,
+                    "matched_count": 0,
+                    "deleted_count": 0,
+                    "edges": [],
+                    "error": str(exc),
+                }
+            )
+            return
+        raise typer.BadParameter(str(exc)) from exc
+    finally:
+        store.close()
+
+    if payload.get("error"):
+        if json_output:
+            _json_echo(payload)
+            return
+        typer.echo(payload["message"])
+        raise typer.Exit(code=1)
+
+    if json_output:
+        _json_echo(payload)
+        return
+
+    action = "Would delete" if payload["dry_run"] else "Deleted"
+    typer.echo(f"{action} {payload['matched_count']} edges.")
+    for edge in payload["edges"]:
+        from_unit = edge.get("from_unit") or {}
+        to_unit = edge.get("to_unit") or {}
+        typer.echo(
+            f"  {edge['id']}: {edge['from_unit_id'][:8]}... --{edge['relation']}--> "
+            f"{edge['to_unit_id'][:8]}... (source: {edge['source']})"
+        )
+        typer.echo(
+            f"    From: [{from_unit.get('source_project', 'unknown')}] "
+            f"{from_unit.get('title', edge['from_unit_id'])}"
+        )
+        typer.echo(
+            f"    To: [{to_unit.get('source_project', 'unknown')}] "
+            f"{to_unit.get('title', edge['to_unit_id'])}"
         )
 
 

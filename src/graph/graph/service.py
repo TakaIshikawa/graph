@@ -755,6 +755,80 @@ class GraphService:
             "created_at": _json_value(edge.created_at),
         }
 
+    def _unit_summary_data(self, unit) -> dict | None:
+        if unit is None:
+            return None
+        return {
+            "id": unit.id,
+            "source_project": str(unit.source_project),
+            "source_id": unit.source_id,
+            "source_entity_type": unit.source_entity_type,
+            "title": unit.title,
+            "content_type": str(unit.content_type),
+        }
+
+    def _edge_with_endpoint_summaries(self, edge) -> dict:
+        return {
+            **self._edge_export_data(edge),
+            "from_unit": self._unit_summary_data(self.store.get_unit(edge.from_unit_id)),
+            "to_unit": self._unit_summary_data(self.store.get_unit(edge.to_unit_id)),
+        }
+
+    def delete_edges_bulk(
+        self,
+        *,
+        relation: str | None = None,
+        source: str | None = None,
+        from_unit_id: str | None = None,
+        to_unit_id: str | None = None,
+        source_project: str | None = None,
+        limit: int | None = None,
+        dry_run: bool = True,
+        confirm: bool = False,
+    ) -> dict:
+        if not dry_run and not confirm:
+            return {
+                "dry_run": dry_run,
+                "confirmed": confirm,
+                "matched_count": 0,
+                "deleted_count": 0,
+                "edges": [],
+                "error": "confirmation_required",
+                "message": "Bulk edge deletion requires confirm=true when dry_run=false.",
+                "filters": {
+                    "relation": relation,
+                    "source": source,
+                    "from_unit_id": from_unit_id,
+                    "to_unit_id": to_unit_id,
+                    "source_project": source_project,
+                    "limit": limit,
+                },
+            }
+
+        filters = {
+            "relation": relation,
+            "source": source,
+            "from_unit_id": from_unit_id,
+            "to_unit_id": to_unit_id,
+            "source_project": source_project,
+            "limit": limit,
+        }
+        if dry_run:
+            edges = self.store.find_edges(**filters)
+            deleted_count = 0
+        else:
+            edges = self.store.delete_edges(**filters)
+            deleted_count = len(edges)
+
+        return {
+            "dry_run": dry_run,
+            "confirmed": confirm,
+            "matched_count": len(edges),
+            "deleted_count": deleted_count,
+            "edges": [self._edge_with_endpoint_summaries(edge) for edge in edges],
+            "filters": filters,
+        }
+
     def build_neighborhood_export(self, unit_id: str, depth: int = 1) -> dict:
         """Build a portable JSON payload for one unit's local neighborhood."""
         capped_depth = max(1, min(depth, 3))

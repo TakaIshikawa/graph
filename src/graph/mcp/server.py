@@ -15,6 +15,7 @@ from graph.cli.main import (
     _do_context_pack,
     _do_create_unit,
     _do_delete_edge,
+    _do_delete_edges_bulk,
     _do_export_cytoscape,
     _do_export_graphml,
     _do_export_json,
@@ -1296,6 +1297,51 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="delete_edges_bulk",
+            description="Preview or delete graph edges matching maintenance filters.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "relation": {
+                        "type": "string",
+                        "enum": [r.value for r in EdgeRelation],
+                        "description": "Filter by edge relation",
+                    },
+                    "source": {
+                        "type": "string",
+                        "enum": [s.value for s in EdgeSource],
+                        "description": "Filter by edge source",
+                    },
+                    "from_unit_id": {
+                        "type": "string",
+                        "description": "Filter by source unit ID",
+                    },
+                    "to_unit_id": {
+                        "type": "string",
+                        "description": "Filter by target unit ID",
+                    },
+                    "source_project": {
+                        "type": "string",
+                        "description": "Filter when either endpoint belongs to this source project",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum matching edges",
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Preview matching edges without deleting them",
+                    },
+                    "confirm": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Must be true when dry_run is false",
+                    },
+                },
+            },
+        ),
+        Tool(
             name="infer_edges",
             description="Infer RELATES_TO edges between embedded units with high semantic similarity.",
             inputSchema={
@@ -2460,6 +2506,30 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         elif name == "delete_edge":
             payload = _do_delete_edge(store, arguments["edge_id"])
             return [TextContent(type="text", text=json.dumps(payload))]
+
+        elif name == "delete_edges_bulk":
+            try:
+                payload = _do_delete_edges_bulk(
+                    store,
+                    relation=arguments.get("relation"),
+                    source=arguments.get("source"),
+                    from_unit_id=arguments.get("from_unit_id"),
+                    to_unit_id=arguments.get("to_unit_id"),
+                    source_project=arguments.get("source_project"),
+                    limit=arguments.get("limit"),
+                    dry_run=arguments.get("dry_run", True),
+                    confirm=arguments.get("confirm", False),
+                )
+            except ValueError as exc:
+                payload = {
+                    "dry_run": arguments.get("dry_run", True),
+                    "confirmed": arguments.get("confirm", False),
+                    "matched_count": 0,
+                    "deleted_count": 0,
+                    "edges": [],
+                    "error": str(exc),
+                }
+            return [TextContent(type="text", text=json.dumps(payload, default=str))]
 
         elif name == "infer_edges":
             result = _do_infer_edges(

@@ -655,6 +655,119 @@ def test_export_graphml_command_writes_valid_graphml(tmp_path, monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_edges_delete_bulk_cli_dry_run_requires_confirm_and_deletes(monkeypatch):
+    store = _make_store()
+    center = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="manual-1",
+            source_entity_type="manual",
+            title="Center",
+            content="Center content",
+        )
+    )
+    neighbor = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="manual-2",
+            source_entity_type="manual",
+            title="Neighbor",
+            content="Neighbor content",
+        )
+    )
+    other = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="max-1",
+            source_entity_type="insight",
+            title="Other",
+            content="Other content",
+        )
+    )
+    target = store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=center.id,
+            to_unit_id=neighbor.id,
+            relation=EdgeRelation.RELATES_TO,
+            source=EdgeSource.INFERRED,
+        )
+    )
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=center.id,
+            to_unit_id=other.id,
+            relation=EdgeRelation.INSPIRES,
+            source=EdgeSource.INFERRED,
+        )
+    )
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        dry_run = runner.invoke(
+            app,
+            [
+                "edges",
+                "delete-bulk",
+                "--relation",
+                "relates_to",
+                "--source",
+                "inferred",
+                "--source-project",
+                "me",
+                "--json",
+            ],
+        )
+        assert dry_run.exit_code == 0
+        dry_payload = json.loads(dry_run.output)
+        assert dry_payload["dry_run"] is True
+        assert dry_payload["matched_count"] == 1
+        assert dry_payload["deleted_count"] == 0
+        assert dry_payload["edges"][0]["id"] == target.id
+        assert dry_payload["edges"][0]["from_unit"]["title"] == "Center"
+        assert len(store.get_all_edges()) == 2
+
+        blocked = runner.invoke(
+            app,
+            [
+                "edges",
+                "delete-bulk",
+                "--relation",
+                "relates_to",
+                "--delete",
+                "--json",
+            ],
+        )
+        assert blocked.exit_code == 0
+        assert json.loads(blocked.output)["error"] == "confirmation_required"
+        assert len(store.get_all_edges()) == 2
+
+        deleted = runner.invoke(
+            app,
+            [
+                "edges",
+                "delete-bulk",
+                "--relation",
+                "relates_to",
+                "--source",
+                "inferred",
+                "--source-project",
+                "me",
+                "--delete",
+                "--confirm",
+                "--json",
+            ],
+        )
+        assert deleted.exit_code == 0
+        delete_payload = json.loads(deleted.output)
+        assert delete_payload["deleted_count"] == 1
+        assert len(store.get_all_edges()) == 1
+        assert target.id not in {edge.id for edge in store.get_all_edges()}
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_export_markdown_command_writes_filtered_folder_and_json_stats(tmp_path, monkeypatch):
     store = _make_store()
     a_id, b_id, c_id, _ = _populate_graph(store)

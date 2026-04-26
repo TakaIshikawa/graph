@@ -277,6 +277,42 @@ class TestGraphService:
         count = gs.rebuild()
         assert count == 4
 
+    def test_delete_edges_bulk_dry_run_confirm_and_endpoint_summaries(
+        self, populated_store: Store
+    ):
+        gs = GraphService(populated_store)
+
+        dry_run = gs.delete_edges_bulk(
+            relation="builds_on",
+            source_project="forty_two",
+            dry_run=True,
+        )
+        assert dry_run["dry_run"] is True
+        assert dry_run["matched_count"] == 1
+        assert dry_run["deleted_count"] == 0
+        assert dry_run["edges"][0]["from_unit"]["title"] == "Node A"
+        assert dry_run["edges"][0]["to_unit"]["title"] == "Node B"
+        assert len(populated_store.get_all_edges()) == 2
+
+        blocked = gs.delete_edges_bulk(
+            relation="builds_on",
+            source_project="forty_two",
+            dry_run=False,
+            confirm=False,
+        )
+        assert blocked["error"] == "confirmation_required"
+        assert len(populated_store.get_all_edges()) == 2
+
+        deleted = gs.delete_edges_bulk(
+            relation="builds_on",
+            source_project="forty_two",
+            dry_run=False,
+            confirm=True,
+        )
+        assert deleted["matched_count"] == 1
+        assert deleted["deleted_count"] == 1
+        assert len(populated_store.get_all_edges()) == 1
+
     def test_export_markdown_folder_filters_front_matter_collisions_and_clean(
         self, store: Store, tmp_path
     ):

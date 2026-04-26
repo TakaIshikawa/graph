@@ -915,6 +915,78 @@ class TestEdgeCRUD:
         assert store.get_all_edges() == []
         assert store.delete_edge(edge.id) == {"edge_id": edge.id, "deleted": False}
 
+    def test_find_and_delete_edges_respects_bulk_filters(self, store: Store):
+        ft = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="ft",
+                source_entity_type="knowledge_node",
+                title="FT",
+                content="FT content",
+            )
+        )
+        max_unit = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="max",
+                source_entity_type="insight",
+                title="Max",
+                content="Max content",
+            )
+        )
+        me = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.ME,
+                source_id="me",
+                source_entity_type="manual",
+                title="Me",
+                content="Me content",
+            )
+        )
+        first = store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=ft.id,
+                to_unit_id=max_unit.id,
+                relation=EdgeRelation.RELATES_TO,
+                source=EdgeSource.INFERRED,
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=max_unit.id,
+                to_unit_id=me.id,
+                relation=EdgeRelation.RELATES_TO,
+                source=EdgeSource.MANUAL,
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=me.id,
+                to_unit_id=ft.id,
+                relation=EdgeRelation.REFERENCES,
+                source=EdgeSource.INFERRED,
+            )
+        )
+
+        preview = store.find_edges(
+            relation="relates_to",
+            source="inferred",
+            source_project="max",
+        )
+        assert [edge.id for edge in preview] == [first.id]
+        assert len(store.get_all_edges()) == 3
+
+        deleted = store.delete_edges(
+            relation="relates_to",
+            source="inferred",
+            source_project="max",
+            limit=1,
+        )
+        assert [edge.id for edge in deleted] == [first.id]
+        remaining = store.get_all_edges()
+        assert len(remaining) == 2
+        assert first.id not in {edge.id for edge in remaining}
+
     def test_import_edges_csv_validates_dry_runs_and_skips_duplicates(
         self, store: Store, tmp_path
     ):
