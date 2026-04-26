@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timezone
 from pathlib import Path
 
 import yaml
@@ -16,6 +16,15 @@ from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 FRONT_MATTER_DELIMITER = "---"
 INLINE_TAG_RE = re.compile(r"(?<![\w/])#([A-Za-z0-9_/-]*[A-Za-z0-9_])")
 WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
+MAPPED_FRONT_MATTER_KEYS = {
+    "title",
+    "tags",
+    "created_at",
+    "updated_at",
+    "content_type",
+    "confidence",
+    "utility_score",
+}
 
 
 class MarkdownAdapter(SourceAdapter):
@@ -60,13 +69,16 @@ class MarkdownAdapter(SourceAdapter):
                     source_entity_type="markdown_note",
                     title=note["title"],
                     content=note["body"],
-                    content_type=ContentType.INSIGHT,
+                    content_type=note["content_type"],
                     metadata={
                         "path": note["source_id"],
                         "front_matter": self._jsonable(note["front_matter"]),
                     },
                     tags=note["tags"],
+                    confidence=note["confidence"],
+                    utility_score=note["utility_score"],
                     created_at=note["created_at"],
+                    updated_at=note["updated_at"],
                 )
             )
 
@@ -96,15 +108,27 @@ class MarkdownAdapter(SourceAdapter):
         source_id = path.relative_to(root).as_posix()
         title = str(front_matter.get("title") or path.stem)
         stat = path.stat()
+        created_at = self._parse_front_matter_datetime(
+            front_matter.get("created_at"),
+            fallback=datetime.fromtimestamp(stat.st_ctime, tz=timezone.utc),
+        )
+        updated_at = self._parse_front_matter_datetime(
+            front_matter.get("updated_at"),
+            fallback=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
+        )
 
         return {
             "source_id": source_id,
             "title": title,
             "body": body,
-            "front_matter": front_matter,
+            "front_matter": self._unmapped_front_matter(front_matter),
             "tags": self._collect_tags(front_matter, body),
             "mtime": stat.st_mtime,
-            "created_at": datetime.fromtimestamp(stat.st_ctime, tz=timezone.utc),
+            "created_at": created_at,
+            "updated_at": updated_at,
+            "content_type": self._parse_content_type(front_matter.get("content_type")),
+            "confidence": self._parse_float(front_matter.get("confidence")),
+            "utility_score": self._parse_float(front_matter.get("utility_score")),
         }
 
     def _split_front_matter(self, text: str) -> tuple[dict, str]:
@@ -143,6 +167,51 @@ class MarkdownAdapter(SourceAdapter):
         normalized = tag.strip().removeprefix("#").strip()
         if normalized and normalized not in tags:
             tags.append(normalized)
+
+    def _unmapped_front_matter(self, front_matter: dict) -> dict:
+        return {
+            key: value
+            for key, value in front_matter.items()
+            if str(key) not in MAPPED_FRONT_MATTER_KEYS
+        }
+
+    def _parse_front_matter_datetime(self, value, *, fallback: datetime) -> datetime:
+        if isinstance(value, datetime):
+            parsed = value
+        elif isinstance(value, date):
+            parsed = datetime.combine(value, time.min)
+        elif isinstance(value, str):
+            raw = value.strip()
+            if not raw:
+                return fallback
+            try:
+                parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            except ValueError:
+                return fallback
+        else:
+            return fallback
+
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    def _parse_content_type(self, value) -> ContentType:
+        if isinstance(value, ContentType):
+            return value
+        if isinstance(value, str):
+            try:
+                return ContentType(value.strip().lower())
+            except ValueError:
+                return ContentType.INSIGHT
+        return ContentType.INSIGHT
+
+    def _parse_float(self, value) -> float | None:
+        if value is None or isinstance(value, bool):
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
 
     def _build_title_index(self, notes: list[dict]) -> dict[str, str]:
         index: dict[str, str] = {}
