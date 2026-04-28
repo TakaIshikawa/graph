@@ -46,6 +46,7 @@ SUPPORTED_SYNC_PROJECTS = [
     "jsonl",
     "opml",
     "pdf",
+    "email",
     "text",
     "html",
     "ical",
@@ -60,6 +61,7 @@ def _get_store() -> Store:
 def _get_adapter_for_project(name: str):
     from graph.adapters.bookmarks import BookmarksAdapter
     from graph.adapters.csv_adapter import CsvAdapter
+    from graph.adapters.email import EmailAdapter
     from graph.adapters.feed import FeedAdapter
     from graph.adapters.forty_two import FortyTwoAdapter
     from graph.adapters.html import HtmlAdapter
@@ -92,6 +94,7 @@ def _get_adapter_for_project(name: str):
         "jsonl": lambda: JsonlAdapter(path=settings.jsonl_path),
         "opml": lambda: OpmlAdapter(path=settings.opml_path),
         "pdf": lambda: PdfAdapter(path=settings.pdf_path),
+        "email": lambda: EmailAdapter(path=settings.email_path),
         "text": lambda: TextAdapter(root_path=settings.text_root),
         "html": lambda: HtmlAdapter(root_path=settings.html_root),
         "ical": lambda: ICalAdapter(path=settings.ical_path),
@@ -2037,6 +2040,7 @@ def _do_ingest(
             "csv",
             "jsonl",
             "opml",
+            "email",
             "text",
             "html",
             "ical",

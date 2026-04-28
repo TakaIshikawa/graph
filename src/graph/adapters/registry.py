@@ -5,6 +5,7 @@ from __future__ import annotations
 from graph.adapters.base import SourceAdapter
 from graph.adapters.bookmarks import BookmarksAdapter
 from graph.adapters.csv_adapter import CsvAdapter
+from graph.adapters.email import EmailAdapter
 from graph.adapters.feed import FeedAdapter
 from graph.adapters.forty_two import FortyTwoAdapter
 from graph.adapters.html import HtmlAdapter
@@ -35,6 +36,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "jsonl": JsonlAdapter,
     "opml": OpmlAdapter,
     "pdf": PdfAdapter,
+    "email": EmailAdapter,
     "text": TextAdapter,
     "html": HtmlAdapter,
     "ical": ICalAdapter,

@@ -12,7 +12,7 @@ def _utcnow() -> datetime:
 
 class KnowledgeUnit(BaseModel):
     id: str = ""
-    source_project: SourceProject
+    source_project: SourceProject | str
     source_id: str
     source_entity_type: str
     title: str

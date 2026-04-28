@@ -13,6 +13,7 @@ class SourceProject(StrEnum):
     JSONL = "jsonl"
     OPML = "opml"
     PDF = "pdf"
+    EMAIL = "email"
 
 
 class ContentType(StrEnum):

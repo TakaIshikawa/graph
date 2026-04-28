@@ -15,6 +15,7 @@ import yaml
 
 from graph.adapters.bookmarks import BookmarksAdapter
 from graph.adapters.csv_adapter import CsvAdapter
+from graph.adapters.email import EmailAdapter
 from graph.adapters.feed import FeedAdapter
 from graph.adapters.forty_two import FortyTwoAdapter
 from graph.adapters.html import HtmlAdapter
@@ -725,6 +726,129 @@ class TestHtmlAdapter:
         assert [unit.source_id for unit in result.units] == ["new.html"]
         assert result.units[0].title == "New Heading"
         assert filtered.units == []
+        assert missing.units == []
+
+
+class TestEmailAdapter:
+    def test_ingest_plain_text_email_with_headers_and_metadata(self, tmp_path):
+        root = tmp_path / "mail"
+        nested = root / "archive"
+        nested.mkdir(parents=True)
+        message = nested / "hello.eml"
+        message.write_text(
+            "\n".join(
+                [
+                    "From: Alice <alice@example.com>",
+                    "To: Bob <bob@example.com>",
+                    "Cc: Carol <carol@example.com>",
+                    "Date: Mon, 01 Apr 2024 10:30:00 +0000",
+                    "Message-ID: <hello@example.com>",
+                    "Subject: Project Hello",
+                    "Content-Type: text/plain; charset=utf-8",
+                    "",
+                    "Plain email search phrase.",
+                    "Second line.",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (root / "skip.txt").write_text("Not email.\n", encoding="utf-8")
+
+        result = EmailAdapter(path=str(root)).ingest()
+
+        assert [unit.source_id for unit in result.units] == ["archive/hello.eml"]
+        unit = result.units[0]
+        assert unit.source_project == "email"
+        assert unit.source_entity_type == "email_message"
+        assert unit.title == "Project Hello"
+        assert unit.content == "Plain email search phrase.\nSecond line."
+        assert "Subject:" not in unit.content
+        assert unit.content_type == "artifact"
+        assert unit.metadata == {
+            "from": "Alice <alice@example.com>",
+            "to": "Bob <bob@example.com>",
+            "cc": "Carol <carol@example.com>",
+            "date": "Mon, 01 Apr 2024 10:30:00 +0000",
+            "message_id": "<hello@example.com>",
+            "path": "archive/hello.eml",
+            "file_size": message.stat().st_size,
+        }
+        assert unit.created_at.isoformat() == "2024-04-01T10:30:00+00:00"
+        assert result.edges == []
+
+    def test_multipart_prefers_plain_text_and_html_fallback(self, tmp_path):
+        plain = tmp_path / "plain.eml"
+        plain.write_text(
+            """From: sender@example.com
+To: reader@example.com
+Subject: Multipart Plain
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="ALT"
+
+--ALT
+Content-Type: text/html; charset=utf-8
+
+<html><body><p>HTML should not win.</p></body></html>
+--ALT
+Content-Type: text/plain; charset=utf-8
+
+Preferred plain body.
+--ALT--
+""",
+            encoding="utf-8",
+        )
+        html_only = tmp_path / "html-only.eml"
+        html_only.write_text(
+            """From: sender@example.com
+To: reader@example.com
+Subject: HTML Only
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="ALT"
+
+--ALT
+Content-Type: text/html; charset=utf-8
+
+<html><body><h1>Rendered Heading</h1><script>ignore me</script><p>HTML fallback phrase &amp; detail.</p></body></html>
+--ALT--
+""",
+            encoding="utf-8",
+        )
+
+        result = EmailAdapter(path=str(tmp_path)).ingest()
+        by_source = {unit.source_id: unit for unit in result.units}
+
+        assert by_source["plain.eml"].content == "Preferred plain body."
+        assert "HTML should not win" not in by_source["plain.eml"].content
+        assert "Rendered Heading" in by_source["html-only.eml"].content
+        assert "HTML fallback phrase & detail." in by_source["html-only.eml"].content
+        assert "ignore me" not in by_source["html-only.eml"].content
+
+    def test_missing_subject_file_path_custom_source_and_filters(self, tmp_path):
+        old_path = tmp_path / "old.eml"
+        new_path = tmp_path / "untitled.eml"
+        old_path.write_text("From: old@example.com\n\nOld body.\n", encoding="utf-8")
+        new_path.write_text("From: new@example.com\n\nNew body.\n", encoding="utf-8")
+        os.utime(old_path, (1_700_000_000, 1_700_000_000))
+        os.utime(new_path, (1_700_100_000, 1_700_100_000))
+
+        result = EmailAdapter(path=str(new_path), source_project="mail_archive").ingest()
+        filtered = EmailAdapter(path=str(new_path)).ingest(entity_types=["text_document"])
+        synced = EmailAdapter(path=str(tmp_path)).ingest(
+            since=SyncState(
+                source_project="email",
+                source_entity_type="email_message",
+                last_sync_at=datetime.fromtimestamp(1_700_050_000, tz=timezone.utc),
+            )
+        )
+        missing = EmailAdapter(path=str(tmp_path / "missing")).ingest()
+
+        assert len(result.units) == 1
+        assert result.units[0].source_project == "mail_archive"
+        assert result.units[0].source_id == "untitled.eml"
+        assert result.units[0].title == "untitled"
+        assert filtered.units == []
+        assert [unit.source_id for unit in synced.units] == ["untitled.eml"]
         assert missing.units == []
 
 
@@ -1483,6 +1607,7 @@ class TestRegistry:
             "jsonl",
             "opml",
             "pdf",
+            "email",
             "text",
             "html",
             "ical",
@@ -1501,6 +1626,9 @@ class TestRegistry:
 
         pdf_adapter = get_adapter("pdf", path="/tmp/test.pdf")
         assert pdf_adapter.name == "pdf"
+
+        email_adapter = get_adapter("email", path="/tmp/mail")
+        assert email_adapter.name == "email"
 
         text_adapter = get_adapter("text", root_path="/tmp/text")
         assert text_adapter.name == "text"

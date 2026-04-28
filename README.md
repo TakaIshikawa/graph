@@ -86,6 +86,7 @@ GRAPH_KINDLE_DB=/path/to/supabooks/supabooks.db
 GRAPH_SOTA_DB=/path/to/sota/sota.db
 GRAPH_ME_CONFIG=/path/to/me/config/projects.yaml
 GRAPH_MARKDOWN_ROOT=/path/to/markdown/notes
+GRAPH_EMAIL_PATH=/path/to/email-archive
 GRAPH_OBSIDIAN_VAULT_PATH=/path/to/obsidian/vault
 ```
 
@@ -111,6 +112,9 @@ graph search "your query" --mode semantic --limit 5
 
 # Ingest a folder of Markdown notes
 graph ingest markdown
+
+# Ingest an .eml file or folder of archived email messages
+graph ingest email
 
 # Generate embeddings
 graph embed --batch-size 5
@@ -248,6 +252,7 @@ The `src/graph/adapters/` directory contains example adapter implementations fro
 
 - `base.py` - Base adapter interface (extend this for custom adapters)
 - `markdown.py` - First-party local Markdown folder adapter
+- `email.py` - First-party `.eml` email archive adapter
 - `forty_two.py`, `max_adapter.py`, `presence.py`, `me.py`, `kindle.py`, `sota.py` - Example implementations
 
 ## Markdown Notes
@@ -272,6 +277,16 @@ Body text with #inline-tags and [[Other Note]] wikilinks.
 ```
 
 The adapter uses the front matter `title` when present, otherwise the filename stem. Tags come from front matter plus inline `#tags`, and wikilinks create `relates_to` graph edges when the linked target note exists.
+
+## Email Archives
+
+Set `GRAPH_EMAIL_PATH` to a single `.eml` file or a directory of `.eml` files, then run:
+
+```bash
+graph ingest email
+```
+
+Directories are read recursively. Each message becomes an `artifact` unit in the `email` source project with a stable `source_id` based on its path relative to `GRAPH_EMAIL_PATH`. Multipart messages prefer `text/plain`; when no plain text part exists, Graph strips readable text from `text/html`. The message body is indexed as content, while `From`, `To`, `Cc`, `Date`, `Message-ID`, and relative path are stored in metadata.
 
 ## MCP Server
 

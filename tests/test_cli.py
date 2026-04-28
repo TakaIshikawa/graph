@@ -1843,6 +1843,57 @@ def test_ingest_html_command_uses_configured_root_and_indexes_fulltext(tmp_path,
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_ingest_email_command_uses_configured_path_and_indexes_fulltext(tmp_path, monkeypatch):
+    root = tmp_path / "mail"
+    nested = root / "archive"
+    nested.mkdir(parents=True)
+    message = nested / "message.eml"
+    message.write_text(
+        """From: Alice <alice@example.com>
+To: Bob <bob@example.com>
+Subject: Email Archive Note
+Message-ID: <cli-message@example.com>
+Content-Type: text/plain; charset=utf-8
+
+Email fulltext search phrase.
+""",
+        encoding="utf-8",
+    )
+
+    store = _make_store()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    monkeypatch.setattr("graph.cli.main.settings.email_path", str(root))
+
+    try:
+        result = runner.invoke(app, ["ingest", "email"])
+
+        assert result.exit_code == 0
+        assert "Ingesting from email" in result.output
+        assert "email: 1 new" in result.output
+        unit = store.get_unit_by_source("email", "archive/message.eml", "email_message")
+        assert unit is not None
+        assert unit.title == "Email Archive Note"
+        assert unit.content == "Email fulltext search phrase."
+        assert unit.metadata["from"] == "Alice <alice@example.com>"
+        assert unit.metadata["to"] == "Bob <bob@example.com>"
+        assert unit.metadata["message_id"] == "<cli-message@example.com>"
+        sync_state = store.get_sync_state("email", "email_message")
+        assert sync_state is not None
+        assert sync_state.items_synced == 1
+
+        search = runner.invoke(
+            app,
+            ["search", "Email fulltext", "--mode", "fulltext", "--limit", "1"],
+        )
+
+        assert search.exit_code == 0
+        assert "Email Archive Note" in search.output
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_ingest_ical_command_uses_configured_path_and_indexes_fulltext(tmp_path, monkeypatch):
     calendar = tmp_path / "calendar.ics"
     calendar.write_text(
