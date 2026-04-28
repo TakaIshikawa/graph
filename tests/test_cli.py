@@ -615,6 +615,72 @@ def test_collection_cli_create_add_members_remove_and_delete(monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_collection_export_import_commands_round_trip_and_strict(monkeypatch, tmp_path):
+    source = _make_store()
+    unit = source.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="collection-export-1",
+            source_entity_type="manual",
+            title="Collection export unit",
+            content="Unit content",
+        )
+    )
+    source.create_collection("reading", description="Reading list")
+    source.add_unit_to_collection("reading", unit.id)
+    export_path = tmp_path / "collections.json"
+
+    source_proxy = StoreProxy(source)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: source_proxy)
+    export_result = runner.invoke(app, ["export-collections", str(export_path), "--json"])
+
+    assert export_result.exit_code == 0
+    export_payload = json.loads(export_result.output)
+    assert export_payload["collections_exported"] == 1
+    exported = json.loads(export_path.read_text())
+    assert exported["collections"][0]["name"] == "reading"
+    assert exported["collections"][0]["unit_ids"] == [unit.id]
+
+    target = _make_store()
+    target.insert_unit(
+        KnowledgeUnit(
+            id=unit.id,
+            source_project=SourceProject.ME,
+            source_id="collection-import-1",
+            source_entity_type="manual",
+            title="Collection import unit",
+            content="Unit content",
+        )
+    )
+    target_proxy = StoreProxy(target)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: target_proxy)
+    import_result = runner.invoke(app, ["import-collections", str(export_path), "--json"])
+
+    try:
+        assert import_result.exit_code == 0
+        import_payload = json.loads(import_result.output)
+        assert import_payload["collections_inserted"] == 1
+        assert import_payload["memberships_added"] == 1
+        assert target.get_collection("reading")["unit_count"] == 1
+
+        exported["collections"][0]["unit_ids"].append("missing-unit")
+        export_path.write_text(json.dumps(exported))
+        strict_result = runner.invoke(
+            app,
+            ["import-collections", str(export_path), "--strict", "--json"],
+        )
+        assert strict_result.exit_code == 1
+        strict_payload = json.loads(strict_result.output)
+        assert strict_payload["error"] == "import_failed"
+        assert "missing-unit" in strict_payload["message"]
+        assert target.get_collection("reading")["unit_count"] == 1
+    finally:
+        source.close()
+        target.close()
+        _cleanup_db(source._test_db_path)  # type: ignore[attr-defined]
+        _cleanup_db(target._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_export_obsidian_uses_configured_vault_default(tmp_path, monkeypatch):
     store = _make_store()
     store.insert_unit(

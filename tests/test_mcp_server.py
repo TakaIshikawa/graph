@@ -423,6 +423,67 @@ def test_mcp_collection_tools_manage_members_with_unit_summaries(tmp_path, monke
         verify.close()
 
 
+def test_mcp_collection_import_export_tools_and_schema(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    export_path = tmp_path / "collections.json"
+    store = Store(str(db_path))
+    unit = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="mcp-collection-export-1",
+            source_entity_type="manual",
+            title="MCP export unit",
+            content="Unit content",
+        )
+    )
+    store.create_collection("reading", description="Reading list")
+    store.add_unit_to_collection("reading", unit.id)
+    store.close()
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    tool_by_name = {tool.name: tool for tool in tools}
+    assert {"export_collections", "import_collections"} <= set(tool_by_name)
+    assert tool_by_name["import_collections"].inputSchema["properties"]["strict"] == {
+        "type": "boolean",
+        "default": False,
+        "description": "Fail without writing memberships if any referenced unit is missing",
+    }
+
+    export_response = asyncio.run(
+        mcp_server.call_tool("export_collections", {"path": str(export_path)})
+    )
+    export_payload = json.loads(export_response[0].text)
+    assert export_payload["collections_exported"] == 1
+    assert export_payload["memberships_exported"] == 1
+    exported = json.loads(export_path.read_text())
+    assert exported["schema_version"] == 1
+    assert exported["collections"][0]["unit_ids"] == [unit.id]
+
+    update_store = Store(str(db_path))
+    update_store.delete_collection("reading")
+    update_store.close()
+
+    import_response = asyncio.run(
+        mcp_server.call_tool("import_collections", {"path": str(export_path)})
+    )
+    import_payload = json.loads(import_response[0].text)
+    assert import_payload["collections_inserted"] == 1
+    assert import_payload["memberships_added"] == 1
+
+    exported["collections"][0]["unit_ids"].append("missing-unit")
+    export_path.write_text(json.dumps(exported))
+    strict_response = asyncio.run(
+        mcp_server.call_tool(
+            "import_collections",
+            {"path": str(export_path), "strict": True},
+        )
+    )
+    strict_payload = json.loads(strict_response[0].text)
+    assert strict_payload["error"] == "import_failed"
+    assert "missing-unit" in strict_payload["message"]
+
+
 def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))
@@ -455,6 +516,7 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_pa
         "jsonl": ["jsonl_record"],
         "opml": ["outline"],
         "pdf": ["pdf_document"],
+        "email": ["email_message"],
         "text": ["text_document"],
         "html": ["html_document"],
         "ical": ["calendar_event"],
@@ -904,12 +966,13 @@ def test_ingest_all_includes_sota_and_search_can_filter_sota(tmp_path, monkeypat
         "feed",
         "bookmarks",
         "csv",
-        "jsonl",
-        "opml",
-        "pdf",
-        "text",
-        "html",
-        "ical",
+            "jsonl",
+            "opml",
+            "pdf",
+            "email",
+            "text",
+            "html",
+            "ical",
         "ipynb",
     ]
     assert payload == {"units_inserted": 1, "units_skipped": 0, "edges_inserted": 0}

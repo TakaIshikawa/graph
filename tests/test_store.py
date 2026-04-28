@@ -1828,6 +1828,158 @@ class TestCollections:
         assert store.list_collection_members("missing")["error"] == "collection_not_found"
         assert store.delete_collection("missing")["deleted"] is False
 
+    def test_collection_export_import_round_trip_and_idempotent_reimport(self, tmp_path):
+        source = Store(str(tmp_path / "source.db"))
+        target = Store(str(tmp_path / "target.db"))
+        try:
+            first = source.insert_unit(
+                KnowledgeUnit(
+                    source_project=SourceProject.ME,
+                    source_id="collection-a",
+                    source_entity_type="manual",
+                    title="Collection A",
+                    content="A",
+                )
+            )
+            second = source.insert_unit(
+                KnowledgeUnit(
+                    source_project=SourceProject.MAX,
+                    source_id="collection-b",
+                    source_entity_type="insight",
+                    title="Collection B",
+                    content="B",
+                )
+            )
+            source.create_collection(
+                "reading",
+                description="Reading list",
+                metadata={"owner": "alice"},
+            )
+            source.create_collection("archive")
+            source.add_unit_to_collection("reading", second.id)
+            source.add_unit_to_collection("reading", first.id)
+
+            target.insert_unit(
+                KnowledgeUnit(
+                    id=first.id,
+                    source_project=SourceProject.ME,
+                    source_id="target-a",
+                    source_entity_type="manual",
+                    title="Target A",
+                    content="A",
+                )
+            )
+            target.insert_unit(
+                KnowledgeUnit(
+                    id=second.id,
+                    source_project=SourceProject.MAX,
+                    source_id="target-b",
+                    source_entity_type="insight",
+                    title="Target B",
+                    content="B",
+                )
+            )
+
+            payload = source.export_collections()
+
+            assert payload["schema_version"] == 1
+            assert payload["exported_at"]
+            assert [collection["name"] for collection in payload["collections"]] == [
+                "archive",
+                "reading",
+            ]
+            assert payload["collections"][1] == {
+                "name": "reading",
+                "description": "Reading list",
+                "metadata": {"owner": "alice"},
+                "unit_ids": sorted([first.id, second.id]),
+            }
+
+            stats = target.import_collections(payload)
+
+            assert stats == {
+                "collections_inserted": 2,
+                "collections_updated": 0,
+                "collections_skipped": 0,
+                "memberships_added": 2,
+                "memberships_existing": 0,
+                "missing_units": [],
+                "missing_units_count": 0,
+            }
+            assert target.get_collection("reading")["metadata"] == {"owner": "alice"}
+            assert {member["id"] for member in target.list_collection_members("reading")["members"]} == {
+                first.id,
+                second.id,
+            }
+            assert target.import_collections(payload) == {
+                "collections_inserted": 0,
+                "collections_updated": 0,
+                "collections_skipped": 2,
+                "memberships_added": 0,
+                "memberships_existing": 2,
+                "missing_units": [],
+                "missing_units_count": 0,
+            }
+        finally:
+            source.close()
+            target.close()
+
+    def test_collection_import_skips_missing_members_by_default(self, store: Store):
+        unit = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.ME,
+                source_id="collection-present",
+                source_entity_type="manual",
+                title="Present",
+                content="Present content",
+            )
+        )
+        payload = {
+            "schema_version": 1,
+            "collections": [
+                {
+                    "name": "reading",
+                    "description": "",
+                    "metadata": {},
+                    "unit_ids": [unit.id, "missing-unit"],
+                }
+            ],
+        }
+
+        stats = store.import_collections(payload)
+
+        assert stats["memberships_added"] == 1
+        assert stats["missing_units"] == ["missing-unit"]
+        members = store.list_collection_members("reading")["members"]
+        assert [member["id"] for member in members] == [unit.id]
+
+    def test_collection_import_strict_missing_units_rolls_back(self, store: Store):
+        unit = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.ME,
+                source_id="collection-strict-present",
+                source_entity_type="manual",
+                title="Present",
+                content="Present content",
+            )
+        )
+        payload = {
+            "schema_version": 1,
+            "collections": [
+                {
+                    "name": "strict-list",
+                    "description": "Should not write",
+                    "metadata": {"owner": "alice"},
+                    "unit_ids": [unit.id, "missing-unit"],
+                }
+            ],
+        }
+
+        with pytest.raises(ValueError, match="missing unit IDs: missing-unit"):
+            store.import_collections(payload, missing_units="strict")
+
+        assert store.get_collection("strict-list") is None
+
 
 class TestSavedQueryCrud:
     def test_saved_query_crud(self, store: Store):

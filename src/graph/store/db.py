@@ -16,6 +16,7 @@ from graph.types.enums import EdgeRelation, EdgeSource
 from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 SAVED_QUERIES_SCHEMA_VERSION = 2
+COLLECTIONS_SCHEMA_VERSION = 1
 SUPPORTED_QUERY_SCHEDULES = {"daily", "weekly", "monthly"}
 
 if TYPE_CHECKING:
@@ -1485,6 +1486,173 @@ class Store:
             "tags": unit.tags,
             "created_at": _json_value(unit.created_at),
             "updated_at": _json_value(unit.updated_at),
+        }
+
+    def export_collections(self) -> dict:
+        """Return a portable JSON-serializable collection backup."""
+        rows = self.conn.execute(
+            """SELECT c.id, c.name, c.description, c.metadata
+               FROM collections c
+               ORDER BY c.name ASC"""
+        ).fetchall()
+        collections = []
+        for row in rows:
+            member_rows = self.conn.execute(
+                """SELECT unit_id
+                   FROM collection_units
+                   WHERE collection_id = ?
+                   ORDER BY unit_id ASC""",
+                (row["id"],),
+            ).fetchall()
+            collections.append(
+                {
+                    "name": row["name"],
+                    "description": row["description"],
+                    "metadata": json.loads(row["metadata"]),
+                    "unit_ids": [member["unit_id"] for member in member_rows],
+                }
+            )
+        return {
+            "schema_version": COLLECTIONS_SCHEMA_VERSION,
+            "exported_at": _utcnow_iso(),
+            "collections": collections,
+        }
+
+    def import_collections(
+        self,
+        payload: dict,
+        missing_units: Literal["skip", "strict"] = "skip",
+    ) -> dict:
+        """Import collection definitions and existing memberships idempotently."""
+        if missing_units not in {"skip", "strict"}:
+            raise ValueError("missing_units must be one of: skip, strict")
+        schema_version = payload.get("schema_version")
+        if schema_version != COLLECTIONS_SCHEMA_VERSION:
+            raise ValueError(
+                f"Unsupported collections schema_version {schema_version!r}; "
+                f"expected {COLLECTIONS_SCHEMA_VERSION}"
+            )
+
+        collections = payload.get("collections", [])
+        if not isinstance(collections, list):
+            raise ValueError("Collections payload must contain a collections array")
+
+        normalized: list[dict] = []
+        referenced_unit_ids: set[str] = set()
+        for data in collections:
+            if not isinstance(data, dict):
+                raise ValueError("Each collection must be a JSON object")
+            name = str(data.get("name") or "").strip()
+            if not name:
+                raise ValueError("Each collection must include a non-empty name")
+            metadata = data.get("metadata") or {}
+            if not isinstance(metadata, dict):
+                raise ValueError(f"Collection {name!r} metadata must be a JSON object")
+            unit_ids = data.get("unit_ids", data.get("members", []))
+            if not isinstance(unit_ids, list):
+                raise ValueError(f"Collection {name!r} unit_ids must be an array")
+            normalized_unit_ids = [str(unit_id) for unit_id in unit_ids]
+            referenced_unit_ids.update(normalized_unit_ids)
+            normalized.append(
+                {
+                    "name": name,
+                    "description": str(data.get("description") or ""),
+                    "metadata": metadata,
+                    "unit_ids": normalized_unit_ids,
+                }
+            )
+
+        existing_unit_ids = {
+            row["id"]
+            for row in self.conn.execute(
+                "SELECT id FROM knowledge_units WHERE id IN ({})".format(
+                    ",".join("?" for _ in referenced_unit_ids) or "NULL"
+                ),
+                tuple(referenced_unit_ids),
+            ).fetchall()
+        }
+        missing = sorted(referenced_unit_ids - existing_unit_ids)
+        if missing and missing_units == "strict":
+            raise ValueError(
+                "Collections import references missing unit IDs: " + ", ".join(missing)
+            )
+
+        collections_inserted = 0
+        collections_updated = 0
+        collections_skipped = 0
+        memberships_added = 0
+        memberships_existing = 0
+
+        try:
+            self.conn.execute("BEGIN")
+            for data in normalized:
+                existing = self.get_collection(data["name"])
+                now = _utcnow_iso()
+                metadata_json = json.dumps(data["metadata"], sort_keys=True)
+                if existing is None:
+                    collection_id = _new_id()
+                    self.conn.execute(
+                        """INSERT INTO collections
+                           (id, name, description, metadata, created_at, updated_at)
+                           VALUES (?, ?, ?, ?, ?, ?)""",
+                        (
+                            collection_id,
+                            data["name"],
+                            data["description"],
+                            metadata_json,
+                            now,
+                            now,
+                        ),
+                    )
+                    collections_inserted += 1
+                else:
+                    collection_id = existing["id"]
+                    imported_values = {
+                        "description": data["description"],
+                        "metadata": data["metadata"],
+                    }
+                    existing_values = {
+                        "description": existing["description"],
+                        "metadata": existing["metadata"],
+                    }
+                    if imported_values == existing_values:
+                        collections_skipped += 1
+                    else:
+                        self.conn.execute(
+                            """UPDATE collections
+                               SET description = ?, metadata = ?, updated_at = ?
+                               WHERE id = ?""",
+                            (data["description"], metadata_json, now, collection_id),
+                        )
+                        collections_updated += 1
+
+                for unit_id in data["unit_ids"]:
+                    if unit_id not in existing_unit_ids:
+                        continue
+                    before = self.conn.total_changes
+                    self.conn.execute(
+                        """INSERT INTO collection_units (collection_id, unit_id, added_at)
+                           VALUES (?, ?, ?)
+                           ON CONFLICT(collection_id, unit_id) DO NOTHING""",
+                        (collection_id, unit_id, now),
+                    )
+                    if self.conn.total_changes > before:
+                        memberships_added += 1
+                    else:
+                        memberships_existing += 1
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+
+        return {
+            "collections_inserted": collections_inserted,
+            "collections_updated": collections_updated,
+            "collections_skipped": collections_skipped,
+            "memberships_added": memberships_added,
+            "memberships_existing": memberships_existing,
+            "missing_units": missing,
+            "missing_units_count": len(missing),
         }
 
     # --- JSON import/export ---

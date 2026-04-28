@@ -21,6 +21,7 @@ from graph.cli.main import (
     _do_export_graphml,
     _do_export_json,
     _do_export_jsonl,
+    _do_export_collections,
     _do_export_markdown,
     _do_export_mermaid,
     _do_export_neighborhood,
@@ -42,6 +43,7 @@ from graph.cli.main import (
     _do_collection_rename,
     _do_import_json,
     _do_import_edges_csv,
+    _do_import_collections,
     _do_import_queries,
     _do_infer_edges,
     _do_integrity_audit,
@@ -450,6 +452,39 @@ async def list_tools() -> list[Tool]:
                     "limit": {"type": "integer", "description": "Maximum members to return"},
                 },
                 "required": ["name"],
+            },
+        ),
+        Tool(
+            name="export_collections",
+            description="Export named collections and memberships to a portable JSON file.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Destination collections JSON path",
+                    },
+                },
+                "required": ["path"],
+            },
+        ),
+        Tool(
+            name="import_collections",
+            description="Import named collections and memberships from a portable JSON file.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Source collections JSON path",
+                    },
+                    "strict": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Fail without writing memberships if any referenced unit is missing",
+                    },
+                },
+                "required": ["path"],
             },
         ),
         Tool(
@@ -2050,6 +2085,26 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 limit=arguments.get("limit"),
             )
             return [TextContent(type="text", text=json.dumps(payload, default=str))]
+
+        elif name == "export_collections":
+            stats = _do_export_collections(store, arguments["path"])
+            return [TextContent(type="text", text=json.dumps(stats))]
+
+        elif name == "import_collections":
+            try:
+                stats = _do_import_collections(
+                    store,
+                    arguments["path"],
+                    strict=arguments.get("strict", False),
+                )
+            except ValueError as exc:
+                payload = {
+                    "error": "import_failed",
+                    "message": str(exc),
+                    "path": arguments["path"],
+                }
+                return [TextContent(type="text", text=json.dumps(payload))]
+            return [TextContent(type="text", text=json.dumps(stats))]
 
         elif name == "similar_units":
             try:

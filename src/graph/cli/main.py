@@ -531,6 +531,32 @@ def _do_import_queries(store: Store, path: str | Path) -> dict:
     return {"path": str(input_path), **stats}
 
 
+def _do_export_collections(store: Store, path: str | Path) -> dict:
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = store.export_collections()
+    output_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    membership_count = sum(len(collection["unit_ids"]) for collection in payload["collections"])
+    return {
+        "path": str(output_path),
+        "schema_version": payload["schema_version"],
+        "collections_exported": len(payload["collections"]),
+        "memberships_exported": membership_count,
+    }
+
+
+def _do_import_collections(
+    store: Store,
+    path: str | Path,
+    *,
+    strict: bool = False,
+) -> dict:
+    input_path = Path(path)
+    payload = json.loads(input_path.read_text())
+    stats = store.import_collections(payload, missing_units="strict" if strict else "skip")
+    return {"path": str(input_path), **stats}
+
+
 def _parse_metadata_json(value: str | dict | None) -> dict:
     if value is None:
         return {}
@@ -2405,6 +2431,66 @@ def import_json_command(
         f"Imported {stats['units_inserted']} units, updated "
         f"{stats['units_updated']} units, inserted {stats['edges_inserted']} edges, "
         f"skipped {stats['edges_skipped']} duplicate edges from {stats['path']}"
+    )
+
+
+@app.command(name="export-collections")
+def export_collections(
+    path: Path = typer.Argument(..., help="Destination collections JSON path"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Export named collections and memberships to a portable JSON file."""
+    store = _get_store()
+    stats = _do_export_collections(store, path)
+    store.close()
+
+    if json_output:
+        _json_echo(stats)
+        return
+
+    typer.echo(
+        f"Exported {stats['collections_exported']} collections and "
+        f"{stats['memberships_exported']} memberships to {stats['path']}"
+    )
+
+
+@app.command(name="import-collections")
+def import_collections(
+    path: Path = typer.Argument(..., help="Source collections JSON path"),
+    strict: bool = typer.Option(
+        False,
+        "--strict",
+        help="Fail without writing memberships if any referenced unit is missing",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Import named collections and memberships from a portable JSON file."""
+    store = _get_store()
+    try:
+        stats = _do_import_collections(store, path, strict=strict)
+    except ValueError as exc:
+        store.close()
+        payload = {"error": "import_failed", "message": str(exc), "path": str(path)}
+        if json_output:
+            _json_echo(payload)
+        else:
+            typer.echo(payload["message"])
+        raise typer.Exit(code=1) from exc
+    store.close()
+
+    if json_output:
+        _json_echo(stats)
+        return
+
+    missing = (
+        f"; skipped {stats['missing_units_count']} missing units"
+        if stats["missing_units_count"]
+        else ""
+    )
+    typer.echo(
+        f"Imported {stats['collections_inserted']} collections, updated "
+        f"{stats['collections_updated']} collections, added "
+        f"{stats['memberships_added']} memberships from {stats['path']}{missing}"
     )
 
 
