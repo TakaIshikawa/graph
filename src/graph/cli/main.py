@@ -2122,6 +2122,47 @@ def _do_ingest(
     return total_stats
 
 
+def _do_import_obsidian(
+    store: Store,
+    vault_path: str | Path,
+    *,
+    folder: str | None = None,
+    source_project: str = "me",
+    include_tags: bool = True,
+) -> dict:
+    """Import Markdown notes from an Obsidian vault using vault-relative source IDs."""
+    from graph.adapters.markdown import MarkdownAdapter
+
+    vault_root = Path(vault_path).expanduser()
+    if not vault_root.exists() or not vault_root.is_dir():
+        raise ValueError(f"Obsidian vault path does not exist or is not a directory: {vault_root}")
+
+    import_root = vault_root
+    if folder:
+        folder_path = Path(folder)
+        if folder_path.is_absolute() or ".." in folder_path.parts:
+            raise ValueError("folder must be a relative path within the vault")
+        import_root = vault_root / folder_path
+
+    adapter = MarkdownAdapter(
+        root_path=str(import_root),
+        source_project=source_project,
+        source_id_root=str(vault_root),
+        include_tags=include_tags,
+    )
+    result = adapter.ingest()
+    stats = store.ingest(result, source_project)
+    return {
+        "vault_path": str(vault_root),
+        "folder": folder,
+        "source_project": source_project,
+        "include_tags": include_tags,
+        "notes_found": len(result.units),
+        "wikilink_edges_found": len(result.edges),
+        **stats,
+    }
+
+
 @app.command()
 def ingest(
     project: str = typer.Argument("all", help="Source project or 'all'"),
@@ -2136,6 +2177,53 @@ def ingest(
     store = _get_store()
     _do_ingest(store, project=project, entity_type=entity_type, full=full)
     store.close()
+
+
+@app.command(name="import-obsidian")
+def import_obsidian(
+    vault_path: Path = typer.Argument(..., help="Path to Obsidian vault"),
+    folder: str | None = typer.Option(
+        None,
+        "--folder",
+        "-f",
+        help="Optional vault subfolder to import",
+    ),
+    source_project: str = typer.Option(
+        "me",
+        "--source-project",
+        "-s",
+        help="Source project name to assign to imported notes",
+    ),
+    include_tags: bool = typer.Option(
+        True,
+        "--include-tags/--exclude-tags",
+        help="Include YAML and inline Markdown tags",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Print structured JSON stats"),
+) -> None:
+    """Import Markdown notes from an Obsidian vault."""
+    store = _get_store()
+    try:
+        stats = _do_import_obsidian(
+            store,
+            vault_path,
+            folder=folder,
+            source_project=source_project,
+            include_tags=include_tags,
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    finally:
+        store.close()
+
+    if json_output:
+        _json_echo(stats)
+        return
+
+    typer.echo(
+        f"Imported {stats['units_inserted']} new, {stats['units_skipped']} updated, "
+        f"{stats['edges_inserted']} edges from {stats['vault_path']}"
+    )
 
 
 @app.command(name="export-json")

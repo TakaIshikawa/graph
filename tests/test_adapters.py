@@ -569,6 +569,45 @@ class TestMarkdownAdapter:
         assert unit.created_at.tzinfo is not None
         assert unit.updated_at.tzinfo is not None
 
+    def test_ingest_obsidian_folder_uses_vault_relative_ids_and_can_exclude_tags(
+        self, tmp_path
+    ):
+        vault = tmp_path / "vault"
+        folder = vault / "Projects"
+        nested = folder / "Nested"
+        nested.mkdir(parents=True)
+        (folder / "Alpha.md").write_text(
+            "---\n"
+            "title: Alpha Title\n"
+            "tags: [front]\n"
+            "---\n"
+            "Alpha links to [[Beta]] and [[Nested/Beta]]. #inline\n",
+            encoding="utf-8",
+        )
+        (nested / "Beta.md").write_text("Beta body.\n", encoding="utf-8")
+        (vault / "Outside.md").write_text("Outside body.\n", encoding="utf-8")
+
+        result = MarkdownAdapter(
+            root_path=str(folder),
+            source_project="obsidian",
+            source_id_root=str(vault),
+            include_tags=False,
+        ).ingest()
+
+        assert [unit.source_id for unit in result.units] == [
+            "Projects/Alpha.md",
+            "Projects/Nested/Beta.md",
+        ]
+        alpha = next(unit for unit in result.units if unit.source_id == "Projects/Alpha.md")
+        assert alpha.source_project == "obsidian"
+        assert alpha.metadata["path"] == "Projects/Alpha.md"
+        assert alpha.metadata["front_matter"] == {}
+        assert alpha.tags == []
+        assert {(edge.from_unit_id, edge.to_unit_id) for edge in result.edges} == {
+            ("Projects/Alpha.md", "Projects/Nested/Beta.md")
+        }
+        assert result.edges[0].metadata["source_project"] == "obsidian"
+
 
 class TestTextAdapter:
     def test_ingest_text_documents_recursively_with_titles_and_metadata(self, tmp_path):

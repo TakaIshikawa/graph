@@ -43,6 +43,7 @@ from graph.cli.main import (
     _do_collection_rename,
     _do_import_json,
     _do_import_edges_csv,
+    _do_import_obsidian,
     _do_import_collections,
     _do_import_queries,
     _do_infer_edges,
@@ -1656,6 +1657,34 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="import_obsidian",
+            description="Import Markdown notes from an Obsidian vault with vault-relative source IDs and wikilink edges.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "vault_path": {
+                        "type": "string",
+                        "description": "Path to the Obsidian vault root",
+                    },
+                    "folder": {
+                        "type": "string",
+                        "description": "Optional subfolder within the vault to import",
+                    },
+                    "source_project": {
+                        "type": "string",
+                        "default": "me",
+                        "description": "Source project name to assign to imported notes",
+                    },
+                    "include_tags": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Include YAML and inline Markdown tags",
+                    },
+                },
+                "required": ["vault_path"],
+            },
+        ),
+        Tool(
             name="export_obsidian",
             description="Export the knowledge graph to an Obsidian vault as markdown notes and index.",
             inputSchema={
@@ -2981,6 +3010,19 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 clean=clean,
             )
             return [TextContent(type="text", text=json.dumps({"notes_written": written}))]
+
+        elif name == "import_obsidian":
+            try:
+                stats = _do_import_obsidian(
+                    store,
+                    arguments["vault_path"],
+                    folder=arguments.get("folder"),
+                    source_project=arguments.get("source_project", "me"),
+                    include_tags=arguments.get("include_tags", True),
+                )
+            except ValueError as exc:
+                return [TextContent(type="text", text=json.dumps({"error": str(exc)}))]
+            return [TextContent(type="text", text=json.dumps(stats))]
 
         elif name == "export_json":
             stats = _do_export_json(store, arguments["path"])

@@ -36,8 +36,18 @@ class MarkdownAdapter(SourceAdapter):
     def entity_types(self) -> list[str]:
         return ["markdown_note"]
 
-    def __init__(self, root_path: str = "") -> None:
+    def __init__(
+        self,
+        root_path: str = "",
+        *,
+        source_project: str = SourceProject.ME,
+        source_id_root: str | None = None,
+        include_tags: bool = True,
+    ) -> None:
         self.root_path = root_path
+        self.source_project = source_project
+        self.source_id_root = source_id_root
+        self.include_tags = include_tags
 
     def ingest(
         self,
@@ -54,7 +64,8 @@ class MarkdownAdapter(SourceAdapter):
             return result
 
         files = sorted(path for path in root.rglob("*.md") if path.is_file())
-        all_notes = [self._read_note(root, path) for path in files]
+        source_root = Path(self.source_id_root).expanduser() if self.source_id_root else root
+        all_notes = [self._read_note(root, path, source_root=source_root) for path in files]
         source_ids = {note["source_id"] for note in all_notes}
         title_index = self._build_title_index(all_notes)
 
@@ -64,7 +75,7 @@ class MarkdownAdapter(SourceAdapter):
 
             result.units.append(
                 KnowledgeUnit(
-                    source_project=SourceProject.ME,
+                    source_project=self.source_project,
                     source_id=note["source_id"],
                     source_entity_type="markdown_note",
                     title=note["title"],
@@ -92,7 +103,7 @@ class MarkdownAdapter(SourceAdapter):
                         relation=EdgeRelation.RELATES_TO,
                         source=EdgeSource.SOURCE,
                         metadata={
-                            "source_project": str(SourceProject.ME),
+                            "source_project": str(self.source_project),
                             "from_entity_type": "markdown_note",
                             "to_entity_type": "markdown_note",
                             "relation_type": "wikilink",
@@ -102,10 +113,10 @@ class MarkdownAdapter(SourceAdapter):
 
         return result
 
-    def _read_note(self, root: Path, path: Path) -> dict:
+    def _read_note(self, root: Path, path: Path, *, source_root: Path | None = None) -> dict:
         text = path.read_text(encoding="utf-8")
         front_matter, body = self._split_front_matter(text)
-        source_id = path.relative_to(root).as_posix()
+        source_id = path.relative_to(source_root or root).as_posix()
         title = str(front_matter.get("title") or path.stem)
         stat = path.stat()
         created_at = self._parse_front_matter_datetime(
@@ -122,7 +133,7 @@ class MarkdownAdapter(SourceAdapter):
             "title": title,
             "body": body,
             "front_matter": self._unmapped_front_matter(front_matter),
-            "tags": self._collect_tags(front_matter, body),
+            "tags": self._collect_tags(front_matter, body) if self.include_tags else [],
             "mtime": stat.st_mtime,
             "created_at": created_at,
             "updated_at": updated_at,

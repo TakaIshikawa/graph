@@ -113,6 +113,9 @@ graph search "your query" --mode semantic --limit 5
 # Ingest a folder of Markdown notes
 graph ingest markdown
 
+# Import an Obsidian vault without configuring GRAPH_MARKDOWN_ROOT
+graph import-obsidian /path/to/obsidian/vault --folder Notes
+
 # Ingest an .eml file or folder of archived email messages
 graph ingest email
 
@@ -278,6 +281,18 @@ Body text with #inline-tags and [[Other Note]] wikilinks.
 
 The adapter uses the front matter `title` when present, otherwise the filename stem. Tags come from front matter plus inline `#tags`, and wikilinks create `relates_to` graph edges when the linked target note exists.
 
+### Obsidian Vault Import
+
+Import an existing Obsidian vault directly:
+
+```bash
+graph import-obsidian /path/to/vault
+graph import-obsidian /path/to/vault --folder Notes --source-project me
+graph import-obsidian /path/to/vault --exclude-tags --json
+```
+
+The import reads Markdown files recursively from the vault, or from the selected vault subfolder. Source IDs and `metadata.path` remain relative to the vault root, so `Notes/Research/Alpha.md` stays stable even when importing only `--folder Notes`. YAML front matter, inline tags, and `[[wikilinks]]` use the same semantics as the generic Markdown adapter, and resolved wikilinks create `relates_to` edges.
+
 ## Email Archives
 
 Set `GRAPH_EMAIL_PATH` to a single `.eml` file or a directory of `.eml` files, then run:
@@ -331,6 +346,7 @@ graph embed [--project name] [--batch-size 5] [--delay 21.0]
 ### Export
 ```bash
 graph export-obsidian [--vault /path/to/vault] [--folder Graph]
+graph import-obsidian /path/to/vault [--folder Notes] [--source-project me] [--exclude-tags]
 ```
 
 If `--vault` is omitted, Graph writes to `GRAPH_OBSIDIAN_VAULT_PATH`.

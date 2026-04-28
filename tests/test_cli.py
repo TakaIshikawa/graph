@@ -1535,6 +1535,82 @@ def test_ingest_markdown_incremental_links_to_existing_note(tmp_path, monkeypatc
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_import_obsidian_command_imports_vault_without_markdown_config(tmp_path, monkeypatch):
+    vault = tmp_path / "vault"
+    nested = vault / "Area" / "Nested"
+    nested.mkdir(parents=True)
+    (vault / "Area" / "Alpha.md").write_text(
+        "---\n"
+        "title: Alpha Imported\n"
+        "tags:\n"
+        "  - front\n"
+        "---\n"
+        "Alpha body links to [[Beta]] with #inline.\n",
+        encoding="utf-8",
+    )
+    (nested / "Beta.md").write_text("Beta body.\n", encoding="utf-8")
+
+    store = _make_store()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    monkeypatch.setattr("graph.cli.main.settings.markdown_root", str(tmp_path / "unused"))
+
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "import-obsidian",
+                str(vault),
+                "--folder",
+                "Area",
+                "--source-project",
+                "obsidian",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert "Imported 2 new, 0 updated, 1 edges" in result.output
+
+        alpha = store.get_unit_by_source("obsidian", "Area/Alpha.md", "markdown_note")
+        beta = store.get_unit_by_source("obsidian", "Area/Nested/Beta.md", "markdown_note")
+        assert alpha is not None
+        assert beta is not None
+        assert alpha.title == "Alpha Imported"
+        assert alpha.metadata["path"] == "Area/Alpha.md"
+        assert alpha.tags == ["front", "inline"]
+        edges = store.get_all_edges()
+        assert len(edges) == 1
+        assert edges[0].from_unit_id == alpha.id
+        assert edges[0].to_unit_id == beta.id
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_import_obsidian_command_can_exclude_tags_and_emit_json(tmp_path, monkeypatch):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "Note.md").write_text("---\ntags: [front]\n---\nBody #inline.\n", encoding="utf-8")
+
+    store = _make_store()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(app, ["import-obsidian", str(vault), "--exclude-tags", "--json"])
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["notes_found"] == 1
+        assert payload["units_inserted"] == 1
+        unit = store.get_unit_by_source("me", "Note.md", "markdown_note")
+        assert unit is not None
+        assert unit.tags == []
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_ingest_feed_command_uses_configured_sources(tmp_path, monkeypatch):
     feed = tmp_path / "feed.xml"
     feed.write_text(

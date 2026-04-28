@@ -3110,6 +3110,62 @@ def test_export_obsidian_tool_uses_configured_vault_default(tmp_path, monkeypatc
     assert (vault_path / "Graph" / "forty_two" / "Node A.md").exists()
 
 
+def test_import_obsidian_tool_returns_counts_and_imports_wikilinks(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    vault = tmp_path / "vault"
+    nested = vault / "Notes" / "Nested"
+    nested.mkdir(parents=True)
+    (vault / "Notes" / "Alpha.md").write_text(
+        "---\n"
+        "title: Alpha MCP\n"
+        "tags: [front]\n"
+        "---\n"
+        "Alpha links to [[Beta]] with #inline.\n",
+        encoding="utf-8",
+    )
+    (nested / "Beta.md").write_text("Beta body.\n", encoding="utf-8")
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    import_tool = next(tool for tool in tools if tool.name == "import_obsidian")
+    assert set(import_tool.inputSchema["required"]) == {"vault_path"}
+    assert import_tool.inputSchema["properties"]["include_tags"]["default"] is True
+
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "import_obsidian",
+            {
+                "vault_path": str(vault),
+                "folder": "Notes",
+                "source_project": "obsidian",
+            },
+        )
+    )
+    payload = json.loads(response[0].text)
+
+    assert payload["notes_found"] == 2
+    assert payload["wikilink_edges_found"] == 1
+    assert payload["units_inserted"] == 2
+    assert payload["edges_inserted"] == 1
+
+    store = Store(str(db_path))
+    try:
+        alpha = store.get_unit_by_source("obsidian", "Notes/Alpha.md", "markdown_note")
+        beta = store.get_unit_by_source("obsidian", "Notes/Nested/Beta.md", "markdown_note")
+        assert alpha is not None
+        assert beta is not None
+        assert alpha.title == "Alpha MCP"
+        assert alpha.metadata["path"] == "Notes/Alpha.md"
+        assert alpha.tags == ["front", "inline"]
+        edges = store.get_all_edges()
+        assert len(edges) == 1
+        assert edges[0].from_unit_id == alpha.id
+        assert edges[0].to_unit_id == beta.id
+    finally:
+        store.close()
+
+
 def test_json_backup_tools_export_and_import_idempotently(tmp_path, monkeypatch):
     source_db = tmp_path / "source.db"
     target_db = tmp_path / "target.db"
