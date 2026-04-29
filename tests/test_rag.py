@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from datetime import datetime
 
 import pytest
 
@@ -349,6 +350,90 @@ class TestRAGService:
         results = rag_service.hybrid_search("solar", sort="utility_desc")
 
         assert [unit.source_id for unit, _score in results] == ["high", "low", "missing"]
+
+    @pytest.mark.parametrize(
+        ("method_name", "kwargs", "error"),
+        [
+            (
+                "search",
+                {"created_after": "not-a-date"},
+                "created_after must be an ISO-8601 date or datetime.",
+            ),
+            (
+                "search",
+                {"created_after": "2026-04-25", "created_before": "2026-04-24"},
+                "created_after must be on or before created_before.",
+            ),
+            (
+                "search",
+                {"updated_after": "2026-04-25", "updated_before": "2026-04-24"},
+                "updated_after must be on or before updated_before.",
+            ),
+            (
+                "hybrid_search",
+                {"created_after": "not-a-date"},
+                "created_after must be an ISO-8601 date or datetime.",
+            ),
+            (
+                "hybrid_search",
+                {"created_after": "2026-04-25", "created_before": "2026-04-24"},
+                "created_after must be on or before created_before.",
+            ),
+            (
+                "hybrid_search",
+                {"updated_after": "2026-04-25", "updated_before": "2026-04-24"},
+                "updated_after must be on or before updated_before.",
+            ),
+        ],
+    )
+    def test_search_rejects_invalid_date_filters_before_execution(
+        self,
+        store: Store,
+        method_name: str,
+        kwargs: dict,
+        error: str,
+    ):
+        service = RAGService(store, provider=None)
+
+        with pytest.raises(ValueError, match=error):
+            getattr(service, method_name)("solar", **kwargs)
+
+    def test_search_accepts_valid_boundary_date_ranges(
+        self, store: Store, rag_service: RAGService
+    ):
+        unit = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="boundary",
+                source_entity_type="insight",
+                title="Solar boundary",
+                content="Solar boundary content",
+                content_type=ContentType.INSIGHT,
+                created_at=datetime.fromisoformat("2026-04-24T00:00:00+00:00"),
+                updated_at=datetime.fromisoformat("2026-04-24T12:00:00+00:00"),
+            )
+        )
+        store.fts_index_unit(unit)
+        rag_service.embed_batch_and_store([unit.id])
+
+        semantic = rag_service.search(
+            "solar",
+            min_similarity=0.0,
+            created_after="2026-04-24T00:00:00+00:00",
+            created_before="2026-04-24T00:00:00+00:00",
+            updated_after="2026-04-24T12:00:00+00:00",
+            updated_before="2026-04-24T12:00:00+00:00",
+        )
+        hybrid = rag_service.hybrid_search(
+            "solar",
+            created_after="2026-04-24T00:00:00+00:00",
+            created_before="2026-04-24T00:00:00+00:00",
+            updated_after="2026-04-24T12:00:00+00:00",
+            updated_before="2026-04-24T12:00:00+00:00",
+        )
+
+        assert [result_unit.id for result_unit, _score in semantic] == [unit.id]
+        assert [result_unit.id for result_unit, _score in hybrid] == [unit.id]
 
     def test_similar_units_uses_stored_seed_embedding_without_provider(self, store: Store):
         seed = store.insert_unit(

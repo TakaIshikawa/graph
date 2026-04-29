@@ -15,7 +15,9 @@ from graph.rag.search import (
     DEFAULT_SEARCH_SNIPPET_LENGTH,
     SEARCH_SORTS,
     build_search_snippet,
+    parse_search_datetime_filter,
     sort_search_results,
+    validate_search_date_range,
     validate_search_sort,
     validate_snippet_length,
 )
@@ -1069,20 +1071,7 @@ def _pinned_unit_to_json(unit, *, include_content: bool = False) -> dict:
 
 
 def _parse_datetime_filter(value: str | datetime | None, *, name: str) -> datetime | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        parsed = value
-    else:
-        try:
-            parsed = datetime.fromisoformat(str(value))
-        except ValueError as exc:
-            raise ValueError(f"{name} must be an ISO-8601 date or datetime.") from exc
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    else:
-        parsed = parsed.astimezone(timezone.utc)
-    return parsed
+    return parse_search_datetime_filter(value, name=name)
 
 
 def _unit_datetime(unit, field: str) -> datetime:
@@ -1105,10 +1094,30 @@ def _validate_date_range(
     after_name: str,
     before_name: str,
 ) -> None:
-    parsed_after = _parse_datetime_filter(after, name=after_name)
-    parsed_before = _parse_datetime_filter(before, name=before_name)
-    if parsed_after and parsed_before and parsed_after > parsed_before:
-        raise ValueError(f"{after_name} must be on or before {before_name}.")
+    validate_search_date_range(
+        after,
+        before,
+        after_name=after_name,
+        before_name=before_name,
+    )
+
+
+def _validate_numeric_range(
+    minimum: float | str | None,
+    maximum: float | str | None,
+    *,
+    min_name: str,
+    max_name: str,
+) -> None:
+    if minimum is None or maximum is None:
+        return
+    try:
+        min_value = float(minimum)
+        max_value = float(maximum)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{min_name} and {max_name} must be numbers.") from exc
+    if min_value > max_value:
+        raise ValueError(f"{min_name} must be less than or equal to {max_name}.")
 
 
 def _validate_search_filters(filters: dict) -> None:
@@ -1134,6 +1143,18 @@ def _validate_search_filters(filters: dict) -> None:
         filters.get("updated_before"),
         after_name="updated_after",
         before_name="updated_before",
+    )
+    _validate_numeric_range(
+        filters.get("min_utility"),
+        filters.get("max_utility"),
+        min_name="min_utility",
+        max_name="max_utility",
+    )
+    _validate_numeric_range(
+        filters.get("min_confidence"),
+        filters.get("max_confidence"),
+        min_name="min_confidence",
+        max_name="max_confidence",
     )
 
 

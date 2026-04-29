@@ -142,6 +142,61 @@ def validate_search_sort(sort: str) -> str:
     return sort
 
 
+def parse_search_datetime_filter(
+    value: datetime | str | None,
+    *,
+    name: str,
+) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        try:
+            parsed = datetime.fromisoformat(str(value))
+        except ValueError as exc:
+            raise ValueError(f"{name} must be an ISO-8601 date or datetime.") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    else:
+        parsed = parsed.astimezone(timezone.utc)
+    return parsed
+
+
+def validate_search_date_range(
+    after: datetime | str | None,
+    before: datetime | str | None,
+    *,
+    after_name: str,
+    before_name: str,
+) -> None:
+    parsed_after = parse_search_datetime_filter(after, name=after_name)
+    parsed_before = parse_search_datetime_filter(before, name=before_name)
+    if parsed_after and parsed_before and parsed_after > parsed_before:
+        raise ValueError(f"{after_name} must be on or before {before_name}.")
+
+
+def validate_search_date_filters(
+    *,
+    created_after: datetime | str | None = None,
+    created_before: datetime | str | None = None,
+    updated_after: datetime | str | None = None,
+    updated_before: datetime | str | None = None,
+) -> None:
+    validate_search_date_range(
+        created_after,
+        created_before,
+        after_name="created_after",
+        before_name="created_before",
+    )
+    validate_search_date_range(
+        updated_after,
+        updated_before,
+        after_name="updated_after",
+        before_name="updated_before",
+    )
+
+
 def _sort_datetime(value) -> datetime:
     if isinstance(value, datetime):
         parsed = value
@@ -341,6 +396,12 @@ class RAGService:
     ) -> list[tuple[KnowledgeUnit, float]]:
         """Semantic search. Returns (unit, similarity) pairs."""
         validate_search_sort(sort)
+        validate_search_date_filters(
+            created_after=created_after,
+            created_before=created_before,
+            updated_after=updated_after,
+            updated_before=updated_before,
+        )
         if self.provider is None:
             raise RuntimeError("Embedding provider is required for semantic search")
         query_embedding = self.provider.embed(query)
@@ -398,6 +459,12 @@ class RAGService:
     ) -> list[tuple[KnowledgeUnit, float]]:
         """Combined semantic + full-text search."""
         validate_search_sort(sort)
+        validate_search_date_filters(
+            created_after=created_after,
+            created_before=created_before,
+            updated_after=updated_after,
+            updated_before=updated_before,
+        )
         # Semantic results
         semantic_results = self.search(
             query,

@@ -4366,6 +4366,47 @@ def test_search_command_requires_metadata_key_and_value_together(monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+@pytest.mark.parametrize(
+    ("args", "error"),
+    [
+        (
+            ["--min-utility", "0.9", "--max-utility", "0.1"],
+            "min_utility must be less than or equal to max_utility.",
+        ),
+        (
+            ["--min-confidence", "0.8", "--max-confidence", "0.2"],
+            "min_confidence must be less than or equal to max_confidence.",
+        ),
+        (
+            ["--created-after", "not-a-date"],
+            "created_after must be an ISO-8601 date or datetime.",
+        ),
+        (
+            ["--created-after", "2026-04-25", "--created-before", "2026-04-24"],
+            "created_after must be on or before created_before.",
+        ),
+        (
+            ["--updated-after", "2026-04-25", "--updated-before", "2026-04-24"],
+            "updated_after must be on or before updated_before.",
+        ),
+    ],
+)
+def test_search_command_rejects_invalid_filter_ranges(monkeypatch, args, error):
+    store = _make_store()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(app, ["search", "solar", *args, "--json"])
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["error"] == error
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_search_command_emits_active_date_and_utility_filters_in_json(monkeypatch):
     store = _make_store()
     _populate_search_graph(store)
