@@ -6240,6 +6240,55 @@ def central(
     store.close()
 
 
+@app.command(name="pagerank")
+def pagerank(
+    limit: int = typer.Option(10, "--limit", "-n", min=0, help="Max results"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Rank knowledge units by weighted PageRank."""
+    from graph.graph.service import GraphService
+
+    store = _get_store()
+    gs = GraphService(store)
+    results = gs.get_pagerank(limit=limit)
+
+    if not results:
+        if json_output:
+            _json_echo({"results": []})
+            store.close()
+            return
+        typer.echo("No nodes found.")
+        store.close()
+        return
+
+    if json_output:
+        _json_echo(
+            {
+                "results": [
+                    {
+                        "id": item["unit"]["id"],
+                        "title": item["unit"]["title"],
+                        "source_project": item["unit"]["source_project"],
+                        "content_type": item["unit"]["content_type"],
+                        "score": item["score"],
+                    }
+                    for item in results
+                ]
+            }
+        )
+        store.close()
+        return
+
+    for item in results:
+        unit = item["unit"]
+        typer.echo(
+            f"[{unit['source_project']}] {unit['title']} "
+            f"({unit['content_type']}, PageRank: {item['score']:.6f})"
+        )
+
+    store.close()
+
+
 @app.command()
 def bridges(
     limit: int = typer.Option(10, "--limit", "-n", help="Max results"),

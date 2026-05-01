@@ -3497,6 +3497,45 @@ def test_bridges_command_prints_readable_units_and_rebuilds(monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_pagerank_command_emits_json_ranked_units(monkeypatch):
+    store = _make_store()
+    _populate_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(app, ["pagerank", "--limit", "2", "--json"])
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert len(payload["results"]) == 2
+        assert payload["results"][0]["score"] >= payload["results"][1]["score"]
+        assert set(payload["results"][0]) >= {
+            "title",
+            "source_project",
+            "content_type",
+            "score",
+        }
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_pagerank_command_empty_graph_emits_empty_json(monkeypatch):
+    store = _make_store()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(app, ["pagerank", "--json"])
+
+        assert result.exit_code == 0
+        assert json.loads(result.output) == {"results": []}
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_neighbors_command_emits_json_with_edge_relations(monkeypatch):
     store = _make_store()
     _, b_id, _, _ = _populate_graph(store)

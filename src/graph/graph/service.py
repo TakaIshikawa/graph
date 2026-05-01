@@ -1414,6 +1414,36 @@ class GraphService:
         sorted_pr = sorted(ranks.items(), key=lambda x: x[1], reverse=True)
         return sorted_pr[:limit]
 
+    def get_pagerank(self, limit: int = 10, weight: str = "weight") -> list[dict]:
+        """Return ranked unit summaries using NetworkX weighted PageRank."""
+        capped_limit = max(0, int(limit))
+        if capped_limit == 0:
+            return []
+
+        if not self.G:
+            self.rebuild()
+        if not self.G.nodes:
+            return []
+
+        scores = nx.pagerank(self.G, weight=weight)
+        ranked = sorted(
+            scores.items(),
+            key=lambda item: (
+                -item[1],
+                str(self.G.nodes[item[0]].get("title", "")).lower(),
+                item[0],
+            ),
+        )
+
+        results = []
+        for unit_id, score in ranked[:capped_limit]:
+            unit = self.store.get_unit(unit_id)
+            summary = self._unit_summary_data(unit)
+            if summary is None:
+                continue
+            results.append({"unit": summary, "score": float(score)})
+        return results
+
     def get_bridges(self, limit: int = 10) -> list[tuple[str, float]]:
         """Find bridge nodes (betweenness centrality)."""
         if not self.G.nodes:

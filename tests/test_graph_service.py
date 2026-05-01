@@ -823,6 +823,75 @@ class TestGraphService:
         # Each entry is (node_id, pagerank_score)
         assert all(isinstance(score, float) for _, score in central)
 
+    def test_get_pagerank_returns_unit_summaries_sorted_by_score(
+        self, populated_store: Store
+    ):
+        results = GraphService(populated_store).get_pagerank(limit=2)
+
+        assert len(results) == 2
+        assert results[0]["score"] >= results[1]["score"]
+        assert set(results[0]["unit"]) >= {
+            "id",
+            "title",
+            "source_project",
+            "content_type",
+        }
+
+    def test_get_pagerank_empty_graph_returns_empty_result(self, store: Store):
+        assert GraphService(store).get_pagerank(limit=10) == []
+
+    def test_get_pagerank_uses_edge_weights(self, store: Store):
+        source = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="source",
+                source_entity_type="insight",
+                title="Source",
+                content="Source note",
+            )
+        )
+        heavy = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="heavy",
+                source_entity_type="insight",
+                title="Heavy target",
+                content="Heavy target note",
+            )
+        )
+        light = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="light",
+                source_entity_type="insight",
+                title="Light target",
+                content="Light target note",
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=source.id,
+                to_unit_id=heavy.id,
+                relation=EdgeRelation.REFERENCES,
+                weight=10.0,
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=source.id,
+                to_unit_id=light.id,
+                relation=EdgeRelation.REFERENCES,
+                weight=1.0,
+            )
+        )
+
+        scores = {
+            item["unit"]["id"]: item["score"]
+            for item in GraphService(store).get_pagerank(limit=3)
+        }
+
+        assert scores[heavy.id] > scores[light.id]
+
     def test_export_graphml_writes_scalar_node_and_edge_attributes(
         self, store: Store, tmp_path
     ):
