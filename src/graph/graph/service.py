@@ -1202,6 +1202,125 @@ class GraphService:
         except (nx.NodeNotFound, nx.NetworkXNoPath):
             return None
 
+    def shortest_path_between(
+        self,
+        source_unit_id: str,
+        target_unit_id: str,
+        *,
+        relation: str | None = None,
+        max_paths: int = 1,
+    ) -> list[dict]:
+        """Explain deterministic shortest paths between two units."""
+        if (
+            not isinstance(max_paths, int)
+            or isinstance(max_paths, bool)
+            or max_paths < 0
+        ):
+            raise ValueError("max_paths must be a non-negative integer.")
+
+        units_by_id = {
+            unit.id: unit for unit in self.store.get_all_units(limit=1000000000)
+        }
+        missing_messages = []
+        if source_unit_id not in units_by_id:
+            missing_messages.append(f"source_unit_id not found: {source_unit_id}")
+        if target_unit_id not in units_by_id:
+            missing_messages.append(f"target_unit_id not found: {target_unit_id}")
+        if missing_messages:
+            raise ValueError("; ".join(missing_messages))
+        if max_paths == 0:
+            return []
+
+        relation_filter = str(relation) if relation is not None else None
+        projection = nx.Graph()
+        projection.add_nodes_from(units_by_id)
+        for edge in sorted(
+            self.store.get_all_edges(),
+            key=lambda item: (
+                min(item.from_unit_id, item.to_unit_id),
+                max(item.from_unit_id, item.to_unit_id),
+                str(item.relation),
+                item.id,
+            ),
+        ):
+            if edge.from_unit_id not in units_by_id or edge.to_unit_id not in units_by_id:
+                continue
+            if relation_filter is not None and str(edge.relation) != relation_filter:
+                continue
+            if edge.from_unit_id == edge.to_unit_id:
+                continue
+
+            left_id, right_id = sorted((edge.from_unit_id, edge.to_unit_id))
+            edge_payload = {
+                "id": edge.id,
+                "from_unit_id": edge.from_unit_id,
+                "to_unit_id": edge.to_unit_id,
+                "relation": str(edge.relation),
+                "weight": float(edge.weight or 0.0),
+                "source": str(edge.source),
+            }
+            if projection.has_edge(left_id, right_id):
+                existing = projection[left_id][right_id]["edge"]
+                existing_key = (
+                    existing["relation"],
+                    existing["id"],
+                    existing["from_unit_id"],
+                    existing["to_unit_id"],
+                )
+                new_key = (
+                    edge_payload["relation"],
+                    edge_payload["id"],
+                    edge_payload["from_unit_id"],
+                    edge_payload["to_unit_id"],
+                )
+                if new_key >= existing_key:
+                    continue
+            projection.add_edge(left_id, right_id, edge=edge_payload)
+
+        try:
+            raw_paths = nx.all_shortest_paths(
+                projection,
+                source_unit_id,
+                target_unit_id,
+            )
+            ordered_paths = sorted(raw_paths)[:max_paths]
+        except nx.NetworkXNoPath:
+            return []
+
+        explanations = []
+        for path in ordered_paths:
+            traversed_edges = []
+            total_weight = 0.0
+            for left_id, right_id in zip(path, path[1:], strict=False):
+                edge = projection[left_id][right_id]["edge"]
+                traversal_direction = (
+                    "forward"
+                    if edge["from_unit_id"] == left_id and edge["to_unit_id"] == right_id
+                    else "reverse"
+                )
+                total_weight += edge["weight"]
+                traversed_edges.append(
+                    {
+                        **edge,
+                        "traversal_from_unit_id": left_id,
+                        "traversal_to_unit_id": right_id,
+                        "traversal_direction": traversal_direction,
+                    }
+                )
+
+            explanations.append(
+                {
+                    "unit_ids": path,
+                    "edge_ids": [edge["id"] for edge in traversed_edges],
+                    "relations": [edge["relation"] for edge in traversed_edges],
+                    "edges": traversed_edges,
+                    "hop_count": len(path) - 1,
+                    "total_weight": round(total_weight, 6),
+                }
+            )
+
+        return explanations
+
     def build_shortest_path_payload(self, from_unit_id: str, to_unit_id: str) -> dict:
         """Build a structured shortest-path payload for API/MCP callers."""
         if not self.G:
