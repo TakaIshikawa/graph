@@ -25,6 +25,7 @@ class SourceProject(StrEnum):
     TRANSCRIPT = "transcript"
     POCKET = "pocket"
     ZOTERO_RDF = "zotero_rdf"
+    HYPOTHESIS = "hypothesis"
 
 
 class ContentType(StrEnum):
