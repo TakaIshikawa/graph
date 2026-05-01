@@ -20,6 +20,7 @@ class SourceProject(StrEnum):
     CSL_JSON = "csl_json"
     RIS = "ris"
     GIT = "git"
+    TRANSCRIPT = "transcript"
 
 
 class ContentType(StrEnum):

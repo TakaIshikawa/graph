@@ -36,6 +36,7 @@ from graph.adapters.presence import PresenceAdapter
 from graph.adapters.registry import get_adapter, list_adapters
 from graph.adapters.ris import RisAdapter
 from graph.adapters.text import TextAdapter
+from graph.adapters.transcript import TranscriptAdapter
 from graph.adapters.yaml_adapter import YamlAdapter
 from graph.store.db import Store
 from graph.types.models import SyncState
@@ -770,6 +771,115 @@ class TestTextAdapter:
 
         assert result.units == []
         assert result.edges == []
+
+
+class TestTranscriptAdapter:
+    def test_ingest_srt_and_vtt_recursively_with_metadata(self, tmp_path):
+        root = tmp_path / "transcripts"
+        nested = root / "meetings"
+        nested.mkdir(parents=True)
+        srt = root / "lecture.srt"
+        vtt = nested / "standup.vtt"
+        srt.write_text(
+            "1\n"
+            "00:00:01,000 --> 00:00:03,500\n"
+            "Welcome to the lecture.\n"
+            "\n"
+            "2\n"
+            "00:00:05,250 --> 00:00:07,000\n"
+            "Second cue search phrase.\n",
+            encoding="utf-8",
+        )
+        vtt.write_text(
+            "WEBVTT\n"
+            "\n"
+            "intro\n"
+            "00:00:02.000 --> 00:00:04.000\n"
+            "Daily notes.\n"
+            "\n"
+            "00:00:04.500 --> 00:00:06.000\n"
+            "Ship the transcript adapter.\n",
+            encoding="utf-8",
+        )
+        (nested / "skip.txt").write_text("Not a transcript.\n", encoding="utf-8")
+
+        result = TranscriptAdapter(root_path=str(root)).ingest()
+
+        assert [unit.source_id for unit in result.units] == [
+            "lecture.srt",
+            "meetings/standup.vtt",
+        ]
+        by_source = {unit.source_id: unit for unit in result.units}
+        lecture = by_source["lecture.srt"]
+        assert lecture.source_project == "transcript"
+        assert lecture.source_entity_type == "transcript"
+        assert lecture.title == "lecture"
+        assert lecture.content == "Welcome to the lecture.\n\nSecond cue search phrase."
+        assert lecture.content_type == "artifact"
+        assert lecture.metadata == {
+            "path": "lecture.srt",
+            "source_path": "lecture.srt",
+            "file_size": srt.stat().st_size,
+            "transcript_format": "srt",
+            "cue_count": 2,
+            "first_timestamp": "00:00:01.000",
+            "last_timestamp": "00:00:07.000",
+            "duration_range": "00:00:01.000 --> 00:00:07.000",
+        }
+        assert lecture.created_at.tzinfo is not None
+        assert by_source["meetings/standup.vtt"].metadata["transcript_format"] == "vtt"
+        assert by_source["meetings/standup.vtt"].metadata["cue_count"] == 2
+        assert "Ship the transcript adapter." in by_source["meetings/standup.vtt"].content
+        assert result.edges == []
+
+    def test_malformed_cues_are_skipped_while_valid_cues_ingest(self, tmp_path):
+        transcript = tmp_path / "mixed.srt"
+        transcript.write_text(
+            "1\n"
+            "not a timestamp\n"
+            "This block is ignored.\n"
+            "\n"
+            "2\n"
+            "00:00:10,000 --> 00:00:12,000\n"
+            "Valid cue survives.\n"
+            "\n"
+            "3\n"
+            "00:99:13,000 --> 00:00:14,000\n"
+            "Invalid minutes are ignored.\n"
+            "\n"
+            "4\n"
+            "00:00:15,000 --> 00:00:16,000\n"
+            "\n",
+            encoding="utf-8",
+        )
+
+        result = TranscriptAdapter(root_path=str(tmp_path)).ingest()
+
+        assert len(result.units) == 1
+        unit = result.units[0]
+        assert unit.content == "Valid cue survives."
+        assert unit.metadata["cue_count"] == 1
+        assert unit.metadata["first_timestamp"] == "00:00:10.000"
+        assert unit.metadata["last_timestamp"] == "00:00:12.000"
+
+    def test_entity_filter_missing_root_and_no_valid_cues_return_empty_result(self, tmp_path):
+        bad_root = tmp_path / "bad"
+        bad_root.mkdir()
+        (tmp_path / "note.srt").write_text(
+            "1\n00:00:01,000 --> 00:00:02,000\nValid.\n",
+            encoding="utf-8",
+        )
+        (bad_root / "bad.vtt").write_text("WEBVTT\n\ninvalid cue\n", encoding="utf-8")
+
+        filtered = TranscriptAdapter(root_path=str(tmp_path)).ingest(entity_types=["text_document"])
+        missing = TranscriptAdapter(root_path=str(tmp_path / "missing")).ingest()
+        no_valid = TranscriptAdapter(root_path=str(bad_root)).ingest()
+
+        assert filtered.units == []
+        assert filtered.edges == []
+        assert missing.units == []
+        assert missing.edges == []
+        assert no_valid.units == []
 
 
 class TestHtmlAdapter:
@@ -2421,6 +2531,7 @@ class TestRegistry:
             "csl_json",
             "ris",
             "git",
+            "transcript",
         }
 
     def test_get_adapter(self):
@@ -2471,6 +2582,9 @@ class TestRegistry:
 
         git_adapter = get_adapter("git", repos="/tmp/repo")
         assert git_adapter.name == "git"
+
+        transcript_adapter = get_adapter("transcript", root_path="/tmp/transcripts")
+        assert transcript_adapter.name == "transcript"
 
     def test_unknown_adapter(self):
         with pytest.raises(KeyError):

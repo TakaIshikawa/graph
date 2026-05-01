@@ -101,6 +101,7 @@ SUPPORTED_SYNC_PROJECTS = [
     "ipynb",
     "ris",
     "git",
+    "transcript",
 ]
 
 SEARCH_FILTER_SCHEMA = {
@@ -201,6 +202,7 @@ def _adapter_kwargs(name: str) -> dict:
         "bibtex": {"path": settings.bibtex_path},
         "ris": {"path": settings.ris_path},
         "git": {"repos": settings.git_repos},
+        "transcript": {"root_path": settings.transcript_root},
     }
     return mapping.get(name, {})
 
@@ -250,6 +252,7 @@ def _get_adapter(name: str):
     from graph.adapters.ris import RisAdapter
     from graph.adapters.sota import SOTAAdapter
     from graph.adapters.text import TextAdapter
+    from graph.adapters.transcript import TranscriptAdapter
 
     mapping = {
         "forty_two": lambda: FortyTwoAdapter(db_path=settings.forty_two_db),
@@ -273,6 +276,7 @@ def _get_adapter(name: str):
         "ipynb": lambda: IpynbAdapter(root_path=settings.ipynb_root),
         "ris": lambda: RisAdapter(path=settings.ris_path),
         "git": lambda: GitAdapter(repos=settings.git_repos),
+        "transcript": lambda: TranscriptAdapter(root_path=settings.transcript_root),
     }
     return mapping[name]()
 

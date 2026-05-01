@@ -26,6 +26,7 @@ from graph.adapters.presence import PresenceAdapter
 from graph.adapters.sota import SOTAAdapter
 from graph.adapters.ris import RisAdapter
 from graph.adapters.text import TextAdapter
+from graph.adapters.transcript import TranscriptAdapter
 from graph.adapters.yaml_adapter import YamlAdapter
 
 _ADAPTERS: dict[str, type[SourceAdapter]] = {
@@ -53,6 +54,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "csl_json": CslJsonAdapter,
     "ris": RisAdapter,
     "git": GitAdapter,
+    "transcript": TranscriptAdapter,
 }
 
 

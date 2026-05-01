@@ -66,6 +66,7 @@ SUPPORTED_SYNC_PROJECTS = [
     "csl_json",
     "ris",
     "git",
+    "transcript",
 ]
 
 
@@ -97,6 +98,7 @@ def _get_adapter_for_project(name: str):
     from graph.adapters.ris import RisAdapter
     from graph.adapters.sota import SOTAAdapter
     from graph.adapters.text import TextAdapter
+    from graph.adapters.transcript import TranscriptAdapter
     from graph.adapters.yaml_adapter import YamlAdapter
 
     mapping = {
@@ -126,6 +128,7 @@ def _get_adapter_for_project(name: str):
         "csl_json": lambda: CslJsonAdapter(path=settings.csl_json_path),
         "ris": lambda: RisAdapter(path=settings.ris_path),
         "git": lambda: GitAdapter(repos=settings.git_repos),
+        "transcript": lambda: TranscriptAdapter(root_path=settings.transcript_root),
     }
     factory = mapping.get(name)
     if factory is None:
