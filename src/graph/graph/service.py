@@ -1938,6 +1938,87 @@ class GraphService:
             "edges": edges,
         }
 
+    def get_k_core_decomposition(
+        self,
+        min_core: int = 1,
+        limit: int | None = None,
+    ) -> dict:
+        """Return ranked unit core numbers from the undirected graph projection."""
+        if (
+            not isinstance(min_core, int)
+            or isinstance(min_core, bool)
+            or min_core < 1
+        ):
+            raise ValueError("min_core must be a positive integer.")
+        if limit is not None and (
+            not isinstance(limit, int) or isinstance(limit, bool) or limit < 1
+        ):
+            raise ValueError("limit must be a positive integer.")
+
+        units_by_id = {unit.id: unit for unit in self.store.get_all_units(limit=1000000000)}
+        projection = nx.Graph()
+        projection.add_nodes_from(sorted(units_by_id))
+        projection.add_edges_from(
+            sorted(
+                (edge.from_unit_id, edge.to_unit_id)
+                for edge in self.store.get_all_edges()
+                if edge.from_unit_id in units_by_id
+                and edge.to_unit_id in units_by_id
+                and edge.from_unit_id != edge.to_unit_id
+            )
+        )
+
+        if not projection.nodes:
+            return {
+                "stats": {
+                    "node_count": 0,
+                    "edge_count": 0,
+                    "max_core": 0,
+                    "returned_count": 0,
+                },
+                "nodes": [],
+            }
+
+        core_numbers = nx.core_number(projection)
+        max_core = max(core_numbers.values(), default=0)
+        ranked_node_ids = sorted(
+            (
+                node_id
+                for node_id, core_number in core_numbers.items()
+                if int(core_number) >= min_core
+            ),
+            key=lambda node_id: (
+                -int(core_numbers.get(node_id, 0)),
+                -int(projection.degree(node_id)),
+                str(units_by_id[node_id].title).lower(),
+                str(node_id),
+            ),
+        )
+        if limit is not None:
+            ranked_node_ids = ranked_node_ids[:limit]
+
+        nodes = [
+            {
+                "unit_id": node_id,
+                "title": units_by_id[node_id].title,
+                "source_project": str(units_by_id[node_id].source_project),
+                "core_number": int(core_numbers[node_id]),
+                "degree": int(projection.degree(node_id)),
+                "neighbor_count": len(list(projection.neighbors(node_id))),
+            }
+            for node_id in ranked_node_ids
+        ]
+
+        return {
+            "stats": {
+                "node_count": projection.number_of_nodes(),
+                "edge_count": projection.number_of_edges(),
+                "max_core": int(max_core),
+                "returned_count": len(nodes),
+            },
+            "nodes": nodes,
+        }
+
     def analyze_triangles(
         self,
         limit: int = 20,
