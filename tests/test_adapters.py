@@ -2637,6 +2637,7 @@ class TestRegistry:
             "git",
             "transcript",
             "pocket",
+            "zotero_rdf",
         }
 
     def test_get_adapter(self):
@@ -2696,6 +2697,9 @@ class TestRegistry:
 
         pocket_adapter = get_adapter("pocket", path="/tmp/pocket.csv")
         assert pocket_adapter.name == "pocket"
+
+        zotero_rdf_adapter = get_adapter("zotero_rdf", path="/tmp/library.rdf")
+        assert zotero_rdf_adapter.name == "zotero_rdf"
 
     def test_unknown_adapter(self):
         with pytest.raises(KeyError):

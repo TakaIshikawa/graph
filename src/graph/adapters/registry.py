@@ -30,6 +30,7 @@ from graph.adapters.ris import RisAdapter
 from graph.adapters.text import TextAdapter
 from graph.adapters.transcript import TranscriptAdapter
 from graph.adapters.yaml_adapter import YamlAdapter
+from graph.adapters.zotero_rdf import ZoteroRdfAdapter
 
 _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "forty_two": FortyTwoAdapter,
@@ -59,6 +60,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "git": GitAdapter,
     "transcript": TranscriptAdapter,
     "pocket": PocketAdapter,
+    "zotero_rdf": ZoteroRdfAdapter,
 }
 
 

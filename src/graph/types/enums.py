@@ -23,6 +23,7 @@ class SourceProject(StrEnum):
     GIT = "git"
     TRANSCRIPT = "transcript"
     POCKET = "pocket"
+    ZOTERO_RDF = "zotero_rdf"
 
 
 class ContentType(StrEnum):
