@@ -365,9 +365,11 @@ class GraphService:
                 source_project=u.source_project,
                 source_entity_type=u.source_entity_type,
                 content_type=u.content_type,
+                confidence=u.confidence or 0.0,
                 utility_score=u.utility_score or 0.0,
                 tags=u.tags,
-                created_at=str(u.created_at),
+                created_at=_json_value(u.created_at),
+                updated_at=_json_value(u.updated_at),
             )
         edges = self.store.get_all_edges()
         for e in edges:
@@ -378,7 +380,7 @@ class GraphService:
                     relation=e.relation,
                     weight=e.weight,
                     source=e.source,
-                    created_at=str(e.created_at),
+                    created_at=_json_value(e.created_at),
                     id=e.id,
                 )
         return len(self.G.nodes)
@@ -399,8 +401,10 @@ class GraphService:
                 source_entity_type=str(data.get("source_entity_type", "")),
                 content_type=str(data.get("content_type", "")),
                 tags=tags_value,
+                confidence=float(data.get("confidence", 0.0) or 0.0),
                 utility_score=float(data.get("utility_score", 0.0) or 0.0),
                 created_at=str(data.get("created_at", "")),
+                updated_at=str(data.get("updated_at", "")),
             )
         for from_id, to_id, data in self.G.edges(data=True):
             export_graph.add_edge(
@@ -423,6 +427,22 @@ class GraphService:
             "path": str(output_path),
             "node_count": export_graph.number_of_nodes(),
             "edge_count": export_graph.number_of_edges(),
+        }
+
+    def export_gexf(self, path: str | Path) -> dict:
+        """Write the current graph to a GEXF file for Gephi and return export stats."""
+        if not self.G:
+            self.rebuild()
+
+        output_path = Path(path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        export_graph = self.build_export_graph()
+        nx.write_gexf(export_graph, output_path)
+        return {
+            "path": str(output_path),
+            "nodes_exported": export_graph.number_of_nodes(),
+            "edges_exported": export_graph.number_of_edges(),
+            "bytes_written": output_path.stat().st_size,
         }
 
     def export_mermaid(
