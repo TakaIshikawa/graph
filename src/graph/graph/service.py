@@ -1630,6 +1630,121 @@ class GraphService:
             "edges": edges,
         }
 
+    def analyze_triangles(
+        self,
+        limit: int = 20,
+        *,
+        min_weight: float = 0.0,
+        tag: str | None = None,
+    ) -> list[dict]:
+        """Identify closed three-node motifs in the undirected knowledge graph."""
+        try:
+            capped_limit = int(limit)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("limit must be a non-negative integer.") from exc
+        if capped_limit < 0:
+            raise ValueError("limit must be a non-negative integer.")
+        if capped_limit == 0:
+            return []
+
+        try:
+            minimum_weight = float(min_weight)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("min_weight must be numeric.") from exc
+
+        required_tag = tag.strip() if isinstance(tag, str) else tag
+        if tag is not None and (not isinstance(tag, str) or not required_tag):
+            raise ValueError("tag must be a non-empty string or None.")
+
+        units_by_id = {unit.id: unit for unit in self.store.get_all_units(limit=1000000000)}
+        if len(units_by_id) < 3:
+            return []
+
+        edge_groups: dict[tuple[str, str], dict] = {}
+        for edge in sorted(
+            self.store.get_all_edges(),
+            key=lambda item: (
+                min(item.from_unit_id, item.to_unit_id),
+                max(item.from_unit_id, item.to_unit_id),
+                str(item.relation),
+                -float(item.weight or 0.0),
+                item.id,
+            ),
+        ):
+            if edge.from_unit_id not in units_by_id or edge.to_unit_id not in units_by_id:
+                continue
+            if edge.from_unit_id == edge.to_unit_id:
+                continue
+
+            pair = tuple(sorted((edge.from_unit_id, edge.to_unit_id)))
+            group = edge_groups.setdefault(
+                pair,
+                {
+                    "unit_ids": list(pair),
+                    "labels": set(),
+                    "weight": float(edge.weight or 0.0),
+                },
+            )
+            group["labels"].add(str(edge.relation))
+            group["weight"] = max(group["weight"], float(edge.weight or 0.0))
+
+        eligible_pairs = {
+            pair: group
+            for pair, group in edge_groups.items()
+            if float(group["weight"]) >= minimum_weight
+        }
+        if len(eligible_pairs) < 3:
+            return []
+
+        motif_graph = nx.Graph()
+        motif_graph.add_nodes_from(units_by_id)
+        motif_graph.add_edges_from(eligible_pairs)
+
+        records = []
+        for unit_ids_tuple in combinations(sorted(units_by_id), 3):
+            a, b, c = unit_ids_tuple
+            pairs = [(a, b), (a, c), (b, c)]
+            if not all(motif_graph.has_edge(left, right) for left, right in pairs):
+                continue
+
+            unit_tags = [set(units_by_id[unit_id].tags or []) for unit_id in unit_ids_tuple]
+            shared_tags = sorted(set.intersection(*unit_tags)) if unit_tags else []
+            if required_tag is not None and required_tag not in shared_tags:
+                continue
+
+            tag_union = set.union(*unit_tags) if unit_tags else set()
+            shared_tag_overlap = (
+                len(shared_tags) / len(tag_union)
+                if tag_union
+                else 0.0
+            )
+            edge_weights = [float(eligible_pairs[pair]["weight"]) for pair in pairs]
+            score = round((sum(edge_weights) / len(edge_weights)) + shared_tag_overlap, 6)
+
+            relations = []
+            for pair in pairs:
+                edge_group = eligible_pairs[pair]
+                relations.append(
+                    {
+                        "unit_ids": list(pair),
+                        "labels": sorted(edge_group["labels"]),
+                        "weight": round(float(edge_group["weight"]), 6),
+                    }
+                )
+
+            records.append(
+                {
+                    "unit_ids": list(unit_ids_tuple),
+                    "titles": [units_by_id[unit_id].title for unit_id in unit_ids_tuple],
+                    "shared_tags": shared_tags,
+                    "relations": relations,
+                    "score": score,
+                }
+            )
+
+        records.sort(key=lambda record: (-record["score"], record["unit_ids"]))
+        return records[:capped_limit]
+
     def get_bridges(self, limit: int = 10) -> list[tuple[str, float]]:
         """Find bridge nodes (betweenness centrality)."""
         if not self.G.nodes:
