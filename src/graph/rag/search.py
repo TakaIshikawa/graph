@@ -28,6 +28,7 @@ DEFAULT_SEARCH_SNIPPET_LENGTH = 160
 MIN_SEARCH_SNIPPET_LENGTH = 1
 MAX_SEARCH_SNIPPET_LENGTH = 2000
 DEFAULT_MMR_LAMBDA = 0.5
+SEARCH_FACET_MODES = ("fulltext", "semantic", "hybrid")
 
 
 def _iso(value) -> str:
@@ -323,6 +324,75 @@ def _unit_matches_filters(
     return True
 
 
+def _sorted_count_dict(counts: dict[str, int]) -> dict[str, int]:
+    return dict(sorted(counts.items(), key=lambda item: (-item[1], item[0])))
+
+
+def _facet_counts(units: list[KnowledgeUnit]) -> dict[str, dict[str, int]]:
+    facets: dict[str, dict[str, int]] = {
+        "source_project": {},
+        "content_type": {},
+        "tags": {},
+        "source_entity_type": {},
+    }
+
+    for unit in units:
+        values = {
+            "source_project": str(unit.source_project),
+            "content_type": str(unit.content_type),
+            "source_entity_type": str(unit.source_entity_type),
+        }
+        for facet_name, value in values.items():
+            counts = facets[facet_name]
+            counts[value] = counts.get(value, 0) + 1
+        for tag in unit.tags:
+            counts = facets["tags"]
+            counts[tag] = counts.get(tag, 0) + 1
+
+    return {
+        facet_name: _sorted_count_dict(counts)
+        for facet_name, counts in facets.items()
+    }
+
+
+def _search_filter_payload(
+    *,
+    source_project: str | None = None,
+    content_type: str | None = None,
+    tag: str | None = None,
+    exclude_tag: str | None = None,
+    created_after: datetime | str | None = None,
+    created_before: datetime | str | None = None,
+    updated_after: datetime | str | None = None,
+    updated_before: datetime | str | None = None,
+    metadata_key: str | None = None,
+    metadata_value: object | None = None,
+) -> dict:
+    return {
+        key: value
+        for key, value in {
+            "source_project": source_project,
+            "content_type": content_type,
+            "tag": tag,
+            "exclude_tag": exclude_tag,
+            "created_after": created_after,
+            "created_before": created_before,
+            "updated_after": updated_after,
+            "updated_before": updated_before,
+            "metadata_key": metadata_key,
+            "metadata_value": metadata_value,
+        }.items()
+        if value is not None
+    }
+
+
+def _validate_search_facet_mode(mode: str) -> str:
+    if mode not in SEARCH_FACET_MODES:
+        valid = ", ".join(SEARCH_FACET_MODES)
+        raise ValueError(f"Unknown mode: {mode}. Use one of: {valid}.")
+    return mode
+
+
 def _similarity_seed_query(unit: KnowledgeUnit) -> str:
     parts = [unit.title, " ".join(unit.tags), _content_excerpt(unit.content)]
     return " ".join(part for part in parts if part).strip()
@@ -612,6 +682,207 @@ class RAGService:
 
         results = sort_search_results(results, sort)
         return results[:limit]
+
+    def search_facets(
+        self,
+        query: str,
+        *,
+        mode: str = "fulltext",
+        limit: int | None = None,
+        min_similarity: float = 0.5,
+        source_project: str | None = None,
+        content_type: str | None = None,
+        tag: str | None = None,
+        exclude_tag: str | None = None,
+        created_after: datetime | str | None = None,
+        created_before: datetime | str | None = None,
+        updated_after: datetime | str | None = None,
+        updated_before: datetime | str | None = None,
+        metadata_key: str | None = None,
+        metadata_value: object | None = None,
+    ) -> dict:
+        """Return deterministic facet counts for units matched by a search query."""
+        mode = _validate_search_facet_mode(mode)
+        validate_search_date_filters(
+            created_after=created_after,
+            created_before=created_before,
+            updated_after=updated_after,
+            updated_before=updated_before,
+        )
+        if tag and tag == exclude_tag:
+            raise ValueError("tag and exclude_tag cannot be identical.")
+        if (metadata_key is None) != (metadata_value is None):
+            raise ValueError("metadata_key and metadata_value must be supplied together.")
+
+        units = self._search_facet_units(
+            query,
+            mode=mode,
+            limit=limit,
+            min_similarity=min_similarity,
+            source_project=source_project,
+            content_type=content_type,
+            tag=tag,
+            exclude_tag=exclude_tag,
+            created_after=created_after,
+            created_before=created_before,
+            updated_after=updated_after,
+            updated_before=updated_before,
+            metadata_key=metadata_key,
+            metadata_value=metadata_value,
+        )
+        filters = _search_filter_payload(
+            source_project=source_project,
+            content_type=content_type,
+            tag=tag,
+            exclude_tag=exclude_tag,
+            created_after=created_after,
+            created_before=created_before,
+            updated_after=updated_after,
+            updated_before=updated_before,
+            metadata_key=metadata_key,
+            metadata_value=metadata_value,
+        )
+        payload = {
+            "query": query,
+            "mode": mode,
+            "total_matches": len(units),
+            "facets": _facet_counts(units),
+        }
+        if filters:
+            payload["filters"] = filters
+        return payload
+
+    def _search_facet_units(
+        self,
+        query: str,
+        *,
+        mode: str,
+        limit: int | None,
+        min_similarity: float,
+        source_project: str | None,
+        content_type: str | None,
+        tag: str | None,
+        exclude_tag: str | None,
+        created_after: datetime | str | None,
+        created_before: datetime | str | None,
+        updated_after: datetime | str | None,
+        updated_before: datetime | str | None,
+        metadata_key: str | None,
+        metadata_value: object | None,
+    ) -> list[KnowledgeUnit]:
+        if mode == "fulltext":
+            return self._fulltext_facet_units(
+                query,
+                limit=limit,
+                source_project=source_project,
+                content_type=content_type,
+                tag=tag,
+                exclude_tag=exclude_tag,
+                created_after=created_after,
+                created_before=created_before,
+                updated_after=updated_after,
+                updated_before=updated_before,
+                metadata_key=metadata_key,
+                metadata_value=metadata_value,
+            )
+
+        def fetch_results(fetch_limit: int) -> list[tuple[KnowledgeUnit, float]]:
+            if mode == "semantic":
+                return self.search(
+                    query,
+                    limit=fetch_limit,
+                    min_similarity=min_similarity,
+                    source_project=source_project,
+                    content_type=content_type,
+                    tag=tag,
+                    exclude_tag=exclude_tag,
+                    created_after=created_after,
+                    created_before=created_before,
+                    updated_after=updated_after,
+                    updated_before=updated_before,
+                    metadata_key=metadata_key,
+                    metadata_value=metadata_value,
+                )
+            return self.hybrid_search(
+                query,
+                limit=fetch_limit,
+                source_project=source_project,
+                content_type=content_type,
+                tag=tag,
+                exclude_tag=exclude_tag,
+                created_after=created_after,
+                created_before=created_before,
+                updated_after=updated_after,
+                updated_before=updated_before,
+                metadata_key=metadata_key,
+                metadata_value=metadata_value,
+            )
+
+        fetch_limit = 100 if limit is None else max(limit, 0)
+        if fetch_limit == 0:
+            return []
+        while True:
+            pairs = fetch_results(fetch_limit)
+            units = [unit for unit, _score in pairs]
+            if limit is not None:
+                return units[:limit]
+            if len(pairs) < fetch_limit:
+                return units
+            fetch_limit *= 2
+
+    def _fulltext_facet_units(
+        self,
+        query: str,
+        *,
+        limit: int | None,
+        source_project: str | None,
+        content_type: str | None,
+        tag: str | None,
+        exclude_tag: str | None,
+        created_after: datetime | str | None,
+        created_before: datetime | str | None,
+        updated_after: datetime | str | None,
+        updated_before: datetime | str | None,
+        metadata_key: str | None,
+        metadata_value: object | None,
+    ) -> list[KnowledgeUnit]:
+        fetch_limit = 100 if limit is None else max(limit, 0)
+        if fetch_limit == 0:
+            return []
+
+        while True:
+            rows = self.store.fts_search(
+                query,
+                limit=fetch_limit,
+                created_after=created_after,
+                created_before=created_before,
+                updated_after=updated_after,
+                updated_before=updated_before,
+                metadata_key=metadata_key,
+                metadata_value=metadata_value,
+            )
+            units = []
+            seen: set[str] = set()
+            for row in rows:
+                unit = self.store.get_unit(row["unit_id"])
+                if unit is None or unit.id in seen:
+                    continue
+                seen.add(unit.id)
+                if _unit_matches_filters(
+                    unit,
+                    source_project=source_project,
+                    content_type=content_type,
+                    tag=tag,
+                    exclude_tag=exclude_tag,
+                    metadata_key=metadata_key,
+                    metadata_value=metadata_value,
+                ):
+                    units.append(unit)
+                    if limit is not None and len(units) >= limit:
+                        return units
+            if len(rows) < fetch_limit:
+                return units
+            fetch_limit *= 2
 
     def similar_units(
         self,
