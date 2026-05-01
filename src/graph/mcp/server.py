@@ -250,6 +250,43 @@ def _sync_state_to_dict(
     }
 
 
+def _result_summary(result: dict) -> dict:
+    summary = {
+        "id": result.get("id"),
+        "title": result.get("title"),
+        "source_project": result.get("source_project"),
+        "source_id": result.get("source_id"),
+        "source_entity_type": result.get("source_entity_type"),
+        "content_type": result.get("content_type"),
+        "tags": result.get("tags", []),
+        "snippet": result.get("snippet"),
+        "created_at": result.get("created_at"),
+        "updated_at": result.get("updated_at"),
+    }
+    for optional_key in ("score", "confidence", "utility_score"):
+        if optional_key in result:
+            summary[optional_key] = result[optional_key]
+    return summary
+
+
+def _saved_query_metadata(saved: dict, *, requested_limit: int | None = None) -> dict:
+    metadata = {
+        "name": saved["name"],
+        "query": saved["query"],
+        "mode": saved["mode"],
+        "limit": saved["limit"],
+        "filters": saved["filters"],
+        "schedule": saved.get("schedule"),
+        "last_run_at": saved.get("last_run_at"),
+        "effective_limit": min(saved["limit"], requested_limit)
+        if requested_limit is not None
+        else saved["limit"],
+    }
+    if requested_limit is not None:
+        metadata["requested_limit"] = requested_limit
+    return metadata
+
+
 def _unit_to_dict(unit: KnowledgeUnit) -> dict:
     review_metadata = {}
     if unit.source_project == SourceProject.MAX and unit.source_entity_type == "buildable_unit":
@@ -620,11 +657,19 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="run_query",
-            description="Run a saved graph search recipe.",
+            description="Run a saved graph search recipe by name, optionally capping returned results.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "name": {"type": "string", "description": "Saved query name"},
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": (
+                            "Optional maximum number of results to return for this run; "
+                            "does not modify the saved query"
+                        ),
+                    },
                 },
                 "required": ["name"],
             },
@@ -2310,15 +2355,41 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                                 "name": arguments["name"],
                                 "found": False,
                                 "error": f"Saved query not found: {arguments['name']}",
+                                "error_code": "saved_query_not_found",
                             }
                         ),
                     )
                 ]
+            requested_limit = arguments.get("limit")
+            if requested_limit is not None:
+                try:
+                    requested_limit = int(requested_limit)
+                except (TypeError, ValueError):
+                    requested_limit = 0
+                if requested_limit < 1:
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps(
+                                {
+                                    "name": arguments["name"],
+                                    "found": True,
+                                    "error": "limit must be a positive integer",
+                                    "error_code": "invalid_limit",
+                                }
+                            ),
+                        )
+                    ]
+            effective_limit = (
+                min(saved["limit"], requested_limit)
+                if requested_limit is not None
+                else saved["limit"]
+            )
             try:
                 payload = _do_search(
                     store,
                     saved["query"],
-                    limit=saved["limit"],
+                    limit=effective_limit,
                     mode=saved["mode"],
                     filters=saved["filters"],
                 )
@@ -2333,6 +2404,13 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             payload["saved_query"] = saved["name"]
             payload["schedule"] = saved.get("schedule")
             payload["last_run_at"] = saved.get("last_run_at")
+            payload["saved_query_metadata"] = _saved_query_metadata(
+                saved,
+                requested_limit=requested_limit,
+            )
+            payload["result_summaries"] = [
+                _result_summary(result) for result in payload.get("results", [])
+            ]
             return [TextContent(type="text", text=json.dumps(payload))]
 
         elif name == "delete_query":

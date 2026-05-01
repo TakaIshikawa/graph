@@ -586,6 +586,9 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_pa
         "weekly",
         "monthly",
     ]
+    run_query_tool = next(tool for tool in tools if tool.name == "run_query")
+    assert run_query_tool.inputSchema["properties"]["limit"]["type"] == "integer"
+    assert run_query_tool.inputSchema["properties"]["limit"]["minimum"] == 1
 
     assert any(tool.name == "sync_status" for tool in tools)
 
@@ -1361,7 +1364,29 @@ def test_saved_query_tools_create_list_run_and_delete(tmp_path, monkeypatch):
     assert payload["last_run_at"] is not None
     assert datetime.fromisoformat(payload["last_run_at"]).tzinfo is not None
     assert payload["filters"] == saved["filters"]
+    assert payload["saved_query_metadata"]["name"] == "approved-solar"
+    assert payload["saved_query_metadata"]["limit"] == 5
+    assert payload["saved_query_metadata"]["effective_limit"] == 5
+    assert payload["saved_query_metadata"]["filters"] == saved["filters"]
     assert [result["title"] for result in payload["results"]] == ["Solar approved insight"]
+    assert payload["result_summaries"] == [
+        {
+            key: payload["results"][0][key]
+            for key in [
+                "id",
+                "title",
+                "source_project",
+                "source_id",
+                "source_entity_type",
+                "content_type",
+                "tags",
+                "snippet",
+                "created_at",
+                "updated_at",
+                "utility_score",
+            ]
+        }
+    ]
 
     search_response = asyncio.run(
         mcp_server.call_tool(
@@ -1402,7 +1427,71 @@ def test_saved_query_tools_create_list_run_and_delete(tmp_path, monkeypatch):
         "name": "approved-solar",
         "found": False,
         "error": "Saved query not found: approved-solar",
+        "error_code": "saved_query_not_found",
     }
+
+
+def test_run_saved_query_limit_override_caps_results_without_mutating_query(
+    tmp_path, monkeypatch
+):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    inserted = []
+    for day, source_id in [(24, "newest"), (23, "middle"), (22, "oldest")]:
+        inserted.append(
+            store.insert_unit(
+                KnowledgeUnit(
+                    source_project=SourceProject.MAX,
+                    source_id=source_id,
+                    source_entity_type="insight",
+                    title=f"Solar {source_id}",
+                    content="Solar storage planning",
+                    content_type=ContentType.INSIGHT,
+                    tags=["energy"],
+                    created_at=datetime.fromisoformat(
+                        f"2026-04-{day}T00:00:00+00:00"
+                    ),
+                )
+            )
+        )
+    for unit in inserted:
+        store.fts_index_unit(unit)
+    saved = store.save_query(
+        name="solar-review",
+        query="solar",
+        mode="fulltext",
+        limit=3,
+        filters={"source_project": "max", "sort": "created_at_desc"},
+    )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(
+        mcp_server.call_tool("run_query", {"name": "solar-review", "limit": 2})
+    )
+    payload = json.loads(response[0].text)
+
+    assert payload["saved_query"] == "solar-review"
+    assert payload["saved_query_metadata"]["limit"] == 3
+    assert payload["saved_query_metadata"]["requested_limit"] == 2
+    assert payload["saved_query_metadata"]["effective_limit"] == 2
+    assert [result["title"] for result in payload["results"]] == [
+        "Solar newest",
+        "Solar middle",
+    ]
+    assert [summary["title"] for summary in payload["result_summaries"]] == [
+        "Solar newest",
+        "Solar middle",
+    ]
+
+    check_store = Store(str(db_path))
+    try:
+        unchanged = check_store.get_saved_query("solar-review")
+    finally:
+        check_store.close()
+    assert unchanged["limit"] == saved["limit"]
+    assert unchanged["filters"] == saved["filters"]
 
 
 def test_saved_query_import_export_tools_round_trip(tmp_path, monkeypatch):
