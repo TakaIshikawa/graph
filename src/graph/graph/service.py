@@ -1788,19 +1788,49 @@ class GraphService:
         sorted_pr = sorted(ranks.items(), key=lambda x: x[1], reverse=True)
         return sorted_pr[:limit]
 
-    def get_pagerank(self, limit: int = 10, weight: str = "weight") -> list[dict]:
-        """Return ranked unit summaries using weighted PageRank."""
-        capped_limit = max(0, int(limit))
-        if capped_limit == 0:
-            return []
+    def pagerank_centrality(
+        self,
+        top_n: int | None = None,
+        relation_filter: str | EdgeRelation | list[str | EdgeRelation] | tuple[str | EdgeRelation, ...] | set[str | EdgeRelation] | None = None,
+        weight: str | bool | None = "weight",
+    ) -> list[dict]:
+        """Return PageRank centrality summaries for knowledge units.
+
+        When ``relation_filter`` is provided, all units remain in the graph but
+        only matching edge relations are considered for scores and degrees. Set
+        ``weight`` to ``None`` or ``False`` for unweighted PageRank.
+        """
+        if top_n is not None:
+            capped_limit = max(0, int(top_n))
+            if capped_limit == 0:
+                return []
+        else:
+            capped_limit = None
 
         if not self.G:
             self.rebuild()
         if not self.G.nodes:
             return []
 
-        nodes = list(self.G.nodes)
+        graph = nx.DiGraph()
+        graph.add_nodes_from(self.G.nodes(data=True))
+        relation_values: set[str] | None = None
+        if relation_filter is not None:
+            if isinstance(relation_filter, (str, EdgeRelation)):
+                relation_values = {str(relation_filter)}
+            else:
+                relation_values = {str(relation) for relation in relation_filter}
+
+        for from_id, to_id, data in self.G.edges(data=True):
+            if relation_values is not None and str(data.get("relation", "")) not in relation_values:
+                continue
+            graph.add_edge(from_id, to_id, **data)
+
+        nodes = list(graph.nodes)
         node_count = len(nodes)
+        weight_key = "weight" if weight is True else weight
+        use_weights = isinstance(weight_key, str) and bool(weight_key)
+
         if node_count == 1:
             scores = {nodes[0]: 1.0}
         else:
@@ -1808,48 +1838,89 @@ class GraphService:
             scores = {node: 1.0 / node_count for node in nodes}
 
             for _ in range(100):
-                sink_rank = sum(
-                    scores[node] for node in nodes if self.G.out_degree(node) == 0
-                )
+                sink_rank = 0.0
+                outgoing: dict[str, list[tuple[str, float]]] = {}
+
+                for node in nodes:
+                    weighted_targets = []
+                    for _, target, data in graph.out_edges(node, data=True):
+                        if use_weights:
+                            edge_weight = max(0.0, float(data.get(weight_key, 1.0)))
+                        else:
+                            edge_weight = 1.0
+                        weighted_targets.append((target, edge_weight))
+
+                    total_weight = sum(edge_weight for _, edge_weight in weighted_targets)
+                    if total_weight <= 0.0:
+                        sink_rank += scores[node]
+                    else:
+                        outgoing[node] = [
+                            (target, edge_weight / total_weight)
+                            for target, edge_weight in weighted_targets
+                        ]
+
                 base_rank = (1.0 - damping) / node_count
                 sink_share = damping * sink_rank / node_count
                 next_scores = {node: base_rank + sink_share for node in nodes}
 
-                for node in nodes:
-                    out_edges = list(self.G.out_edges(node, data=True))
-                    if not out_edges:
-                        continue
-                    total_weight = sum(
-                        float(data.get(weight, 1.0)) for _, _, data in out_edges
-                    )
-                    if total_weight <= 0:
-                        continue
+                for node, weighted_targets in outgoing.items():
                     share = damping * scores[node]
-                    for _, target, data in out_edges:
-                        edge_weight = float(data.get(weight, 1.0))
-                        next_scores[target] += share * (edge_weight / total_weight)
+                    for target, normalized_weight in weighted_targets:
+                        next_scores[target] += share * normalized_weight
 
                 delta = sum(abs(next_scores[node] - scores[node]) for node in nodes)
                 scores = next_scores
                 if delta < 1e-12:
                     break
 
-        ranked = sorted(
-            scores.items(),
-            key=lambda item: (
-                -item[1],
-                str(self.G.nodes[item[0]].get("title", "")).lower(),
-                item[0],
-            ),
-        )
+        ranked = sorted(scores.items(), key=lambda item: (-item[1], item[0]))
+        if capped_limit is not None:
+            ranked = ranked[:capped_limit]
 
         results = []
-        for unit_id, score in ranked[:capped_limit]:
-            unit = self.store.get_unit(unit_id)
-            summary = self._unit_summary_data(unit)
+        for unit_id, score in ranked:
+            summary = self._unit_summary_data(self.store.get_unit(unit_id))
             if summary is None:
-                continue
-            results.append({"unit": summary, "score": float(score)})
+                node_data = graph.nodes[unit_id]
+                summary = {
+                    "id": unit_id,
+                    "source_project": str(node_data.get("source_project", "")),
+                    "source_id": "",
+                    "source_entity_type": str(node_data.get("source_entity_type", "")),
+                    "title": str(node_data.get("title", "")),
+                    "content_type": str(node_data.get("content_type", "")),
+                }
+            results.append(
+                {
+                    **summary,
+                    "score": float(score),
+                    "in_degree": int(graph.in_degree(unit_id)),
+                    "out_degree": int(graph.out_degree(unit_id)),
+                }
+            )
+        return results
+
+    def get_pagerank(self, limit: int = 10, weight: str | bool | None = "weight") -> list[dict]:
+        """Return ranked unit summaries using weighted PageRank."""
+        capped_limit = max(0, int(limit))
+        if capped_limit == 0:
+            return []
+
+        ranked = sorted(
+            self.pagerank_centrality(weight=weight),
+            key=lambda item: (-item["score"], str(item["title"]).lower(), item["id"]),
+        )
+        results = []
+        for item in ranked[:capped_limit]:
+            summary = {
+                "id": item["id"],
+                "source_project": item["source_project"],
+                "source_id": item["source_id"],
+                "source_entity_type": item["source_entity_type"],
+                "title": item["title"],
+                "content_type": item["content_type"],
+            }
+            results.append({"unit": summary, "score": item["score"]})
         return results
 
     def analyze_k_core(
