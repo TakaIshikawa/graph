@@ -2877,6 +2877,8 @@ def test_backlinks_tool_returns_expanded_json_filters_and_missing_error(tmp_path
 
     tools = asyncio.run(mcp_server.list_tools())
     tool = next(tool for tool in tools if tool.name == "backlinks")
+    assert tool.inputSchema["properties"]["depth"]["minimum"] == 1
+    assert tool.inputSchema["properties"]["depth"]["maximum"] == 3
     assert tool.inputSchema["properties"]["direction"]["enum"] == [
         "incoming",
         "outgoing",
@@ -2891,6 +2893,18 @@ def test_backlinks_tool_returns_expanded_json_filters_and_missing_error(tmp_path
     )
     payload = json.loads(response[0].text)
     assert payload["center"]["title"] == "Node B"
+    assert payload["filters"] == {
+        "depth": 1,
+        "direction": "both",
+        "relation": None,
+        "source_project": None,
+        "content_type": None,
+        "tag": None,
+        "limit": 20,
+    }
+    assert [edge["source_unit"]["title"] for edge in payload["inbound_edges"]] == ["Node A"]
+    assert [edge["target_unit"]["title"] for edge in payload["outbound_edges"]] == ["Node C"]
+    assert {unit["title"] for unit in payload["neighboring_units"]} == {"Node A", "Node C"}
     assert {
         (link["direction"], link["relation"], link["unit"]["title"]) for link in payload["links"]
     } == {
@@ -2915,9 +2929,29 @@ def test_backlinks_tool_returns_expanded_json_filters_and_missing_error(tmp_path
     )
     filtered_payload = json.loads(filtered[0].text)
     assert [link["unit"]["title"] for link in filtered_payload["links"]] == ["Node C"]
+    assert filtered_payload["center"]["title"] == "Node B"
+    assert filtered_payload["inbound_edges"] == []
+    assert [edge["neighbor_unit"]["title"] for edge in filtered_payload["outbound_edges"]] == [
+        "Node C"
+    ]
+
+    default_response = asyncio.run(mcp_server.call_tool("backlinks", {"unit_id": b_id}))
+    default_payload = json.loads(default_response[0].text)
+    assert len(default_payload["inbound_edges"]) == 1
+    assert len(default_payload["outbound_edges"]) == 1
 
     missing = asyncio.run(mcp_server.call_tool("backlinks", {"unit_id": "missing"}))
     assert json.loads(missing[0].text)["error"] == "unit_not_found"
+
+    missing_id = asyncio.run(mcp_server.call_tool("backlinks", {}))
+    missing_id_payload = json.loads(missing_id[0].text)
+    assert missing_id_payload["error"] == "missing_unit_id"
+    assert missing_id_payload["center"] is None
+
+    invalid_depth = asyncio.run(mcp_server.call_tool("backlinks", {"unit_id": b_id, "depth": 0}))
+    invalid_depth_payload = json.loads(invalid_depth[0].text)
+    assert invalid_depth_payload["error"] == "invalid_depth"
+    assert invalid_depth_payload["inbound_edges"] == []
 
 
 def test_ego_tool_returns_cli_helper_payload_shape(tmp_path, monkeypatch):

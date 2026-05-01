@@ -66,7 +66,9 @@ from graph.cli.main import (
     _do_similar,
     _do_update_unit,
     _list_edges_payload,
+    _knowledge_edge_to_json,
     _search_filters_dict,
+    _unit_to_json,
     _validate_search_filters,
     DEFAULT_SEARCH_SNIPPET_LENGTH,
     SEARCH_SORTS,
@@ -247,6 +249,213 @@ def _sync_state_to_dict(
         "last_sync_at": last_sync_at,
         "last_source_id": state.last_source_id,
         "items_synced": state.items_synced,
+    }
+
+
+def _invalid_backlinks_payload(
+    *,
+    unit_id: str | None,
+    error: str,
+    message: str,
+    filters: dict | None = None,
+) -> dict:
+    return {
+        "unit_id": unit_id,
+        "center": None,
+        "inbound_edges": [],
+        "outbound_edges": [],
+        "neighboring_units": [],
+        "links": [],
+        "filters": filters or {},
+        "error": error,
+        "message": message,
+    }
+
+
+def _mcp_backlinks_payload(
+    store: Store,
+    *,
+    unit_id: str | None,
+    depth: int | str = 1,
+    direction: str = "both",
+    relation: str | None = None,
+    source_project: str | None = None,
+    content_type: str | None = None,
+    tag: str | None = None,
+    limit: int | str = 20,
+) -> dict:
+    """Return a structured MCP backlink payload around a center unit."""
+    try:
+        depth_value = int(depth)
+    except (TypeError, ValueError):
+        return _invalid_backlinks_payload(
+            unit_id=unit_id,
+            error="invalid_depth",
+            message="depth must be an integer between 1 and 3",
+        )
+    if depth_value < 1 or depth_value > 3:
+        return _invalid_backlinks_payload(
+            unit_id=unit_id,
+            error="invalid_depth",
+            message="depth must be an integer between 1 and 3",
+        )
+
+    try:
+        limit_value = int(limit)
+    except (TypeError, ValueError):
+        limit_value = 20
+    limit_value = max(0, limit_value)
+
+    filters = {
+        "depth": depth_value,
+        "direction": direction,
+        "relation": relation,
+        "source_project": source_project,
+        "content_type": content_type,
+        "tag": tag,
+        "limit": limit_value,
+    }
+    if not unit_id:
+        return _invalid_backlinks_payload(
+            unit_id=unit_id,
+            error="missing_unit_id",
+            message="unit_id is required",
+            filters=filters,
+        )
+    if direction not in ("incoming", "outgoing", "both"):
+        return _invalid_backlinks_payload(
+            unit_id=unit_id,
+            error="invalid_direction",
+            message="direction must be incoming, outgoing, or both",
+            filters=filters,
+        )
+
+    try:
+        payload = _backlinks_payload(
+            store,
+            unit_id,
+            direction=direction,
+            relation=relation,
+            source_project=source_project,
+            content_type=content_type,
+            tag=tag,
+            limit=limit_value,
+        )
+    except ValueError as exc:
+        return _invalid_backlinks_payload(
+            unit_id=unit_id,
+            error="invalid_filter",
+            message=str(exc),
+            filters=filters,
+        )
+
+    if payload.get("error"):
+        return {
+            **_invalid_backlinks_payload(
+                unit_id=unit_id,
+                error=payload["error"],
+                message=payload.get("message", f"Unit not found: {unit_id}"),
+                filters=filters,
+            ),
+            "direction": direction,
+            "relation": payload.get("relation"),
+            "source_project": payload.get("source_project"),
+            "content_type": payload.get("content_type"),
+            "tag": payload.get("tag"),
+            "limit": payload.get("limit"),
+        }
+
+    inbound_edges = []
+    outbound_edges = []
+    neighboring_units_by_id = {}
+    for link in payload["links"]:
+        edge_payload = {
+            "direction": link["direction"],
+            "relation": link["relation"],
+            "edge": link["edge"],
+            "source_unit": link["source_unit"],
+            "target_unit": link["target_unit"],
+            "neighbor_unit": link["unit"],
+        }
+        neighboring_units_by_id[link["unit"]["id"]] = link["unit"]
+        if link["direction"] == "incoming":
+            inbound_edges.append(edge_payload)
+        else:
+            outbound_edges.append(edge_payload)
+
+    if depth_value > 1 and limit_value > len(payload["links"]):
+        center = store.get_unit(unit_id)
+        seen_units = {unit_id, *neighboring_units_by_id}
+        frontier = set(neighboring_units_by_id)
+        remaining_edges = limit_value - len(payload["links"])
+        normalized_relation = payload.get("relation")
+        for _ in range(2, depth_value + 1):
+            next_frontier: set[str] = set()
+            for frontier_unit_id in sorted(frontier):
+                if remaining_edges <= 0:
+                    break
+                for edge in store.get_edges_for_unit(frontier_unit_id):
+                    if remaining_edges <= 0:
+                        break
+                    if normalized_relation is not None and str(edge.relation) != normalized_relation:
+                        continue
+                    neighbor_id = (
+                        edge.to_unit_id
+                        if edge.from_unit_id == frontier_unit_id
+                        else edge.from_unit_id
+                    )
+                    if neighbor_id in seen_units:
+                        continue
+                    neighbor = store.get_unit(neighbor_id)
+                    if neighbor is None:
+                        continue
+                    if source_project is not None and str(neighbor.source_project) != source_project:
+                        continue
+                    if content_type is not None and str(neighbor.content_type) != content_type:
+                        continue
+                    if tag is not None and tag not in neighbor.tags:
+                        continue
+                    neighbor_payload = _unit_to_json(neighbor, include_content=False)
+                    neighboring_units_by_id[neighbor_id] = neighbor_payload
+                    seen_units.add(neighbor_id)
+                    next_frontier.add(neighbor_id)
+                    edge_payload = {
+                        "direction": "outgoing" if edge.from_unit_id == frontier_unit_id else "incoming",
+                        "relation": str(edge.relation),
+                        "edge": _knowledge_edge_to_json(edge),
+                        "source_unit": _unit_to_json(
+                            store.get_unit(edge.from_unit_id) or center,
+                            include_content=False,
+                        ),
+                        "target_unit": _unit_to_json(
+                            store.get_unit(edge.to_unit_id) or center,
+                            include_content=False,
+                        ),
+                        "neighbor_unit": neighbor_payload,
+                    }
+                    if edge.to_unit_id == unit_id:
+                        inbound_edges.append(edge_payload)
+                    else:
+                        outbound_edges.append(edge_payload)
+                    remaining_edges -= 1
+            frontier = next_frontier
+            if not frontier or remaining_edges <= 0:
+                break
+
+    return {
+        "unit_id": unit_id,
+        "center": payload["center"],
+        "inbound_edges": inbound_edges,
+        "outbound_edges": outbound_edges,
+        "neighboring_units": list(neighboring_units_by_id.values()),
+        "links": payload["links"],
+        "filters": filters,
+        "direction": direction,
+        "relation": payload.get("relation"),
+        "source_project": payload.get("source_project"),
+        "content_type": payload.get("content_type"),
+        "tag": payload.get("tag"),
+        "limit": payload.get("limit"),
     }
 
 
@@ -727,15 +936,26 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="backlinks",
-            description="Return references for a knowledge unit with expanded source and target unit details.",
+            description=(
+                "Look up inbound and outbound graph relationships around a knowledge unit, "
+                "with neighboring unit summaries and applied filters."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "unit_id": {"type": "string", "description": "Knowledge unit ID"},
+                    "depth": {
+                        "type": "integer",
+                        "default": 1,
+                        "minimum": 1,
+                        "maximum": 3,
+                        "description": "Relationship traversal depth for neighboring units",
+                    },
                     "direction": {
                         "type": "string",
                         "enum": ["incoming", "outgoing", "both"],
-                        "default": "incoming",
+                        "default": "both",
+                        "description": "Optional edge direction filter",
                     },
                     "relation": {
                         "type": "string",
@@ -2477,25 +2697,11 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return [TextContent(type="text", text=json.dumps(payload, default=str))]
 
         elif name == "backlinks":
-            direction = arguments.get("direction", "incoming")
-            if direction not in ("incoming", "outgoing", "both"):
-                return [
-                    TextContent(
-                        type="text",
-                        text=json.dumps(
-                            {
-                                "center": None,
-                                "links": [],
-                                "error": "invalid_direction",
-                                "message": "direction must be incoming, outgoing, or both",
-                            }
-                        ),
-                    )
-                ]
-            payload = _backlinks_payload(
+            payload = _mcp_backlinks_payload(
                 store,
-                arguments["unit_id"],
-                direction=direction,
+                unit_id=arguments.get("unit_id"),
+                depth=arguments.get("depth", 1),
+                direction=arguments.get("direction", "both"),
                 relation=arguments.get("relation"),
                 source_project=arguments.get("source_project"),
                 content_type=arguments.get("content_type"),
