@@ -2567,6 +2567,117 @@ class GraphService:
             )
         ]
 
+    def analyze_assortativity(self, *, top_edge_limit: int = 10) -> dict:
+        """Report whether graph edges connect similar units by source, type, and tags."""
+        if not self.G:
+            self.rebuild()
+
+        edge_pairs = list(self.G.edges())
+        edge_count = len(edge_pairs)
+        unit_ids = sorted(self.G.nodes)
+        node_count = len(unit_ids)
+
+        def _safe_attribute_assortativity(attribute: str) -> float:
+            if edge_count == 0:
+                return 0.0
+
+            values_on_edges = []
+            all_same_endpoint_value = True
+            for left_id, right_id in edge_pairs:
+                left_value = str(self.G.nodes[left_id].get(attribute, ""))
+                right_value = str(self.G.nodes[right_id].get(attribute, ""))
+                values_on_edges.extend([left_value, right_value])
+                if left_value != right_value:
+                    all_same_endpoint_value = False
+
+            if all_same_endpoint_value:
+                return 1.0
+            if len(set(values_on_edges)) < 2:
+                return 0.0
+
+            try:
+                score = nx.attribute_assortativity_coefficient(self.G, attribute)
+            except (ZeroDivisionError, nx.NetworkXException):
+                return 0.0
+            return 0.0 if math.isnan(score) else float(score)
+
+        def _tag_set(unit_id: str) -> set[str]:
+            tags = self.G.nodes[unit_id].get("tags") or []
+            return {str(tag).strip().lower() for tag in tags if str(tag).strip()}
+
+        def _jaccard(left_id: str, right_id: str) -> float:
+            left_tags = _tag_set(left_id)
+            right_tags = _tag_set(right_id)
+            if not left_tags and not right_tags:
+                return 0.0
+            union = left_tags | right_tags
+            return len(left_tags & right_tags) / len(union) if union else 0.0
+
+        def _average_similarity(pairs: list[tuple[str, str]]) -> float:
+            if not pairs:
+                return 0.0
+            return sum(_jaccard(left_id, right_id) for left_id, right_id in pairs) / len(
+                pairs
+            )
+
+        connected_pairs = {
+            tuple(sorted((left_id, right_id))) for left_id, right_id in edge_pairs
+        }
+        baseline_pairs = [
+            (left_id, right_id)
+            for left_id, right_id in combinations(unit_ids, 2)
+            if tuple(sorted((left_id, right_id))) not in connected_pairs
+        ]
+        baseline_pairs.sort(
+            key=lambda pair: (
+                hashlib.sha256(f"{pair[0]}\0{pair[1]}".encode("utf-8")).hexdigest(),
+                pair[0],
+                pair[1],
+            )
+        )
+        baseline_sample = baseline_pairs[:edge_count] if edge_count else []
+
+        cross_source_edges = []
+        for from_id, to_id, data in self.G.edges(data=True):
+            from_node = self.G.nodes[from_id]
+            to_node = self.G.nodes[to_id]
+            from_source = str(from_node.get("source_project", ""))
+            to_source = str(to_node.get("source_project", ""))
+            if from_source == to_source:
+                continue
+            cross_source_edges.append(
+                {
+                    "from_unit_id": from_id,
+                    "from_title": str(from_node.get("title", "")),
+                    "from_source_project": from_source,
+                    "to_unit_id": to_id,
+                    "to_title": str(to_node.get("title", "")),
+                    "to_source_project": to_source,
+                    "relation": str(data.get("relation", "")),
+                    "weight": float(data.get("weight", 1.0) or 0.0),
+                }
+            )
+
+        cross_source_edges.sort(
+            key=lambda item: (
+                -item["weight"],
+                item["from_title"].lower(),
+                item["to_title"].lower(),
+                item["from_unit_id"],
+                item["to_unit_id"],
+            )
+        )
+
+        return {
+            "node_count": node_count,
+            "edge_count": edge_count,
+            "source_project_assortativity": _safe_attribute_assortativity("source_project"),
+            "content_type_assortativity": _safe_attribute_assortativity("content_type"),
+            "tag_similarity": _average_similarity(edge_pairs),
+            "baseline_tag_similarity": _average_similarity(baseline_sample),
+            "top_cross_source_edges": cross_source_edges[: max(0, int(top_edge_limit))],
+        }
+
     def analyze_source_coverage(self) -> dict:
         """Summarize graph coverage by source project and entity type."""
         units = self.store.get_all_units(limit=1000000000)
