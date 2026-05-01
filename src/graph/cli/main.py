@@ -63,6 +63,7 @@ SUPPORTED_SYNC_PROJECTS = [
     "ical",
     "ipynb",
     "bibtex",
+    "csl_json",
     "ris",
     "git",
 ]
@@ -76,6 +77,7 @@ def _get_adapter_for_project(name: str):
     from graph.adapters.bibtex import BibtexAdapter
     from graph.adapters.bookmarks import BookmarksAdapter
     from graph.adapters.csv_adapter import CsvAdapter
+    from graph.adapters.csl_json import CslJsonAdapter
     from graph.adapters.email import EmailAdapter
     from graph.adapters.feed import FeedAdapter
     from graph.adapters.forty_two import FortyTwoAdapter
@@ -121,6 +123,7 @@ def _get_adapter_for_project(name: str):
         "ical": lambda: ICalAdapter(path=settings.ical_path),
         "ipynb": lambda: IpynbAdapter(root_path=settings.ipynb_root),
         "bibtex": lambda: BibtexAdapter(path=settings.bibtex_path),
+        "csl_json": lambda: CslJsonAdapter(path=settings.csl_json_path),
         "ris": lambda: RisAdapter(path=settings.ris_path),
         "git": lambda: GitAdapter(repos=settings.git_repos),
     }
@@ -2308,6 +2311,7 @@ def _do_ingest(
             "ical",
             "ipynb",
             "bibtex",
+            "csl_json",
         ]
         if project == "all"
         else [project]

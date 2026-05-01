@@ -17,6 +17,7 @@ import yaml
 from graph.adapters.bibtex import BibtexAdapter
 from graph.adapters.bookmarks import BookmarksAdapter
 from graph.adapters.csv_adapter import CsvAdapter
+from graph.adapters.csl_json import CslJsonAdapter
 from graph.adapters.email import EmailAdapter
 from graph.adapters.feed import FeedAdapter
 from graph.adapters.forty_two import FortyTwoAdapter
@@ -1205,6 +1206,135 @@ class TestBibtexAdapter:
         assert missing.units == []
 
 
+class TestCslJsonAdapter:
+    def test_ingest_csl_json_array_with_metadata(self, tmp_path):
+        refs = tmp_path / "refs.json"
+        refs.write_text(
+            json.dumps(
+                [
+                    {
+                        "id": "smith-2024-graph",
+                        "type": "article-journal",
+                        "title": "Semantic Personal Graphs",
+                        "author": [
+                            {"family": "Smith", "given": "Ada"},
+                            {"literal": "Knowledge Lab"},
+                        ],
+                        "issued": {"date-parts": [[2024, 5, 3]]},
+                        "container-title": "Journal of Knowledge Systems",
+                        "publisher": "Example Press",
+                        "abstract": "A study of personal semantic graphs.",
+                        "keyword": "graphs, knowledge, graphs",
+                        "DOI": "https://doi.org/10.1000/example",
+                        "URL": "https://example.com/paper",
+                    },
+                    {
+                        "type": "paper-conference",
+                        "title": "Agent Evaluation",
+                        "author": [{"family": "Lee", "given": "Robin"}],
+                        "issued": {"literal": "Spring 2025"},
+                        "categories": ["agents", "evaluation"],
+                    },
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        result = CslJsonAdapter(path=str(refs)).ingest()
+
+        assert [unit.source_id for unit in result.units] == [
+            "smith-2024-graph",
+            "refs.json:1:2f61929a518a9ddf1a113131",
+        ]
+        first = result.units[0]
+        assert first.source_project == "csl_json"
+        assert first.source_entity_type == "csl_json_item"
+        assert first.title == "Semantic Personal Graphs"
+        assert first.tags == ["graphs", "knowledge", "article-journal"]
+        assert "Authors: Smith, Ada; Knowledge Lab" in first.content
+        assert "Issued: 2024-05-03" in first.content
+        assert "Venue: Journal of Knowledge Systems" in first.content
+        assert "Abstract: A study of personal semantic graphs." in first.content
+        assert "DOI: 10.1000/example" in first.content
+        assert first.metadata == {
+            "csl_type": "article-journal",
+            "doi": "10.1000/example",
+            "url": "https://example.com/paper",
+            "issued": "2024-05-03",
+            "authors": ["Smith, Ada", "Knowledge Lab"],
+            "publisher": "Example Press",
+            "container_title": "Journal of Knowledge Systems",
+            "source_file": "refs.json",
+        }
+        assert first.created_at == datetime(2024, 5, 3, tzinfo=timezone.utc)
+        assert result.units[1].metadata["issued"] == "Spring 2025"
+        assert result.edges == []
+
+    def test_ingest_single_csl_json_object(self, tmp_path):
+        ref = tmp_path / "single.json"
+        ref.write_text(
+            json.dumps(
+                {
+                    "id": "doe-2026",
+                    "type": "book",
+                    "title": "Single Bibliography Item",
+                    "publisher": "Example Press",
+                    "issued": {"date-parts": [[2026]]},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = CslJsonAdapter(path=str(ref)).ingest()
+
+        assert [unit.title for unit in result.units] == ["Single Bibliography Item"]
+        assert result.units[0].source_id == "doe-2026"
+        assert result.units[0].metadata["publisher"] == "Example Press"
+
+    def test_ingest_directory_recursively_includes_only_json_files_deterministically(self, tmp_path):
+        root = tmp_path / "library"
+        nested = root / "nested"
+        nested.mkdir(parents=True)
+        (root / "root.json").write_text(
+            json.dumps({"id": "root", "type": "book", "title": "Root Book"}),
+            encoding="utf-8",
+        )
+        (nested / "more.JSON").write_text(
+            json.dumps({"id": "nested", "type": "article", "title": "Nested Ref"}),
+            encoding="utf-8",
+        )
+        (nested / "ignore.txt").write_text(
+            json.dumps({"id": "ignored", "title": "Ignored"}),
+            encoding="utf-8",
+        )
+
+        result = CslJsonAdapter(path=str(root)).ingest()
+
+        assert [unit.metadata["source_file"] for unit in result.units] == [
+            "nested/more.JSON",
+            "root.json",
+        ]
+        assert [unit.source_id for unit in result.units] == ["nested", "root"]
+
+    def test_malformed_json_missing_path_and_entity_filter_are_skipped(self, tmp_path):
+        bad = tmp_path / "bad.json"
+        bad.write_text("{not valid json", encoding="utf-8")
+        good = tmp_path / "good.json"
+        good.write_text(
+            json.dumps({"id": "good", "type": "article", "title": "Good"}),
+            encoding="utf-8",
+        )
+
+        with pytest.warns(UserWarning, match="Skipped 1 malformed CSL-JSON input"):
+            result = CslJsonAdapter(path=str(tmp_path)).ingest()
+        filtered = CslJsonAdapter(path=str(good)).ingest(entity_types=["ris_record"])
+        missing = CslJsonAdapter(path=str(tmp_path / "missing")).ingest()
+
+        assert [unit.source_id for unit in result.units] == ["good"]
+        assert filtered.units == []
+        assert missing.units == []
+
+
 class TestRisAdapter:
     def test_ingest_ris_file_with_multiple_records_and_metadata(self, tmp_path):
         ris = tmp_path / "refs.ris"
@@ -2288,6 +2418,7 @@ class TestRegistry:
             "ical",
             "ipynb",
             "bibtex",
+            "csl_json",
             "ris",
             "git",
         }
@@ -2331,6 +2462,9 @@ class TestRegistry:
 
         bibtex_adapter = get_adapter("bibtex", path="/tmp/refs.bib")
         assert bibtex_adapter.name == "bibtex"
+
+        csl_json_adapter = get_adapter("csl_json", path="/tmp/refs.json")
+        assert csl_json_adapter.name == "csl_json"
 
         ris_adapter = get_adapter("ris", path="/tmp/refs.ris")
         assert ris_adapter.name == "ris"

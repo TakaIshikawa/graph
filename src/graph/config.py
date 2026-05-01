@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     ical_path: str = ""
     ipynb_root: str = ""
     bibtex_path: str = ""
+    csl_json_path: str = ""
     ris_path: str = ""
     email_path: str = ""
     git_repos: str = ""
