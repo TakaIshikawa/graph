@@ -9,6 +9,7 @@ import hashlib
 from itertools import combinations
 import html
 import json
+import math
 from pathlib import Path
 import re
 import shutil
@@ -1851,6 +1852,87 @@ class GraphService:
             )
         )
         return records[:capped_limit]
+
+    def suggest_missing_links(
+        self,
+        limit: int = 20,
+        min_score: float = 0.0,
+    ) -> list[dict]:
+        """Recommend missing unit links from common-neighbor topology signals."""
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
+            raise ValueError("limit must be a non-negative integer.")
+        if limit == 0:
+            return []
+
+        try:
+            minimum_score = float(min_score)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("min_score must be a non-negative number.") from exc
+        if not math.isfinite(minimum_score) or minimum_score < 0:
+            raise ValueError("min_score must be a non-negative number.")
+
+        units_by_id = {unit.id: unit for unit in self.store.get_all_units(limit=1000000000)}
+        if len(units_by_id) < 3:
+            return []
+
+        projection = nx.Graph()
+        projection.add_nodes_from(units_by_id)
+        existing_pairs: set[tuple[str, str]] = set()
+        for edge in self.store.get_all_edges():
+            if edge.from_unit_id not in units_by_id or edge.to_unit_id not in units_by_id:
+                continue
+            if edge.from_unit_id == edge.to_unit_id:
+                continue
+
+            pair = tuple(sorted((edge.from_unit_id, edge.to_unit_id)))
+            existing_pairs.add(pair)
+            projection.add_edge(*pair)
+
+        candidates = []
+        for left_id, right_id in combinations(sorted(units_by_id), 2):
+            pair = (left_id, right_id)
+            if pair in existing_pairs:
+                continue
+
+            common_neighbor_ids = sorted(nx.common_neighbors(projection, left_id, right_id))
+            common_neighbor_count = len(common_neighbor_ids)
+            if common_neighbor_count == 0:
+                continue
+
+            union_neighbors = set(projection.neighbors(left_id)) | set(
+                projection.neighbors(right_id)
+            )
+            jaccard_bonus = (
+                common_neighbor_count / len(union_neighbors) if union_neighbors else 0.0
+            )
+            score = round(float(common_neighbor_count) + jaccard_bonus, 6)
+            if score < minimum_score:
+                continue
+
+            candidates.append(
+                {
+                    "unit_ids": [left_id, right_id],
+                    "units": [
+                        self._unit_export_data(units_by_id[left_id]),
+                        self._unit_export_data(units_by_id[right_id]),
+                    ],
+                    "score": score,
+                    "common_neighbor_count": common_neighbor_count,
+                    "common_neighbors": [
+                        self._unit_export_data(units_by_id[neighbor_id])
+                        for neighbor_id in common_neighbor_ids
+                    ],
+                }
+            )
+
+        candidates.sort(
+            key=lambda candidate: (
+                -candidate["score"],
+                -candidate["common_neighbor_count"],
+                candidate["unit_ids"],
+            )
+        )
+        return candidates[:limit]
 
     def get_bridges(self, limit: int = 10) -> list[tuple[str, float]]:
         """Find bridge nodes (betweenness centrality)."""
