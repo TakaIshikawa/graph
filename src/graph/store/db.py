@@ -1475,6 +1475,66 @@ class Store:
             ],
         }
 
+    def collection_diff(
+        self,
+        left_name: str,
+        right_name: str,
+        *,
+        limit: int | None = None,
+    ) -> dict:
+        left = self.get_collection(left_name)
+        right = self.get_collection(right_name)
+        missing = [
+            name
+            for name, collection in ((left_name, left), (right_name, right))
+            if collection is None
+        ]
+        if missing:
+            raise ValueError(f"Collection not found: {', '.join(missing)}")
+
+        def member_ids(collection_id: str) -> set[str]:
+            rows = self.conn.execute(
+                "SELECT unit_id FROM collection_units WHERE collection_id = ?",
+                (collection_id,),
+            ).fetchall()
+            return {row["unit_id"] for row in rows}
+
+        def member_summaries(unit_ids: set[str]) -> list[dict]:
+            if not unit_ids:
+                return []
+            placeholders = ", ".join("?" for _ in unit_ids)
+            params: list[object] = sorted(unit_ids)
+            query = f"""SELECT *
+                        FROM knowledge_units
+                        WHERE id IN ({placeholders})
+                        ORDER BY lower(title), title, id"""
+            if limit is not None:
+                query += " LIMIT ?"
+                params.append(max(0, limit))
+            rows = self.conn.execute(query, params).fetchall()
+            return [self.collection_unit_summary(_row_to_unit(row)) for row in rows]
+
+        left_ids = member_ids(left["id"])
+        right_ids = member_ids(right["id"])
+        left_only_ids = left_ids - right_ids
+        right_only_ids = right_ids - left_ids
+        both_ids = left_ids & right_ids
+
+        return {
+            "left": left,
+            "right": right,
+            "left_only": member_summaries(left_only_ids),
+            "right_only": member_summaries(right_only_ids),
+            "both": member_summaries(both_ids),
+            "counts": {
+                "left": len(left_ids),
+                "right": len(right_ids),
+                "left_only": len(left_only_ids),
+                "right_only": len(right_only_ids),
+                "both": len(both_ids),
+            },
+        }
+
     def collection_unit_summary(self, unit: KnowledgeUnit) -> dict:
         return {
             "id": unit.id,

@@ -36,6 +36,8 @@ maintenance_app = typer.Typer(help="Run graph maintenance operations")
 app.add_typer(maintenance_app, name="maintenance")
 tags_app = typer.Typer(help="Explore and mutate graph tags", invoke_without_command=True)
 app.add_typer(tags_app, name="tags")
+collections_app = typer.Typer(help="Compare and inspect named collections")
+app.add_typer(collections_app, name="collections")
 
 SUPPORTED_SYNC_PROJECTS = [
     "forty_two",
@@ -806,6 +808,16 @@ def _do_collection_remove(store: Store, name: str, unit_id: str) -> dict:
 
 def _do_collection_members(store: Store, name: str, *, limit: int | None = None) -> dict:
     return store.list_collection_members(name, limit=limit)
+
+
+def _do_collection_diff(
+    store: Store,
+    left_name: str,
+    right_name: str,
+    *,
+    limit: int | None = None,
+) -> dict:
+    return store.collection_diff(left_name, right_name, limit=limit)
 
 
 def _do_rename_tag(
@@ -3583,6 +3595,38 @@ def collection_members(
         return
     for member in payload["members"]:
         typer.echo(f"{member['added_at']} {member['id']} [{member['source_project']}] {member['title']}")
+
+
+@collections_app.command(name="diff")
+def collections_diff(
+    left_name: str = typer.Argument(..., help="Left collection name"),
+    right_name: str = typer.Argument(..., help="Right collection name"),
+    limit: int | None = typer.Option(
+        None,
+        "--limit",
+        "-n",
+        min=0,
+        help="Maximum members per diff group",
+    ),
+) -> None:
+    """Compare memberships in two named collections."""
+    store = _get_store()
+    try:
+        payload = _do_collection_diff(store, left_name, right_name, limit=limit)
+    except ValueError as exc:
+        _json_echo(
+            {
+                "left_name": left_name,
+                "right_name": right_name,
+                "error": "collection_not_found",
+                "message": str(exc),
+            }
+        )
+        raise typer.Exit(code=1) from exc
+    finally:
+        store.close()
+
+    _json_echo(payload)
 
 
 @app.command(name="delete-unit")

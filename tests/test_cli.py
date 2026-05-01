@@ -615,6 +615,71 @@ def test_collection_cli_create_add_members_remove_and_delete(monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_collections_diff_cli_emits_json_and_fails_for_missing_collection(monkeypatch):
+    store = _make_store()
+    left_only = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="collection-diff-cli-left",
+            source_entity_type="manual",
+            title="Left only",
+            content="Left content",
+        )
+    )
+    shared = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="collection-diff-cli-shared",
+            source_entity_type="manual",
+            title="Shared",
+            content="Shared content",
+        )
+    )
+    right_only = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="collection-diff-cli-right",
+            source_entity_type="manual",
+            title="Right only",
+            content="Right content",
+        )
+    )
+    store.create_collection("left")
+    store.create_collection("right")
+    store.add_unit_to_collection("left", left_only.id)
+    store.add_unit_to_collection("left", shared.id)
+    store.add_unit_to_collection("right", shared.id)
+    store.add_unit_to_collection("right", right_only.id)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(app, ["collections", "diff", "left", "right", "--limit", "1"])
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["counts"] == {
+            "both": 1,
+            "left": 2,
+            "left_only": 1,
+            "right": 2,
+            "right_only": 1,
+        }
+        assert payload["left_only"][0]["id"] == left_only.id
+        assert payload["right_only"][0]["id"] == right_only.id
+        assert payload["both"][0]["id"] == shared.id
+
+        missing = runner.invoke(app, ["collections", "diff", "left", "missing"])
+
+        assert missing.exit_code == 1
+        missing_payload = json.loads(missing.output)
+        assert missing_payload["error"] == "collection_not_found"
+        assert missing_payload["message"] == "Collection not found: missing"
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_collection_export_import_commands_round_trip_and_strict(monkeypatch, tmp_path):
     source = _make_store()
     unit = source.insert_unit(

@@ -1868,6 +1868,88 @@ class TestCollections:
         assert store.list_collection_members("missing")["error"] == "collection_not_found"
         assert store.delete_collection("missing")["deleted"] is False
 
+    def test_collection_diff_returns_deterministic_groups_counts_and_missing_errors(
+        self, store: Store
+    ):
+        alpha = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="collection-diff-alpha",
+                source_entity_type="insight",
+                title="Alpha",
+                content="Alpha content",
+            )
+        )
+        beta = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="collection-diff-beta",
+                source_entity_type="insight",
+                title="Beta",
+                content="Beta content",
+            )
+        )
+        gamma = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="collection-diff-gamma",
+                source_entity_type="insight",
+                title="Gamma",
+                content="Gamma content",
+            )
+        )
+        delta = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="collection-diff-delta",
+                source_entity_type="insight",
+                title="Delta",
+                content="Delta content",
+            )
+        )
+        epsilon = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="collection-diff-epsilon",
+                source_entity_type="insight",
+                title="Epsilon",
+                content="Epsilon content",
+            )
+        )
+        zeta = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="collection-diff-zeta",
+                source_entity_type="insight",
+                title="Zeta",
+                content="Zeta content",
+            )
+        )
+
+        store.create_collection("left")
+        store.create_collection("right")
+        for unit in (gamma, beta, alpha, delta):
+            store.add_unit_to_collection("left", unit.id)
+        for unit in (epsilon, delta, gamma, zeta):
+            store.add_unit_to_collection("right", unit.id)
+
+        diff = store.collection_diff("left", "right", limit=1)
+
+        assert diff["counts"] == {
+            "left": 4,
+            "right": 4,
+            "left_only": 2,
+            "right_only": 2,
+            "both": 2,
+        }
+        assert [unit["title"] for unit in diff["left_only"]] == ["Alpha"]
+        assert [unit["title"] for unit in diff["right_only"]] == ["Epsilon"]
+        assert [unit["title"] for unit in diff["both"]] == ["Delta"]
+        assert set(diff["left_only"][0]) == set(store.collection_unit_summary(alpha))
+
+        with pytest.raises(ValueError, match="Collection not found: missing"):
+            store.collection_diff("left", "missing")
+
     def test_collection_export_import_round_trip_and_idempotent_reimport(self, tmp_path):
         source = Store(str(tmp_path / "source.db"))
         target = Store(str(tmp_path / "target.db"))
