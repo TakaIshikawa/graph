@@ -9,6 +9,7 @@ from graph.adapters.csv_adapter import CsvAdapter
 from graph.adapters.email import EmailAdapter
 from graph.adapters.feed import FeedAdapter
 from graph.adapters.forty_two import FortyTwoAdapter
+from graph.adapters.git_adapter import GitAdapter
 from graph.adapters.html import HtmlAdapter
 from graph.adapters.ical import ICalAdapter
 from graph.adapters.ipynb import IpynbAdapter
@@ -47,6 +48,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "ipynb": IpynbAdapter,
     "bibtex": BibtexAdapter,
     "ris": RisAdapter,
+    "git": GitAdapter,
 }
 
 

@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     bibtex_path: str = ""
     ris_path: str = ""
     email_path: str = ""
+    git_repos: str = ""
     obsidian_vault_path: str = "/Users/taka/ObsidianVaults/note"
 
     embedding_provider: str = "voyage"
