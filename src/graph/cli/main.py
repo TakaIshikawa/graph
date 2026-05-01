@@ -58,6 +58,7 @@ SUPPORTED_SYNC_PROJECTS = [
     "org",
     "pdf",
     "email",
+    "enex",
     "text",
     "html",
     "ical",
@@ -80,6 +81,7 @@ def _get_adapter_for_project(name: str):
     from graph.adapters.csv_adapter import CsvAdapter
     from graph.adapters.csl_json import CslJsonAdapter
     from graph.adapters.email import EmailAdapter
+    from graph.adapters.enex import EnexAdapter
     from graph.adapters.feed import FeedAdapter
     from graph.adapters.forty_two import FortyTwoAdapter
     from graph.adapters.git_adapter import GitAdapter
@@ -120,6 +122,7 @@ def _get_adapter_for_project(name: str):
         "org": lambda: OrgAdapter(root_path=settings.org_root),
         "pdf": lambda: PdfAdapter(path=settings.pdf_path),
         "email": lambda: EmailAdapter(path=settings.email_path),
+        "enex": lambda: EnexAdapter(path=settings.enex_path),
         "text": lambda: TextAdapter(root_path=settings.text_root),
         "html": lambda: HtmlAdapter(root_path=settings.html_root),
         "ical": lambda: ICalAdapter(path=settings.ical_path),
@@ -2309,6 +2312,7 @@ def _do_ingest(
             "opml",
             "org",
             "email",
+            "enex",
             "text",
             "html",
             "ical",

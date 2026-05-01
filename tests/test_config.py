@@ -25,6 +25,7 @@ def test_source_path_settings_honor_environment_overrides(monkeypatch):
         "GRAPH_ICAL_PATH": "/tmp/calendar.ics",
         "GRAPH_IPYNB_ROOT": "/tmp/notebooks",
         "GRAPH_EMAIL_PATH": "/tmp/mail",
+        "GRAPH_ENEX_PATH": "/tmp/evernote",
         "GRAPH_OBSIDIAN_VAULT_PATH": "/tmp/obsidian",
     }
     for key, value in overrides.items():
@@ -50,4 +51,5 @@ def test_source_path_settings_honor_environment_overrides(monkeypatch):
     assert loaded.ical_path == "/tmp/calendar.ics"
     assert loaded.ipynb_root == "/tmp/notebooks"
     assert loaded.email_path == "/tmp/mail"
+    assert loaded.enex_path == "/tmp/evernote"
     assert loaded.obsidian_vault_path == "/tmp/obsidian"

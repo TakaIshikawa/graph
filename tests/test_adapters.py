@@ -19,6 +19,7 @@ from graph.adapters.bookmarks import BookmarksAdapter
 from graph.adapters.csv_adapter import CsvAdapter
 from graph.adapters.csl_json import CslJsonAdapter
 from graph.adapters.email import EmailAdapter
+from graph.adapters.enex import EnexAdapter
 from graph.adapters.feed import FeedAdapter
 from graph.adapters.forty_two import FortyTwoAdapter
 from graph.adapters.git_adapter import GitAdapter
@@ -1092,6 +1093,108 @@ Content-Type: text/html; charset=utf-8
         assert result.units[0].title == "untitled"
         assert filtered.units == []
         assert [unit.source_id for unit in synced.units] == ["untitled.eml"]
+        assert missing.units == []
+
+
+class TestEnexAdapter:
+    def test_ingest_enex_notes_with_clean_content_and_metadata(self, tmp_path):
+        enex = tmp_path / "evernote.enex"
+        enex.write_text(
+            """<?xml version="1.0" encoding="UTF-8"?>
+<en-export>
+  <note>
+    <title>Project Note</title>
+    <content><![CDATA[<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE en-note SYSTEM "http://xml.evernote.com/pub/enml2.dtd">
+<en-note><div>Hello <b>Evernote</b></div><div>Second line<br/>after break</div><en-media hash="abc" type="image/png"/></en-note>]]></content>
+    <created>20240102T030405Z</created>
+    <updated>20240203T040506Z</updated>
+    <tag>research</tag>
+    <tag>research</tag>
+    <tag>archive</tag>
+    <guid>note-guid-1</guid>
+    <note-attributes>
+      <author>Ada Lovelace</author>
+      <source-url>https://example.com/source</source-url>
+      <latitude>35.681236</latitude>
+      <longitude>139.767125</longitude>
+      <altitude>12.5</altitude>
+    </note-attributes>
+  </note>
+</en-export>
+""",
+            encoding="utf-8",
+        )
+
+        result = EnexAdapter(path=str(enex)).ingest()
+
+        assert len(result.units) == 1
+        unit = result.units[0]
+        assert unit.source_project == "enex"
+        assert unit.source_id == "note-guid-1"
+        assert unit.source_entity_type == "note"
+        assert unit.title == "Project Note"
+        assert unit.content == "Hello Evernote\nSecond line\nafter break"
+        assert unit.tags == ["research", "archive"]
+        assert unit.created_at == datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+        assert unit.updated_at == datetime(2024, 2, 3, 4, 5, 6, tzinfo=timezone.utc)
+        assert unit.metadata == {
+            "source_path": "evernote.enex",
+            "guid": "note-guid-1",
+            "author": "Ada Lovelace",
+            "source_url": "https://example.com/source",
+            "latitude": "35.681236",
+            "longitude": "139.767125",
+            "altitude": "12.5",
+        }
+        assert result.edges == []
+
+    def test_ingest_directory_recursively_and_filters_notes(self, tmp_path):
+        root = tmp_path / "exports"
+        nested = root / "nested"
+        nested.mkdir(parents=True)
+        (root / "old.enex").write_text(
+            """<?xml version="1.0" encoding="UTF-8"?>
+<en-export>
+  <note>
+    <title>Old</title>
+    <content><![CDATA[<en-note><div>Old note</div></en-note>]]></content>
+    <created>20230101T000000Z</created>
+    <updated>20240101T000000Z</updated>
+    <guid>old-guid</guid>
+  </note>
+</en-export>
+""",
+            encoding="utf-8",
+        )
+        (nested / "new.ENEX").write_text(
+            """<?xml version="1.0" encoding="UTF-8"?>
+<en-export>
+  <note>
+    <title>No Updated</title>
+    <content><![CDATA[<en-note><p>Created timestamp is used.</p></en-note>]]></content>
+    <created>20260425T120000Z</created>
+  </note>
+</en-export>
+""",
+            encoding="utf-8",
+        )
+        (nested / "ignore.txt").write_text("<en-export />\n", encoding="utf-8")
+
+        result = EnexAdapter(path=str(root)).ingest(
+            since=SyncState(
+                source_project="enex",
+                source_entity_type="note",
+                last_sync_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+            )
+        )
+        filtered = EnexAdapter(path=str(root)).ingest(entity_types=["text_document"])
+        missing = EnexAdapter(path=str(tmp_path / "missing")).ingest()
+
+        assert [unit.source_id for unit in result.units] == ["nested/new.ENEX:1"]
+        assert result.units[0].metadata["source_path"] == "nested/new.ENEX"
+        assert result.units[0].updated_at == datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+        assert filtered.units == []
         assert missing.units == []
 
 
@@ -2523,6 +2626,7 @@ class TestRegistry:
             "org",
             "pdf",
             "email",
+            "enex",
             "text",
             "html",
             "ical",
@@ -2555,6 +2659,9 @@ class TestRegistry:
 
         email_adapter = get_adapter("email", path="/tmp/mail")
         assert email_adapter.name == "email"
+
+        enex_adapter = get_adapter("enex", path="/tmp/evernote.enex")
+        assert enex_adapter.name == "enex"
 
         text_adapter = get_adapter("text", root_path="/tmp/text")
         assert text_adapter.name == "text"
