@@ -319,6 +319,32 @@ def _do_ego_metrics(store: Store, unit_id: str, *, depth: int = 1) -> dict:
     return gs.get_ego_metrics(unit_id, depth=depth)
 
 
+def _do_cycles(
+    store: Store,
+    *,
+    relation: str | None = None,
+    max_length: int | None = None,
+    limit: int = 20,
+) -> dict:
+    from graph.graph.service import GraphService
+
+    if relation is not None:
+        relation = EdgeRelation(relation).value
+    gs = GraphService(store)
+    cycles = gs.find_cycles(
+        relation=relation,
+        max_length=max_length,
+        limit=limit,
+    )
+    return {
+        "cycles": cycles,
+        "count": len(cycles),
+        "relation": relation,
+        "max_length": max_length,
+        "limit": max(0, limit),
+    }
+
+
 def _do_export_report(store: Store, path: str | Path, *, limit: int = 10) -> dict:
     from graph.graph.service import GraphService
 
@@ -5489,6 +5515,60 @@ def ego(
             typer.echo(f"    {relation}: {count}")
     else:
         typer.echo("    None")
+
+    store.close()
+
+
+@app.command(name="cycles")
+def cycles(
+    relation: str | None = typer.Option(None, "--relation", help="Filter by edge relation"),
+    max_length: int | None = typer.Option(
+        None,
+        "--max-length",
+        min=1,
+        help="Exclude cycles longer than this many units",
+    ),
+    limit: int = typer.Option(20, "--limit", "-n", min=0, help="Maximum cycles to return"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Report directed cycles among knowledge units."""
+    store = _get_store()
+    try:
+        payload = _do_cycles(
+            store,
+            relation=relation,
+            max_length=max_length,
+            limit=limit,
+        )
+    except ValueError as exc:
+        if json_output:
+            _json_echo({"cycles": [], "error": str(exc)})
+            store.close()
+            return
+        typer.echo(f"Error: {exc}")
+        store.close()
+        return
+
+    if json_output:
+        _json_echo(payload)
+        store.close()
+        return
+
+    if not payload["cycles"]:
+        typer.echo("No directed cycles found.")
+        store.close()
+        return
+
+    typer.echo(f"Directed cycles ({payload['count']}):")
+    for index, cycle in enumerate(payload["cycles"], 1):
+        units = cycle["units"]
+        edges = cycle["edges"]
+        parts = []
+        for unit, edge in zip(units, edges, strict=False):
+            parts.append(f"[{unit['source_project']}] {unit['title']}")
+            parts.append(f"--{edge['relation']}-->")
+        parts.append(f"[{units[0]['source_project']}] {units[0]['title']}")
+        typer.echo(f"  {index}. length {cycle['length']}: {' '.join(parts)}")
 
     store.close()
 

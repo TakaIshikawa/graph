@@ -589,6 +589,174 @@ class TestGraphService:
         assert disconnected["path"] == []
         assert disconnected["edges"] == []
 
+    def test_find_cycles_returns_bounded_directed_cycles_with_stable_order(
+        self, store: Store
+    ):
+        alpha = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="cycle-alpha",
+                source_entity_type="insight",
+                title="Alpha",
+                content="Alpha note",
+                metadata={"rank": 1},
+            )
+        )
+        beta = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="cycle-beta",
+                source_entity_type="insight",
+                title="Beta",
+                content="Beta note",
+            )
+        )
+        gamma = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="cycle-gamma",
+                source_entity_type="insight",
+                title="Gamma",
+                content="Gamma note",
+            )
+        )
+        delta = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="cycle-delta",
+                source_entity_type="insight",
+                title="Delta",
+                content="Delta note",
+            )
+        )
+
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=alpha.id,
+                to_unit_id=beta.id,
+                relation=EdgeRelation.BUILDS_ON,
+                metadata={"step": "alpha-beta"},
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=beta.id,
+                to_unit_id=alpha.id,
+                relation=EdgeRelation.BUILDS_ON,
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=alpha.id,
+                to_unit_id=gamma.id,
+                relation=EdgeRelation.REFERENCES,
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=gamma.id,
+                to_unit_id=delta.id,
+                relation=EdgeRelation.REFERENCES,
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=delta.id,
+                to_unit_id=alpha.id,
+                relation=EdgeRelation.REFERENCES,
+            )
+        )
+
+        cycles = GraphService(store).find_cycles(limit=10)
+
+        assert [[unit["title"] for unit in cycle["units"]] for cycle in cycles] == [
+            ["Alpha", "Beta"],
+            ["Alpha", "Gamma", "Delta"],
+        ]
+        assert [cycle["length"] for cycle in cycles] == [2, 3]
+        assert cycles[0]["unit_ids"] == [alpha.id, beta.id]
+        assert cycles[0]["edges"][0]["metadata"] == {"step": "alpha-beta"}
+        assert cycles[0]["units"][0]["metadata"] == {"rank": 1}
+
+    def test_find_cycles_filters_relation_max_length_and_limit(self, store: Store):
+        alpha = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="cycle-alpha",
+                source_entity_type="insight",
+                title="Alpha",
+                content="Alpha note",
+            )
+        )
+        beta = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="cycle-beta",
+                source_entity_type="insight",
+                title="Beta",
+                content="Beta note",
+            )
+        )
+        gamma = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="cycle-gamma",
+                source_entity_type="insight",
+                title="Gamma",
+                content="Gamma note",
+            )
+        )
+
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=alpha.id,
+                to_unit_id=beta.id,
+                relation=EdgeRelation.BUILDS_ON,
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=beta.id,
+                to_unit_id=alpha.id,
+                relation=EdgeRelation.BUILDS_ON,
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=alpha.id,
+                to_unit_id=gamma.id,
+                relation=EdgeRelation.REFERENCES,
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=gamma.id,
+                to_unit_id=beta.id,
+                relation=EdgeRelation.REFERENCES,
+            )
+        )
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=beta.id,
+                to_unit_id=alpha.id,
+                relation=EdgeRelation.REFERENCES,
+            )
+        )
+
+        service = GraphService(store)
+
+        assert [
+            [unit["title"] for unit in cycle["units"]]
+            for cycle in service.find_cycles(relation="references", limit=10)
+        ] == [["Alpha", "Gamma", "Beta"]]
+        assert service.find_cycles(max_length=2, limit=10)[0]["length"] == 2
+        assert all(
+            cycle["length"] <= 2
+            for cycle in service.find_cycles(max_length=2, limit=10)
+        )
+        assert len(service.find_cycles(limit=1)) == 1
+        assert service.find_cycles(limit=0) == []
+
     def test_get_backlinks_returns_incoming_source_summaries_with_filters(
         self, store: Store
     ):

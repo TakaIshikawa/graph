@@ -129,6 +129,84 @@ def _populate_graph(store: Store) -> tuple[str, str, str, str]:
     return a.id, b.id, c.id, d.id
 
 
+def _populate_cycle_graph(store: Store) -> tuple[str, str, str, str]:
+    alpha = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="cycle-alpha",
+            source_entity_type="insight",
+            title="Alpha",
+            content="Alpha note",
+            metadata={"rank": 1},
+        )
+    )
+    beta = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="cycle-beta",
+            source_entity_type="insight",
+            title="Beta",
+            content="Beta note",
+        )
+    )
+    gamma = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="cycle-gamma",
+            source_entity_type="insight",
+            title="Gamma",
+            content="Gamma note",
+        )
+    )
+    delta = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="cycle-delta",
+            source_entity_type="insight",
+            title="Delta",
+            content="Delta note",
+        )
+    )
+
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=alpha.id,
+            to_unit_id=beta.id,
+            relation=EdgeRelation.BUILDS_ON,
+            metadata={"step": "alpha-beta"},
+        )
+    )
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=beta.id,
+            to_unit_id=alpha.id,
+            relation=EdgeRelation.BUILDS_ON,
+        )
+    )
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=alpha.id,
+            to_unit_id=gamma.id,
+            relation=EdgeRelation.REFERENCES,
+        )
+    )
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=gamma.id,
+            to_unit_id=delta.id,
+            relation=EdgeRelation.REFERENCES,
+        )
+    )
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=delta.id,
+            to_unit_id=alpha.id,
+            relation=EdgeRelation.REFERENCES,
+        )
+    )
+    return alpha.id, beta.id, gamma.id, delta.id
+
+
 def _populate_search_graph(store: Store) -> None:
     from graph.rag.search import RAGService
 
@@ -2288,6 +2366,66 @@ def test_shortest_path_command_emits_json_with_edge_relations(monkeypatch):
         assert [unit["title"] for unit in payload["path"]] == ["Node A", "Node B", "Node C"]
         assert [edge["relation"] for edge in payload["edges"]] == ["builds_on", "inspires"]
         assert payload["edges"][0]["from_unit_id"] == a_id
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_cycles_command_prints_directed_cycle_paths(monkeypatch):
+    store = _make_store()
+    _populate_cycle_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(app, ["cycles"])
+
+        assert result.exit_code == 0
+        assert "Directed cycles (2):" in result.output
+        assert (
+            "length 2: [max] Alpha --builds_on--> "
+            "[max] Beta --builds_on--> [max] Alpha"
+        ) in result.output
+        assert (
+            "length 3: [max] Alpha --references--> [max] Gamma "
+            "--references--> [max] Delta --references--> [max] Alpha"
+        ) in result.output
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_cycles_command_filters_relation_max_length_and_json_metadata(monkeypatch):
+    store = _make_store()
+    alpha_id, beta_id, _, _ = _populate_cycle_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        filtered = runner.invoke(
+            app,
+            ["cycles", "--relation", "references", "--max-length", "2", "--json"],
+        )
+        assert filtered.exit_code == 0
+        filtered_payload = json.loads(filtered.output)
+        assert filtered_payload["cycles"] == []
+        assert filtered_payload["relation"] == "references"
+        assert filtered_payload["max_length"] == 2
+
+        result = runner.invoke(app, ["cycles", "--limit", "1", "--json"])
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["count"] == 1
+        assert payload["cycles"][0]["length"] == 2
+        assert payload["cycles"][0]["unit_ids"] == [alpha_id, beta_id]
+        assert [unit["title"] for unit in payload["cycles"][0]["units"]] == [
+            "Alpha",
+            "Beta",
+        ]
+        assert payload["cycles"][0]["units"][0]["metadata"] == {"rank": 1}
+        assert payload["cycles"][0]["edges"][0]["relation"] == "builds_on"
+        assert payload["cycles"][0]["edges"][0]["metadata"] == {"step": "alpha-beta"}
     finally:
         store.close()
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]

@@ -1271,6 +1271,95 @@ class GraphService:
             "edges": edges,
         }
 
+    def find_cycles(
+        self,
+        *,
+        relation: str | None = None,
+        max_length: int | None = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        """Find bounded directed simple cycles with deterministic ordering."""
+        capped_limit = max(0, limit)
+        if capped_limit == 0:
+            return []
+
+        if max_length is not None:
+            max_length = max(1, max_length)
+
+        units_by_id = {unit.id: unit for unit in self.store.get_all_units()}
+        cycle_graph = nx.DiGraph()
+        cycle_graph.add_nodes_from(units_by_id)
+
+        edges_by_pair: dict[tuple[str, str], KnowledgeEdge] = {}
+        for edge in sorted(
+            self.store.get_all_edges(),
+            key=lambda item: (
+                item.from_unit_id,
+                item.to_unit_id,
+                str(item.relation),
+                str(item.source),
+                item.id,
+            ),
+        ):
+            if edge.from_unit_id not in units_by_id or edge.to_unit_id not in units_by_id:
+                continue
+            if relation is not None and str(edge.relation) != relation:
+                continue
+            pair = (edge.from_unit_id, edge.to_unit_id)
+            if pair in edges_by_pair:
+                continue
+            edges_by_pair[pair] = edge
+            cycle_graph.add_edge(edge.from_unit_id, edge.to_unit_id)
+
+        def unit_sort_key(unit_id: str) -> tuple[str, str]:
+            unit = units_by_id[unit_id]
+            return (unit.title.lower(), unit_id)
+
+        def canonical_cycle(cycle: list[str]) -> list[str]:
+            rotations = [
+                cycle[index:] + cycle[:index]
+                for index in range(len(cycle))
+            ]
+            return min(
+                rotations,
+                key=lambda rotation: tuple(
+                    unit_sort_key(unit_id) for unit_id in rotation
+                ),
+            )
+
+        unique_cycles: dict[tuple[str, ...], list[str]] = {}
+        for cycle in nx.simple_cycles(cycle_graph):
+            if max_length is not None and len(cycle) > max_length:
+                continue
+            canonical = canonical_cycle(list(cycle))
+            unique_cycles[tuple(canonical)] = canonical
+
+        ordered_cycles = sorted(
+            unique_cycles.values(),
+            key=lambda cycle: (len(cycle), tuple(unit_sort_key(unit_id) for unit_id in cycle)),
+        )
+
+        results = []
+        for cycle in ordered_cycles[:capped_limit]:
+            cycle_edges = []
+            for from_unit_id, to_unit_id in zip(cycle, cycle[1:] + cycle[:1], strict=False):
+                edge = edges_by_pair[(from_unit_id, to_unit_id)]
+                cycle_edges.append(self._edge_export_data(edge))
+            results.append(
+                {
+                    "length": len(cycle),
+                    "unit_ids": cycle,
+                    "units": [
+                        self._unit_export_data(units_by_id[unit_id])
+                        for unit_id in cycle
+                    ],
+                    "edges": cycle_edges,
+                    "relations": [edge["relation"] for edge in cycle_edges],
+                }
+            )
+
+        return results
+
     def get_clusters(self, min_size: int = 3) -> list[list[str]]:
         """Find connected components / clusters."""
         if not self.G.nodes:
