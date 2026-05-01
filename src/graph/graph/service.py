@@ -200,6 +200,15 @@ def _mermaid_label(value: object) -> str:
     return html.escape(text, quote=True).replace("|", "&#124;")
 
 
+def _markdown_inline(value: object) -> str:
+    return " ".join(str(value).split())
+
+
+def _markdown_heading(value: object) -> str:
+    text = _markdown_inline(value)
+    return text.replace("#", r"\#") or "Untitled"
+
+
 def _metadata_strings(value: object, path: str = "metadata") -> list[tuple[str, str]]:
     if isinstance(value, str):
         return [(path, value)]
@@ -587,6 +596,126 @@ class GraphService:
         if unit_id is not None:
             stats["depth"] = depth_used
             stats["center_unit_id"] = unit_id
+        return stats
+
+    def export_link_markdown(
+        self,
+        path: str | Path,
+        *,
+        unit_id: str | None = None,
+        depth: int = 1,
+    ) -> dict:
+        """Write a deterministic Markdown report of incoming and outgoing links."""
+        output_path = Path(path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if unit_id is not None:
+            payload = self.build_neighborhood_export(unit_id, depth=depth)
+            center_unit_id = unit_id
+            units = list(payload["units"])
+            edges = list(payload["edges"])
+            mode = "neighborhood"
+            depth_used = payload["depth"]
+        else:
+            center_unit_id = None
+            all_units = sorted(
+                self.store.get_all_units(limit=1000000000),
+                key=lambda unit: unit.id,
+            )
+            units = [self._unit_export_data(unit) for unit in all_units]
+            unit_ids = {unit["id"] for unit in units}
+            edges = [
+                self._edge_export_data(edge)
+                for edge in self.store.get_all_edges()
+                if edge.from_unit_id in unit_ids and edge.to_unit_id in unit_ids
+            ]
+            mode = "whole_graph"
+            depth_used = None
+
+        units = sorted(
+            units,
+            key=lambda unit: (_markdown_inline(unit["title"]).lower(), unit["id"]),
+        )
+        units_by_id = {unit["id"]: unit for unit in units}
+        edges = sorted(
+            edges,
+            key=lambda edge: (
+                _markdown_inline(edge["relation"]).lower(),
+                _markdown_inline(units_by_id[edge["from_unit_id"]]["title"]).lower(),
+                edge["from_unit_id"],
+                _markdown_inline(units_by_id[edge["to_unit_id"]]["title"]).lower(),
+                edge["to_unit_id"],
+                edge["id"],
+            ),
+        )
+
+        outgoing_edges: dict[str, list[dict]] = {unit["id"]: [] for unit in units}
+        incoming_edges: dict[str, list[dict]] = {unit["id"]: [] for unit in units}
+        for edge in edges:
+            outgoing_edges[edge["from_unit_id"]].append(edge)
+            incoming_edges[edge["to_unit_id"]].append(edge)
+
+        def edge_line(edge: dict, linked_unit_id: str, arrow: str) -> str:
+            linked_unit = units_by_id[linked_unit_id]
+            relation = _markdown_inline(edge["relation"])
+            linked_title = _markdown_inline(linked_unit["title"])
+            return f"- `{relation}` {arrow} {linked_title} (`{linked_unit_id}`)"
+
+        lines = [
+            "# Graph Link Report",
+            "",
+            f"- Scope: {mode}",
+            f"- Units exported: {len(units)}",
+            f"- Edges exported: {len(edges)}",
+        ]
+        if unit_id is not None:
+            lines.extend(
+                [
+                    f"- Center unit ID: `{unit_id}`",
+                    f"- Depth: {depth_used}",
+                ]
+            )
+        lines.append("")
+
+        for unit in units:
+            unit_id_value = unit["id"]
+            lines.extend(
+                [
+                    f"## {_markdown_heading(unit['title'])}",
+                    "",
+                    f"- Unit ID: `{unit_id_value}`",
+                    f"- Source: {unit['source_project']}/{unit['source_entity_type']}",
+                    "",
+                    "### Outgoing",
+                    "",
+                ]
+            )
+            if outgoing_edges[unit_id_value]:
+                lines.extend(
+                    edge_line(edge, edge["to_unit_id"], "to")
+                    for edge in outgoing_edges[unit_id_value]
+                )
+            else:
+                lines.append("- _None._")
+            lines.extend(["", "### Incoming", ""])
+            if incoming_edges[unit_id_value]:
+                lines.extend(
+                    edge_line(edge, edge["from_unit_id"], "from")
+                    for edge in incoming_edges[unit_id_value]
+                )
+            else:
+                lines.append("- _None._")
+            lines.append("")
+
+        output_path.write_text("\n".join(lines), encoding="utf-8")
+        stats = {
+            "path": str(output_path),
+            "units_exported": len(units),
+            "edges_exported": len(edges),
+        }
+        if center_unit_id is not None:
+            stats["depth"] = depth_used
+            stats["center_unit_id"] = center_unit_id
         return stats
 
     def export_turtle(

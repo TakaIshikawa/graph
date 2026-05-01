@@ -250,6 +250,20 @@ def _do_export_cytoscape(
     return gs.export_cytoscape(path, unit_id=unit_id, depth=depth, limit=limit)
 
 
+def _do_export_link_markdown(
+    store: Store,
+    path: str | Path,
+    *,
+    unit_id: str | None = None,
+    depth: int = 1,
+) -> dict:
+    from graph.graph.service import GraphService
+
+    gs = GraphService(store)
+    gs.rebuild()
+    return gs.export_link_markdown(path, unit_id=unit_id, depth=depth)
+
+
 def _do_export_turtle(
     store: Store, path: str | Path, *, base_uri: str = "https://graph.local/unit/"
 ) -> dict:
@@ -2394,6 +2408,44 @@ def export_cytoscape(
         f"Exported {stats['node_count']} nodes and "
         f"{stats['edge_count']} edges to {stats['path']} "
         f"({stats['mode']}){capped}"
+    )
+
+
+@app.command(name="export-link-markdown")
+def export_link_markdown(
+    path: Path = typer.Argument(..., help="Destination Markdown report path"),
+    unit_id: str | None = typer.Option(
+        None,
+        "--unit-id",
+        help="Center unit ID for a focused neighborhood export",
+    ),
+    depth: int = typer.Option(1, "--depth", "-d", help="Traversal depth (1-3; max 3)"),
+) -> None:
+    """Export a human-readable Markdown report of graph links."""
+    store = _get_store()
+    try:
+        stats = _do_export_link_markdown(
+            store,
+            path,
+            unit_id=unit_id,
+            depth=depth,
+        )
+    except ValueError as exc:
+        store.close()
+        try:
+            payload = json.loads(str(exc))
+        except json.JSONDecodeError:
+            payload = {"error": "export_failed", "message": str(exc)}
+        _json_echo(payload)
+        raise typer.Exit(code=1) from exc
+    store.close()
+
+    _json_echo(
+        {
+            "path": stats["path"],
+            "units_exported": stats["units_exported"],
+            "edges_exported": stats["edges_exported"],
+        }
     )
 
 

@@ -937,6 +937,57 @@ class TestGraphService:
             "inspires",
         }
 
+    def test_export_link_markdown_writes_stable_incoming_and_outgoing_sections(
+        self, populated_store: Store, tmp_path
+    ):
+        a = populated_store.get_unit_by_source("forty_two", "a", "knowledge_node")
+        b = populated_store.get_unit_by_source("forty_two", "b", "knowledge_node")
+        c = populated_store.get_unit_by_source("max", "c", "insight")
+        d = populated_store.get_unit_by_source("presence", "d", "knowledge_item")
+        output_path = tmp_path / "links.md"
+
+        stats = GraphService(populated_store).export_link_markdown(output_path)
+        text = output_path.read_text()
+
+        assert stats == {
+            "path": str(output_path),
+            "units_exported": 4,
+            "edges_exported": 2,
+        }
+        assert text.startswith("# Graph Link Report\n\n- Scope: whole_graph\n")
+        assert text.index("## Node A") < text.index("## Node B") < text.index("## Node C")
+        assert f"- `builds_on` to Node B (`{b.id}`)" in text
+        assert f"- `builds_on` from Node A (`{a.id}`)" in text
+        assert f"- `inspires` to Node C (`{c.id}`)" in text
+        assert f"- `inspires` from Node B (`{b.id}`)" in text
+        assert f"- Unit ID: `{d.id}`" in text
+
+    def test_export_link_markdown_neighborhood_respects_unit_and_depth(
+        self, populated_store: Store, tmp_path
+    ):
+        a = populated_store.get_unit_by_source("forty_two", "a", "knowledge_node")
+        b = populated_store.get_unit_by_source("forty_two", "b", "knowledge_node")
+        c = populated_store.get_unit_by_source("max", "c", "insight")
+        d = populated_store.get_unit_by_source("presence", "d", "knowledge_item")
+        output_path = tmp_path / "links-neighborhood.md"
+
+        gs = GraphService(populated_store)
+        gs.rebuild()
+        stats = gs.export_link_markdown(output_path, unit_id=a.id, depth=1)
+        text = output_path.read_text()
+
+        assert stats == {
+            "path": str(output_path),
+            "units_exported": 2,
+            "edges_exported": 1,
+            "depth": 1,
+            "center_unit_id": a.id,
+        }
+        assert f"- Center unit ID: `{a.id}`" in text
+        assert f"- `builds_on` to Node B (`{b.id}`)" in text
+        assert c.id not in text
+        assert d.id not in text
+
     def test_export_neighborhood_writes_capped_local_json(
         self, populated_store: Store, tmp_path
     ):

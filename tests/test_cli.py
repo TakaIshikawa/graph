@@ -1151,6 +1151,47 @@ def test_export_cytoscape_command_writes_json_and_emits_json_stats(tmp_path, mon
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_export_link_markdown_command_writes_report_and_emits_json_stats(
+    tmp_path, monkeypatch
+):
+    store = _make_store()
+    a_id, b_id, c_id, d_id = _populate_graph(store)
+    export_path = tmp_path / "links.md"
+
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    result = runner.invoke(
+        app,
+        [
+            "export-link-markdown",
+            str(export_path),
+            "--unit-id",
+            a_id,
+            "--depth",
+            "1",
+        ],
+    )
+
+    try:
+        assert result.exit_code == 0
+        stats = json.loads(result.output)
+        assert stats == {
+            "path": str(export_path),
+            "units_exported": 2,
+            "edges_exported": 1,
+        }
+        text = export_path.read_text()
+        assert text.startswith("# Graph Link Report\n")
+        assert f"- Center unit ID: `{a_id}`" in text
+        assert f"- `builds_on` to Node B (`{b_id}`)" in text
+        assert f"- `builds_on` from Node A (`{a_id}`)" in text
+        assert c_id not in text
+        assert d_id not in text
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_export_neighborhood_command_writes_local_json_and_caps_depth(tmp_path, monkeypatch):
     store = _make_store()
     a_id, _, _, d_id = _populate_graph(store)
