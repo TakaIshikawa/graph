@@ -1899,7 +1899,7 @@ class GraphService:
             "filters": {"source_project": source_project},
         }
 
-    def extract_references(
+    def infer_reference_edges(
         self,
         *,
         dry_run: bool = False,
@@ -2041,10 +2041,12 @@ class GraphService:
         return {
             "dry_run": dry_run,
             "inserted": inserted,
+            "created": inserted,
             "would_insert": would_insert,
             "skipped_self": skipped_self,
             "skipped_duplicates": skipped_duplicates,
             "skipped_ambiguous": skipped_ambiguous,
+            "skipped": skipped_self + skipped_duplicates + skipped_ambiguous,
             "source_units_scanned": len(source_units),
             "known_urls": len(url_targets),
             "limit": limit,
@@ -2055,6 +2057,22 @@ class GraphService:
             "candidates": candidates,
             "inserted_edges": inserted_edges,
         }
+
+    def extract_references(
+        self,
+        *,
+        dry_run: bool = False,
+        source_project: str | None = None,
+        content_type: str | None = None,
+        limit: int | None = None,
+    ) -> dict:
+        """Backward-compatible alias for URL-based REFERENCES edge inference."""
+        return self.infer_reference_edges(
+            dry_run=dry_run,
+            source_project=source_project,
+            content_type=content_type,
+            limit=limit,
+        )
 
     def rename_tag(
         self,

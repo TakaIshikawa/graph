@@ -2760,7 +2760,7 @@ def _do_extract_references(
 ) -> dict:
     from graph.graph.service import GraphService
 
-    return GraphService(store).extract_references(
+    return GraphService(store).infer_reference_edges(
         dry_run=dry_run,
         source_project=source_project,
         content_type=content_type,
@@ -3010,6 +3010,32 @@ def extract_references(
         )
 
     store.close()
+
+
+@edges_app.command(name="infer-references")
+def edges_infer_references(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview REFERENCES edges without writing"),
+    source_project: str | None = typer.Option(
+        None,
+        "--source-project",
+        "--project",
+        "-p",
+        help="Filter scanned source units by source project",
+    ),
+    content_type: str | None = typer.Option(
+        None, "--content-type", help="Filter scanned source units by content type"
+    ),
+    limit: int | None = typer.Option(None, "--limit", "-n", help="Max source units to scan"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Infer REFERENCES edges from URL mentions in content and metadata."""
+    extract_references(
+        dry_run=dry_run,
+        source_project=source_project,
+        content_type=content_type,
+        limit=limit,
+        json_output=json_output,
+    )
 
 
 @app.command(name="create-unit")

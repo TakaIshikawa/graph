@@ -2932,7 +2932,8 @@ def test_extract_references_command_dry_run_and_normal_mode(monkeypatch):
         dry_result = runner.invoke(
             app,
             [
-                "extract-references",
+                "edges",
+                "infer-references",
                 "--source-project",
                 "max",
                 "--content-type",
@@ -2945,6 +2946,7 @@ def test_extract_references_command_dry_run_and_normal_mode(monkeypatch):
         assert dry_result.exit_code == 0
         dry_payload = json.loads(dry_result.output)
         assert dry_payload["inserted"] == 0
+        assert dry_payload["created"] == 0
         assert dry_payload["would_insert"] == 1
         assert dry_payload["candidates"][0]["status"] == "would_insert"
         assert dry_payload["candidates"][0]["to_unit_id"] == target.id
@@ -2953,7 +2955,8 @@ def test_extract_references_command_dry_run_and_normal_mode(monkeypatch):
         result = runner.invoke(
             app,
             [
-                "extract-references",
+                "edges",
+                "infer-references",
                 "--source-project",
                 "max",
                 "--content-type",
@@ -2965,6 +2968,7 @@ def test_extract_references_command_dry_run_and_normal_mode(monkeypatch):
         assert result.exit_code == 0
         payload = json.loads(result.output)
         assert payload["inserted"] == 1
+        assert payload["created"] == 1
         edges = store.get_all_edges()
         assert len(edges) == 1
         assert edges[0].from_unit_id == source.id

@@ -1627,17 +1627,19 @@ class TestGraphService:
             )
         )
 
-        dry_run = GraphService(store).extract_references(
+        dry_run = GraphService(store).infer_reference_edges(
             dry_run=True,
             source_project="max",
             content_type="insight",
         )
 
         assert dry_run["inserted"] == 0
+        assert dry_run["created"] == 0
         assert dry_run["would_insert"] == 1
         assert dry_run["skipped_duplicates"] == 1
         assert dry_run["skipped_self"] == 1
         assert dry_run["skipped_ambiguous"] == 1
+        assert dry_run["skipped"] == 3
         assert dry_run["filters"] == {"source_project": "max", "content_type": "insight"}
         assert len(store.get_all_edges()) == 1
         statuses = {candidate["status"] for candidate in dry_run["candidates"]}
@@ -1648,15 +1650,17 @@ class TestGraphService:
             "skipped_ambiguous_match",
         } <= statuses
 
-        result = GraphService(store).extract_references(
+        result = GraphService(store).infer_reference_edges(
             source_project="max",
             content_type="insight",
         )
 
         assert result["inserted"] == 1
+        assert result["created"] == 1
         assert result["skipped_duplicates"] == 1
         assert result["skipped_self"] == 1
         assert result["skipped_ambiguous"] == 1
+        assert result["skipped"] == 3
         inserted = [edge for edge in store.get_all_edges() if edge.source == EdgeSource.INFERRED]
         assert len(inserted) == 1
         assert inserted[0].from_unit_id == source.id
