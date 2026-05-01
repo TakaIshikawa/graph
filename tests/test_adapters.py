@@ -2636,6 +2636,7 @@ class TestRegistry:
             "ris",
             "git",
             "transcript",
+            "pocket",
         }
 
     def test_get_adapter(self):
@@ -2692,6 +2693,9 @@ class TestRegistry:
 
         transcript_adapter = get_adapter("transcript", root_path="/tmp/transcripts")
         assert transcript_adapter.name == "transcript"
+
+        pocket_adapter = get_adapter("pocket", path="/tmp/pocket.csv")
+        assert pocket_adapter.name == "pocket"
 
     def test_unknown_adapter(self):
         with pytest.raises(KeyError):

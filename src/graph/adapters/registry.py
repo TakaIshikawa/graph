@@ -23,6 +23,7 @@ from graph.adapters.me import MeAdapter
 from graph.adapters.opml import OpmlAdapter
 from graph.adapters.org import OrgAdapter
 from graph.adapters.pdf import PdfAdapter
+from graph.adapters.pocket import PocketAdapter
 from graph.adapters.presence import PresenceAdapter
 from graph.adapters.sota import SOTAAdapter
 from graph.adapters.ris import RisAdapter
@@ -57,6 +58,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "ris": RisAdapter,
     "git": GitAdapter,
     "transcript": TranscriptAdapter,
+    "pocket": PocketAdapter,
 }
 
 
