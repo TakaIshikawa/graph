@@ -2321,6 +2321,71 @@ class GraphService:
         )
         return records[:capped_limit]
 
+    def analyze_brokers(self, limit: int = 20) -> list[dict]:
+        """Identify high-betweenness broker nodes in the knowledge graph."""
+        if isinstance(limit, bool):
+            raise ValueError("limit must be a non-negative integer.")
+        try:
+            capped_limit = int(limit)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("limit must be a non-negative integer.") from exc
+        if capped_limit < 0:
+            raise ValueError("limit must be a non-negative integer.")
+        if capped_limit == 0:
+            return []
+
+        units_by_id = {unit.id: unit for unit in self.store.get_all_units(limit=1000000000)}
+        if len(units_by_id) < 3:
+            return []
+
+        projection = nx.Graph()
+        projection.add_nodes_from(sorted(units_by_id))
+        projection.add_edges_from(
+            tuple(sorted((edge.from_unit_id, edge.to_unit_id)))
+            for edge in self.store.get_all_edges()
+            if edge.from_unit_id in units_by_id
+            and edge.to_unit_id in units_by_id
+            and edge.from_unit_id != edge.to_unit_id
+        )
+        if projection.number_of_edges() == 0:
+            return []
+
+        centrality = nx.betweenness_centrality(projection)
+        records = []
+        for unit_id, score in centrality.items():
+            if score <= 0:
+                continue
+
+            unit = units_by_id[unit_id]
+            neighbor_ids = sorted(projection.neighbors(unit_id))
+            neighbor_source_projects = sorted(
+                {str(units_by_id[neighbor_id].source_project) for neighbor_id in neighbor_ids}
+            )
+            degree = int(projection.degree(unit_id))
+            rounded_score = round(float(score), 6)
+            records.append(
+                {
+                    "unit_id": unit_id,
+                    "title": unit.title,
+                    "source_project": str(unit.source_project),
+                    "score": rounded_score,
+                    "degree": degree,
+                    "neighbor_source_project_diversity": len(neighbor_source_projects),
+                    "explanation": (
+                        f"Connects {degree} neighboring units across "
+                        f"{len(neighbor_source_projects)} source projects."
+                    ),
+                }
+            )
+
+        records.sort(
+            key=lambda record: (
+                -float(centrality.get(record["unit_id"], 0.0)),
+                record["unit_id"],
+            )
+        )
+        return records[:capped_limit]
+
     def suggest_missing_links(
         self,
         limit: int = 20,
