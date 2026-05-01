@@ -22,6 +22,7 @@ class SourceProject(StrEnum):
     RIS = "ris"
     GIT = "git"
     TRANSCRIPT = "transcript"
+    POCKET = "pocket"
 
 
 class ContentType(StrEnum):
