@@ -697,6 +697,204 @@ class TestRAGService:
         assert result["filters"] == {"exclude_tag": "archive"}
         assert [item["unit"].id for item in result["results"]] == [keep.id]
 
+    def test_search_facets_fulltext_counts_without_embedding_provider(self, store: Store):
+        units = [
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="facet-max-1",
+                source_entity_type="insight",
+                title="Solar storage",
+                content="Solar storage adoption",
+                content_type=ContentType.INSIGHT,
+                tags=["solar", "energy"],
+            ),
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="facet-max-2",
+                source_entity_type="finding",
+                title="Solar financing",
+                content="Solar finance programs",
+                content_type=ContentType.FINDING,
+                tags=["solar", "finance"],
+            ),
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="facet-42",
+                source_entity_type="knowledge_node",
+                title="Solar grid",
+                content="Solar grid constraints",
+                content_type=ContentType.FINDING,
+                tags=["solar", "energy"],
+            ),
+            KnowledgeUnit(
+                source_project=SourceProject.PRESENCE,
+                source_id="facet-presence",
+                source_entity_type="knowledge_item",
+                title="Solar artifact",
+                content="Solar artifact notes",
+                content_type=ContentType.ARTIFACT,
+                tags=["artifact"],
+            ),
+        ]
+        for unit in units:
+            store.fts_index_unit(store.insert_unit(unit))
+
+        result = RAGService(store, provider=None).search_facets("solar", mode="fulltext")
+
+        assert result["total_matches"] == 4
+        assert result["facets"]["source_project"] == {
+            "max": 2,
+            "forty_two": 1,
+            "presence": 1,
+        }
+        assert result["facets"]["content_type"] == {
+            "finding": 2,
+            "artifact": 1,
+            "insight": 1,
+        }
+        assert result["facets"]["source_entity_type"] == {
+            "finding": 1,
+            "insight": 1,
+            "knowledge_item": 1,
+            "knowledge_node": 1,
+        }
+        assert list(result["facets"]["tags"].items()) == [
+            ("solar", 3),
+            ("energy", 2),
+            ("artifact", 1),
+            ("finance", 1),
+        ]
+
+    def test_search_facets_honors_fulltext_filters_without_embedding_provider(
+        self, store: Store
+    ):
+        keep = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="facet-keep",
+                source_entity_type="insight",
+                title="Solar grid keep",
+                content="Solar grid planning",
+                content_type=ContentType.INSIGHT,
+                tags=["energy", "solar"],
+                metadata={"project": {"area": "grid"}},
+            )
+        )
+        skip_archived = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="facet-skip-archived",
+                source_entity_type="insight",
+                title="Solar grid archived",
+                content="Solar grid archive",
+                content_type=ContentType.INSIGHT,
+                tags=["archive", "energy", "solar"],
+                metadata={"project": {"area": "grid"}},
+            )
+        )
+        skip_project = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="facet-skip-project",
+                source_entity_type="knowledge_node",
+                title="Solar grid other project",
+                content="Solar grid research",
+                content_type=ContentType.FINDING,
+                tags=["energy", "solar"],
+                metadata={"project": {"area": "grid"}},
+            )
+        )
+        skip_metadata = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="facet-skip-metadata",
+                source_entity_type="insight",
+                title="Solar storage",
+                content="Solar storage planning",
+                content_type=ContentType.INSIGHT,
+                tags=["energy", "solar"],
+                metadata={"project": {"area": "storage"}},
+            )
+        )
+        for unit in [keep, skip_archived, skip_project, skip_metadata]:
+            store.fts_index_unit(unit)
+
+        result = RAGService(store, provider=None).search_facets(
+            "solar",
+            mode="fulltext",
+            source_project="max",
+            content_type="insight",
+            tag="energy",
+            exclude_tag="archive",
+            metadata_key="project.area",
+            metadata_value="grid",
+        )
+
+        assert result["total_matches"] == 1
+        assert result["filters"] == {
+            "source_project": "max",
+            "content_type": "insight",
+            "tag": "energy",
+            "exclude_tag": "archive",
+            "metadata_key": "project.area",
+            "metadata_value": "grid",
+        }
+        assert result["facets"]["source_project"] == {"max": 1}
+        assert result["facets"]["content_type"] == {"insight": 1}
+        assert result["facets"]["source_entity_type"] == {"insight": 1}
+        assert result["facets"]["tags"] == {"energy": 1, "solar": 1}
+
+    def test_search_facets_collects_hybrid_results(self, store: Store):
+        keep = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="facet-hybrid-keep",
+                source_entity_type="insight",
+                title="Solar hybrid keep",
+                content="Solar hybrid content",
+                content_type=ContentType.INSIGHT,
+                tags=["energy", "solar"],
+            )
+        )
+        finding = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="facet-hybrid-finding",
+                source_entity_type="finding",
+                title="Solar hybrid finding",
+                content="Solar hybrid finding content",
+                content_type=ContentType.FINDING,
+                tags=["solar"],
+            )
+        )
+        other = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="facet-hybrid-other",
+                source_entity_type="knowledge_node",
+                title="Solar hybrid other",
+                content="Solar hybrid other content",
+                content_type=ContentType.INSIGHT,
+                tags=["solar"],
+            )
+        )
+        for unit in [keep, finding, other]:
+            store.fts_index_unit(unit)
+        store.update_embedding(keep.id, serialize_embedding([1.0, 0.0]))
+        store.update_embedding(finding.id, serialize_embedding([1.0, 0.0]))
+        store.update_embedding(other.id, serialize_embedding([1.0, 0.0]))
+
+        result = RAGService(store, FixedQueryEmbeddingProvider()).search_facets(
+            "solar",
+            mode="hybrid",
+            source_project="max",
+        )
+
+        assert result["total_matches"] == 2
+        assert result["facets"]["source_project"] == {"max": 2}
+        assert result["facets"]["content_type"] == {"finding": 1, "insight": 1}
+        assert result["facets"]["source_entity_type"] == {"finding": 1, "insight": 1}
+
     def test_search_no_embeddings(self, store: Store, rag_service: RAGService):
         # No units with embeddings
         results = rag_service.search("anything")
