@@ -185,6 +185,19 @@ def _row_to_saved_query(row: sqlite3.Row) -> dict:
     }
 
 
+def _row_to_saved_query_run(row: sqlite3.Row) -> dict:
+    return {
+        "id": row["id"],
+        "saved_query_name": row["saved_query_name"],
+        "run_at": row["run_at"],
+        "effective_limit": row["effective_limit"],
+        "mode": row["mode"],
+        "filters": json.loads(row["filters"]),
+        "result_count": row["result_count"],
+        "top_result_ids": json.loads(row["top_result_ids"]),
+    }
+
+
 def _row_to_collection(row: sqlite3.Row) -> dict:
     data = {
         "id": row["id"],
@@ -2136,8 +2149,38 @@ class Store:
         rows = self.conn.execute("SELECT * FROM saved_queries ORDER BY name").fetchall()
         return [_row_to_saved_query(row) for row in rows]
 
-    def mark_saved_query_run(self, name: str) -> dict | None:
+    def mark_saved_query_run(
+        self,
+        name: str,
+        *,
+        effective_limit: int | None = None,
+        mode: str | None = None,
+        filters: dict | None = None,
+        result_count: int | None = None,
+        top_result_ids: list[str] | None = None,
+    ) -> dict | None:
+        saved = self.get_saved_query(name)
+        if saved is None:
+            return None
+
         now = _utcnow_iso()
+        if (
+            effective_limit is not None
+            or mode is not None
+            or filters is not None
+            or result_count is not None
+            or top_result_ids is not None
+        ):
+            self.record_saved_query_run(
+                name,
+                run_at=now,
+                effective_limit=effective_limit if effective_limit is not None else saved["limit"],
+                mode=mode or saved["mode"],
+                filters=filters if filters is not None else saved["filters"],
+                result_count=result_count if result_count is not None else 0,
+                top_result_ids=top_result_ids or [],
+                commit=False,
+            )
         cursor = self.conn.execute(
             "UPDATE saved_queries SET last_run_at = ?, updated_at = ? WHERE name = ?",
             (now, now, name),
@@ -2146,6 +2189,71 @@ class Store:
         if cursor.rowcount == 0:
             return None
         return self.get_saved_query(name)
+
+    def record_saved_query_run(
+        self,
+        name: str,
+        *,
+        effective_limit: int,
+        mode: str,
+        filters: dict | None,
+        result_count: int,
+        top_result_ids: list[str],
+        run_at: str | datetime | None = None,
+        commit: bool = True,
+    ) -> dict:
+        saved = self.get_saved_query(name)
+        if saved is None:
+            raise ValueError(f"Saved query not found: {name}")
+
+        if run_at is None:
+            normalized_run_at = _utcnow_iso()
+        elif isinstance(run_at, datetime):
+            normalized_run_at = (
+                run_at if run_at.tzinfo is not None else run_at.replace(tzinfo=timezone.utc)
+            ).astimezone(timezone.utc).isoformat()
+        else:
+            normalized_run_at = str(run_at)
+
+        normalized_filters = filters or {}
+        normalized_ids = [str(unit_id) for unit_id in top_result_ids]
+        cursor = self.conn.execute(
+            """INSERT INTO saved_query_runs
+               (saved_query_name, run_at, effective_limit, mode, filters, result_count, top_result_ids)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                name,
+                normalized_run_at,
+                effective_limit,
+                mode,
+                json.dumps(normalized_filters, sort_keys=True),
+                result_count,
+                json.dumps(normalized_ids),
+            ),
+        )
+        if commit:
+            self.conn.commit()
+        row = self.conn.execute(
+            "SELECT * FROM saved_query_runs WHERE id = ?",
+            (cursor.lastrowid,),
+        ).fetchone()
+        return _row_to_saved_query_run(row)
+
+    def list_saved_query_runs(
+        self,
+        *,
+        name: str | None = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        params: list[object] = []
+        query = "SELECT * FROM saved_query_runs"
+        if name is not None:
+            query += " WHERE saved_query_name = ?"
+            params.append(name)
+        query += " ORDER BY run_at DESC, id DESC LIMIT ?"
+        params.append(max(0, limit))
+        rows = self.conn.execute(query, params).fetchall()
+        return [_row_to_saved_query_run(row) for row in rows]
 
     def export_saved_queries(self) -> dict:
         """Return a JSON-serializable saved query backup."""

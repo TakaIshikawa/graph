@@ -4821,7 +4821,15 @@ def run_query(
             filters=saved["filters"],
         )
         if "error" not in payload:
-            saved = store.mark_saved_query_run(name) or saved
+            result_ids = [str(result["id"]) for result in payload.get("results", [])]
+            saved = store.mark_saved_query_run(
+                name,
+                effective_limit=saved["limit"],
+                mode=saved["mode"],
+                filters=saved["filters"],
+                result_count=len(result_ids),
+                top_result_ids=result_ids,
+            ) or saved
             payload["saved_query"] = saved["name"]
             payload["schedule"] = saved.get("schedule")
             payload["last_run_at"] = saved.get("last_run_at")
@@ -4833,6 +4841,37 @@ def run_query(
 
     _render_search_payload(payload, json_output=json_output)
     store.close()
+
+
+@queries_app.command(name="history")
+def query_history(
+    name: str | None = typer.Argument(None, help="Optional saved query name"),
+    limit: int = typer.Option(20, "--limit", "-n", help="Max runs to show"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """List recent saved query runs."""
+    store = _get_store()
+    runs = store.list_saved_query_runs(name=name, limit=limit)
+    store.close()
+
+    payload = {"runs": runs, "name": name, "limit": limit}
+    if json_output:
+        _json_echo(payload)
+        return
+
+    if not runs:
+        if name:
+            typer.echo(f"No runs found for saved query '{name}'.")
+        else:
+            typer.echo("No saved query runs.")
+        return
+
+    for run in runs:
+        top_ids = ", ".join(run["top_result_ids"]) if run["top_result_ids"] else "none"
+        typer.echo(
+            f"{run['run_at']} | {run['saved_query_name']} | {run['mode']} "
+            f"limit {run['effective_limit']} | {run['result_count']} results | top: {top_ids}"
+        )
 
 
 @queries_app.command(name="delete")

@@ -783,7 +783,7 @@ def test_json_export_and_import_commands_round_trip(tmp_path, monkeypatch):
     assert export_result.exit_code == 0
     assert export_path.exists()
     exported = json.loads(export_path.read_text())
-    assert exported["schema_version"] == 4
+    assert exported["schema_version"] == 5
     assert exported["exported_at"]
     assert len(exported["units"]) == 4
     assert len(exported["edges"]) == 2
@@ -4987,6 +4987,33 @@ def test_queries_cli_save_list_run_and_delete(monkeypatch):
         assert datetime.fromisoformat(payload["last_run_at"]).tzinfo is not None
         assert payload["filters"] == saved["filters"]
         assert [result["title"] for result in payload["results"]] == ["Solar approved insight"]
+
+        history_result = runner.invoke(app, ["queries", "history", "--json"])
+
+        assert history_result.exit_code == 0
+        history_payload = json.loads(history_result.output)
+        assert history_payload["name"] is None
+        assert history_payload["limit"] == 20
+        assert len(history_payload["runs"]) == 1
+        history_run = history_payload["runs"][0]
+        assert history_run["saved_query_name"] == "approved-solar"
+        assert history_run["effective_limit"] == 10
+        assert history_run["mode"] == "fulltext"
+        assert history_run["filters"] == saved["filters"]
+        assert history_run["result_count"] == 1
+        assert history_run["top_result_ids"] == [payload["results"][0]["id"]]
+        assert history_run["run_at"] == payload["last_run_at"]
+
+        named_history = runner.invoke(app, ["queries", "history", "approved-solar", "--json"])
+
+        assert named_history.exit_code == 0
+        assert json.loads(named_history.output)["runs"] == history_payload["runs"]
+
+        text_history = runner.invoke(app, ["queries", "history", "approved-solar"])
+
+        assert text_history.exit_code == 0
+        assert "approved-solar" in text_history.output
+        assert "1 results" in text_history.output
 
         delete_result = runner.invoke(app, ["queries", "delete", "approved-solar", "--json"])
 

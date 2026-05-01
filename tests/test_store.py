@@ -1722,10 +1722,27 @@ class TestSavedQueries:
                 "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'saved_queries'"
             ).fetchone()
             assert row is not None
+            run_row = store.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'saved_query_runs'"
+            ).fetchone()
+            assert run_row is not None
             columns = {
                 row[1] for row in store.conn.execute("PRAGMA table_info(saved_queries)").fetchall()
             }
             assert {"schedule", "last_run_at"} <= columns
+            run_columns = {
+                row[1]
+                for row in store.conn.execute("PRAGMA table_info(saved_query_runs)").fetchall()
+            }
+            assert {
+                "saved_query_name",
+                "run_at",
+                "effective_limit",
+                "mode",
+                "filters",
+                "result_count",
+                "top_result_ids",
+            } <= run_columns
         finally:
             store.close()
 
@@ -1768,7 +1785,7 @@ class TestSavedQueries:
             }
             assert "embedding_updated_at" in columns
             version = store.conn.execute("SELECT version FROM schema_version").fetchone()[0]
-            assert version == 4
+            assert version == 5
         finally:
             store.close()
 
@@ -1794,7 +1811,7 @@ class TestSavedQueries:
 
             assert collections is not None
             assert collection_units is not None
-            assert version == 4
+            assert version == 5
         finally:
             store.close()
 
@@ -2142,13 +2159,71 @@ class TestSavedQueryCrud:
         assert updated["filters"] == {"tag": "energy"}
         assert updated["schedule"] == "daily"
         assert len(store.list_saved_queries()) == 1
-        ran = store.mark_saved_query_run("approved-solar")
+        ran = store.mark_saved_query_run(
+            "approved-solar",
+            effective_limit=2,
+            mode="fulltext",
+            filters={"tag": "energy"},
+            result_count=2,
+            top_result_ids=["unit-2", "unit-1"],
+        )
         assert ran is not None
         assert ran["last_run_at"] is not None
         assert datetime.fromisoformat(ran["last_run_at"]).tzinfo is not None
+        runs = store.list_saved_query_runs(name="approved-solar")
+        assert len(runs) == 1
+        assert runs[0]["saved_query_name"] == "approved-solar"
+        assert runs[0]["effective_limit"] == 2
+        assert runs[0]["mode"] == "fulltext"
+        assert runs[0]["filters"] == {"tag": "energy"}
+        assert runs[0]["result_count"] == 2
+        assert runs[0]["top_result_ids"] == ["unit-2", "unit-1"]
         assert store.delete_saved_query("approved-solar") is True
         assert store.get_saved_query("approved-solar") is None
+        assert store.list_saved_query_runs(name="approved-solar") == []
         assert store.delete_saved_query("approved-solar") is False
+
+    def test_saved_query_run_history_lists_newest_first(self, store: Store):
+        store.save_query(name="solar", query="solar", mode="fulltext", limit=3)
+        store.save_query(name="battery", query="battery", mode="hybrid", limit=4)
+
+        store.record_saved_query_run(
+            "solar",
+            run_at="2026-04-22T10:00:00+00:00",
+            effective_limit=3,
+            mode="fulltext",
+            filters={},
+            result_count=1,
+            top_result_ids=["solar-1"],
+        )
+        store.record_saved_query_run(
+            "battery",
+            run_at="2026-04-23T10:00:00+00:00",
+            effective_limit=4,
+            mode="hybrid",
+            filters={"tag": "energy"},
+            result_count=2,
+            top_result_ids=["battery-1", "battery-2"],
+        )
+        store.record_saved_query_run(
+            "solar",
+            run_at="2026-04-24T10:00:00+00:00",
+            effective_limit=3,
+            mode="fulltext",
+            filters={},
+            result_count=0,
+            top_result_ids=[],
+        )
+
+        assert [run["saved_query_name"] for run in store.list_saved_query_runs()] == [
+            "solar",
+            "battery",
+            "solar",
+        ]
+        solar_runs = store.list_saved_query_runs(name="solar", limit=1)
+        assert len(solar_runs) == 1
+        assert solar_runs[0]["run_at"] == "2026-04-24T10:00:00+00:00"
+        assert solar_runs[0]["result_count"] == 0
 
     def test_saved_query_export_import_round_trip_and_updates_by_name(self, tmp_path):
         source = Store(str(tmp_path / "source.db"))
@@ -2445,7 +2520,7 @@ class TestJsonBackup:
 
         payload = store.export_json()
 
-        assert payload["schema_version"] == 4
+        assert payload["schema_version"] == 5
         assert payload["exported_at"]
         assert len(payload["units"]) == 1
         assert payload["units"][0]["id"] == inserted.id
