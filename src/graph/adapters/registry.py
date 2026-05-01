@@ -13,6 +13,7 @@ from graph.adapters.feed import FeedAdapter
 from graph.adapters.forty_two import FortyTwoAdapter
 from graph.adapters.git_adapter import GitAdapter
 from graph.adapters.html import HtmlAdapter
+from graph.adapters.hypothesis import HypothesisAdapter
 from graph.adapters.ical import ICalAdapter
 from graph.adapters.ipynb import IpynbAdapter
 from graph.adapters.jats import JatsAdapter
@@ -63,6 +64,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "transcript": TranscriptAdapter,
     "pocket": PocketAdapter,
     "zotero_rdf": ZoteroRdfAdapter,
+    "hypothesis": HypothesisAdapter,
 }
 
 

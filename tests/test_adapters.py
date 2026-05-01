@@ -24,6 +24,7 @@ from graph.adapters.feed import FeedAdapter
 from graph.adapters.forty_two import FortyTwoAdapter
 from graph.adapters.git_adapter import GitAdapter
 from graph.adapters.html import HtmlAdapter
+from graph.adapters.hypothesis import HypothesisAdapter
 from graph.adapters.ical import ICalAdapter
 from graph.adapters.ipynb import IpynbAdapter
 from graph.adapters.jsonl_adapter import JsonlAdapter
@@ -2639,6 +2640,7 @@ class TestRegistry:
             "transcript",
             "pocket",
             "zotero_rdf",
+            "hypothesis",
         }
 
     def test_get_adapter(self):
@@ -2704,6 +2706,10 @@ class TestRegistry:
 
         zotero_rdf_adapter = get_adapter("zotero_rdf", path="/tmp/library.rdf")
         assert zotero_rdf_adapter.name == "zotero_rdf"
+
+        hypothesis_adapter = get_adapter("hypothesis", path="/tmp/hypothesis.json")
+        assert isinstance(hypothesis_adapter, HypothesisAdapter)
+        assert hypothesis_adapter.name == "hypothesis"
 
     def test_unknown_adapter(self):
         with pytest.raises(KeyError):
