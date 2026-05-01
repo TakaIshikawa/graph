@@ -95,6 +95,7 @@ SUPPORTED_SYNC_PROJECTS = [
     "opml",
     "pdf",
     "email",
+    "enex",
     "text",
     "html",
     "ical",
@@ -195,6 +196,7 @@ def _adapter_kwargs(name: str) -> dict:
         "opml": {"path": settings.opml_path},
         "pdf": {"path": settings.pdf_path},
         "email": {"path": settings.email_path},
+        "enex": {"path": settings.enex_path},
         "text": {"root_path": settings.text_root},
         "html": {"root_path": settings.html_root},
         "ical": {"path": settings.ical_path},
@@ -236,6 +238,7 @@ def _get_adapter(name: str):
     from graph.adapters.bookmarks import BookmarksAdapter
     from graph.adapters.csv_adapter import CsvAdapter
     from graph.adapters.email import EmailAdapter
+    from graph.adapters.enex import EnexAdapter
     from graph.adapters.feed import FeedAdapter
     from graph.adapters.forty_two import FortyTwoAdapter
     from graph.adapters.git_adapter import GitAdapter
@@ -270,6 +273,7 @@ def _get_adapter(name: str):
         "opml": lambda: OpmlAdapter(path=settings.opml_path),
         "pdf": lambda: PdfAdapter(path=settings.pdf_path),
         "email": lambda: EmailAdapter(path=settings.email_path),
+        "enex": lambda: EnexAdapter(path=settings.enex_path),
         "text": lambda: TextAdapter(root_path=settings.text_root),
         "html": lambda: HtmlAdapter(root_path=settings.html_root),
         "ical": lambda: ICalAdapter(path=settings.ical_path),
