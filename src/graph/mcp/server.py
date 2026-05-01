@@ -37,6 +37,7 @@ from graph.cli.main import (
     _do_collection_add,
     _do_collection_create,
     _do_collection_delete,
+    _do_collection_diff,
     _do_collection_list,
     _do_collection_members,
     _do_collection_remove,
@@ -705,6 +706,33 @@ async def list_tools() -> list[Tool]:
                     "limit": {"type": "integer", "description": "Maximum members to return"},
                 },
                 "required": ["name"],
+            },
+        ),
+        Tool(
+            name="collection_diff",
+            description="Compare two named collections and return only-left, only-right, and shared member counts and unit summaries.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "left_name": {
+                        "type": "string",
+                        "description": "Left collection name",
+                    },
+                    "right_name": {
+                        "type": "string",
+                        "description": "Right collection name",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum unit summaries to return per diff group",
+                    },
+                    "include_units": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Include unit summaries for left-only, right-only, and shared members",
+                    },
+                },
+                "required": ["left_name", "right_name"],
             },
         ),
         Tool(
@@ -2384,6 +2412,33 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 arguments["name"],
                 limit=arguments.get("limit"),
             )
+            return [TextContent(type="text", text=json.dumps(payload, default=str))]
+
+        elif name == "collection_diff":
+            left_name = arguments["left_name"]
+            right_name = arguments["right_name"]
+            try:
+                payload = _do_collection_diff(
+                    store,
+                    left_name,
+                    right_name,
+                    limit=arguments.get("limit"),
+                )
+            except ValueError as exc:
+                payload = {
+                    "left_name": left_name,
+                    "right_name": right_name,
+                    "error": "collection_not_found",
+                    "message": str(exc),
+                }
+            else:
+                if not arguments.get("include_units", True):
+                    payload = {
+                        **payload,
+                        "left_only": [],
+                        "right_only": [],
+                        "both": [],
+                    }
             return [TextContent(type="text", text=json.dumps(payload, default=str))]
 
         elif name == "export_collections":

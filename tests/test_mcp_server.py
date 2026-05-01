@@ -423,6 +423,124 @@ def test_mcp_collection_tools_manage_members_with_unit_summaries(tmp_path, monke
         verify.close()
 
 
+def test_mcp_collection_diff_returns_counts_summaries_and_errors(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    alpha = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="mcp-collection-diff-alpha",
+            source_entity_type="manual",
+            title="Alpha",
+            content="Left only",
+        )
+    )
+    beta = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="mcp-collection-diff-beta",
+            source_entity_type="manual",
+            title="Beta",
+            content="Shared",
+        )
+    )
+    gamma = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="mcp-collection-diff-gamma",
+            source_entity_type="manual",
+            title="Gamma",
+            content="Right only",
+        )
+    )
+    delta = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="mcp-collection-diff-delta",
+            source_entity_type="manual",
+            title="Delta",
+            content="Right only limited out",
+        )
+    )
+    store.create_collection("left")
+    store.create_collection("right")
+    store.add_unit_to_collection("left", alpha.id)
+    store.add_unit_to_collection("left", beta.id)
+    store.add_unit_to_collection("right", beta.id)
+    store.add_unit_to_collection("right", gamma.id)
+    store.add_unit_to_collection("right", delta.id)
+    store.close()
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    tool_by_name = {tool.name: tool for tool in tools}
+    assert "collection_diff" in tool_by_name
+    diff_schema = tool_by_name["collection_diff"].inputSchema
+    assert diff_schema["required"] == ["left_name", "right_name"]
+    assert diff_schema["properties"]["include_units"] == {
+        "type": "boolean",
+        "default": True,
+        "description": "Include unit summaries for left-only, right-only, and shared members",
+    }
+
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "collection_diff",
+            {"left_name": "left", "right_name": "right", "limit": 1},
+        )
+    )
+    payload = json.loads(response[0].text)
+    assert payload["counts"] == {
+        "left": 2,
+        "right": 3,
+        "left_only": 1,
+        "right_only": 2,
+        "both": 1,
+    }
+    assert [unit["title"] for unit in payload["left_only"]] == ["Alpha"]
+    assert [unit["title"] for unit in payload["right_only"]] == ["Delta"]
+    assert [unit["title"] for unit in payload["both"]] == ["Beta"]
+    assert set(payload["left_only"][0]) >= {
+        "id",
+        "title",
+        "source_project",
+        "source_id",
+        "source_entity_type",
+        "content_type",
+        "tags",
+    }
+
+    counts_only = asyncio.run(
+        mcp_server.call_tool(
+            "collection_diff",
+            {
+                "left_name": "left",
+                "right_name": "right",
+                "include_units": False,
+            },
+        )
+    )
+    counts_only_payload = json.loads(counts_only[0].text)
+    assert counts_only_payload["counts"] == payload["counts"]
+    assert counts_only_payload["left_only"] == []
+    assert counts_only_payload["right_only"] == []
+    assert counts_only_payload["both"] == []
+
+    missing = asyncio.run(
+        mcp_server.call_tool(
+            "collection_diff",
+            {"left_name": "left", "right_name": "missing"},
+        )
+    )
+    missing_payload = json.loads(missing[0].text)
+    assert missing_payload == {
+        "left_name": "left",
+        "right_name": "missing",
+        "error": "collection_not_found",
+        "message": "Collection not found: missing",
+    }
+
+
 def test_mcp_collection_import_export_tools_and_schema(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     export_path = tmp_path / "collections.json"
@@ -521,6 +639,8 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_pa
         "html": ["html_document"],
         "ical": ["calendar_event"],
         "ipynb": ["notebook"],
+        "ris": ["ris_record"],
+        "git": ["git_commit"],
     }
     monkeypatch.setattr(
         mcp_server,
@@ -541,6 +661,8 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_pa
     assert "html" in ingest_tool.inputSchema["properties"]["project"]["enum"]
     assert "ical" in ingest_tool.inputSchema["properties"]["project"]["enum"]
     assert "ipynb" in ingest_tool.inputSchema["properties"]["project"]["enum"]
+    assert "ris" in ingest_tool.inputSchema["properties"]["project"]["enum"]
+    assert "git" in ingest_tool.inputSchema["properties"]["project"]["enum"]
 
     search_tool = next(tool for tool in tools if tool.name == "search")
     assert "kindle" in search_tool.inputSchema["properties"]["source_project"]["enum"]
@@ -554,6 +676,8 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_pa
     assert "html" in search_tool.inputSchema["properties"]["source_project"]["enum"]
     assert "ical" in search_tool.inputSchema["properties"]["source_project"]["enum"]
     assert "ipynb" in search_tool.inputSchema["properties"]["source_project"]["enum"]
+    assert "ris" in search_tool.inputSchema["properties"]["source_project"]["enum"]
+    assert "git" in search_tool.inputSchema["properties"]["source_project"]["enum"]
     assert search_tool.inputSchema["properties"]["created_after"]["type"] == "string"
     assert search_tool.inputSchema["properties"]["min_utility"]["type"] == "number"
     assert search_tool.inputSchema["properties"]["min_confidence"]["type"] == "number"
@@ -969,14 +1093,16 @@ def test_ingest_all_includes_sota_and_search_can_filter_sota(tmp_path, monkeypat
         "feed",
         "bookmarks",
         "csv",
-            "jsonl",
-            "opml",
-            "pdf",
-            "email",
-            "text",
-            "html",
-            "ical",
+        "jsonl",
+        "opml",
+        "pdf",
+        "email",
+        "text",
+        "html",
+        "ical",
         "ipynb",
+        "ris",
+        "git",
     ]
     assert payload == {"units_inserted": 1, "units_skipped": 0, "edges_inserted": 0}
 
