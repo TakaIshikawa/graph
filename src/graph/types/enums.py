@@ -16,6 +16,7 @@ class SourceProject(StrEnum):
     PDF = "pdf"
     EMAIL = "email"
     BIBTEX = "bibtex"
+    RIS = "ris"
 
 
 class ContentType(StrEnum):

@@ -30,6 +30,7 @@ from graph.adapters.opml import OpmlAdapter
 from graph.adapters.pdf import PdfAdapter
 from graph.adapters.presence import PresenceAdapter
 from graph.adapters.registry import get_adapter, list_adapters
+from graph.adapters.ris import RisAdapter
 from graph.adapters.text import TextAdapter
 from graph.adapters.yaml_adapter import YamlAdapter
 from graph.store.db import Store
@@ -1114,6 +1115,157 @@ class TestBibtexAdapter:
         assert missing.units == []
 
 
+class TestRisAdapter:
+    def test_ingest_ris_file_with_multiple_records_and_metadata(self, tmp_path):
+        ris = tmp_path / "refs.ris"
+        ris.write_text(
+            """TY  - JOUR
+TI  - Semantic Personal Graphs
+AU  - Smith, Ada
+AU  - Doe, Grace
+PY  - 2024
+T2  - Journal of Knowledge Systems
+AB  - A study of personal semantic graphs.
+KW  - graphs
+KW  - knowledge; graphs
+DO  - 10.1000/example
+UR  - https://example.com/paper
+ER  -
+
+TY  - CONF
+T1  - Agent Evaluation
+A1  - Lee, Robin
+Y1  - 2025/05/03/
+N2  - Evaluation methods for agents.
+KW  - agents, evaluation
+L2  - https://example.com/agent-eval
+ER  -
+""",
+            encoding="utf-8",
+        )
+
+        result = RisAdapter(path=str(ris)).ingest()
+
+        assert [unit.source_id for unit in result.units] == [
+            "doi:10.1000/example",
+            "url:https://example.com/agent-eval",
+        ]
+        first = result.units[0]
+        assert first.source_project == "ris"
+        assert first.source_entity_type == "ris_record"
+        assert first.title == "Semantic Personal Graphs"
+        assert first.tags == ["graphs", "knowledge"]
+        assert "Authors: Smith, Ada; Doe, Grace" in first.content
+        assert "Year: 2024" in first.content
+        assert "Venue: Journal of Knowledge Systems" in first.content
+        assert "Abstract: A study of personal semantic graphs." in first.content
+        assert first.metadata == {
+            "ris_type": "JOUR",
+            "authors": ["Smith, Ada", "Doe, Grace"],
+            "year": "2024",
+            "date": "2024",
+            "doi": "10.1000/example",
+            "url": "https://example.com/paper",
+            "venue": "Journal of Knowledge Systems",
+            "source_file": "refs.ris",
+        }
+        assert result.units[1].created_at == datetime(2025, 5, 3, tzinfo=timezone.utc)
+        assert result.edges == []
+
+    def test_ingest_directory_recursively_includes_only_ris_files(self, tmp_path):
+        root = tmp_path / "library"
+        nested = root / "nested"
+        nested.mkdir(parents=True)
+        (root / "root.ris").write_text(
+            "TY  - BOOK\nTI  - Root Book\nPY  - 2023\nER  -\n",
+            encoding="utf-8",
+        )
+        (nested / "more.RIS").write_text(
+            "TY  - JOUR\nTI  - Nested Ref\nKW  - nested\nER  -\n",
+            encoding="utf-8",
+        )
+        (nested / "ignore.txt").write_text(
+            "TY  - JOUR\nTI  - Ignored\nER  -\n",
+            encoding="utf-8",
+        )
+
+        result = RisAdapter(path=str(root)).ingest()
+
+        assert [unit.metadata["source_file"] for unit in result.units] == [
+            "nested/more.RIS",
+            "root.ris",
+        ]
+        assert result.units[0].tags == ["nested"]
+
+    def test_malformed_and_incomplete_records_are_skipped_with_warning(self, tmp_path):
+        ris = tmp_path / "mixed.ris"
+        ris.write_text(
+            """TY  - JOUR
+TI  - Valid
+PY  - 2024
+ER  -
+TY  - JOUR
+PY  - 2025
+ER  -
+TI  - Stray title
+TY  - JOUR
+TI  - Unterminated
+""",
+            encoding="utf-8",
+        )
+
+        with pytest.warns(UserWarning, match="Skipped 3 malformed RIS record"):
+            result = RisAdapter(path=str(ris)).ingest()
+
+        assert [unit.title for unit in result.units] == ["Valid"]
+
+    def test_incremental_sync_uses_parseable_record_dates(self, tmp_path):
+        ris = tmp_path / "sync.ris"
+        ris.write_text(
+            """TY  - JOUR
+TI  - Old
+PY  - 2024
+ER  -
+TY  - JOUR
+TI  - New
+DA  - 2026-04-25
+ER  -
+TY  - JOUR
+TI  - Undated
+ER  -
+""",
+            encoding="utf-8",
+        )
+
+        result = RisAdapter(path=str(ris)).ingest(
+            since=SyncState(
+                source_project="ris",
+                source_entity_type="ris_record",
+                last_sync_at=datetime.fromisoformat("2025-01-01T00:00:00+00:00"),
+            )
+        )
+        filtered = RisAdapter(path=str(ris)).ingest(entity_types=["bibtex_entry"])
+        missing = RisAdapter(path=str(tmp_path / "missing")).ingest()
+
+        assert [unit.title for unit in result.units] == ["New", "Undated"]
+        assert filtered.units == []
+        assert missing.units == []
+        assert result.units[0].updated_at == datetime(2026, 4, 25, tzinfo=timezone.utc)
+
+    def test_hash_source_id_is_stable_when_doi_and_url_are_missing(self, tmp_path):
+        ris = tmp_path / "hash.ris"
+        ris.write_text(
+            "TY  - JOUR\nTI  - Stable Hash\nAU  - Doe, Jane\nPY  - 2024\nER  -\n",
+            encoding="utf-8",
+        )
+
+        first = RisAdapter(path=str(ris)).ingest()
+        second = RisAdapter(path=str(ris)).ingest()
+
+        assert first.units[0].source_id == second.units[0].source_id
+        assert first.units[0].source_id.startswith("ris:")
+
+
 class TestPdfAdapter:
     def test_ingest_pdf_documents_with_mocked_reader(self, tmp_path, monkeypatch):
         root = tmp_path / "pdfs"
@@ -1882,6 +2034,7 @@ class TestRegistry:
             "ical",
             "ipynb",
             "bibtex",
+            "ris",
         }
 
     def test_get_adapter(self):
@@ -1920,6 +2073,9 @@ class TestRegistry:
 
         bibtex_adapter = get_adapter("bibtex", path="/tmp/refs.bib")
         assert bibtex_adapter.name == "bibtex"
+
+        ris_adapter = get_adapter("ris", path="/tmp/refs.ris")
+        assert ris_adapter.name == "ris"
 
     def test_unknown_adapter(self):
         with pytest.raises(KeyError):

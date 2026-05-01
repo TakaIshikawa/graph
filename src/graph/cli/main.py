@@ -61,6 +61,7 @@ SUPPORTED_SYNC_PROJECTS = [
     "ical",
     "ipynb",
     "bibtex",
+    "ris",
 ]
 
 
@@ -86,6 +87,7 @@ def _get_adapter_for_project(name: str):
     from graph.adapters.opml import OpmlAdapter
     from graph.adapters.pdf import PdfAdapter
     from graph.adapters.presence import PresenceAdapter
+    from graph.adapters.ris import RisAdapter
     from graph.adapters.sota import SOTAAdapter
     from graph.adapters.text import TextAdapter
     from graph.adapters.yaml_adapter import YamlAdapter
@@ -113,6 +115,7 @@ def _get_adapter_for_project(name: str):
         "ical": lambda: ICalAdapter(path=settings.ical_path),
         "ipynb": lambda: IpynbAdapter(root_path=settings.ipynb_root),
         "bibtex": lambda: BibtexAdapter(path=settings.bibtex_path),
+        "ris": lambda: RisAdapter(path=settings.ris_path),
     }
     factory = mapping.get(name)
     if factory is None:

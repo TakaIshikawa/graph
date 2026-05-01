@@ -21,6 +21,7 @@ from graph.adapters.opml import OpmlAdapter
 from graph.adapters.pdf import PdfAdapter
 from graph.adapters.presence import PresenceAdapter
 from graph.adapters.sota import SOTAAdapter
+from graph.adapters.ris import RisAdapter
 from graph.adapters.text import TextAdapter
 from graph.adapters.yaml_adapter import YamlAdapter
 
@@ -45,6 +46,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "ical": ICalAdapter,
     "ipynb": IpynbAdapter,
     "bibtex": BibtexAdapter,
+    "ris": RisAdapter,
 }
 
 

@@ -98,6 +98,7 @@ SUPPORTED_SYNC_PROJECTS = [
     "html",
     "ical",
     "ipynb",
+    "ris",
 ]
 
 SEARCH_FILTER_SCHEMA = {
@@ -187,6 +188,7 @@ def _get_adapter(name: str):
     from graph.adapters.opml import OpmlAdapter
     from graph.adapters.pdf import PdfAdapter
     from graph.adapters.presence import PresenceAdapter
+    from graph.adapters.ris import RisAdapter
     from graph.adapters.sota import SOTAAdapter
     from graph.adapters.text import TextAdapter
 
@@ -210,6 +212,7 @@ def _get_adapter(name: str):
         "html": lambda: HtmlAdapter(root_path=settings.html_root),
         "ical": lambda: ICalAdapter(path=settings.ical_path),
         "ipynb": lambda: IpynbAdapter(root_path=settings.ipynb_root),
+        "ris": lambda: RisAdapter(path=settings.ris_path),
     }
     return mapping[name]()
 
