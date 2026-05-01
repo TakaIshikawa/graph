@@ -685,6 +685,7 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_pa
         "ipynb": ["notebook"],
         "ris": ["ris_record"],
         "git": ["git_commit"],
+        "transcript": ["transcript"],
     }
     monkeypatch.setattr(
         mcp_server,
@@ -707,6 +708,7 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_pa
     assert "ipynb" in ingest_tool.inputSchema["properties"]["project"]["enum"]
     assert "ris" in ingest_tool.inputSchema["properties"]["project"]["enum"]
     assert "git" in ingest_tool.inputSchema["properties"]["project"]["enum"]
+    assert "transcript" in ingest_tool.inputSchema["properties"]["project"]["enum"]
 
     search_tool = next(tool for tool in tools if tool.name == "search")
     assert "kindle" in search_tool.inputSchema["properties"]["source_project"]["enum"]
@@ -722,6 +724,7 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_pa
     assert "ipynb" in search_tool.inputSchema["properties"]["source_project"]["enum"]
     assert "ris" in search_tool.inputSchema["properties"]["source_project"]["enum"]
     assert "git" in search_tool.inputSchema["properties"]["source_project"]["enum"]
+    assert "transcript" in search_tool.inputSchema["properties"]["source_project"]["enum"]
     assert search_tool.inputSchema["properties"]["created_after"]["type"] == "string"
     assert search_tool.inputSchema["properties"]["min_utility"]["type"] == "number"
     assert search_tool.inputSchema["properties"]["min_confidence"]["type"] == "number"
@@ -1147,6 +1150,7 @@ def test_ingest_all_includes_sota_and_search_can_filter_sota(tmp_path, monkeypat
         "ipynb",
         "ris",
         "git",
+        "transcript",
     ]
     assert payload == {"units_inserted": 1, "units_skipped": 0, "edges_inserted": 0}
 
@@ -3952,6 +3956,145 @@ def test_export_report_tool_writes_markdown_with_same_sections(tmp_path, monkeyp
     assert "Report Node B" in report
     assert "energy: 2 units" in report
     assert "forty_two <-> max: 1 edges" in report
+
+
+def test_analyze_k_core_tool_catalog_and_payload(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    a = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="core-a",
+            source_entity_type="insight",
+            title="Core A",
+            content="Core A content",
+        )
+    )
+    b = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="core-b",
+            source_entity_type="insight",
+            title="Core B",
+            content="Core B content",
+        )
+    )
+    c = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="core-c",
+            source_entity_type="knowledge_node",
+            title="Core C",
+            content="Core C content",
+        )
+    )
+    d = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.PRESENCE,
+            source_id="leaf-d",
+            source_entity_type="knowledge_item",
+            title="Leaf D",
+            content="Leaf content",
+        )
+    )
+    for from_unit, to_unit in [(a, b), (b, c), (c, a), (c, d)]:
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=from_unit.id,
+                to_unit_id=to_unit.id,
+                relation=EdgeRelation.RELATES_TO,
+            )
+        )
+    expected = GraphService(store).analyze_k_core(k=2, limit=10)
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    analyze_tool = next(tool for tool in tools if tool.name == "analyze_k_core")
+    schema = analyze_tool.inputSchema["properties"]
+    assert schema["k"]["default"] == 2
+    assert schema["k"]["minimum"] == 1
+    assert schema["limit"]["default"] == 20
+    assert schema["include_units"]["default"] is True
+
+    response = asyncio.run(
+        mcp_server.call_tool("analyze_k_core", {"k": 2, "limit": 10})
+    )
+    payload = json.loads(response[0].text)
+
+    assert payload == expected
+    assert payload["k"] == 2
+    assert payload["node_count"] == 3
+    assert payload["edge_count"] == 3
+    assert {node["id"] for node in payload["nodes"]} == {a.id, b.id, c.id}
+    assert d.id not in {node["id"] for node in payload["nodes"]}
+    assert all(node["core_number"] >= 2 for node in payload["nodes"])
+    assert all("unit" in node for node in payload["nodes"])
+
+
+def test_analyze_k_core_tool_respects_include_units_false(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    units = [
+        store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id=f"core-{index}",
+                source_entity_type="insight",
+                title=f"Core {index}",
+                content=f"Core content {index}",
+            )
+        )
+        for index in range(3)
+    ]
+    for left, right in [(0, 1), (1, 2), (2, 0)]:
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=units[left].id,
+                to_unit_id=units[right].id,
+                relation=EdgeRelation.RELATES_TO,
+            )
+        )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "analyze_k_core",
+            {"k": 2, "limit": 10, "include_units": False},
+        )
+    )
+    payload = json.loads(response[0].text)
+
+    assert payload["filters"]["include_units"] is False
+    assert payload["nodes"]
+    assert all("unit" not in node for node in payload["nodes"])
+
+
+def test_analyze_k_core_tool_serializes_validation_errors(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    Store(str(db_path)).close()
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    invalid_k = asyncio.run(mcp_server.call_tool("analyze_k_core", {"k": 0}))
+    invalid_k_payload = json.loads(invalid_k[0].text)
+    assert invalid_k_payload == {
+        "error": "invalid_k",
+        "message": "k must be a positive integer.",
+        "arguments": {"k": 0, "limit": 20, "include_units": True},
+    }
+
+    invalid_limit = asyncio.run(
+        mcp_server.call_tool("analyze_k_core", {"k": 2, "limit": "many"})
+    )
+    invalid_limit_payload = json.loads(invalid_limit[0].text)
+    assert invalid_limit_payload == {
+        "error": "invalid_limit",
+        "message": "limit must be a positive integer.",
+        "arguments": {"k": 2, "limit": "many", "include_units": True},
+    }
 
 
 def test_analyze_tags_tool_returns_summary_and_detail_json(tmp_path, monkeypatch):

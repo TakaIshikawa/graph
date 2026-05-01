@@ -1165,6 +1165,32 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="analyze_k_core",
+            description="Find dense graph neighborhoods by returning the k-core subgraph.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "k": {
+                        "type": "integer",
+                        "default": 2,
+                        "minimum": 1,
+                        "description": "Minimum undirected degree required within the returned core",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "default": 20,
+                        "minimum": 1,
+                        "description": "Maximum ranked node entries to return",
+                    },
+                    "include_units": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Include embedded unit summaries in node entries",
+                    },
+                },
+            },
+        ),
+        Tool(
             name="analyze_bridges",
             description="Find bridge nodes connecting different knowledge clusters.",
             inputSchema={
@@ -2944,6 +2970,28 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     )
 
             return [TextContent(type="text", text=json.dumps(results))]
+
+        elif name == "analyze_k_core":
+            gs = GraphService(store)
+            try:
+                result = gs.analyze_k_core(
+                    k=arguments.get("k", 2),
+                    limit=arguments.get("limit", 20),
+                    include_units=arguments.get("include_units", True),
+                )
+            except ValueError as exc:
+                message = str(exc)
+                error = "invalid_k" if message.startswith("k ") else "invalid_limit"
+                result = {
+                    "error": error,
+                    "message": message,
+                    "arguments": {
+                        "k": arguments.get("k", 2),
+                        "limit": arguments.get("limit", 20),
+                        "include_units": arguments.get("include_units", True),
+                    },
+                }
+            return [TextContent(type="text", text=json.dumps(result, default=str))]
 
         elif name == "analyze_bridges":
             gs = GraphService(store)

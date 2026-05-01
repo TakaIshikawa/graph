@@ -1444,6 +1444,99 @@ class GraphService:
             results.append({"unit": summary, "score": float(score)})
         return results
 
+    def analyze_k_core(
+        self,
+        *,
+        k: int = 2,
+        limit: int = 20,
+        include_units: bool = True,
+    ) -> dict:
+        """Return the k-core subgraph as ranked node and edge summaries."""
+        try:
+            requested_k = int(k)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("k must be a positive integer.") from exc
+        if requested_k < 1:
+            raise ValueError("k must be a positive integer.")
+
+        try:
+            capped_limit = int(limit)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("limit must be a positive integer.") from exc
+        if capped_limit < 1:
+            raise ValueError("limit must be a positive integer.")
+
+        if not self.G:
+            self.rebuild()
+
+        filters = {
+            "k": requested_k,
+            "limit": capped_limit,
+            "include_units": bool(include_units),
+        }
+        if not self.G.nodes:
+            return {
+                "k": requested_k,
+                "node_count": 0,
+                "edge_count": 0,
+                "filters": filters,
+                "nodes": [],
+                "edges": [],
+            }
+
+        undirected = self.G.to_undirected()
+        core_numbers = nx.core_number(undirected)
+        core_graph = nx.k_core(undirected, k=requested_k, core_number=core_numbers)
+        core_node_ids = set(core_graph.nodes)
+
+        ranked_node_ids = sorted(
+            core_node_ids,
+            key=lambda node_id: (
+                -int(core_numbers.get(node_id, 0)),
+                -int(undirected.degree(node_id)),
+                str(self.G.nodes[node_id].get("title", "")).lower(),
+                str(node_id),
+            ),
+        )
+
+        nodes = []
+        for node_id in ranked_node_ids[:capped_limit]:
+            node = {
+                "id": node_id,
+                "title": str(self.G.nodes[node_id].get("title", "")),
+                "source_project": str(self.G.nodes[node_id].get("source_project", "")),
+                "content_type": str(self.G.nodes[node_id].get("content_type", "")),
+                "degree": int(undirected.degree(node_id)),
+                "core_number": int(core_numbers.get(node_id, 0)),
+            }
+            if include_units:
+                unit_summary = self._unit_summary_data(self.store.get_unit(node_id))
+                if unit_summary is not None:
+                    node["unit"] = unit_summary
+            nodes.append(node)
+
+        edges = []
+        for edge in self.store.get_all_edges():
+            if edge.from_unit_id in core_node_ids and edge.to_unit_id in core_node_ids:
+                edges.append(self._edge_export_data(edge))
+        edges.sort(
+            key=lambda edge: (
+                edge["from_unit_id"],
+                edge["to_unit_id"],
+                edge["relation"],
+                edge["id"] or "",
+            )
+        )
+
+        return {
+            "k": requested_k,
+            "node_count": len(core_node_ids),
+            "edge_count": len(edges),
+            "filters": filters,
+            "nodes": nodes,
+            "edges": edges,
+        }
+
     def get_bridges(self, limit: int = 10) -> list[tuple[str, float]]:
         """Find bridge nodes (betweenness centrality)."""
         if not self.G.nodes:
