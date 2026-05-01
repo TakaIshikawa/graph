@@ -1175,14 +1175,14 @@ async def list_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "k": {
-                        "type": "integer",
-                        "default": 2,
-                        "minimum": 1,
-                        "description": "Minimum undirected degree required within the returned core",
+                        "type": ["integer", "null"],
+                        "default": None,
+                        "minimum": 0,
+                        "description": "Minimum core number to return; omit to use the maximum core",
                     },
                     "limit": {
                         "type": "integer",
-                        "default": 20,
+                        "default": 50,
                         "minimum": 1,
                         "description": "Maximum ranked node entries to return",
                     },
@@ -2979,8 +2979,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             gs = GraphService(store)
             try:
                 result = gs.analyze_k_core(
-                    k=arguments.get("k", 2),
-                    limit=arguments.get("limit", 20),
+                    k=arguments.get("k"),
+                    limit=arguments.get("limit", 50),
                     include_units=arguments.get("include_units", True),
                 )
             except ValueError as exc:
@@ -2990,8 +2990,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     "error": error,
                     "message": message,
                     "arguments": {
-                        "k": arguments.get("k", 2),
-                        "limit": arguments.get("limit", 20),
+                        "k": arguments.get("k"),
+                        "limit": arguments.get("limit", 50),
                         "include_units": arguments.get("include_units", True),
                     },
                 }

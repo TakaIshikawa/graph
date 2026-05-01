@@ -142,6 +142,44 @@ def tagged_store(store: Store):
 
 
 @pytest.fixture
+def k_core_store(store: Store):
+    """Store with a 2-core triangle, a 1-core leaf, and an isolated node."""
+    units = {}
+    for unit_id, source_id, title in [
+        ("unit-alpha", "alpha", "Alpha"),
+        ("unit-beta", "beta", "Beta"),
+        ("unit-gamma", "gamma", "Gamma"),
+        ("unit-delta", "delta", "Delta"),
+        ("unit-isolated", "isolated", "Isolated"),
+    ]:
+        units[source_id] = store.insert_unit(
+            KnowledgeUnit(
+                id=unit_id,
+                source_project=SourceProject.MAX,
+                source_id=source_id,
+                source_entity_type="insight",
+                title=title,
+                content=f"{title} note",
+            )
+        )
+
+    for from_id, to_id in [
+        ("alpha", "beta"),
+        ("alpha", "gamma"),
+        ("beta", "gamma"),
+        ("gamma", "delta"),
+    ]:
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=units[from_id].id,
+                to_unit_id=units[to_id].id,
+                relation=EdgeRelation.RELATES_TO,
+            )
+        )
+    return store
+
+
+@pytest.fixture
 def tag_synonym_store(store: Store):
     """Store with variant tags that should suggest a canonical form."""
     units = [
@@ -891,6 +929,64 @@ class TestGraphService:
         }
 
         assert scores[heavy.id] > scores[light.id]
+
+    def test_analyze_k_core_uses_max_core_by_default(self, k_core_store: Store):
+        result = GraphService(k_core_store).analyze_k_core()
+
+        assert result["max_core"] == 2
+        assert result["selected_core"] == 2
+        assert result["node_count"] == 3
+        assert result["edge_count"] == 3
+        assert [node["id"] for node in result["nodes"]] == [
+            "unit-gamma",
+            "unit-alpha",
+            "unit-beta",
+        ]
+        assert result["nodes"][0]["degree"] == 3
+        assert result["nodes"][0]["core_number"] == 2
+        assert result["nodes"][0]["unit"]["title"] == "Gamma"
+
+    def test_analyze_k_core_explicit_k_filters_by_minimum_core_number(
+        self, k_core_store: Store
+    ):
+        result = GraphService(k_core_store).analyze_k_core(k=1, limit=10)
+
+        assert result["max_core"] == 2
+        assert result["selected_core"] == 1
+        assert result["node_count"] == 4
+        assert [node["id"] for node in result["nodes"]] == [
+            "unit-gamma",
+            "unit-alpha",
+            "unit-beta",
+            "unit-delta",
+        ]
+        assert [node["core_number"] for node in result["nodes"]] == [2, 2, 2, 1]
+
+    def test_analyze_k_core_empty_graph_returns_zero_counts(self, store: Store):
+        result = GraphService(store).analyze_k_core()
+
+        assert result["max_core"] == 0
+        assert result["selected_core"] == 0
+        assert result["node_count"] == 0
+        assert result["edge_count"] == 0
+        assert result["nodes"] == []
+
+    def test_analyze_k_core_can_omit_unit_payloads(self, k_core_store: Store):
+        result = GraphService(k_core_store).analyze_k_core(k=0, include_units=False)
+
+        assert result["selected_core"] == 0
+        assert result["node_count"] == 5
+        assert result["nodes"][-1]["id"] == "unit-isolated"
+        assert result["nodes"][-1]["core_number"] == 0
+        assert all("unit" not in node for node in result["nodes"])
+
+    def test_analyze_k_core_rejects_invalid_k(self, store: Store):
+        gs = GraphService(store)
+
+        with pytest.raises(ValueError, match="non-negative integer"):
+            gs.analyze_k_core(k=-1)
+        with pytest.raises(ValueError, match="non-negative integer"):
+            gs.analyze_k_core(k="many")
 
     def test_export_graphml_writes_scalar_node_and_edge_attributes(
         self, store: Store, tmp_path

@@ -1446,18 +1446,21 @@ class GraphService:
 
     def analyze_k_core(
         self,
+        k: int | None = None,
         *,
-        k: int = 2,
-        limit: int = 20,
+        limit: int = 50,
         include_units: bool = True,
     ) -> dict:
-        """Return the k-core subgraph as ranked node and edge summaries."""
-        try:
-            requested_k = int(k)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("k must be a positive integer.") from exc
-        if requested_k < 1:
-            raise ValueError("k must be a positive integer.")
+        """Return ranked nodes in the selected undirected k-core."""
+        if k is None:
+            requested_k = None
+        else:
+            try:
+                requested_k = int(k)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("k must be a non-negative integer.") from exc
+            if requested_k < 0:
+                raise ValueError("k must be a non-negative integer.")
 
         try:
             capped_limit = int(limit)
@@ -1477,6 +1480,8 @@ class GraphService:
         if not self.G.nodes:
             return {
                 "k": requested_k,
+                "max_core": 0,
+                "selected_core": 0 if requested_k is None else requested_k,
                 "node_count": 0,
                 "edge_count": 0,
                 "filters": filters,
@@ -1486,11 +1491,17 @@ class GraphService:
 
         undirected = self.G.to_undirected()
         core_numbers = nx.core_number(undirected)
-        core_graph = nx.k_core(undirected, k=requested_k, core_number=core_numbers)
-        core_node_ids = set(core_graph.nodes)
+        max_core = max(core_numbers.values(), default=0)
+        selected_core = max_core if requested_k is None else requested_k
+        selected_node_ids = {
+            node_id
+            for node_id, core_number in core_numbers.items()
+            if int(core_number) >= selected_core
+        }
+        selected_graph = undirected.subgraph(selected_node_ids)
 
         ranked_node_ids = sorted(
-            core_node_ids,
+            selected_node_ids,
             key=lambda node_id: (
                 -int(core_numbers.get(node_id, 0)),
                 -int(undirected.degree(node_id)),
@@ -1510,14 +1521,14 @@ class GraphService:
                 "core_number": int(core_numbers.get(node_id, 0)),
             }
             if include_units:
-                unit_summary = self._unit_summary_data(self.store.get_unit(node_id))
-                if unit_summary is not None:
-                    node["unit"] = unit_summary
+                unit = self.store.get_unit(node_id)
+                if unit is not None:
+                    node["unit"] = self._unit_export_data(unit)
             nodes.append(node)
 
         edges = []
         for edge in self.store.get_all_edges():
-            if edge.from_unit_id in core_node_ids and edge.to_unit_id in core_node_ids:
+            if edge.from_unit_id in selected_node_ids and edge.to_unit_id in selected_node_ids:
                 edges.append(self._edge_export_data(edge))
         edges.sort(
             key=lambda edge: (
@@ -1530,8 +1541,10 @@ class GraphService:
 
         return {
             "k": requested_k,
-            "node_count": len(core_node_ids),
-            "edge_count": len(edges),
+            "max_core": int(max_core),
+            "selected_core": int(selected_core),
+            "node_count": len(selected_node_ids),
+            "edge_count": selected_graph.number_of_edges(),
             "filters": filters,
             "nodes": nodes,
             "edges": edges,

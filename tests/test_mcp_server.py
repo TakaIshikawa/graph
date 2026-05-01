@@ -4013,9 +4013,9 @@ def test_analyze_k_core_tool_catalog_and_payload(tmp_path, monkeypatch):
     tools = asyncio.run(mcp_server.list_tools())
     analyze_tool = next(tool for tool in tools if tool.name == "analyze_k_core")
     schema = analyze_tool.inputSchema["properties"]
-    assert schema["k"]["default"] == 2
-    assert schema["k"]["minimum"] == 1
-    assert schema["limit"]["default"] == 20
+    assert schema["k"]["default"] is None
+    assert schema["k"]["minimum"] == 0
+    assert schema["limit"]["default"] == 50
     assert schema["include_units"]["default"] is True
 
     response = asyncio.run(
@@ -4078,12 +4078,12 @@ def test_analyze_k_core_tool_serializes_validation_errors(tmp_path, monkeypatch)
     Store(str(db_path)).close()
     monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
 
-    invalid_k = asyncio.run(mcp_server.call_tool("analyze_k_core", {"k": 0}))
+    invalid_k = asyncio.run(mcp_server.call_tool("analyze_k_core", {"k": -1}))
     invalid_k_payload = json.loads(invalid_k[0].text)
     assert invalid_k_payload == {
         "error": "invalid_k",
-        "message": "k must be a positive integer.",
-        "arguments": {"k": 0, "limit": 20, "include_units": True},
+        "message": "k must be a non-negative integer.",
+        "arguments": {"k": -1, "limit": 50, "include_units": True},
     }
 
     invalid_limit = asyncio.run(
