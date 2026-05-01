@@ -63,6 +63,7 @@ class OpmlAdapter(SourceAdapter):
                 warnings.warn(f"Skipping OPML file without a body: {source}", stacklevel=2)
                 continue
 
+            emitted_edges: set[tuple[str, str, EdgeRelation]] = set()
             for index, outline in enumerate(self._outline_children(body), 1):
                 self._ingest_outline(
                     outline,
@@ -70,6 +71,7 @@ class OpmlAdapter(SourceAdapter):
                     position=(index,),
                     path_titles=(),
                     parent_source_id=None,
+                    emitted_edges=emitted_edges,
                     result=result,
                 )
 
@@ -107,9 +109,15 @@ class OpmlAdapter(SourceAdapter):
         position: tuple[int, ...],
         path_titles: tuple[str, ...],
         parent_source_id: str | None,
+        emitted_edges: set[tuple[str, str, EdgeRelation]],
         result: IngestResult,
     ) -> None:
-        unit = self._outline_unit(outline, source=source, position=position, path_titles=path_titles)
+        unit = self._outline_unit(
+            outline,
+            source=source,
+            position=position,
+            path_titles=path_titles,
+        )
         current_source_id = unit.source_id if unit else None
 
         if unit is not None:
@@ -127,19 +135,11 @@ class OpmlAdapter(SourceAdapter):
                 )
             )
             if parent_source_id:
-                result.edges.append(
-                    KnowledgeEdge(
-                        from_unit_id=parent_source_id,
-                        to_unit_id=unit.source_id,
-                        relation=EdgeRelation.CONTAINS,
-                        source=EdgeSource.SOURCE,
-                        metadata={
-                            "source_project": SourceProject.OPML.value,
-                            "from_entity_type": "outline",
-                            "to_entity_type": "outline",
-                            "opml_path": unit.metadata["path"],
-                        },
-                    )
+                self._append_hierarchy_edge(
+                    result=result,
+                    emitted_edges=emitted_edges,
+                    parent_source_id=parent_source_id,
+                    child=unit,
                 )
 
         next_path_titles = path_titles
@@ -154,8 +154,38 @@ class OpmlAdapter(SourceAdapter):
                 position=(*position, index),
                 path_titles=next_path_titles,
                 parent_source_id=current_source_id or parent_source_id,
+                emitted_edges=emitted_edges,
                 result=result,
             )
+
+    def _append_hierarchy_edge(
+        self,
+        *,
+        result: IngestResult,
+        emitted_edges: set[tuple[str, str, EdgeRelation]],
+        parent_source_id: str,
+        child: _OutlineUnit,
+    ) -> None:
+        edge_key = (parent_source_id, child.source_id, EdgeRelation.CONTAINS)
+        if edge_key in emitted_edges:
+            return
+
+        emitted_edges.add(edge_key)
+        result.edges.append(
+            KnowledgeEdge(
+                id=self._edge_id(parent_source_id, child.source_id),
+                from_unit_id=parent_source_id,
+                to_unit_id=child.source_id,
+                relation=EdgeRelation.CONTAINS,
+                source=EdgeSource.SOURCE,
+                metadata={
+                    "source_project": SourceProject.OPML.value,
+                    "from_entity_type": "outline",
+                    "to_entity_type": "outline",
+                    "opml_path": child.metadata["path"],
+                },
+            )
+        )
 
     def _outline_unit(
         self,
@@ -220,6 +250,18 @@ class OpmlAdapter(SourceAdapter):
         )
         digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
         return f"outline-{'.'.join(str(part) for part in position)}-{digest}"
+
+    def _edge_id(self, parent_source_id: str, child_source_id: str) -> str:
+        raw = "|".join(
+            [
+                SourceProject.OPML.value,
+                EdgeRelation.CONTAINS.value,
+                parent_source_id,
+                child_source_id,
+            ]
+        )
+        digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+        return f"opml-contains-{digest}"
 
     def _path_tags(self, path: tuple[str, ...]) -> list[str]:
         tags: list[str] = []
