@@ -58,6 +58,7 @@ SUPPORTED_SYNC_PROJECTS = [
     "html",
     "ical",
     "ipynb",
+    "bibtex",
 ]
 
 
@@ -66,6 +67,7 @@ def _get_store() -> Store:
 
 
 def _get_adapter_for_project(name: str):
+    from graph.adapters.bibtex import BibtexAdapter
     from graph.adapters.bookmarks import BookmarksAdapter
     from graph.adapters.csv_adapter import CsvAdapter
     from graph.adapters.email import EmailAdapter
@@ -108,6 +110,7 @@ def _get_adapter_for_project(name: str):
         "html": lambda: HtmlAdapter(root_path=settings.html_root),
         "ical": lambda: ICalAdapter(path=settings.ical_path),
         "ipynb": lambda: IpynbAdapter(root_path=settings.ipynb_root),
+        "bibtex": lambda: BibtexAdapter(path=settings.bibtex_path),
     }
     factory = mapping.get(name)
     if factory is None:
@@ -2132,6 +2135,7 @@ def _do_ingest(
             "html",
             "ical",
             "ipynb",
+            "bibtex",
         ]
         if project == "all"
         else [project]

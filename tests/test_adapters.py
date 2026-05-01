@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from graph.adapters.bibtex import BibtexAdapter
 from graph.adapters.bookmarks import BookmarksAdapter
 from graph.adapters.csv_adapter import CsvAdapter
 from graph.adapters.email import EmailAdapter
@@ -990,6 +991,129 @@ class TestIpynbAdapter:
         assert missing.units == []
 
 
+class TestBibtexAdapter:
+    def test_ingest_bibtex_file_with_multiple_entries_and_metadata(self, tmp_path):
+        bib = tmp_path / "refs.bib"
+        bib.write_text(
+            r"""@article{smith2024graph,
+  title = {Semantic Personal Graphs},
+  author = {Smith, Ada and Doe, Grace},
+  year = {2024},
+  journal = {Journal of Knowledge Systems},
+  abstract = {A study of personal semantic graphs.},
+  note = {Includes longitudinal evaluation.},
+  keywords = {graphs, knowledge, graphs},
+  doi = {10.1000/example},
+  url = {https://example.com/paper}
+}
+
+@inproceedings{lee2025agents,
+  booktitle = {Proceedings of AgentConf},
+  author = "Lee, Robin",
+  year = 2025,
+  keywords = {agents; evaluation}
+}
+""",
+            encoding="utf-8",
+        )
+
+        result = BibtexAdapter(path=str(bib)).ingest()
+
+        assert [unit.source_id for unit in result.units] == [
+            "refs.bib:smith2024graph",
+            "refs.bib:lee2025agents",
+        ]
+        first = result.units[0]
+        assert first.source_project == "bibtex"
+        assert first.source_entity_type == "bibtex_entry"
+        assert first.title == "Semantic Personal Graphs"
+        assert first.tags == ["graphs", "knowledge"]
+        assert "Authors: Smith, Ada and Doe, Grace" in first.content
+        assert "Year: 2024" in first.content
+        assert "Venue: Journal of Knowledge Systems" in first.content
+        assert "Abstract: A study of personal semantic graphs." in first.content
+        assert "Notes: Includes longitudinal evaluation." in first.content
+        assert first.metadata == {
+            "citation_key": "smith2024graph",
+            "entry_type": "article",
+            "authors": ["Smith, Ada", "Doe, Grace"],
+            "year": "2024",
+            "doi": "10.1000/example",
+            "url": "https://example.com/paper",
+            "journal": "Journal of Knowledge Systems",
+            "booktitle": "",
+            "source_file": "refs.bib",
+        }
+        assert result.units[1].title == "Proceedings of AgentConf"
+        assert result.units[1].tags == ["agents", "evaluation"]
+        assert result.edges == []
+
+    def test_ingest_directory_recursively_includes_only_bib_files(self, tmp_path):
+        root = tmp_path / "library"
+        nested = root / "nested"
+        nested.mkdir(parents=True)
+        (root / "root.bib").write_text(
+            "@book{book1, title = {Root Book}, year = {2023}}\n",
+            encoding="utf-8",
+        )
+        (nested / "more.BIB").write_text(
+            "@misc{misc1, title = {Nested Ref}, keywords = {nested}}\n",
+            encoding="utf-8",
+        )
+        (nested / "ignore.txt").write_text(
+            "@article{ignored, title = {Ignored}}\n",
+            encoding="utf-8",
+        )
+
+        result = BibtexAdapter(path=str(root)).ingest()
+
+        assert [unit.source_id for unit in result.units] == [
+            "nested/more.BIB:misc1",
+            "root.bib:book1",
+        ]
+        assert result.units[0].metadata["source_file"] == "nested/more.BIB"
+
+    def test_malformed_entries_are_skipped_with_warning(self, tmp_path):
+        bib = tmp_path / "mixed.bib"
+        bib.write_text(
+            """@article{good, title = {Valid}, year = {2024}}
+@article{bad, title = {Broken}
+@inproceedings{also_good, title = {Also Valid}, booktitle = {Conference}}
+""",
+            encoding="utf-8",
+        )
+
+        with pytest.warns(UserWarning, match="Skipped 1 malformed BibTeX entr"):
+            result = BibtexAdapter(path=str(bib)).ingest()
+
+        assert [unit.source_id for unit in result.units] == [
+            "mixed.bib:good",
+            "mixed.bib:also_good",
+        ]
+
+    def test_missing_sync_and_entity_filter_return_empty_result(self, tmp_path):
+        old_path = tmp_path / "old.bib"
+        new_path = tmp_path / "new.bib"
+        old_path.write_text("@article{old, title = {Old}}\n", encoding="utf-8")
+        new_path.write_text("@article{new, title = {New}}\n", encoding="utf-8")
+        os.utime(old_path, (1_700_000_000, 1_700_000_000))
+        os.utime(new_path, (1_700_100_000, 1_700_100_000))
+
+        result = BibtexAdapter(path=str(tmp_path)).ingest(
+            since=SyncState(
+                source_project="bibtex",
+                source_entity_type="bibtex_entry",
+                last_sync_at=datetime.fromtimestamp(1_700_050_000, tz=timezone.utc),
+            )
+        )
+        filtered = BibtexAdapter(path=str(new_path)).ingest(entity_types=["text_document"])
+        missing = BibtexAdapter(path=str(tmp_path / "missing")).ingest()
+
+        assert [unit.source_id for unit in result.units] == ["new.bib:new"]
+        assert filtered.units == []
+        assert missing.units == []
+
+
 class TestPdfAdapter:
     def test_ingest_pdf_documents_with_mocked_reader(self, tmp_path, monkeypatch):
         root = tmp_path / "pdfs"
@@ -1757,6 +1881,7 @@ class TestRegistry:
             "html",
             "ical",
             "ipynb",
+            "bibtex",
         }
 
     def test_get_adapter(self):
@@ -1792,6 +1917,9 @@ class TestRegistry:
 
         feed_adapter = get_adapter("feed", sources="/tmp/feed.xml")
         assert feed_adapter.name == "feed"
+
+        bibtex_adapter = get_adapter("bibtex", path="/tmp/refs.bib")
+        assert bibtex_adapter.name == "bibtex"
 
     def test_unknown_adapter(self):
         with pytest.raises(KeyError):

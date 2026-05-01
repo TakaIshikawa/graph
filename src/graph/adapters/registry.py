@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from graph.adapters.base import SourceAdapter
+from graph.adapters.bibtex import BibtexAdapter
 from graph.adapters.bookmarks import BookmarksAdapter
 from graph.adapters.csv_adapter import CsvAdapter
 from graph.adapters.email import EmailAdapter
@@ -43,6 +44,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "html": HtmlAdapter,
     "ical": ICalAdapter,
     "ipynb": IpynbAdapter,
+    "bibtex": BibtexAdapter,
 }
 
 

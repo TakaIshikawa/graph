@@ -15,6 +15,7 @@ class SourceProject(StrEnum):
     OPML = "opml"
     PDF = "pdf"
     EMAIL = "email"
+    BIBTEX = "bibtex"
 
 
 class ContentType(StrEnum):
