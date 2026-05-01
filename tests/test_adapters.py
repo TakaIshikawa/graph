@@ -29,6 +29,7 @@ from graph.adapters.markdown import MarkdownAdapter
 from graph.adapters.max_adapter import MaxAdapter
 from graph.adapters.me import MeAdapter
 from graph.adapters.opml import OpmlAdapter
+from graph.adapters.org import OrgAdapter
 from graph.adapters.pdf import PdfAdapter
 from graph.adapters.presence import PresenceAdapter
 from graph.adapters.registry import get_adapter, list_adapters
@@ -612,6 +613,93 @@ class TestMarkdownAdapter:
             ("Projects/Alpha.md", "Projects/Nested/Beta.md")
         }
         assert result.edges[0].metadata["source_project"] == "obsidian"
+
+
+class TestOrgAdapter:
+    def test_ingest_org_headings_with_tags_properties_and_links(self, tmp_path):
+        (tmp_path / "Alpha.org").write_text(
+            "* TODO Research Plan :research:python:\n"
+            ":PROPERTIES:\n"
+            ":CUSTOM_ID: plan\n"
+            ":Owner: Taka\n"
+            ":END:\n"
+            "Body links to [[file:Beta.org::*Implementation][implementation]], "
+            "[[#local]], and [[file:Missing.org]].\n"
+            "** Local Details :local:\n"
+            ":PROPERTIES:\n"
+            ":CUSTOM_ID: local\n"
+            ":END:\n"
+            "Nested detail.\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "Beta.org").write_text(
+            "* Implementation :build:\n"
+            "Backlink to [[file:Alpha.org::#plan]].\n",
+            encoding="utf-8",
+        )
+
+        result = OrgAdapter(root_path=str(tmp_path)).ingest()
+
+        assert [unit.source_id for unit in result.units] == [
+            "Alpha.org#research-plan",
+            "Alpha.org#local-details",
+            "Beta.org#implementation",
+        ]
+        by_source = {unit.source_id: unit for unit in result.units}
+        plan = by_source["Alpha.org#research-plan"]
+        assert plan.source_project == "org"
+        assert plan.source_entity_type == "org_heading"
+        assert plan.title == "Research Plan"
+        assert plan.tags == ["research", "python"]
+        assert plan.metadata["path"] == "Alpha.org"
+        assert plan.metadata["heading_level"] == 1
+        assert plan.metadata["line"] == 1
+        assert plan.metadata["properties"] == {
+            "CUSTOM_ID": "plan",
+            "Owner": "Taka",
+        }
+        assert "Body links to" in plan.content
+        assert "Local Details" not in plan.content
+        assert by_source["Alpha.org#local-details"].tags == ["local"]
+        assert by_source["Alpha.org#local-details"].metadata["heading_level"] == 2
+
+        assert {(edge.from_unit_id, edge.to_unit_id) for edge in result.edges} == {
+            ("Alpha.org#research-plan", "Beta.org#implementation"),
+            ("Alpha.org#research-plan", "Alpha.org#local-details"),
+            ("Beta.org#implementation", "Alpha.org#research-plan"),
+        }
+        assert all(edge.relation == "relates_to" for edge in result.edges)
+        assert all(edge.metadata["relation_type"] == "org_link" for edge in result.edges)
+
+    def test_org_adapter_keeps_unsupported_org_syntax_as_content(self, tmp_path):
+        (tmp_path / "Agenda.org").write_text(
+            "* Agenda\n"
+            "SCHEDULED: <2026-05-01 Fri>\n"
+            "- [ ] checkbox syntax is retained as plain content\n"
+            "#+BEGIN_SRC python\n"
+            "print('not parsed as a block')\n"
+            "#+END_SRC\n",
+            encoding="utf-8",
+        )
+
+        result = OrgAdapter(root_path=str(tmp_path)).ingest()
+
+        assert len(result.units) == 1
+        unit = result.units[0]
+        assert unit.metadata["properties"] == {}
+        assert "SCHEDULED: <2026-05-01 Fri>" in unit.content
+        assert "#+BEGIN_SRC python" in unit.content
+
+    def test_org_adapter_respects_entity_filter_and_missing_root(self, tmp_path):
+        (tmp_path / "Note.org").write_text("* Note\nBody.\n", encoding="utf-8")
+
+        filtered = OrgAdapter(root_path=str(tmp_path)).ingest(entity_types=["markdown_note"])
+        missing = OrgAdapter(root_path=str(tmp_path / "missing")).ingest()
+
+        assert filtered.units == []
+        assert filtered.edges == []
+        assert missing.units == []
+        assert missing.edges == []
 
 
 class TestTextAdapter:
@@ -2192,6 +2280,7 @@ class TestRegistry:
             "jsonl",
             "yaml",
             "opml",
+            "org",
             "pdf",
             "email",
             "text",
@@ -2215,6 +2304,9 @@ class TestRegistry:
 
         opml_adapter = get_adapter("opml", path="/tmp/test.opml")
         assert opml_adapter.name == "opml"
+
+        org_adapter = get_adapter("org", root_path="/tmp/org")
+        assert org_adapter.name == "org"
 
         pdf_adapter = get_adapter("pdf", path="/tmp/test.pdf")
         assert pdf_adapter.name == "pdf"

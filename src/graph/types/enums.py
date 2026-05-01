@@ -13,6 +13,7 @@ class SourceProject(StrEnum):
     JSONL = "jsonl"
     YAML = "yaml"
     OPML = "opml"
+    ORG = "org"
     PDF = "pdf"
     EMAIL = "email"
     BIBTEX = "bibtex"

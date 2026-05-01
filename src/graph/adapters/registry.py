@@ -19,6 +19,7 @@ from graph.adapters.markdown import MarkdownAdapter
 from graph.adapters.max_adapter import MaxAdapter
 from graph.adapters.me import MeAdapter
 from graph.adapters.opml import OpmlAdapter
+from graph.adapters.org import OrgAdapter
 from graph.adapters.pdf import PdfAdapter
 from graph.adapters.presence import PresenceAdapter
 from graph.adapters.sota import SOTAAdapter
@@ -40,6 +41,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "jsonl": JsonlAdapter,
     "yaml": YamlAdapter,
     "opml": OpmlAdapter,
+    "org": OrgAdapter,
     "pdf": PdfAdapter,
     "email": EmailAdapter,
     "text": TextAdapter,

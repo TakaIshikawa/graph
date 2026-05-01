@@ -2219,6 +2219,61 @@ def test_ingest_text_command_uses_configured_root_and_indexes_fulltext(tmp_path,
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_ingest_org_command_uses_configured_root_and_indexes_fulltext(tmp_path, monkeypatch):
+    root = tmp_path / "org"
+    nested = root / "notes"
+    nested.mkdir(parents=True)
+    (nested / "Alpha.org").write_text(
+        "* Research Plan :cli:org:\n"
+        ":PROPERTIES:\n"
+        ":CUSTOM_ID: alpha\n"
+        ":END:\n"
+        "Org fulltext phrase links to [[file:Beta.org]].\n",
+        encoding="utf-8",
+    )
+    (nested / "Beta.org").write_text("* Beta\nTarget body.\n", encoding="utf-8")
+
+    store = _make_store()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    monkeypatch.setattr("graph.cli.main.settings.org_root", str(root))
+
+    try:
+        result = runner.invoke(app, ["ingest", "org"])
+
+        assert result.exit_code == 0
+        assert "Ingesting from org" in result.output
+        assert "org: 2 new" in result.output
+        alpha = store.get_unit_by_source(
+            "org", "notes/Alpha.org#research-plan", "org_heading"
+        )
+        beta = store.get_unit_by_source("org", "notes/Beta.org#beta", "org_heading")
+        assert alpha is not None
+        assert beta is not None
+        assert alpha.tags == ["cli", "org"]
+        assert alpha.metadata["path"] == "notes/Alpha.org"
+        assert alpha.metadata["heading_level"] == 1
+        assert alpha.metadata["properties"] == {"CUSTOM_ID": "alpha"}
+        edges = store.get_all_edges()
+        assert len(edges) == 1
+        assert edges[0].from_unit_id == alpha.id
+        assert edges[0].to_unit_id == beta.id
+        sync_state = store.get_sync_state("org", "org_heading")
+        assert sync_state is not None
+        assert sync_state.items_synced == 2
+
+        search = runner.invoke(
+            app,
+            ["search", "Org fulltext", "--mode", "fulltext", "--limit", "1"],
+        )
+
+        assert search.exit_code == 0
+        assert "Research Plan" in search.output
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_ingest_html_command_uses_configured_root_and_indexes_fulltext(tmp_path, monkeypatch):
     root = tmp_path / "html"
     nested = root / "nested"
