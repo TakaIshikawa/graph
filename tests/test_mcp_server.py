@@ -602,6 +602,50 @@ def test_mcp_collection_import_export_tools_and_schema(tmp_path, monkeypatch):
     assert "missing-unit" in strict_payload["message"]
 
 
+def test_adapter_catalog_tool_lists_configuration_without_ingesting(tmp_path, monkeypatch):
+    from graph.adapters import registry
+
+    monkeypatch.setattr(mcp_server.settings, "csv_path", str(tmp_path / "items.csv"))
+    monkeypatch.setattr(mcp_server.settings, "jsonl_path", "")
+    monkeypatch.setattr(
+        mcp_server,
+        "_get_store",
+        lambda: (_ for _ in ()).throw(AssertionError("catalog should not open store")),
+    )
+    monkeypatch.setattr(registry, "list_adapters", lambda: ["csv", "jsonl", "broken"])
+
+    def fake_get_adapter(name: str, **kwargs):
+        if name == "broken":
+            raise ImportError("missing optional package")
+        return FakeAdapter(name, {"csv": ["csv_row"], "jsonl": ["jsonl_record"]}[name])
+
+    monkeypatch.setattr(registry, "get_adapter", fake_get_adapter)
+
+    tools = asyncio.run(mcp_server.list_tools())
+    catalog_tool = next(tool for tool in tools if tool.name == "adapter_catalog")
+    assert catalog_tool.inputSchema == {"type": "object", "properties": {}}
+
+    response = asyncio.run(mcp_server.call_tool("adapter_catalog", {}))
+    payload = json.loads(response[0].text)
+    adapters = {adapter["name"]: adapter for adapter in payload["adapters"]}
+
+    assert adapters["csv"] == {
+        "name": "csv",
+        "entity_types": ["csv_row"],
+        "configured": True,
+        "error": None,
+    }
+    assert adapters["jsonl"] == {
+        "name": "jsonl",
+        "entity_types": ["jsonl_record"],
+        "configured": False,
+        "error": None,
+    }
+    assert adapters["broken"]["entity_types"] == []
+    assert adapters["broken"]["configured"] is False
+    assert adapters["broken"]["error"] == "ImportError: missing optional package"
+
+
 def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))

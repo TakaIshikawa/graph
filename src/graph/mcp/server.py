@@ -174,6 +174,62 @@ def _get_store() -> Store:
     return Store(settings.database_url)
 
 
+def _adapter_kwargs(name: str) -> dict:
+    mapping = {
+        "forty_two": {"db_path": settings.forty_two_db},
+        "max": {"db_path": settings.max_db},
+        "presence": {
+            "db_path": settings.presence_db,
+            "min_score": settings.content_min_score,
+        },
+        "me": {"config_path": settings.me_config},
+        "markdown": {"root_path": settings.markdown_root},
+        "kindle": {"db_path": settings.kindle_db},
+        "sota": {"db_path": settings.sota_db},
+        "feed": {"sources": settings.feed_sources},
+        "bookmarks": {"path": settings.bookmarks_path},
+        "csv": {"path": settings.csv_path},
+        "jsonl": {"path": settings.jsonl_path},
+        "yaml": {"root_path": settings.yaml_root},
+        "opml": {"path": settings.opml_path},
+        "pdf": {"path": settings.pdf_path},
+        "email": {"path": settings.email_path},
+        "text": {"root_path": settings.text_root},
+        "html": {"root_path": settings.html_root},
+        "ical": {"path": settings.ical_path},
+        "ipynb": {"root_path": settings.ipynb_root},
+        "bibtex": {"path": settings.bibtex_path},
+        "ris": {"path": settings.ris_path},
+        "git": {"repos": settings.git_repos},
+    }
+    return mapping.get(name, {})
+
+
+def _adapter_configured(name: str) -> bool:
+    kwargs = _adapter_kwargs(name)
+    return any(bool(value) for value in kwargs.values() if isinstance(value, str))
+
+
+def _adapter_catalog_payload() -> dict:
+    from graph.adapters import registry
+
+    adapters = []
+    for name in registry.list_adapters():
+        entry = {
+            "name": name,
+            "entity_types": [],
+            "configured": _adapter_configured(name),
+            "error": None,
+        }
+        try:
+            adapter = registry.get_adapter(name, **_adapter_kwargs(name))
+            entry["entity_types"] = adapter.entity_types
+        except Exception as exc:  # pragma: no cover - concrete failures are adapter dependent
+            entry["error"] = f"{type(exc).__name__}: {exc}"
+        adapters.append(entry)
+    return {"adapters": adapters}
+
+
 def _get_adapter(name: str):
     from graph.adapters.bookmarks import BookmarksAdapter
     from graph.adapters.csv_adapter import CsvAdapter
@@ -559,6 +615,14 @@ async def list_tools() -> list[Tool]:
                 },
                 "required": ["project"],
             },
+        ),
+        Tool(
+            name="adapter_catalog",
+            description=(
+                "List available ingestion adapters, their entity types, and whether "
+                "their configured path or source setting is present. Does not ingest data."
+            ),
+            inputSchema={"type": "object", "properties": {}},
         ),
         Tool(
             name="search",
@@ -2271,6 +2335,9 @@ async def list_tools() -> list[Tool]:
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+    if name == "adapter_catalog":
+        return [TextContent(type="text", text=json.dumps(_adapter_catalog_payload()))]
+
     store = _get_store()
 
     try:
