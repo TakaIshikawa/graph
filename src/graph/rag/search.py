@@ -27,6 +27,7 @@ SEARCH_SORTS = (
 DEFAULT_SEARCH_SNIPPET_LENGTH = 160
 MIN_SEARCH_SNIPPET_LENGTH = 1
 MAX_SEARCH_SNIPPET_LENGTH = 2000
+DEFAULT_MMR_LAMBDA = 0.5
 
 
 def _iso(value) -> str:
@@ -140,6 +141,59 @@ def validate_search_sort(sort: str) -> str:
         valid = ", ".join(SEARCH_SORTS)
         raise ValueError(f"Unknown sort: {sort}. Use one of: {valid}.")
     return sort
+
+
+def validate_mmr_lambda(lambda_mult: float) -> float:
+    if isinstance(lambda_mult, bool):
+        raise ValueError("lambda_mult must be a number between 0 and 1.")
+    try:
+        value = float(lambda_mult)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("lambda_mult must be a number between 0 and 1.") from exc
+    if value < 0.0 or value > 1.0:
+        raise ValueError("lambda_mult must be between 0 and 1.")
+    return value
+
+
+def _mmr_rerank(
+    results: list[tuple[KnowledgeUnit, float, list[float] | None]],
+    *,
+    limit: int,
+    lambda_mult: float,
+) -> list[tuple[KnowledgeUnit, float]]:
+    """Diversify ranked results with maximal marginal relevance."""
+    if limit <= 0 or not results:
+        return []
+
+    remaining = list(enumerate(results))
+    selected: list[tuple[int, tuple[KnowledgeUnit, float, list[float] | None]]] = []
+
+    while remaining and len(selected) < limit:
+        if not selected:
+            best = max(remaining, key=lambda item: (item[1][1], -item[0]))
+        else:
+            selected_embeddings = [item[1][2] for item in selected if item[1][2] is not None]
+
+            def mmr_score(item):
+                index, (_unit, relevance, embedding) = item
+                diversity_penalty = 0.0
+                if embedding is not None and selected_embeddings:
+                    diversity_penalty = max(
+                        cosine_similarity(embedding, selected_embedding)
+                        for selected_embedding in selected_embeddings
+                    )
+                return (
+                    lambda_mult * relevance - (1.0 - lambda_mult) * diversity_penalty,
+                    relevance,
+                    -index,
+                )
+
+            best = max(remaining, key=mmr_score)
+
+        selected.append(best)
+        remaining.remove(best)
+
+    return [(unit, score) for _index, (unit, score, _embedding) in selected]
 
 
 def parse_search_datetime_filter(
@@ -393,9 +447,12 @@ class RAGService:
         metadata_key: str | None = None,
         metadata_value: object | None = None,
         sort: str = "relevance",
+        rerank_mmr: bool = False,
+        lambda_mult: float = DEFAULT_MMR_LAMBDA,
     ) -> list[tuple[KnowledgeUnit, float]]:
         """Semantic search. Returns (unit, similarity) pairs."""
         validate_search_sort(sort)
+        lambda_mult = validate_mmr_lambda(lambda_mult)
         validate_search_date_filters(
             created_after=created_after,
             created_before=created_before,
@@ -432,11 +489,15 @@ class RAGService:
             emb = deserialize_embedding(emb_bytes)
             sim = cosine_similarity(query_embedding, emb)
             if sim >= min_similarity:
-                results.append((unit, sim))
+                results.append((unit, sim, emb))
 
         results.sort(key=lambda x: x[1], reverse=True)
-        results = sort_search_results(results, sort)
-        return results[:limit]
+        if rerank_mmr and sort == "relevance":
+            return _mmr_rerank(results, limit=limit, lambda_mult=lambda_mult)
+
+        pairs = [(unit, score) for unit, score, _embedding in results]
+        pairs = sort_search_results(pairs, sort)
+        return pairs[:limit]
 
     def hybrid_search(
         self,
@@ -456,9 +517,12 @@ class RAGService:
         metadata_key: str | None = None,
         metadata_value: object | None = None,
         sort: str = "relevance",
+        rerank_mmr: bool = False,
+        lambda_mult: float = DEFAULT_MMR_LAMBDA,
     ) -> list[tuple[KnowledgeUnit, float]]:
         """Combined semantic + full-text search."""
         validate_search_sort(sort)
+        lambda_mult = validate_mmr_lambda(lambda_mult)
         validate_search_date_filters(
             created_after=created_after,
             created_before=created_before,
@@ -480,6 +544,7 @@ class RAGService:
             updated_before=updated_before,
             metadata_key=metadata_key,
             metadata_value=metadata_value,
+            rerank_mmr=False,
         )
         semantic_scores = {unit.id: sim for unit, sim in semantic_results}
 
@@ -511,6 +576,20 @@ class RAGService:
 
         combined.sort(key=lambda x: x[1], reverse=True)
 
+        embedding_by_id: dict[str, list[float]] = {}
+        if rerank_mmr and sort == "relevance":
+            for embedded_unit, blob in self.store.get_units_with_embeddings(
+                source_project=source_project,
+                content_type=content_type,
+                created_after=created_after,
+                created_before=created_before,
+                updated_after=updated_after,
+                updated_before=updated_before,
+                metadata_key=metadata_key,
+                metadata_value=metadata_value,
+            ):
+                embedding_by_id[embedded_unit.id] = deserialize_embedding(blob)
+
         results = []
         for uid, score in combined:
             unit = self.store.get_unit(uid)
@@ -524,6 +603,13 @@ class RAGService:
                 metadata_value=metadata_value,
             ):
                 results.append((unit, score))
+        if rerank_mmr and sort == "relevance":
+            return _mmr_rerank(
+                [(unit, score, embedding_by_id.get(unit.id)) for unit, score in results],
+                limit=limit,
+                lambda_mult=lambda_mult,
+            )
+
         results = sort_search_results(results, sort)
         return results[:limit]
 
@@ -724,6 +810,17 @@ class RAGService:
                     continue
                 selected_edges[edge.id] = _context_edge_payload(edge)
 
+        metadata = {
+            **search_payload.get("metadata", {}),
+            "char_budget": char_budget,
+            "content_chars_used": char_budget - remaining_budget,
+            "neighbor_depth_requested": requested_depth,
+            "neighbor_depth": capped_depth,
+            "neighbor_depth_cap": 2,
+            "result_count": len(ranked_units),
+            "sort": search_payload.get("sort", "relevance"),
+        }
+
         return {
             "query": search_payload.get("query"),
             "mode": search_payload.get("mode"),
@@ -732,15 +829,7 @@ class RAGService:
             "ranked_units": ranked_units,
             "neighbors": list(neighbor_units.values()),
             "selected_edges": list(selected_edges.values()),
-            "metadata": {
-                "char_budget": char_budget,
-                "content_chars_used": char_budget - remaining_budget,
-                "neighbor_depth_requested": requested_depth,
-                "neighbor_depth": capped_depth,
-                "neighbor_depth_cap": 2,
-                "result_count": len(ranked_units),
-                "sort": search_payload.get("sort", "relevance"),
-            },
+            "metadata": metadata,
         }
 
     def _unit_has_tag(self, unit_id: str, tag: str) -> bool:

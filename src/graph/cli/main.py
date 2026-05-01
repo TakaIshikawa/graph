@@ -12,11 +12,13 @@ import typer
 from graph.config import settings
 from graph.export.html_report import render_search_html_report
 from graph.rag.search import (
+    DEFAULT_MMR_LAMBDA,
     DEFAULT_SEARCH_SNIPPET_LENGTH,
     SEARCH_SORTS,
     build_search_snippet,
     parse_search_datetime_filter,
     sort_search_results,
+    validate_mmr_lambda,
     validate_search_date_range,
     validate_search_sort,
     validate_snippet_length,
@@ -1574,6 +1576,8 @@ def _do_search(
     filters: dict | None = None,
     sort: str = "relevance",
     snippet_length: int = DEFAULT_SEARCH_SNIPPET_LENGTH,
+    rerank_mmr: bool = False,
+    lambda_mult: float = DEFAULT_MMR_LAMBDA,
 ) -> dict:
     _validate_search_mode(mode)
     filters = filters or {}
@@ -1581,6 +1585,9 @@ def _do_search(
     sort = str(filters.get("sort", sort))
     validate_search_sort(sort)
     snippet_length = validate_snippet_length(snippet_length)
+    lambda_mult = validate_mmr_lambda(lambda_mult)
+    if rerank_mmr and mode == "fulltext":
+        raise ValueError("--rerank-mmr requires semantic or hybrid mode.")
 
     if mode == "fulltext":
         results = _search_fulltext_with_filters(
@@ -1642,6 +1649,8 @@ def _do_search(
                 updated_before=filters.get("updated_before"),
                 metadata_key=filters.get("metadata_key"),
                 metadata_value=filters.get("metadata_value"),
+                rerank_mmr=rerank_mmr,
+                lambda_mult=lambda_mult,
             ),
             query,
             limit=limit,
@@ -1681,6 +1690,8 @@ def _do_search(
                 updated_before=filters.get("updated_before"),
                 metadata_key=filters.get("metadata_key"),
                 metadata_value=filters.get("metadata_value"),
+                rerank_mmr=rerank_mmr,
+                lambda_mult=lambda_mult,
             ),
             query,
             limit=limit,
@@ -1715,6 +1726,9 @@ def _do_search(
         ],
         "metadata": {"sort": sort},
     }
+    if rerank_mmr:
+        payload["metadata"]["rerank_mmr"] = True
+        payload["metadata"]["lambda_mult"] = lambda_mult
     if filters:
         payload["filters"] = filters
     return payload
@@ -1976,6 +1990,8 @@ def _do_context_pack(
     sort: str = "relevance",
     char_budget: int = 4000,
     neighbor_depth: int = 1,
+    rerank_mmr: bool = False,
+    lambda_mult: float = DEFAULT_MMR_LAMBDA,
 ) -> dict:
     from graph.rag.search import RAGService
 
@@ -1986,6 +2002,8 @@ def _do_context_pack(
         mode=mode,
         filters=filters,
         sort=sort,
+        rerank_mmr=rerank_mmr,
+        lambda_mult=lambda_mult,
     )
     rag = RAGService(store, provider=None)
     return rag.context_pack(
@@ -4172,6 +4190,16 @@ def search(
         "--snippet-length",
         help="Maximum characters to include in each result snippet",
     ),
+    rerank_mmr: bool = typer.Option(
+        False,
+        "--rerank-mmr",
+        help="Diversify semantic or hybrid results with maximal marginal relevance",
+    ),
+    lambda_mult: float = typer.Option(
+        DEFAULT_MMR_LAMBDA,
+        "--lambda-mult",
+        help="MMR relevance/diversity balance between 0 and 1",
+    ),
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
     """Search knowledge units."""
@@ -4184,6 +4212,8 @@ def search(
             mode=mode,
             sort=sort,
             snippet_length=snippet_length,
+            rerank_mmr=rerank_mmr,
+            lambda_mult=lambda_mult,
             filters=_search_filters_dict(
                 source_project=source_project,
                 content_type=content_type,
@@ -4210,6 +4240,10 @@ def search(
             "valid_snippet_length": {
                 "min": 1,
                 "max": 2000,
+            },
+            "valid_lambda_mult": {
+                "min": 0,
+                "max": 1,
             },
         }
 
@@ -4585,6 +4619,16 @@ def context(
         "--char-budget",
         help="Total character budget for content excerpts",
     ),
+    rerank_mmr: bool = typer.Option(
+        False,
+        "--rerank-mmr",
+        help="Diversify semantic or hybrid ranked units with maximal marginal relevance",
+    ),
+    lambda_mult: float = typer.Option(
+        DEFAULT_MMR_LAMBDA,
+        "--lambda-mult",
+        help="MMR relevance/diversity balance between 0 and 1",
+    ),
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
     """Build a compact retrieval context pack for LLM use."""
@@ -4613,12 +4657,18 @@ def context(
             ),
             char_budget=char_budget,
             neighbor_depth=neighbor_depth,
+            rerank_mmr=rerank_mmr,
+            lambda_mult=lambda_mult,
         )
     except ValueError as exc:
         payload = {
             "error": str(exc),
             "valid_modes": ["fulltext", "semantic", "hybrid"],
             "valid_sorts": list(SEARCH_SORTS),
+            "valid_lambda_mult": {
+                "min": 0,
+                "max": 1,
+            },
         }
     finally:
         store.close()

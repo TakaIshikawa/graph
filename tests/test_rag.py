@@ -9,7 +9,12 @@ from datetime import datetime
 import pytest
 
 from graph.rag.embeddings import cosine_similarity, deserialize_embedding, serialize_embedding
-from graph.rag.search import RAGService, build_search_snippet, validate_snippet_length
+from graph.rag.search import (
+    RAGService,
+    build_search_snippet,
+    validate_mmr_lambda,
+    validate_snippet_length,
+)
 from graph.store.db import Store
 from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
 from graph.types.models import KnowledgeEdge, KnowledgeUnit
@@ -30,6 +35,14 @@ class MockEmbeddingProvider:
         if norm > 0:
             vec = [x / norm for x in vec]
         return vec
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        return [self.embed(t) for t in texts]
+
+
+class FixedQueryEmbeddingProvider:
+    def embed(self, text: str) -> list[float]:
+        return [1.0, 0.0]
 
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
         return [self.embed(t) for t in texts]
@@ -57,6 +70,11 @@ def test_search_snippet_falls_back_when_terms_do_not_match():
 def test_validate_snippet_length_rejects_invalid_values():
     with pytest.raises(ValueError, match="snippet_length must be between 1 and 2000"):
         validate_snippet_length(0)
+
+
+def test_validate_mmr_lambda_rejects_invalid_values():
+    with pytest.raises(ValueError, match="lambda_mult must be between 0 and 1"):
+        validate_mmr_lambda(1.01)
 
 
 @pytest.fixture
@@ -212,12 +230,115 @@ class TestRAGService:
         # Results are (unit, similarity) tuples
         assert all(isinstance(sim, float) for _, sim in results)
 
+    def test_semantic_search_mmr_prefers_diverse_embeddings(self, store: Store):
+        duplicate_a = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="duplicate-a",
+                source_entity_type="insight",
+                title="Solar duplicate A",
+                content="Solar storage duplicate A",
+            )
+        )
+        duplicate_b = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="duplicate-b",
+                source_entity_type="insight",
+                title="Solar duplicate B",
+                content="Solar storage duplicate B",
+            )
+        )
+        diverse = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="diverse",
+                source_entity_type="insight",
+                title="Solar diverse",
+                content="Solar storage diverse",
+            )
+        )
+        store.update_embedding(duplicate_a.id, serialize_embedding([0.96, 0.28]))
+        store.update_embedding(duplicate_b.id, serialize_embedding([0.95, 0.31]))
+        store.update_embedding(diverse.id, serialize_embedding([0.7, 0.714]))
+        service = RAGService(store, FixedQueryEmbeddingProvider())
+
+        baseline = service.search("solar", limit=3, min_similarity=0.0)
+        reranked = service.search(
+            "solar",
+            limit=3,
+            min_similarity=0.0,
+            rerank_mmr=True,
+            lambda_mult=0.3,
+        )
+
+        assert [unit.source_id for unit, _score in baseline[:2]] == [
+            "duplicate-a",
+            "duplicate-b",
+        ]
+        assert [unit.source_id for unit, _score in reranked[:2]] == [
+            "duplicate-a",
+            "diverse",
+        ]
+
     def test_hybrid_search(
         self, populated_store_with_embeddings: Store, rag_service: RAGService
     ):
         results = rag_service.hybrid_search("solar")
         assert len(results) > 0
         assert all(isinstance(sim, float) for _, sim in results)
+
+    def test_hybrid_search_mmr_prefers_diverse_embeddings(self, store: Store):
+        duplicate_a = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="hybrid-duplicate-a",
+                source_entity_type="insight",
+                title="Solar duplicate A",
+                content="Solar storage duplicate A",
+            )
+        )
+        duplicate_b = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="hybrid-duplicate-b",
+                source_entity_type="insight",
+                title="Solar duplicate B",
+                content="Solar storage duplicate B",
+            )
+        )
+        diverse = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="hybrid-diverse",
+                source_entity_type="insight",
+                title="Solar diverse",
+                content="Solar storage diverse",
+            )
+        )
+        for unit in [duplicate_a, duplicate_b, diverse]:
+            store.fts_index_unit(unit)
+        store.update_embedding(duplicate_a.id, serialize_embedding([0.96, 0.28]))
+        store.update_embedding(duplicate_b.id, serialize_embedding([0.95, 0.31]))
+        store.update_embedding(diverse.id, serialize_embedding([0.7, 0.714]))
+        service = RAGService(store, FixedQueryEmbeddingProvider())
+
+        baseline = service.hybrid_search("solar", limit=3)
+        reranked = service.hybrid_search(
+            "solar",
+            limit=3,
+            rerank_mmr=True,
+            lambda_mult=0.3,
+        )
+
+        assert [unit.source_id for unit, _score in baseline[:2]] == [
+            "hybrid-duplicate-a",
+            "hybrid-duplicate-b",
+        ]
+        assert [unit.source_id for unit, _score in reranked[:2]] == [
+            "hybrid-duplicate-a",
+            "hybrid-diverse",
+        ]
 
     def test_semantic_and_hybrid_search_exclude_exact_tag(
         self, populated_store_with_embeddings: Store, rag_service: RAGService

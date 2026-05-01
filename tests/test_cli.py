@@ -52,6 +52,14 @@ class MockEmbeddingProvider:
         return [self.embed(t) for t in texts]
 
 
+class FixedQueryEmbeddingProvider:
+    def embed(self, text: str) -> list[float]:
+        return [1.0, 0.0]
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        return [self.embed(t) for t in texts]
+
+
 class RecordingEmbeddingProvider(MockEmbeddingProvider):
     def __init__(self) -> None:
         self.batch_texts: list[list[str]] = []
@@ -2569,6 +2577,104 @@ def test_search_command_emits_semantic_json_with_scores(monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_search_command_mmr_reranks_semantic_json(monkeypatch):
+    store = _make_store()
+    duplicate_a = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="duplicate-a",
+            source_entity_type="insight",
+            title="Solar duplicate A",
+            content="Solar storage duplicate A",
+        )
+    )
+    duplicate_b = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="duplicate-b",
+            source_entity_type="insight",
+            title="Solar duplicate B",
+            content="Solar storage duplicate B",
+        )
+    )
+    diverse = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="diverse",
+            source_entity_type="insight",
+            title="Solar diverse",
+            content="Solar storage diverse",
+        )
+    )
+    store.update_embedding(duplicate_a.id, serialize_embedding([0.96, 0.28]))
+    store.update_embedding(duplicate_b.id, serialize_embedding([0.95, 0.31]))
+    store.update_embedding(diverse.id, serialize_embedding([0.7, 0.714]))
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    monkeypatch.setattr(
+        "graph.rag.embeddings.get_embedding_provider",
+        lambda *args, **kwargs: FixedQueryEmbeddingProvider(),
+    )
+
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "search",
+                "solar",
+                "--mode",
+                "semantic",
+                "--limit",
+                "3",
+                "--rerank-mmr",
+                "--lambda-mult",
+                "0.3",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["metadata"]["rerank_mmr"] is True
+        assert payload["metadata"]["lambda_mult"] == 0.3
+        assert [item["source_id"] for item in payload["results"][:2]] == [
+            "duplicate-a",
+            "diverse",
+        ]
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_search_command_rejects_invalid_mmr_lambda(monkeypatch):
+    store = _make_store()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "search",
+                "solar",
+                "--mode",
+                "semantic",
+                "--rerank-mmr",
+                "--lambda-mult",
+                "1.5",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["error"] == "lambda_mult must be between 0 and 1."
+        assert payload["valid_lambda_mult"] == {"min": 0, "max": 1}
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_search_command_snippet_length_bounds_fulltext_snippet(monkeypatch):
     store = _make_store()
     unit = store.insert_unit(
@@ -2827,6 +2933,75 @@ def test_context_command_emits_ranked_units_neighbors_and_budget(monkeypatch):
             )
             <= 40
         )
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_context_command_mmr_reranks_semantic_ranked_units(monkeypatch):
+    store = _make_store()
+    duplicate_a = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="context-duplicate-a",
+            source_entity_type="insight",
+            title="Solar duplicate A",
+            content="Solar storage duplicate A",
+        )
+    )
+    duplicate_b = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="context-duplicate-b",
+            source_entity_type="insight",
+            title="Solar duplicate B",
+            content="Solar storage duplicate B",
+        )
+    )
+    diverse = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="context-diverse",
+            source_entity_type="insight",
+            title="Solar diverse",
+            content="Solar storage diverse",
+        )
+    )
+    store.update_embedding(duplicate_a.id, serialize_embedding([0.96, 0.28]))
+    store.update_embedding(duplicate_b.id, serialize_embedding([0.95, 0.31]))
+    store.update_embedding(diverse.id, serialize_embedding([0.7, 0.714]))
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    monkeypatch.setattr(
+        "graph.rag.embeddings.get_embedding_provider",
+        lambda *args, **kwargs: FixedQueryEmbeddingProvider(),
+    )
+
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "context",
+                "solar",
+                "--mode",
+                "semantic",
+                "--limit",
+                "3",
+                "--rerank-mmr",
+                "--lambda-mult",
+                "0.3",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["metadata"]["rerank_mmr"] is True
+        assert payload["metadata"]["lambda_mult"] == 0.3
+        assert [item["source_id"] for item in payload["ranked_units"][:2]] == [
+            "context-duplicate-a",
+            "context-diverse",
+        ]
     finally:
         store.close()
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
