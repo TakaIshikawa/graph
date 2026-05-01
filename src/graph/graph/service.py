@@ -1972,6 +1972,86 @@ class GraphService:
         )
         return records[:capped_limit]
 
+    def analyze_articulation_points(self, limit: int = 20) -> list[dict]:
+        """Identify articulation points in the undirected knowledge graph projection."""
+        try:
+            capped_limit = int(limit)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("limit must be a non-negative integer.") from exc
+        if capped_limit < 0:
+            raise ValueError("limit must be a non-negative integer.")
+        if capped_limit == 0:
+            return []
+
+        units_by_id = {unit.id: unit for unit in self.store.get_all_units(limit=1000000000)}
+        if len(units_by_id) < 3:
+            return []
+
+        projection = nx.Graph()
+        projection.add_nodes_from(units_by_id)
+        projection.add_edges_from(
+            tuple(sorted((edge.from_unit_id, edge.to_unit_id)))
+            for edge in self.store.get_all_edges()
+            if edge.from_unit_id in units_by_id
+            and edge.to_unit_id in units_by_id
+            and edge.from_unit_id != edge.to_unit_id
+        )
+        if projection.number_of_edges() == 0:
+            return []
+
+        component_count_before = nx.number_connected_components(projection)
+        records = []
+        for unit_id in sorted(nx.articulation_points(projection)):
+            unit = units_by_id[unit_id]
+            original_component = nx.node_connected_component(projection, unit_id)
+            without_unit = projection.copy()
+            without_unit.remove_node(unit_id)
+
+            affected_component_sizes = sorted(
+                (
+                    len(component)
+                    for component in nx.connected_components(
+                        without_unit.subgraph(original_component - {unit_id})
+                    )
+                ),
+                reverse=True,
+            )
+            largest_remaining_size = affected_component_sizes[0]
+            component_size_impact = (
+                len(original_component) - 1 - largest_remaining_size
+            )
+
+            records.append(
+                {
+                    "unit_id": unit_id,
+                    "title": unit.title,
+                    "source_project": str(unit.source_project),
+                    "source_id": unit.source_id,
+                    "source_entity_type": unit.source_entity_type,
+                    "content_type": str(unit.content_type),
+                    "component_size_impact": component_size_impact,
+                    "neighbor_count": int(projection.degree[unit_id]),
+                    "affected_component_sizes": affected_component_sizes[:5],
+                    "impact": {
+                        "component_count_before": component_count_before,
+                        "component_count_after": component_count_before
+                        + len(affected_component_sizes)
+                        - 1,
+                        "original_component_size": len(original_component),
+                        "largest_remaining_component_size": largest_remaining_size,
+                        "affected_component_sizes": affected_component_sizes,
+                    },
+                }
+            )
+
+        records.sort(
+            key=lambda record: (
+                -record["component_size_impact"],
+                record["unit_id"],
+            )
+        )
+        return records[:capped_limit]
+
     def suggest_missing_links(
         self,
         limit: int = 20,
