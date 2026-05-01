@@ -481,6 +481,117 @@ class Store:
         rows = self.conn.execute(query, params).fetchall()
         return {str(row["tag"]): row["count"] for row in rows}
 
+    def add_unit_alias(
+        self,
+        unit_id: str,
+        alias: str,
+        *,
+        source: str | None = None,
+    ) -> dict:
+        alias = alias.strip()
+        if not alias:
+            raise ValueError("alias must not be empty.")
+
+        unit = self.get_unit(unit_id)
+        if unit is None:
+            return {
+                "unit_id": unit_id,
+                "alias": alias,
+                "added": False,
+                "error": "unit_not_found",
+                "message": f"Unit not found: {unit_id}",
+            }
+
+        existing = self.conn.execute(
+            """SELECT unit_id, alias, source, created_at
+               FROM unit_aliases
+               WHERE unit_id = ? AND alias = ?""",
+            (unit_id, alias),
+        ).fetchone()
+        if existing is not None:
+            return {
+                "unit_id": unit_id,
+                "alias": alias,
+                "source": existing["source"],
+                "created_at": existing["created_at"],
+                "added": False,
+            }
+
+        now = _utcnow_iso()
+        self.conn.execute(
+            """INSERT INTO unit_aliases (unit_id, alias, source, created_at)
+               VALUES (?, ?, ?, ?)""",
+            (unit_id, alias, source, now),
+        )
+        self.conn.commit()
+        self.fts_index_unit(unit)
+        return {
+            "unit_id": unit_id,
+            "alias": alias,
+            "source": source,
+            "created_at": now,
+            "added": True,
+        }
+
+    def remove_unit_alias(self, unit_id: str, alias: str) -> dict:
+        alias = alias.strip()
+        if not alias:
+            raise ValueError("alias must not be empty.")
+
+        unit = self.get_unit(unit_id)
+        if unit is None:
+            return {
+                "unit_id": unit_id,
+                "alias": alias,
+                "removed": False,
+                "error": "unit_not_found",
+                "message": f"Unit not found: {unit_id}",
+            }
+
+        cursor = self.conn.execute(
+            "DELETE FROM unit_aliases WHERE unit_id = ? AND alias = ?",
+            (unit_id, alias),
+        )
+        self.conn.commit()
+        self.fts_index_unit(unit)
+        return {"unit_id": unit_id, "alias": alias, "removed": cursor.rowcount > 0}
+
+    def list_unit_aliases(self, unit_id: str) -> dict:
+        unit = self.get_unit(unit_id)
+        if unit is None:
+            return {
+                "unit_id": unit_id,
+                "aliases": [],
+                "count": 0,
+                "error": "unit_not_found",
+                "message": f"Unit not found: {unit_id}",
+            }
+
+        rows = self.conn.execute(
+            """SELECT unit_id, alias, source, created_at
+               FROM unit_aliases
+               WHERE unit_id = ?
+               ORDER BY lower(alias), alias""",
+            (unit_id,),
+        ).fetchall()
+        aliases = [
+            {
+                "unit_id": row["unit_id"],
+                "alias": row["alias"],
+                "source": row["source"],
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+        return {"unit_id": unit_id, "aliases": aliases, "count": len(aliases)}
+
+    def _unit_alias_texts(self, unit_id: str) -> list[str]:
+        rows = self.conn.execute(
+            "SELECT alias FROM unit_aliases WHERE unit_id = ? ORDER BY lower(alias), alias",
+            (unit_id,),
+        ).fetchall()
+        return [str(row["alias"]) for row in rows]
+
     def get_units(
         self,
         *,
@@ -1095,6 +1206,7 @@ class Store:
             for edge_id in skipped_edge_ids:
                 self.conn.execute("DELETE FROM edges WHERE id = ?", (edge_id,))
             self.conn.execute("DELETE FROM knowledge_fts WHERE unit_id = ?", (source_id,))
+            self.conn.execute("DELETE FROM unit_aliases WHERE unit_id = ?", (source_id,))
             self.conn.execute("DELETE FROM knowledge_units WHERE id = ?", (source_id,))
 
         updated_target = self.get_unit(target_id)
@@ -1207,7 +1319,7 @@ class Store:
                     self.conn.execute("DELETE FROM knowledge_fts WHERE unit_id = ?", (unit.id,))
                     self.conn.execute(
                         "INSERT INTO knowledge_fts (unit_id, title, content, tags) VALUES (?, ?, ?, ?)",
-                        (unit.id, unit.title, unit.content, " ".join(unit.tags)),
+                        (unit.id, unit.title, unit.content, self._fts_tags_text_for_unit(unit)),
                     )
 
         return {
@@ -1290,7 +1402,7 @@ class Store:
                     self.conn.execute("DELETE FROM knowledge_fts WHERE unit_id = ?", (unit.id,))
                     self.conn.execute(
                         "INSERT INTO knowledge_fts (unit_id, title, content, tags) VALUES (?, ?, ?, ?)",
-                        (unit.id, unit.title, unit.content, " ".join(unit.tags)),
+                        (unit.id, unit.title, unit.content, self._fts_tags_text_for_unit(unit)),
                     )
 
         return {
@@ -1368,7 +1480,7 @@ class Store:
                     self.conn.execute("DELETE FROM knowledge_fts WHERE unit_id = ?", (unit.id,))
                     self.conn.execute(
                         "INSERT INTO knowledge_fts (unit_id, title, content, tags) VALUES (?, ?, ?, ?)",
-                        (unit.id, unit.title, unit.content, " ".join(unit.tags)),
+                        (unit.id, unit.title, unit.content, self._fts_tags_text_for_unit(unit)),
                     )
 
         return {
@@ -1392,6 +1504,7 @@ class Store:
             (unit_id, unit_id),
         )
         self.conn.execute("DELETE FROM knowledge_fts WHERE unit_id = ?", (unit_id,))
+        self.conn.execute("DELETE FROM unit_aliases WHERE unit_id = ?", (unit_id,))
         unit_cursor = self.conn.execute("DELETE FROM knowledge_units WHERE id = ?", (unit_id,))
         self.conn.commit()
         return {
@@ -1886,11 +1999,26 @@ class Store:
             }
             for edge in self.get_all_edges()
         ]
+        alias_rows = self.conn.execute(
+            """SELECT unit_id, alias, source, created_at
+               FROM unit_aliases
+               ORDER BY unit_id, lower(alias), alias"""
+        ).fetchall()
+        aliases = [
+            {
+                "unit_id": row["unit_id"],
+                "alias": row["alias"],
+                "source": row["source"],
+                "created_at": row["created_at"],
+            }
+            for row in alias_rows
+        ]
         return {
             "schema_version": SCHEMA_VERSION,
             "exported_at": _utcnow_iso(),
             "units": units,
             "edges": edges,
+            "aliases": aliases,
         }
 
     def export_jsonl_records(
@@ -1988,6 +2116,33 @@ class Store:
             fetched = self.get_unit(actual_id)
             if fetched:
                 self.fts_index_unit(fetched)
+
+        alias_unit_ids: set[str] = set()
+        for data in payload.get("aliases", []):
+            unit_id = imported_to_graph_id.get(data["unit_id"], data["unit_id"])
+            if self.get_unit(unit_id) is None:
+                continue
+            alias = str(data.get("alias") or "").strip()
+            if not alias:
+                continue
+            self.conn.execute(
+                """INSERT INTO unit_aliases (unit_id, alias, source, created_at)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(unit_id, alias) DO UPDATE SET
+                       source = excluded.source""",
+                (
+                    unit_id,
+                    alias,
+                    data.get("source"),
+                    data.get("created_at") or _utcnow_iso(),
+                ),
+            )
+            alias_unit_ids.add(unit_id)
+        self.conn.commit()
+        for unit_id in alias_unit_ids:
+            unit = self.get_unit(unit_id)
+            if unit:
+                self.fts_index_unit(unit)
 
         for data in payload.get("edges", []):
             from_id = imported_to_graph_id.get(data["from_unit_id"], data["from_unit_id"])
@@ -2951,21 +3106,16 @@ class Store:
                WHERE unit_id NOT IN (SELECT id FROM knowledge_units)"""
         )
         rows = self.conn.execute(
-            """SELECT u.id, u.title, u.content, u.tags
+            """SELECT u.*
                FROM knowledge_units u
                LEFT JOIN knowledge_fts f ON f.unit_id = u.id
                WHERE f.unit_id IS NULL"""
         ).fetchall()
         for row in rows:
-            try:
-                tags = json.loads(row["tags"])
-            except json.JSONDecodeError:
-                tags = []
-            if not isinstance(tags, list):
-                tags = []
+            unit = _row_to_unit(row)
             self.conn.execute(
                 "INSERT INTO knowledge_fts (unit_id, title, content, tags) VALUES (?, ?, ?, ?)",
-                (row["id"], row["title"], row["content"], " ".join(map(str, tags))),
+                (unit.id, unit.title, unit.content, self._fts_tags_text_for_unit(unit)),
             )
         self.conn.commit()
         return {
@@ -2974,22 +3124,17 @@ class Store:
         }
 
     def rebuild_fts_index(self) -> dict:
-        rows = self.conn.execute("SELECT id, title, content, tags FROM knowledge_units").fetchall()
+        rows = self.conn.execute("SELECT * FROM knowledge_units").fetchall()
         fts_row = self.conn.execute("SELECT COUNT(*) AS count FROM knowledge_fts").fetchone()
         rows_deleted = fts_row["count"] or 0
 
         with self.conn:
             self.conn.execute("DELETE FROM knowledge_fts")
             for row in rows:
-                try:
-                    tags = json.loads(row["tags"])
-                except json.JSONDecodeError:
-                    tags = []
-                if not isinstance(tags, list):
-                    tags = []
+                unit = _row_to_unit(row)
                 self.conn.execute(
                     "INSERT INTO knowledge_fts (unit_id, title, content, tags) VALUES (?, ?, ?, ?)",
-                    (row["id"], row["title"], row["content"], " ".join(map(str, tags))),
+                    (unit.id, unit.title, unit.content, self._fts_tags_text_for_unit(unit)),
                 )
 
         return {"rows_deleted": rows_deleted, "rows_inserted": len(rows)}
@@ -3134,11 +3279,14 @@ class Store:
 
     # --- FTS ---
 
+    def _fts_tags_text_for_unit(self, unit: KnowledgeUnit) -> str:
+        return " ".join([*map(str, unit.tags), *self._unit_alias_texts(unit.id)])
+
     def fts_index_unit(self, unit: KnowledgeUnit) -> None:
         self.conn.execute("DELETE FROM knowledge_fts WHERE unit_id = ?", (unit.id,))
         self.conn.execute(
             "INSERT INTO knowledge_fts (unit_id, title, content, tags) VALUES (?, ?, ?, ?)",
-            (unit.id, unit.title, unit.content, " ".join(unit.tags)),
+            (unit.id, unit.title, unit.content, self._fts_tags_text_for_unit(unit)),
         )
         self.conn.commit()
 
@@ -3198,7 +3346,7 @@ class Store:
                     unit = self.get_unit(result["unit_id"])
                     if unit is None:
                         continue
-                    haystacks = [unit.title, unit.content, *unit.tags]
+                    haystacks = [unit.title, unit.content, *unit.tags, *self._unit_alias_texts(unit.id)]
                     if any(exact in str(value).lower() for value in haystacks):
                         filtered.append(result)
                 return filtered
@@ -3206,11 +3354,20 @@ class Store:
         except sqlite3.OperationalError:
             # Fallback to LIKE search if FTS query syntax is invalid
             terms = _fallback_search_terms(query)
-            clauses = " OR ".join(["title LIKE ? OR content LIKE ? OR tags LIKE ?" for _ in terms])
+            clauses = " OR ".join(
+                [
+                    """title LIKE ? OR content LIKE ? OR tags LIKE ?
+                       OR EXISTS (
+                           SELECT 1 FROM unit_aliases ua
+                           WHERE ua.unit_id = knowledge_units.id AND ua.alias LIKE ?
+                       )"""
+                    for _ in terms
+                ]
+            )
             params: list[object] = []
             for term in terms:
                 pattern = f"%{term}%"
-                params.extend([pattern, pattern, pattern])
+                params.extend([pattern, pattern, pattern, pattern])
             params.extend(date_params)
             params.extend(metadata_params)
             params.append(limit)

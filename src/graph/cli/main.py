@@ -824,6 +824,30 @@ def _do_remove_unit_metadata(store: Store, unit_id: str, path: str) -> dict:
     return {"unit_id": unit_id, "updated": True, "path": path, "unit": _unit_to_json(updated)}
 
 
+def _do_add_unit_alias(
+    store: Store,
+    unit_id: str,
+    alias: str,
+    *,
+    source: str | None = None,
+) -> dict:
+    payload = store.add_unit_alias(unit_id, alias, source=source)
+    if not payload.get("error"):
+        payload["aliases"] = store.list_unit_aliases(unit_id)["aliases"]
+    return payload
+
+
+def _do_remove_unit_alias(store: Store, unit_id: str, alias: str) -> dict:
+    payload = store.remove_unit_alias(unit_id, alias)
+    if not payload.get("error"):
+        payload["aliases"] = store.list_unit_aliases(unit_id)["aliases"]
+    return payload
+
+
+def _do_list_unit_aliases(store: Store, unit_id: str) -> dict:
+    return store.list_unit_aliases(unit_id)
+
+
 def _do_pin_unit(store: Store, unit_id: str, *, reason: str | None = None) -> dict:
     updated = store.pin_unit(unit_id, reason=reason)
     if updated is None:
@@ -3425,6 +3449,102 @@ def units_metadata_remove(
 
     unit = payload["unit"]
     typer.echo(f"Removed metadata {path} from unit {unit['id']}: {unit['title']}")
+
+
+@units_app.command(name="alias-add")
+def units_alias_add(
+    unit_id: str = typer.Argument(..., help="Knowledge unit ID"),
+    alias: str = typer.Argument(..., help="Alias text"),
+    source: str | None = typer.Option(None, "--source", help="Optional alias source"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Add an alternate name for a knowledge unit."""
+    store = _get_store()
+    try:
+        payload = _do_add_unit_alias(store, unit_id, alias, source=source)
+    except ValueError as exc:
+        if json_output:
+            _json_echo({"unit_id": unit_id, "alias": alias, "added": False, "error": str(exc)})
+            return
+        raise typer.BadParameter(str(exc)) from exc
+    finally:
+        store.close()
+
+    if payload.get("error"):
+        if json_output:
+            _json_echo(payload)
+            return
+        typer.echo(payload["message"])
+        raise typer.Exit(code=1)
+
+    if json_output:
+        _json_echo(payload)
+        return
+
+    action = "Added alias" if payload["added"] else "Alias already exists"
+    typer.echo(f"{action} for unit {unit_id}: {payload['alias']}")
+
+
+@units_app.command(name="alias-remove")
+def units_alias_remove(
+    unit_id: str = typer.Argument(..., help="Knowledge unit ID"),
+    alias: str = typer.Argument(..., help="Alias text"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Remove an alternate name from a knowledge unit."""
+    store = _get_store()
+    try:
+        payload = _do_remove_unit_alias(store, unit_id, alias)
+    except ValueError as exc:
+        if json_output:
+            _json_echo({"unit_id": unit_id, "alias": alias, "removed": False, "error": str(exc)})
+            return
+        raise typer.BadParameter(str(exc)) from exc
+    finally:
+        store.close()
+
+    if payload.get("error"):
+        if json_output:
+            _json_echo(payload)
+            return
+        typer.echo(payload["message"])
+        raise typer.Exit(code=1)
+
+    if json_output:
+        _json_echo(payload)
+        return
+
+    action = "Removed alias" if payload["removed"] else "Alias not found"
+    typer.echo(f"{action} for unit {unit_id}: {payload['alias']}")
+
+
+@units_app.command(name="aliases")
+def units_aliases(
+    unit_id: str = typer.Argument(..., help="Knowledge unit ID"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """List alternate names for a knowledge unit."""
+    store = _get_store()
+    payload = _do_list_unit_aliases(store, unit_id)
+    store.close()
+
+    if payload.get("error"):
+        if json_output:
+            _json_echo(payload)
+            return
+        typer.echo(payload["message"])
+        raise typer.Exit(code=1)
+
+    if json_output:
+        _json_echo(payload)
+        return
+
+    if not payload["aliases"]:
+        typer.echo("No aliases found.")
+        return
+    for item in payload["aliases"]:
+        source_text = f" ({item['source']})" if item.get("source") else ""
+        typer.echo(f"{item['alias']}{source_text}")
 
 
 @app.command(name="pin-unit")

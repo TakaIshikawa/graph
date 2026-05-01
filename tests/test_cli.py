@@ -870,7 +870,7 @@ def test_json_export_and_import_commands_round_trip(tmp_path, monkeypatch):
     assert export_result.exit_code == 0
     assert export_path.exists()
     exported = json.loads(export_path.read_text())
-    assert exported["schema_version"] == 5
+    assert exported["schema_version"] == 6
     assert exported["exported_at"]
     assert len(exported["units"]) == 4
     assert len(exported["edges"]) == 2
@@ -5864,6 +5864,68 @@ def test_units_metadata_set_remove_cli_json_and_errors(monkeypatch):
         missing_result = runner.invoke(
             app,
             ["units", "metadata-remove", "missing", "review.owner", "--json"],
+        )
+        assert missing_result.exit_code == 0
+        assert json.loads(missing_result.output)["error"] == "unit_not_found"
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_units_alias_cli_json_and_search(monkeypatch):
+    store = _make_store()
+    unit = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.ME,
+            source_id="manual-alias",
+            source_entity_type="manual",
+            title="Alias target",
+            content="Alias content",
+        )
+    )
+    store.fts_index_unit(unit)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        add_result = runner.invoke(
+            app,
+            ["units", "alias-add", unit.id, "pvx-909", "--source", "manual", "--json"],
+        )
+
+        assert add_result.exit_code == 0
+        add_payload = json.loads(add_result.output)
+        assert add_payload["added"] is True
+        assert add_payload["aliases"][0]["alias"] == "pvx-909"
+        assert add_payload["aliases"][0]["source"] == "manual"
+        assert store.fts_search("pvx")[0]["unit_id"] == unit.id
+
+        duplicate_result = runner.invoke(
+            app,
+            ["units", "alias-add", unit.id, "pvx-909", "--json"],
+        )
+        assert duplicate_result.exit_code == 0
+        assert json.loads(duplicate_result.output)["added"] is False
+
+        list_result = runner.invoke(app, ["units", "aliases", unit.id, "--json"])
+        assert list_result.exit_code == 0
+        list_payload = json.loads(list_result.output)
+        assert list_payload["count"] == 1
+        assert list_payload["aliases"][0]["alias"] == "pvx-909"
+
+        remove_result = runner.invoke(
+            app,
+            ["units", "alias-remove", unit.id, "pvx-909", "--json"],
+        )
+        assert remove_result.exit_code == 0
+        remove_payload = json.loads(remove_result.output)
+        assert remove_payload["removed"] is True
+        assert remove_payload["aliases"] == []
+        assert store.fts_search("pvx") == []
+
+        missing_result = runner.invoke(
+            app,
+            ["units", "aliases", "missing", "--json"],
         )
         assert missing_result.exit_code == 0
         assert json.loads(missing_result.output)["error"] == "unit_not_found"
