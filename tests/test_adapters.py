@@ -6,6 +6,7 @@ import builtins
 import json
 import os
 import sqlite3
+import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,6 +20,7 @@ from graph.adapters.csv_adapter import CsvAdapter
 from graph.adapters.email import EmailAdapter
 from graph.adapters.feed import FeedAdapter
 from graph.adapters.forty_two import FortyTwoAdapter
+from graph.adapters.git_adapter import GitAdapter
 from graph.adapters.html import HtmlAdapter
 from graph.adapters.ical import ICalAdapter
 from graph.adapters.ipynb import IpynbAdapter
@@ -2010,6 +2012,169 @@ class TestOpmlAdapter:
         assert edges[0].relation == "contains"
 
 
+class TestGitAdapter:
+    def _run_git(
+        self,
+        repo: Path,
+        *args: str,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        try:
+            return subprocess.run(
+                ["git", "-C", str(repo), *args],
+                check=True,
+                capture_output=True,
+                text=True,
+                env={**os.environ, **(env or {})},
+            )
+        except FileNotFoundError:
+            pytest.skip("git executable is not available")
+
+    def _init_repo(self, tmp_path: Path) -> Path:
+        repo = tmp_path / "knowledge-repo"
+        repo.mkdir(parents=True)
+        try:
+            subprocess.run(
+                ["git", "init", str(repo)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except FileNotFoundError:
+            pytest.skip("git executable is not available")
+        self._run_git(repo, "config", "user.name", "Test User")
+        self._run_git(repo, "config", "user.email", "test@example.com")
+        return repo
+
+    def _commit(
+        self,
+        repo: Path,
+        filename: str,
+        content: str,
+        subject: str,
+        body: str,
+        timestamp: str,
+    ) -> str:
+        path = repo / filename
+        path.write_text(content, encoding="utf-8")
+        self._run_git(repo, "add", filename)
+        env = {
+            "GIT_AUTHOR_NAME": "Ada Lovelace",
+            "GIT_AUTHOR_EMAIL": "ada@example.com",
+            "GIT_AUTHOR_DATE": timestamp,
+            "GIT_COMMITTER_NAME": "Grace Hopper",
+            "GIT_COMMITTER_EMAIL": "grace@example.com",
+            "GIT_COMMITTER_DATE": timestamp,
+        }
+        self._run_git(repo, "commit", "-m", subject, "-m", body, env=env)
+        return self._run_git(repo, "rev-parse", "HEAD").stdout.strip()
+
+    def test_ingests_commits_with_metadata_and_refs(self, tmp_path):
+        repo = self._init_repo(tmp_path)
+        first_sha = self._commit(
+            repo,
+            "notes.txt",
+            "first\n",
+            "Capture design decision",
+            "Use the graph as commit memory.",
+            "2025-01-01T10:00:00+00:00",
+        )
+        self._run_git(repo, "tag", "v1", first_sha)
+
+        result = GitAdapter(repos=str(repo)).ingest()
+
+        by_title = {unit.title: unit for unit in result.units}
+        unit = by_title["Capture design decision"]
+        assert unit.source_project == "git"
+        assert unit.source_entity_type == "commit"
+        assert unit.source_id == f"knowledge-repo:{first_sha}"
+        assert unit.content == "Capture design decision\n\nUse the graph as commit memory."
+        assert unit.content_type == "artifact"
+        assert unit.metadata["sha"] == first_sha
+        assert unit.metadata["author"] == "Ada Lovelace"
+        assert unit.metadata["email"] == "ada@example.com"
+        assert unit.metadata["repo_name"] == "knowledge-repo"
+        assert unit.metadata["repo_path"] == str(repo.resolve())
+        assert "tag: v1" in unit.metadata["refs"]
+        assert unit.created_at == datetime(2025, 1, 1, 10, tzinfo=timezone.utc)
+        assert unit.updated_at == datetime(2025, 1, 1, 10, tzinfo=timezone.utc)
+        assert unit.tags == ["git", "knowledge-repo"]
+        assert result.edges == []
+
+    def test_incremental_sync_excludes_commits_at_or_before_last_sync(self, tmp_path):
+        repo = self._init_repo(tmp_path)
+        old_sha = self._commit(
+            repo,
+            "old.txt",
+            "old\n",
+            "Old commit",
+            "Already synced.",
+            "2025-01-01T00:00:00+00:00",
+        )
+        new_sha = self._commit(
+            repo,
+            "new.txt",
+            "new\n",
+            "New commit",
+            "Needs ingest.",
+            "2025-01-02T00:00:00+00:00",
+        )
+
+        result = GitAdapter(repos=str(repo)).ingest(
+            since=SyncState(
+                source_project="git",
+                source_entity_type="commit",
+                last_sync_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+            )
+        )
+
+        assert [unit.source_id for unit in result.units] == [f"knowledge-repo:{new_sha}"]
+        assert old_sha not in result.units[0].source_id
+
+    def test_accepts_comma_and_newline_separated_repositories(self, tmp_path):
+        first = self._init_repo(tmp_path / "first")
+        second = self._init_repo(tmp_path / "second")
+        first_sha = self._commit(
+            first,
+            "a.txt",
+            "a\n",
+            "First repo commit",
+            "Imported from first.",
+            "2025-01-01T00:00:00+00:00",
+        )
+        second_sha = self._commit(
+            second,
+            "b.txt",
+            "b\n",
+            "Second repo commit",
+            "Imported from second.",
+            "2025-01-02T00:00:00+00:00",
+        )
+
+        result = GitAdapter(repos=f"{first},\n{second}").ingest()
+
+        assert {unit.source_id for unit in result.units} == {
+            f"knowledge-repo:{first_sha}",
+            f"knowledge-repo:{second_sha}",
+        }
+
+    def test_entity_filter_returns_empty_result(self, tmp_path):
+        repo = self._init_repo(tmp_path)
+        self._commit(
+            repo,
+            "notes.txt",
+            "first\n",
+            "Capture design decision",
+            "Use the graph as commit memory.",
+            "2025-01-01T10:00:00+00:00",
+        )
+
+        result = GitAdapter(repos=str(repo)).ingest(entity_types=["yaml_document"])
+
+        assert result.units == []
+        assert result.edges == []
+
+
 class TestRegistry:
     def test_list_adapters(self):
         adapters = list_adapters()
@@ -2035,6 +2200,7 @@ class TestRegistry:
             "ipynb",
             "bibtex",
             "ris",
+            "git",
         }
 
     def test_get_adapter(self):
@@ -2076,6 +2242,9 @@ class TestRegistry:
 
         ris_adapter = get_adapter("ris", path="/tmp/refs.ris")
         assert ris_adapter.name == "ris"
+
+        git_adapter = get_adapter("git", repos="/tmp/repo")
+        assert git_adapter.name == "git"
 
     def test_unknown_adapter(self):
         with pytest.raises(KeyError):

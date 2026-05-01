@@ -17,6 +17,7 @@ class SourceProject(StrEnum):
     EMAIL = "email"
     BIBTEX = "bibtex"
     RIS = "ris"
+    GIT = "git"
 
 
 class ContentType(StrEnum):

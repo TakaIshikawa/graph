@@ -62,6 +62,7 @@ SUPPORTED_SYNC_PROJECTS = [
     "ipynb",
     "bibtex",
     "ris",
+    "git",
 ]
 
 
@@ -76,6 +77,7 @@ def _get_adapter_for_project(name: str):
     from graph.adapters.email import EmailAdapter
     from graph.adapters.feed import FeedAdapter
     from graph.adapters.forty_two import FortyTwoAdapter
+    from graph.adapters.git_adapter import GitAdapter
     from graph.adapters.html import HtmlAdapter
     from graph.adapters.ical import ICalAdapter
     from graph.adapters.ipynb import IpynbAdapter
@@ -116,6 +118,7 @@ def _get_adapter_for_project(name: str):
         "ipynb": lambda: IpynbAdapter(root_path=settings.ipynb_root),
         "bibtex": lambda: BibtexAdapter(path=settings.bibtex_path),
         "ris": lambda: RisAdapter(path=settings.ris_path),
+        "git": lambda: GitAdapter(repos=settings.git_repos),
     }
     factory = mapping.get(name)
     if factory is None:
