@@ -94,6 +94,45 @@ class TestUnitCRUD:
         units = store.get_all_units()
         assert len(units) == 5
 
+    def test_unit_aliases_are_idempotent_and_searchable(
+        self, store: Store, sample_unit: KnowledgeUnit
+    ):
+        inserted = store.insert_unit(sample_unit)
+        store.fts_index_unit(inserted)
+
+        first = store.add_unit_alias(inserted.id, "pvx-909", source="manual")
+        second = store.add_unit_alias(inserted.id, "pvx-909", source="manual")
+
+        assert first["added"] is True
+        assert second["added"] is False
+        assert store.list_unit_aliases(inserted.id)["aliases"] == [
+            {
+                "unit_id": inserted.id,
+                "alias": "pvx-909",
+                "source": "manual",
+                "created_at": first["created_at"],
+            }
+        ]
+        assert store.fts_search("pvx")[0]["unit_id"] == inserted.id
+        assert store.fts_search("pvx-909")[0]["unit_id"] == inserted.id
+
+        removed = store.remove_unit_alias(inserted.id, "pvx-909")
+        removed_again = store.remove_unit_alias(inserted.id, "pvx-909")
+
+        assert removed == {"unit_id": inserted.id, "alias": "pvx-909", "removed": True}
+        assert removed_again == {
+            "unit_id": inserted.id,
+            "alias": "pvx-909",
+            "removed": False,
+        }
+        assert store.list_unit_aliases(inserted.id)["aliases"] == []
+        assert store.fts_search("pvx") == []
+
+    def test_unit_aliases_report_missing_unit(self, store: Store):
+        assert store.add_unit_alias("missing", "Alias")["error"] == "unit_not_found"
+        assert store.remove_unit_alias("missing", "Alias")["error"] == "unit_not_found"
+        assert store.list_unit_aliases("missing")["error"] == "unit_not_found"
+
     def test_tag_vocabulary_counts_existing_tags_and_can_exclude_unit(self, store: Store):
         target = store.insert_unit(
             KnowledgeUnit(
@@ -1785,7 +1824,7 @@ class TestSavedQueries:
             }
             assert "embedding_updated_at" in columns
             version = store.conn.execute("SELECT version FROM schema_version").fetchone()[0]
-            assert version == 5
+            assert version == 6
         finally:
             store.close()
 
@@ -1811,7 +1850,7 @@ class TestSavedQueries:
 
             assert collections is not None
             assert collection_units is not None
-            assert version == 5
+            assert version == 6
         finally:
             store.close()
 
@@ -2520,11 +2559,12 @@ class TestJsonBackup:
 
         payload = store.export_json()
 
-        assert payload["schema_version"] == 5
+        assert payload["schema_version"] == 6
         assert payload["exported_at"]
         assert len(payload["units"]) == 1
         assert payload["units"][0]["id"] == inserted.id
         assert payload["edges"] == []
+        assert payload["aliases"] == []
 
     def test_export_jsonl_records_filters_and_orders_by_created_at_then_id(self, store: Store):
         later = store.insert_unit(
@@ -2617,8 +2657,10 @@ class TestJsonBackup:
                     metadata={"why": "backup"},
                 )
             )
+            source.add_unit_alias(u1.id, "pvx-909", source="manual")
 
             payload = source.export_json()
+            assert payload["aliases"][0]["alias"] == "pvx-909"
             first_stats = target.import_json(payload)
 
             assert first_stats == {
@@ -2631,6 +2673,8 @@ class TestJsonBackup:
             assert len(target.get_all_edges()) == 1
             assert target.get_unit(u1.id).title == "Solar storage note"
             assert target.get_all_edges()[0].id == edge.id
+            assert target.list_unit_aliases(u1.id)["aliases"][0]["alias"] == "pvx-909"
+            assert target.fts_search("pvx")[0]["unit_id"] == u1.id
             assert target.fts_search("battery")[0]["unit_id"] in {u1.id, u2.id}
 
             second_stats = target.import_json(payload)
