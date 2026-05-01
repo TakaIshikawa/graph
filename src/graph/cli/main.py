@@ -32,6 +32,8 @@ edges_app = typer.Typer(help="List and edit graph edges")
 app.add_typer(edges_app, name="edges")
 units_app = typer.Typer(help="Manage knowledge units")
 app.add_typer(units_app, name="units")
+maintenance_app = typer.Typer(help="Run graph maintenance operations")
+app.add_typer(maintenance_app, name="maintenance")
 tags_app = typer.Typer(help="Explore and mutate graph tags", invoke_without_command=True)
 app.add_typer(tags_app, name="tags")
 
@@ -2778,6 +2780,10 @@ def _do_integrity_audit(
     return gs.integrity_audit(repair_fts=repair_fts, limit=limit)
 
 
+def _do_rebuild_fts_index(store: Store) -> dict:
+    return store.rebuild_fts_index()
+
+
 @app.command()
 def embed(
     project: str | None = typer.Option(None, "--project", "-p", help="Filter by source project"),
@@ -4932,6 +4938,15 @@ def integrity(
             f"{payload['repair']['fts_rows_inserted']} inserted, "
             f"{payload['repair']['fts_rows_deleted']} deleted"
         )
+
+
+@maintenance_app.command(name="rebuild-fts")
+def maintenance_rebuild_fts() -> None:
+    """Rebuild the full-text search index from units."""
+    store = _get_store()
+    payload = _do_rebuild_fts_index(store)
+    store.close()
+    _json_echo(payload)
 
 
 @app.command()

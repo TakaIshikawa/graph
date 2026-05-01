@@ -2683,6 +2683,27 @@ class Store:
             "fts_rows_deleted": stale_cursor.rowcount,
         }
 
+    def rebuild_fts_index(self) -> dict:
+        rows = self.conn.execute("SELECT id, title, content, tags FROM knowledge_units").fetchall()
+        fts_row = self.conn.execute("SELECT COUNT(*) AS count FROM knowledge_fts").fetchone()
+        rows_deleted = fts_row["count"] or 0
+
+        with self.conn:
+            self.conn.execute("DELETE FROM knowledge_fts")
+            for row in rows:
+                try:
+                    tags = json.loads(row["tags"])
+                except json.JSONDecodeError:
+                    tags = []
+                if not isinstance(tags, list):
+                    tags = []
+                self.conn.execute(
+                    "INSERT INTO knowledge_fts (unit_id, title, content, tags) VALUES (?, ?, ?, ?)",
+                    (row["id"], row["title"], row["content"], " ".join(map(str, tags))),
+                )
+
+        return {"rows_deleted": rows_deleted, "rows_inserted": len(rows)}
+
     def get_backlinks(
         self,
         unit_id: str,

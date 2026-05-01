@@ -1520,6 +1520,46 @@ class TestFTS:
         assert store.find_stale_fts_rows()["count"] == 0
         assert store.fts_search("monocrystalline")[0]["unit_id"] == missing.id
 
+    def test_rebuild_fts_index_restores_missing_and_stale_rows(
+        self, store: Store, sample_unit: KnowledgeUnit
+    ):
+        first = store.insert_unit(sample_unit)
+        second = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="rebuild-target",
+                source_entity_type="insight",
+                title="Battery rebuild note",
+                content="Sodium battery rebuild search content.",
+                tags=["storage", "battery"],
+            )
+        )
+        store.fts_index_unit(first)
+        store.fts_index_unit(second)
+        store.conn.execute("DELETE FROM knowledge_fts WHERE unit_id = ?", (second.id,))
+        store.conn.execute(
+            "UPDATE knowledge_fts SET title = ?, content = ?, tags = ? WHERE unit_id = ?",
+            ("Outdated title", "obsolete phrase only", "obsolete", first.id),
+        )
+        store.conn.execute(
+            "INSERT INTO knowledge_fts (unit_id, title, content, tags) VALUES (?, ?, ?, ?)",
+            ("deleted-unit", "Deleted", "stale content", "stale"),
+        )
+        store.conn.commit()
+
+        assert store.fts_search("sodium") == []
+        assert store.fts_search("obsolete")[0]["unit_id"] == first.id
+
+        result = store.rebuild_fts_index()
+
+        assert result == {"rows_deleted": 2, "rows_inserted": 2}
+        assert store.fts_search("monocrystalline")[0]["unit_id"] == first.id
+        assert store.fts_search("sodium")[0]["unit_id"] == second.id
+        assert store.fts_search("obsolete") == []
+        assert store.find_units_missing_fts_rows()["count"] == 0
+        assert store.find_stale_fts_rows()["count"] == 0
+        assert store.rebuild_fts_index() == {"rows_deleted": 2, "rows_inserted": 2}
+
     def test_integrity_helpers_find_structural_issues(
         self, store: Store, sample_unit: KnowledgeUnit
     ):

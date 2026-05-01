@@ -5513,6 +5513,36 @@ def test_integrity_cli_json_reports_and_repairs_fts(monkeypatch):
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_maintenance_rebuild_fts_command_emits_json_and_restores_search(monkeypatch):
+    store = _make_store()
+    unit = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="rebuild-cli",
+            source_entity_type="insight",
+            title="CLI rebuild target",
+            content="Sodium battery rebuild command content.",
+            tags=["maintenance"],
+        )
+    )
+    store.fts_index_unit(unit)
+    store.conn.execute("DELETE FROM knowledge_fts WHERE unit_id = ?", (unit.id,))
+    store.conn.commit()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+
+    try:
+        result = runner.invoke(app, ["maintenance", "rebuild-fts"])
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload == {"rows_deleted": 0, "rows_inserted": 1}
+        assert store.fts_search("sodium")[0]["unit_id"] == unit.id
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_edge_management_cli_json_lists_updates_and_deletes(monkeypatch):
     store = _make_store()
     center = store.insert_unit(
