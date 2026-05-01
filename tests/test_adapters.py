@@ -2634,6 +2634,7 @@ class TestRegistry:
             "bibtex",
             "csl_json",
             "ris",
+            "jats",
             "git",
             "transcript",
             "pocket",
@@ -2688,6 +2689,9 @@ class TestRegistry:
 
         ris_adapter = get_adapter("ris", path="/tmp/refs.ris")
         assert ris_adapter.name == "ris"
+
+        jats_adapter = get_adapter("jats", path="/tmp/article.xml")
+        assert jats_adapter.name == "jats"
 
         git_adapter = get_adapter("git", repos="/tmp/repo")
         assert git_adapter.name == "git"

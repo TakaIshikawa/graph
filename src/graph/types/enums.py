@@ -20,6 +20,7 @@ class SourceProject(StrEnum):
     BIBTEX = "bibtex"
     CSL_JSON = "csl_json"
     RIS = "ris"
+    JATS = "jats"
     GIT = "git"
     TRANSCRIPT = "transcript"
     POCKET = "pocket"
