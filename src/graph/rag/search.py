@@ -163,6 +163,23 @@ def _mmr_rerank(
     lambda_mult: float,
 ) -> list[tuple[KnowledgeUnit, float]]:
     """Diversify ranked results with maximal marginal relevance."""
+    return [
+        (unit, score)
+        for _original_rank, unit, score in _mmr_rerank_with_positions(
+            results,
+            limit=limit,
+            lambda_mult=lambda_mult,
+        )
+    ]
+
+
+def _mmr_rerank_with_positions(
+    results: list[tuple[KnowledgeUnit, float, list[float] | None]],
+    *,
+    limit: int,
+    lambda_mult: float,
+) -> list[tuple[int, KnowledgeUnit, float]]:
+    """Diversify ranked results and keep each result's pre-rerank position."""
     if limit <= 0 or not results:
         return []
 
@@ -194,7 +211,7 @@ def _mmr_rerank(
         selected.append(best)
         remaining.remove(best)
 
-    return [(unit, score) for _index, (unit, score, _embedding) in selected]
+    return [(index + 1, unit, score) for index, (unit, score, _embedding) in selected]
 
 
 def parse_search_datetime_filter(
@@ -386,6 +403,77 @@ def _search_filter_payload(
     }
 
 
+def _matched_query_terms(unit: KnowledgeUnit, query: str) -> dict[str, list[str]]:
+    terms = _query_terms(query)
+    title = (unit.title or "").lower()
+    content = (unit.content or "").lower()
+    tags = [tag.lower() for tag in unit.tags]
+    return {
+        "title": [term for term in terms if term in title],
+        "content": [term for term in terms if term in content],
+        "tags": [term for term in terms if any(term in tag for tag in tags)],
+    }
+
+
+def _result_explanation(
+    unit: KnowledgeUnit,
+    query: str,
+    *,
+    mode: str,
+    score_fields: dict,
+    filters: dict,
+    original_rank: int,
+    final_rank: int,
+    mmr_applied: bool = False,
+) -> dict:
+    return {
+        "retrieval_mode": mode,
+        "scores": score_fields,
+        "matched_terms": _matched_query_terms(unit, query),
+        "filters": filters,
+        "mmr": {
+            "applied": mmr_applied,
+            "original_rank": original_rank,
+            "final_rank": final_rank,
+            "position_changed": original_rank != final_rank,
+        },
+    }
+
+
+def _search_result_payload(
+    unit: KnowledgeUnit,
+    query: str,
+    *,
+    rank: int,
+    score: float,
+    mode: str,
+    score_fields: dict,
+    filters: dict,
+    snippet: str | None = None,
+    include_explanations: bool = False,
+    original_rank: int | None = None,
+    mmr_applied: bool = False,
+) -> dict:
+    payload = _context_unit_payload(
+        unit,
+        rank=rank,
+        score=score,
+        snippet=snippet,
+    )
+    if include_explanations:
+        payload["explanation"] = _result_explanation(
+            unit,
+            query,
+            mode=mode,
+            score_fields=score_fields,
+            filters=filters,
+            original_rank=original_rank or rank,
+            final_rank=rank,
+            mmr_applied=mmr_applied,
+        )
+    return payload
+
+
 def _validate_search_facet_mode(mode: str) -> str:
     if mode not in SEARCH_FACET_MODES:
         valid = ", ".join(SEARCH_FACET_MODES)
@@ -519,7 +607,8 @@ class RAGService:
         sort: str = "relevance",
         rerank_mmr: bool = False,
         lambda_mult: float = DEFAULT_MMR_LAMBDA,
-    ) -> list[tuple[KnowledgeUnit, float]]:
+        include_explanations: bool = False,
+    ) -> list[tuple[KnowledgeUnit, float]] | list[dict]:
         """Semantic search. Returns (unit, similarity) pairs."""
         validate_search_sort(sort)
         lambda_mult = validate_mmr_lambda(lambda_mult)
@@ -562,12 +651,68 @@ class RAGService:
                 results.append((unit, sim, emb))
 
         results.sort(key=lambda x: x[1], reverse=True)
+        filters = _search_filter_payload(
+            source_project=source_project,
+            content_type=content_type,
+            tag=tag,
+            exclude_tag=exclude_tag,
+            created_after=created_after,
+            created_before=created_before,
+            updated_after=updated_after,
+            updated_before=updated_before,
+            metadata_key=metadata_key,
+            metadata_value=metadata_value,
+        )
         if rerank_mmr and sort == "relevance":
-            return _mmr_rerank(results, limit=limit, lambda_mult=lambda_mult)
+            if not include_explanations:
+                return _mmr_rerank(results, limit=limit, lambda_mult=lambda_mult)
+            reranked = _mmr_rerank_with_positions(
+                results,
+                limit=limit,
+                lambda_mult=lambda_mult,
+            )
+            return [
+                _search_result_payload(
+                    unit,
+                    query,
+                    rank=rank,
+                    score=score,
+                    mode="semantic",
+                    score_fields={
+                        "similarity": score,
+                        "final_score": score,
+                    },
+                    filters=filters,
+                    snippet=build_search_snippet(unit.content, query),
+                    include_explanations=True,
+                    original_rank=original_rank,
+                    mmr_applied=True,
+                )
+                for rank, (original_rank, unit, score) in enumerate(reranked, start=1)
+            ]
 
         pairs = [(unit, score) for unit, score, _embedding in results]
         pairs = sort_search_results(pairs, sort)
-        return pairs[:limit]
+        pairs = pairs[:limit]
+        if not include_explanations:
+            return pairs
+        return [
+            _search_result_payload(
+                unit,
+                query,
+                rank=rank,
+                score=score,
+                mode="semantic",
+                score_fields={
+                    "similarity": score,
+                    "final_score": score,
+                },
+                filters=filters,
+                snippet=build_search_snippet(unit.content, query),
+                include_explanations=True,
+            )
+            for rank, (unit, score) in enumerate(pairs, start=1)
+        ]
 
     def hybrid_search(
         self,
@@ -589,7 +734,8 @@ class RAGService:
         sort: str = "relevance",
         rerank_mmr: bool = False,
         lambda_mult: float = DEFAULT_MMR_LAMBDA,
-    ) -> list[tuple[KnowledgeUnit, float]]:
+        include_explanations: bool = False,
+    ) -> list[tuple[KnowledgeUnit, float]] | list[dict]:
         """Combined semantic + full-text search."""
         validate_search_sort(sort)
         lambda_mult = validate_mmr_lambda(lambda_mult)
@@ -617,6 +763,9 @@ class RAGService:
             rerank_mmr=False,
         )
         semantic_scores = {unit.id: sim for unit, sim in semantic_results}
+        semantic_ranks = {
+            unit.id: rank for rank, (unit, _sim) in enumerate(semantic_results, start=1)
+        }
 
         # FTS results
         fts_results = self.store.fts_search(
@@ -635,6 +784,9 @@ class RAGService:
             fts_scores = {
                 r["unit_id"]: abs(r["rank"]) / max_rank for r in fts_results
             }
+        fts_ranks = {
+            row["unit_id"]: rank for rank, row in enumerate(fts_results, start=1)
+        }
 
         # Combine scores
         all_ids = set(semantic_scores) | set(fts_scores)
@@ -645,6 +797,21 @@ class RAGService:
             combined.append((uid, s_score + f_score))
 
         combined.sort(key=lambda x: x[1], reverse=True)
+        combined_ranks = {
+            uid: rank for rank, (uid, _score) in enumerate(combined, start=1)
+        }
+        filters = _search_filter_payload(
+            source_project=source_project,
+            content_type=content_type,
+            tag=tag,
+            exclude_tag=exclude_tag,
+            created_after=created_after,
+            created_before=created_before,
+            updated_after=updated_after,
+            updated_before=updated_before,
+            metadata_key=metadata_key,
+            metadata_value=metadata_value,
+        )
 
         embedding_by_id: dict[str, list[float]] = {}
         if rerank_mmr and sort == "relevance":
@@ -660,7 +827,7 @@ class RAGService:
             ):
                 embedding_by_id[embedded_unit.id] = deserialize_embedding(blob)
 
-        results = []
+        results: list[tuple[KnowledgeUnit, float]] = []
         for uid, score in combined:
             unit = self.store.get_unit(uid)
             if unit and _unit_matches_filters(
@@ -674,14 +841,336 @@ class RAGService:
             ):
                 results.append((unit, score))
         if rerank_mmr and sort == "relevance":
-            return _mmr_rerank(
-                [(unit, score, embedding_by_id.get(unit.id)) for unit, score in results],
+            rerank_input = [
+                (unit, score, embedding_by_id.get(unit.id)) for unit, score in results
+            ]
+            if not include_explanations:
+                return _mmr_rerank(
+                    rerank_input,
+                    limit=limit,
+                    lambda_mult=lambda_mult,
+                )
+            reranked = _mmr_rerank_with_positions(
+                rerank_input,
                 limit=limit,
                 lambda_mult=lambda_mult,
             )
+            return [
+                _search_result_payload(
+                    unit,
+                    query,
+                    rank=rank,
+                    score=score,
+                    mode="hybrid",
+                    score_fields={
+                        "semantic_score": semantic_scores.get(unit.id, 0.0),
+                        "fulltext_score": fts_scores.get(unit.id, 0.0),
+                        "semantic_weighted_score": semantic_scores.get(unit.id, 0.0)
+                        * semantic_weight,
+                        "fulltext_weighted_score": fts_scores.get(unit.id, 0.0)
+                        * fts_weight,
+                        "hybrid_score": score,
+                        "final_score": score,
+                        "semantic_rank": semantic_ranks.get(unit.id),
+                        "fulltext_rank": fts_ranks.get(unit.id),
+                        "matched_modes": [
+                            mode_name
+                            for mode_name, present in {
+                                "semantic": unit.id in semantic_scores,
+                                "fulltext": unit.id in fts_scores,
+                            }.items()
+                            if present
+                        ],
+                    },
+                    filters=filters,
+                    snippet=build_search_snippet(unit.content, query),
+                    include_explanations=True,
+                    original_rank=original_rank,
+                    mmr_applied=True,
+                )
+                for rank, (original_rank, unit, score) in enumerate(reranked, start=1)
+            ]
 
         results = sort_search_results(results, sort)
-        return results[:limit]
+        results = results[:limit]
+        if not include_explanations:
+            return results
+        return [
+            _search_result_payload(
+                unit,
+                query,
+                rank=rank,
+                score=score,
+                mode="hybrid",
+                score_fields={
+                    "semantic_score": semantic_scores.get(unit.id, 0.0),
+                    "fulltext_score": fts_scores.get(unit.id, 0.0),
+                    "semantic_weighted_score": semantic_scores.get(unit.id, 0.0)
+                    * semantic_weight,
+                    "fulltext_weighted_score": fts_scores.get(unit.id, 0.0)
+                    * fts_weight,
+                    "hybrid_score": score,
+                    "final_score": score,
+                    "combined_rank": combined_ranks.get(unit.id),
+                    "semantic_rank": semantic_ranks.get(unit.id),
+                    "fulltext_rank": fts_ranks.get(unit.id),
+                    "matched_modes": [
+                        mode_name
+                        for mode_name, present in {
+                            "semantic": unit.id in semantic_scores,
+                            "fulltext": unit.id in fts_scores,
+                        }.items()
+                        if present
+                    ],
+                },
+                filters=filters,
+                snippet=build_search_snippet(unit.content, query),
+                include_explanations=True,
+                original_rank=combined_ranks.get(unit.id),
+            )
+            for rank, (unit, score) in enumerate(results, start=1)
+        ]
+
+    def fulltext_search(
+        self,
+        query: str,
+        *,
+        limit: int = 10,
+        source_project: str | None = None,
+        content_type: str | None = None,
+        tag: str | None = None,
+        exclude_tag: str | None = None,
+        created_after: datetime | str | None = None,
+        created_before: datetime | str | None = None,
+        updated_after: datetime | str | None = None,
+        updated_before: datetime | str | None = None,
+        metadata_key: str | None = None,
+        metadata_value: object | None = None,
+        sort: str = "relevance",
+        snippet_length: int = DEFAULT_SEARCH_SNIPPET_LENGTH,
+        include_explanations: bool = False,
+    ) -> list[dict]:
+        """Full-text search result payloads."""
+        validate_search_sort(sort)
+        snippet_length = validate_snippet_length(snippet_length)
+        validate_search_date_filters(
+            created_after=created_after,
+            created_before=created_before,
+            updated_after=updated_after,
+            updated_before=updated_before,
+        )
+        filters = _search_filter_payload(
+            source_project=source_project,
+            content_type=content_type,
+            tag=tag,
+            exclude_tag=exclude_tag,
+            created_after=created_after,
+            created_before=created_before,
+            updated_after=updated_after,
+            updated_before=updated_before,
+            metadata_key=metadata_key,
+            metadata_value=metadata_value,
+        )
+        rows = self.store.fts_search(
+            query,
+            limit=max(limit * 4, limit),
+            created_after=created_after,
+            created_before=created_before,
+            updated_after=updated_after,
+            updated_before=updated_before,
+            metadata_key=metadata_key,
+            metadata_value=metadata_value,
+        )
+        max_rank = max((abs(row["rank"]) for row in rows), default=1.0) or 1.0
+        ranked: list[tuple[KnowledgeUnit, float, dict, int]] = []
+        seen: set[str] = set()
+        for row_rank, row in enumerate(rows, start=1):
+            unit_id = row["unit_id"]
+            if unit_id in seen:
+                continue
+            seen.add(unit_id)
+            unit = self.store.get_unit(unit_id)
+            if unit is None:
+                continue
+            if not _unit_matches_filters(
+                unit,
+                source_project=source_project,
+                content_type=content_type,
+                tag=tag,
+                exclude_tag=exclude_tag,
+                metadata_key=metadata_key,
+                metadata_value=metadata_value,
+            ):
+                continue
+            score = abs(row["rank"]) / max_rank
+            ranked.append((unit, score, row, row_rank))
+
+        if sort != "relevance":
+            rank_by_id = {unit.id: row_rank for unit, _score, _row, row_rank in ranked}
+            row_by_id = {unit.id: row for unit, _score, row, _row_rank in ranked}
+            pairs = sort_search_results(
+                [(unit, score) for unit, score, _row, _row_rank in ranked],
+                sort,
+            )
+            ranked = [
+                (unit, score, row_by_id[unit.id], rank_by_id[unit.id])
+                for unit, score in pairs
+            ]
+
+        payloads = []
+        for final_rank, (unit, score, row, row_rank) in enumerate(
+            ranked[:limit],
+            start=1,
+        ):
+            payloads.append(
+                _search_result_payload(
+                    unit,
+                    query,
+                    rank=final_rank,
+                    score=score,
+                    mode="fulltext",
+                    score_fields={
+                        "fulltext_score": score,
+                        "fulltext_rank": row_rank,
+                        "raw_rank": row["rank"],
+                        "final_score": score,
+                    },
+                    filters=filters,
+                    snippet=row.get("snippet")
+                    or build_search_snippet(unit.content, query, length=snippet_length),
+                    include_explanations=include_explanations,
+                    original_rank=row_rank,
+                )
+            )
+        return payloads
+
+    def search_results(
+        self,
+        query: str,
+        *,
+        mode: str = "fulltext",
+        limit: int = 10,
+        min_similarity: float = 0.5,
+        source_project: str | None = None,
+        content_type: str | None = None,
+        tag: str | None = None,
+        exclude_tag: str | None = None,
+        created_after: datetime | str | None = None,
+        created_before: datetime | str | None = None,
+        updated_after: datetime | str | None = None,
+        updated_before: datetime | str | None = None,
+        metadata_key: str | None = None,
+        metadata_value: object | None = None,
+        sort: str = "relevance",
+        rerank_mmr: bool = False,
+        lambda_mult: float = DEFAULT_MMR_LAMBDA,
+        snippet_length: int = DEFAULT_SEARCH_SNIPPET_LENGTH,
+        include_explanations: bool = False,
+    ) -> dict:
+        """Return search results as a payload with optional per-result explanations."""
+        mode = _validate_search_facet_mode(mode)
+        filters = _search_filter_payload(
+            source_project=source_project,
+            content_type=content_type,
+            tag=tag,
+            exclude_tag=exclude_tag,
+            created_after=created_after,
+            created_before=created_before,
+            updated_after=updated_after,
+            updated_before=updated_before,
+            metadata_key=metadata_key,
+            metadata_value=metadata_value,
+        )
+        if mode == "fulltext":
+            results = self.fulltext_search(
+                query,
+                limit=limit,
+                source_project=source_project,
+                content_type=content_type,
+                tag=tag,
+                exclude_tag=exclude_tag,
+                created_after=created_after,
+                created_before=created_before,
+                updated_after=updated_after,
+                updated_before=updated_before,
+                metadata_key=metadata_key,
+                metadata_value=metadata_value,
+                sort=sort,
+                snippet_length=snippet_length,
+                include_explanations=include_explanations,
+            )
+        elif mode == "semantic":
+            results = self.search(
+                query,
+                limit=limit,
+                min_similarity=min_similarity,
+                source_project=source_project,
+                content_type=content_type,
+                tag=tag,
+                exclude_tag=exclude_tag,
+                created_after=created_after,
+                created_before=created_before,
+                updated_after=updated_after,
+                updated_before=updated_before,
+                metadata_key=metadata_key,
+                metadata_value=metadata_value,
+                sort=sort,
+                rerank_mmr=rerank_mmr,
+                lambda_mult=lambda_mult,
+                include_explanations=include_explanations,
+            )
+        else:
+            results = self.hybrid_search(
+                query,
+                limit=limit,
+                source_project=source_project,
+                content_type=content_type,
+                tag=tag,
+                exclude_tag=exclude_tag,
+                created_after=created_after,
+                created_before=created_before,
+                updated_after=updated_after,
+                updated_before=updated_before,
+                metadata_key=metadata_key,
+                metadata_value=metadata_value,
+                sort=sort,
+                rerank_mmr=rerank_mmr,
+                lambda_mult=lambda_mult,
+                include_explanations=include_explanations,
+            )
+
+        if not include_explanations and mode in {"semantic", "hybrid"}:
+            results = [
+                _search_result_payload(
+                    unit,
+                    query,
+                    rank=rank,
+                    score=score,
+                    mode=mode,
+                    score_fields={"final_score": score},
+                    filters=filters,
+                    snippet=build_search_snippet(
+                        unit.content,
+                        query,
+                        length=snippet_length,
+                    ),
+                )
+                for rank, (unit, score) in enumerate(results, start=1)
+            ]
+
+        payload = {
+            "query": query,
+            "mode": mode,
+            "sort": sort,
+            "results": results,
+            "metadata": {"sort": sort},
+        }
+        if filters:
+            payload["filters"] = filters
+        if rerank_mmr:
+            payload["metadata"]["rerank_mmr"] = True
+            payload["metadata"]["lambda_mult"] = lambda_mult
+        return payload
 
     def search_facets(
         self,

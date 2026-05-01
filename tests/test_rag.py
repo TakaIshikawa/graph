@@ -340,6 +340,195 @@ class TestRAGService:
             "hybrid-diverse",
         ]
 
+    def test_search_results_default_payload_omits_explanations(self, store: Store):
+        unit = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="payload-default",
+                source_entity_type="insight",
+                title="Solar default payload",
+                content="Solar content",
+                content_type=ContentType.INSIGHT,
+            )
+        )
+        store.fts_index_unit(unit)
+
+        payload = RAGService(store, provider=None).search_results("solar")
+
+        assert payload["results"][0]["id"] == unit.id
+        assert "explanation" not in payload["results"][0]
+
+    def test_fulltext_search_results_include_explanations_and_filters(self, store: Store):
+        keep = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="fulltext-explain-keep",
+                source_entity_type="insight",
+                title="Solar grid planning",
+                content="Battery storage supports solar grid operations",
+                content_type=ContentType.INSIGHT,
+                tags=["energy", "solar"],
+                metadata={"project": {"area": "grid"}},
+            )
+        )
+        skip = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="fulltext-explain-skip",
+                source_entity_type="insight",
+                title="Solar archive",
+                content="Solar grid archive",
+                content_type=ContentType.INSIGHT,
+                tags=["archive", "solar"],
+                metadata={"project": {"area": "grid"}},
+            )
+        )
+        for unit in [keep, skip]:
+            store.fts_index_unit(unit)
+
+        payload = RAGService(store, provider=None).search_results(
+            "solar grid",
+            source_project="max",
+            content_type="insight",
+            tag="energy",
+            exclude_tag="archive",
+            metadata_key="project.area",
+            metadata_value="grid",
+            include_explanations=True,
+        )
+
+        assert [result["id"] for result in payload["results"]] == [keep.id]
+        explanation = payload["results"][0]["explanation"]
+        assert explanation["retrieval_mode"] == "fulltext"
+        assert explanation["scores"]["fulltext_score"] == payload["results"][0]["score"]
+        assert explanation["matched_terms"] == {
+            "title": ["solar", "grid"],
+            "content": ["solar", "grid"],
+            "tags": ["solar"],
+        }
+        assert explanation["filters"] == {
+            "source_project": "max",
+            "content_type": "insight",
+            "tag": "energy",
+            "exclude_tag": "archive",
+            "metadata_key": "project.area",
+            "metadata_value": "grid",
+        }
+
+    def test_semantic_search_results_include_explanations_with_fake_provider(self, store: Store):
+        unit = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="semantic-explain",
+                source_entity_type="insight",
+                title="Solar semantic match",
+                content="Panels and storage",
+                content_type=ContentType.INSIGHT,
+                tags=["solar"],
+            )
+        )
+        store.update_embedding(unit.id, serialize_embedding([1.0, 0.0]))
+
+        payload = RAGService(store, FixedQueryEmbeddingProvider()).search_results(
+            "solar panels",
+            mode="semantic",
+            min_similarity=0.0,
+            include_explanations=True,
+        )
+
+        result = payload["results"][0]
+        explanation = result["explanation"]
+        assert result["id"] == unit.id
+        assert explanation["retrieval_mode"] == "semantic"
+        assert explanation["scores"]["similarity"] == result["score"]
+        assert explanation["scores"]["final_score"] == result["score"]
+        assert explanation["matched_terms"]["title"] == ["solar"]
+        assert explanation["matched_terms"]["content"] == ["panels"]
+        assert explanation["matched_terms"]["tags"] == ["solar"]
+
+    def test_hybrid_search_results_explain_score_components(self, store: Store):
+        unit = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="hybrid-explain",
+                source_entity_type="insight",
+                title="Solar hybrid explanation",
+                content="Solar storage content",
+                content_type=ContentType.INSIGHT,
+                tags=["solar"],
+            )
+        )
+        store.fts_index_unit(unit)
+        store.update_embedding(unit.id, serialize_embedding([1.0, 0.0]))
+
+        payload = RAGService(store, FixedQueryEmbeddingProvider()).search_results(
+            "solar storage",
+            mode="hybrid",
+            include_explanations=True,
+        )
+
+        explanation = payload["results"][0]["explanation"]
+        assert explanation["retrieval_mode"] == "hybrid"
+        assert explanation["scores"]["matched_modes"] == ["semantic", "fulltext"]
+        assert explanation["scores"]["semantic_score"] == 1.0
+        assert explanation["scores"]["fulltext_score"] > 0.0
+        assert explanation["scores"]["hybrid_score"] == payload["results"][0]["score"]
+
+    def test_hybrid_mmr_explanation_reports_position_changes(self, store: Store):
+        duplicate_a = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="mmr-explain-duplicate-a",
+                source_entity_type="insight",
+                title="Solar duplicate A",
+                content="Solar storage duplicate A",
+            )
+        )
+        duplicate_b = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="mmr-explain-duplicate-b",
+                source_entity_type="insight",
+                title="Solar duplicate B",
+                content="Solar storage duplicate B",
+            )
+        )
+        diverse = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="mmr-explain-diverse",
+                source_entity_type="insight",
+                title="Solar diverse",
+                content="Solar storage diverse",
+            )
+        )
+        for unit in [duplicate_a, duplicate_b, diverse]:
+            store.fts_index_unit(unit)
+        store.update_embedding(duplicate_a.id, serialize_embedding([0.96, 0.28]))
+        store.update_embedding(duplicate_b.id, serialize_embedding([0.95, 0.31]))
+        store.update_embedding(diverse.id, serialize_embedding([0.7, 0.714]))
+
+        payload = RAGService(store, FixedQueryEmbeddingProvider()).search_results(
+            "solar",
+            mode="hybrid",
+            limit=3,
+            rerank_mmr=True,
+            lambda_mult=0.3,
+            include_explanations=True,
+        )
+
+        assert [result["source_id"] for result in payload["results"][:2]] == [
+            "mmr-explain-duplicate-a",
+            "mmr-explain-diverse",
+        ]
+        diverse_explanation = payload["results"][1]["explanation"]
+        assert diverse_explanation["mmr"] == {
+            "applied": True,
+            "original_rank": 3,
+            "final_rank": 2,
+            "position_changed": True,
+        }
+
     def test_semantic_and_hybrid_search_exclude_exact_tag(
         self, populated_store_with_embeddings: Store, rag_service: RAGService
     ):
