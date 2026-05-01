@@ -27,6 +27,7 @@ from graph.adapters.org import OrgAdapter
 from graph.adapters.pdf import PdfAdapter
 from graph.adapters.pocket import PocketAdapter
 from graph.adapters.presence import PresenceAdapter
+from graph.adapters.readwise import ReadwiseAdapter
 from graph.adapters.sota import SOTAAdapter
 from graph.adapters.ris import RisAdapter
 from graph.adapters.text import TextAdapter
@@ -65,6 +66,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "pocket": PocketAdapter,
     "zotero_rdf": ZoteroRdfAdapter,
     "hypothesis": HypothesisAdapter,
+    "readwise": ReadwiseAdapter,
 }
 
 
