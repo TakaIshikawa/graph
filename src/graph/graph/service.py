@@ -1373,6 +1373,86 @@ class GraphService:
         components.sort(key=len, reverse=True)
         return components
 
+    def detect_communities(
+        self,
+        *,
+        min_size: int = 2,
+        limit: int | None = None,
+    ) -> list[dict]:
+        """Detect deterministic communities in the undirected knowledge graph."""
+        if not isinstance(min_size, int) or isinstance(min_size, bool) or min_size < 1:
+            raise ValueError("min_size must be a positive integer.")
+        if limit is not None and (
+            not isinstance(limit, int) or isinstance(limit, bool) or limit < 1
+        ):
+            raise ValueError("limit must be a positive integer or None.")
+
+        if not self.G:
+            self.rebuild()
+        if not self.G.nodes:
+            return []
+
+        undirected = self.G.to_undirected()
+        raw_communities: list[set[str]] = []
+        for component_ids in nx.connected_components(undirected):
+            component = undirected.subgraph(component_ids)
+            if component.number_of_edges() == 0:
+                raw_communities.extend({str(node_id)} for node_id in component.nodes)
+                continue
+
+            detected = nx.algorithms.community.greedy_modularity_communities(
+                component,
+                weight="weight",
+            )
+            for community in detected:
+                community_graph = component.subgraph(community)
+                raw_communities.extend(
+                    {str(node_id) for node_id in connected_ids}
+                    for connected_ids in nx.connected_components(community_graph)
+                )
+
+        records = []
+        for unit_ids_set in raw_communities:
+            if len(unit_ids_set) < min_size:
+                continue
+
+            unit_ids = sorted(unit_ids_set)
+            community_graph = undirected.subgraph(unit_ids)
+            internal_edge_count = int(community_graph.number_of_edges())
+            density = round(float(nx.density(community_graph)), 6)
+            ranked_representatives = sorted(
+                unit_ids,
+                key=lambda unit_id: (
+                    -int(community_graph.degree(unit_id)),
+                    str(self.G.nodes[unit_id].get("title", "")).lower(),
+                    unit_id,
+                ),
+            )
+            digest = hashlib.sha1("\n".join(unit_ids).encode("utf-8")).hexdigest()[:12]
+            records.append(
+                {
+                    "community_id": f"community-{digest}",
+                    "size": len(unit_ids),
+                    "unit_ids": unit_ids,
+                    "representative_titles": [
+                        str(self.G.nodes[unit_id].get("title", ""))
+                        for unit_id in ranked_representatives[:3]
+                    ],
+                    "internal_edge_count": internal_edge_count,
+                    "density": density,
+                }
+            )
+
+        records.sort(
+            key=lambda record: (
+                -record["size"],
+                -record["density"],
+                -record["internal_edge_count"],
+                record["unit_ids"],
+            )
+        )
+        return records[:limit] if limit is not None else records
+
     def get_central_nodes(self, limit: int = 10) -> list[tuple[str, float]]:
         """Top nodes by PageRank."""
         if not self.G.nodes:
