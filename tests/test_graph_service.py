@@ -1657,6 +1657,7 @@ class TestGraphService:
         assert gs.get_central_nodes() == []
         assert gs.get_bridges() == []
         assert gs.analyze_articulation_points() == []
+        assert gs.analyze_strongly_connected_components() == []
         assert gs.find_gaps() == []
 
     def test_analyze_tags_lists_counts_and_breakdowns(self, tagged_store: Store):

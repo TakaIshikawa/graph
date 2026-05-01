@@ -1573,6 +1573,73 @@ class GraphService:
         )
         return records[:limit] if limit is not None else records
 
+    def analyze_strongly_connected_components(
+        self,
+        min_size: int = 2,
+        limit: int = 20,
+    ) -> list[dict]:
+        """Identify directed strongly connected component clusters."""
+        if not isinstance(min_size, int) or isinstance(min_size, bool) or min_size < 1:
+            raise ValueError("min_size must be a positive integer.")
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
+            raise ValueError("limit must be a non-negative integer.")
+        if limit == 0:
+            return []
+
+        units_by_id = {unit.id: unit for unit in self.store.get_all_units(limit=1000000000)}
+        if len(units_by_id) < min_size:
+            return []
+
+        edges = self.store.get_all_edges()
+        graph = nx.DiGraph()
+        graph.add_nodes_from(units_by_id)
+        for edge in edges:
+            if edge.from_unit_id in units_by_id and edge.to_unit_id in units_by_id:
+                graph.add_edge(edge.from_unit_id, edge.to_unit_id)
+
+        records = []
+        for component_ids in nx.strongly_connected_components(graph):
+            if len(component_ids) < min_size:
+                continue
+
+            unit_ids = sorted(str(unit_id) for unit_id in component_ids)
+            component_set = set(unit_ids)
+            units = [units_by_id[unit_id] for unit_id in unit_ids]
+
+            source_project_counts = Counter(str(unit.source_project) for unit in units)
+            tag_counts = Counter(
+                str(tag)
+                for unit in units
+                for tag in (unit.tags or [])
+                if str(tag)
+            )
+            relation_counts = Counter(
+                str(edge.relation)
+                for edge in edges
+                if edge.from_unit_id in component_set
+                and edge.to_unit_id in component_set
+            )
+
+            records.append(
+                {
+                    "size": len(unit_ids),
+                    "unit_ids": unit_ids,
+                    "titles": [unit.title for unit in units],
+                    "source_project_counts": dict(sorted(source_project_counts.items())),
+                    "relation_counts": dict(sorted(relation_counts.items())),
+                    "representative_tags": [
+                        tag
+                        for tag, _count in sorted(
+                            tag_counts.items(),
+                            key=lambda item: (-item[1], item[0]),
+                        )[:5]
+                    ],
+                }
+            )
+
+        records.sort(key=lambda record: (-record["size"], record["unit_ids"]))
+        return records[:limit]
+
     def get_central_nodes(self, limit: int = 10) -> list[tuple[str, float]]:
         """Top nodes by PageRank."""
         if not self.G.nodes:
