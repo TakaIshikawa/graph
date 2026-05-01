@@ -192,6 +192,159 @@ class TestRAGService:
         assert count == 3
         assert len(store.get_units_with_embeddings()) == 3
 
+    def test_suggest_queries_matches_prefix_ranks_and_deduplicates(self, store: Store):
+        units = [
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="solar-old",
+                source_entity_type="insight",
+                title="Solar Storage",
+                content="Old storage note",
+                tags=["Solar", "Energy"],
+                created_at=datetime.fromisoformat("2026-01-01T00:00:00+00:00"),
+            ),
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="solar-new",
+                source_entity_type="insight",
+                title="solar storage",
+                content="New storage note",
+                tags=["solar"],
+                created_at=datetime.fromisoformat("2026-02-01T00:00:00+00:00"),
+            ),
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="solar-finance",
+                source_entity_type="insight",
+                title="Solar Finance",
+                content="Finance note",
+                tags=["solar"],
+                created_at=datetime.fromisoformat("2026-03-01T00:00:00+00:00"),
+            ),
+        ]
+        for unit in units:
+            store.insert_unit(unit)
+
+        result = RAGService(store, provider=None).suggest_queries("sol")
+
+        assert result[:3] == [
+            {
+                "text": "Solar",
+                "kind": "tag",
+                "count": 3,
+                "latest_created_at": "2026-03-01T00:00:00+00:00",
+            },
+            {
+                "text": "Solar Storage",
+                "kind": "title",
+                "count": 2,
+                "latest_created_at": "2026-02-01T00:00:00+00:00",
+            },
+            {
+                "text": "Solar Finance",
+                "kind": "title",
+                "count": 1,
+                "latest_created_at": "2026-03-01T00:00:00+00:00",
+            },
+        ]
+
+    def test_suggest_queries_filters_candidate_units(self, store: Store):
+        units = [
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="max-insight",
+                source_entity_type="insight",
+                title="Energy Dashboard",
+                content="Dashboard note",
+                content_type=ContentType.INSIGHT,
+                tags=["energy"],
+                created_at=datetime.fromisoformat("2026-01-03T00:00:00+00:00"),
+            ),
+            KnowledgeUnit(
+                source_project=SourceProject.PRESENCE,
+                source_id="presence-insight",
+                source_entity_type="knowledge_item",
+                title="Energy Journal",
+                content="Journal note",
+                content_type=ContentType.INSIGHT,
+                tags=["energy"],
+                created_at=datetime.fromisoformat("2026-01-02T00:00:00+00:00"),
+            ),
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="max-finding",
+                source_entity_type="finding",
+                title="Energy Research",
+                content="Research note",
+                content_type=ContentType.FINDING,
+                tags=["energy"],
+                created_at=datetime.fromisoformat("2026-01-01T00:00:00+00:00"),
+            ),
+        ]
+        for unit in units:
+            store.insert_unit(unit)
+
+        result = RAGService(store, provider=None).suggest_queries(
+            "energy",
+            source_project="max",
+            content_type="insight",
+            tag="energy",
+        )
+
+        assert result == [
+            {
+                "text": "Energy Dashboard",
+                "kind": "title",
+                "count": 1,
+                "latest_created_at": "2026-01-03T00:00:00+00:00",
+            },
+            {
+                "text": "energy",
+                "kind": "tag",
+                "count": 1,
+                "latest_created_at": "2026-01-03T00:00:00+00:00",
+            },
+        ]
+
+    def test_suggest_queries_empty_prefix_and_limit_zero(self, store: Store):
+        store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="alpha",
+                source_entity_type="insight",
+                title="Alpha",
+                content="Alpha note",
+                tags=["beta"],
+                created_at=datetime.fromisoformat("2026-01-01T00:00:00+00:00"),
+            )
+        )
+
+        service = RAGService(store, provider=None)
+
+        assert service.suggest_queries("", limit=10) == [
+            {
+                "text": "Alpha",
+                "kind": "title",
+                "count": 1,
+                "latest_created_at": "2026-01-01T00:00:00+00:00",
+            },
+            {
+                "text": "beta",
+                "kind": "tag",
+                "count": 1,
+                "latest_created_at": "2026-01-01T00:00:00+00:00",
+            },
+        ]
+        assert service.suggest_queries("a", limit=0) == []
+
+    def test_suggest_queries_rejects_negative_limit_before_scanning(self, store: Store):
+        class ExplodingStore:
+            def get_units(self, **kwargs):
+                raise AssertionError("get_units should not be called")
+
+        with pytest.raises(ValueError, match="limit must be greater than or equal to 0"):
+            RAGService(ExplodingStore(), provider=None).suggest_queries(limit=-1)
+
     def test_embedded_unit_becomes_stale_after_content_update(
         self, store: Store, rag_service: RAGService
     ):

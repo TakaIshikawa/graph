@@ -372,6 +372,13 @@ def _facet_counts(units: list[KnowledgeUnit]) -> dict[str, dict[str, int]]:
     }
 
 
+def _suggestion_datetime_key(value) -> datetime:
+    try:
+        return parse_search_datetime_filter(value, name="created_at") or datetime.min.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+
 def _search_filter_payload(
     *,
     source_project: str | None = None,
@@ -587,6 +594,74 @@ class RAGService:
         for unit, emb in zip(units, embeddings):
             self.store.update_embedding(unit.id, serialize_embedding(emb))
         return len(units)
+
+    def suggest_queries(
+        self,
+        prefix: str = "",
+        *,
+        limit: int = 10,
+        source_project: str | None = None,
+        content_type: str | None = None,
+        tag: str | None = None,
+    ) -> list[dict]:
+        """Suggest query strings from matching unit titles and tags."""
+        if limit < 0:
+            raise ValueError("limit must be greater than or equal to 0.")
+        if limit == 0:
+            return []
+
+        normalized_prefix = (prefix or "").casefold()
+        suggestions: dict[tuple[str, str], dict] = {}
+
+        for unit in self.store.get_units(
+            source_project=source_project,
+            content_type=content_type,
+        ):
+            if not _unit_matches_filters(
+                unit,
+                source_project=source_project,
+                content_type=content_type,
+                tag=tag,
+            ):
+                continue
+
+            candidates = [("title", unit.title), *(("tag", item) for item in unit.tags)]
+            for kind, text in candidates:
+                text = " ".join((text or "").split())
+                if not text or not text.casefold().startswith(normalized_prefix):
+                    continue
+
+                key = (kind, text.casefold())
+                latest_key = _suggestion_datetime_key(unit.created_at)
+                existing = suggestions.get(key)
+                if existing is None:
+                    suggestions[key] = {
+                        "text": text,
+                        "kind": kind,
+                        "count": 1,
+                        "latest_created_at": _iso(unit.created_at),
+                        "_latest_key": latest_key,
+                    }
+                    continue
+
+                existing["count"] += 1
+                if text < existing["text"]:
+                    existing["text"] = text
+                if latest_key > existing["_latest_key"]:
+                    existing["_latest_key"] = latest_key
+                    existing["latest_created_at"] = _iso(unit.created_at)
+
+        def tie_breaker(item):
+            kind_rank = 0 if item["kind"] == "title" else 1
+            return (kind_rank, item["text"].casefold(), item["text"])
+
+        ranked = sorted(suggestions.values(), key=tie_breaker)
+        ranked = sorted(ranked, key=lambda item: item["_latest_key"], reverse=True)
+        ranked = sorted(ranked, key=lambda item: item["count"], reverse=True)
+        return [
+            {key: value for key, value in item.items() if key != "_latest_key"}
+            for item in ranked[:limit]
+        ]
 
     def search(
         self,
