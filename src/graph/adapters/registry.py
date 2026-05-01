@@ -21,6 +21,7 @@ from graph.adapters.pdf import PdfAdapter
 from graph.adapters.presence import PresenceAdapter
 from graph.adapters.sota import SOTAAdapter
 from graph.adapters.text import TextAdapter
+from graph.adapters.yaml_adapter import YamlAdapter
 
 _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "forty_two": FortyTwoAdapter,
@@ -34,6 +35,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "bookmarks": BookmarksAdapter,
     "csv": CsvAdapter,
     "jsonl": JsonlAdapter,
+    "yaml": YamlAdapter,
     "opml": OpmlAdapter,
     "pdf": PdfAdapter,
     "email": EmailAdapter,

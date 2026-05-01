@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     bookmarks_path: str = ""
     csv_path: str = ""
     jsonl_path: str = ""
+    yaml_root: str = ""
     opml_path: str = ""
     pdf_path: str = ""
     me_config: str = ""

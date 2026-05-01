@@ -46,6 +46,7 @@ SUPPORTED_SYNC_PROJECTS = [
     "bookmarks",
     "csv",
     "jsonl",
+    "yaml",
     "opml",
     "pdf",
     "email",
@@ -79,6 +80,7 @@ def _get_adapter_for_project(name: str):
     from graph.adapters.presence import PresenceAdapter
     from graph.adapters.sota import SOTAAdapter
     from graph.adapters.text import TextAdapter
+    from graph.adapters.yaml_adapter import YamlAdapter
 
     mapping = {
         "forty_two": lambda: FortyTwoAdapter(db_path=settings.forty_two_db),
@@ -94,6 +96,7 @@ def _get_adapter_for_project(name: str):
         "bookmarks": lambda: BookmarksAdapter(path=settings.bookmarks_path),
         "csv": lambda: CsvAdapter(path=settings.csv_path),
         "jsonl": lambda: JsonlAdapter(path=settings.jsonl_path),
+        "yaml": lambda: YamlAdapter(root_path=settings.yaml_root),
         "opml": lambda: OpmlAdapter(path=settings.opml_path),
         "pdf": lambda: PdfAdapter(path=settings.pdf_path),
         "email": lambda: EmailAdapter(path=settings.email_path),
@@ -2086,6 +2089,7 @@ def _do_ingest(
             "bookmarks",
             "csv",
             "jsonl",
+            "yaml",
             "opml",
             "email",
             "text",

@@ -11,6 +11,7 @@ class SourceProject(StrEnum):
     BOOKMARKS = "bookmarks"
     CSV = "csv"
     JSONL = "jsonl"
+    YAML = "yaml"
     OPML = "opml"
     PDF = "pdf"
     EMAIL = "email"

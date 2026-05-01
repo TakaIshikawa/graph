@@ -30,6 +30,7 @@ from graph.adapters.pdf import PdfAdapter
 from graph.adapters.presence import PresenceAdapter
 from graph.adapters.registry import get_adapter, list_adapters
 from graph.adapters.text import TextAdapter
+from graph.adapters.yaml_adapter import YamlAdapter
 from graph.store.db import Store
 from graph.types.models import SyncState
 
@@ -1550,6 +1551,110 @@ class TestJsonlAdapter:
         assert missing.edges == []
 
 
+class TestYamlAdapter:
+    def test_ingest_yaml_documents_recursively_with_metadata_title_and_tags(self, tmp_path):
+        root = tmp_path / "yaml"
+        nested = root / "nested"
+        nested.mkdir(parents=True)
+        first = root / "note.yaml"
+        second = nested / "record.yml"
+        first.write_text(
+            yaml.safe_dump(
+                {
+                    "title": "YAML Note",
+                    "tags": ["knowledge", "#yaml", "knowledge"],
+                    "summary": "Structured note content.",
+                    "details": {"status": "active"},
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        second.write_text(
+            yaml.safe_dump(
+                {
+                    "name": "Named Export",
+                    "tags": ["export"],
+                    "items": ["alpha", "beta"],
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        (nested / "skip.txt").write_text("Not YAML.\n", encoding="utf-8")
+
+        result = YamlAdapter(root_path=str(root)).ingest()
+
+        assert [unit.source_id for unit in result.units] == [
+            "nested/record.yml",
+            "note.yaml",
+        ]
+        by_source = {unit.source_id: unit for unit in result.units}
+        note = by_source["note.yaml"]
+        assert note.source_project == "yaml"
+        assert note.source_entity_type == "yaml_document"
+        assert note.title == "YAML Note"
+        assert note.tags == ["knowledge", "yaml"]
+        assert "summary: Structured note content." in note.content
+        assert "details:" in note.content
+        assert "title:" not in note.content
+        assert note.metadata == {
+            "path": "note.yaml",
+            "file_size": first.stat().st_size,
+            "top_level_keys": ["title", "tags", "summary", "details"],
+        }
+        assert note.created_at.tzinfo is not None
+        assert by_source["nested/record.yml"].title == "Named Export"
+        assert by_source["nested/record.yml"].tags == ["export"]
+        assert result.edges == []
+
+    def test_malformed_yaml_file_is_skipped_without_aborting_tree(self, tmp_path):
+        good = tmp_path / "good.yaml"
+        bad = tmp_path / "bad.yml"
+        good.write_text("title: Valid\nbody: Imported.\n", encoding="utf-8")
+        bad.write_text("title: [broken\n", encoding="utf-8")
+
+        with pytest.warns(UserWarning, match="Skipped 1 malformed YAML file"):
+            result = YamlAdapter(root_path=str(tmp_path)).ingest()
+
+        assert [unit.source_id for unit in result.units] == ["good.yaml"]
+        assert result.units[0].title == "Valid"
+
+    def test_empty_missing_non_directory_and_entity_filter_return_empty_result(self, tmp_path):
+        file_root = tmp_path / "file.yaml"
+        file_root.write_text("title: Root file\n", encoding="utf-8")
+
+        empty = YamlAdapter(root_path=str(tmp_path / "empty")).ingest()
+        missing = YamlAdapter(root_path=str(tmp_path / "missing")).ingest()
+        non_directory = YamlAdapter(root_path=str(file_root)).ingest()
+        filtered = YamlAdapter(root_path=str(tmp_path)).ingest(entity_types=["jsonl_record"])
+
+        assert empty.units == []
+        assert missing.units == []
+        assert non_directory.units == []
+        assert filtered.units == []
+        assert filtered.edges == []
+
+    def test_title_falls_back_to_file_stem_and_sync_skips_old_files(self, tmp_path):
+        old_path = tmp_path / "old.yaml"
+        new_path = tmp_path / "untitled.yml"
+        old_path.write_text("title: Old\nbody: skipped\n", encoding="utf-8")
+        new_path.write_text("body: imported\n", encoding="utf-8")
+        os.utime(old_path, (1_700_000_000, 1_700_000_000))
+        os.utime(new_path, (1_700_100_000, 1_700_100_000))
+
+        result = YamlAdapter(root_path=str(tmp_path)).ingest(
+            since=SyncState(
+                source_project="yaml",
+                source_entity_type="yaml_document",
+                last_sync_at=datetime.fromtimestamp(1_700_050_000, tz=timezone.utc),
+            )
+        )
+
+        assert [unit.source_id for unit in result.units] == ["untitled.yml"]
+        assert result.units[0].title == "untitled"
+
+
 class TestOpmlAdapter:
     def test_ingest_nested_outlines_with_urls_and_edges(self, tmp_path):
         opml_path = tmp_path / "feeds.opml"
@@ -1644,6 +1749,7 @@ class TestRegistry:
             "bookmarks",
             "csv",
             "jsonl",
+            "yaml",
             "opml",
             "pdf",
             "email",
@@ -1659,6 +1765,9 @@ class TestRegistry:
 
         jsonl_adapter = get_adapter("jsonl", path="/tmp/test.jsonl")
         assert jsonl_adapter.name == "jsonl"
+
+        yaml_adapter = get_adapter("yaml", root_path="/tmp/yaml")
+        assert yaml_adapter.name == "yaml"
 
         opml_adapter = get_adapter("opml", path="/tmp/test.opml")
         assert opml_adapter.name == "opml"
