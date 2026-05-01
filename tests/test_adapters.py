@@ -35,6 +35,7 @@ from graph.adapters.opml import OpmlAdapter
 from graph.adapters.org import OrgAdapter
 from graph.adapters.pdf import PdfAdapter
 from graph.adapters.presence import PresenceAdapter
+from graph.adapters.readwise import ReadwiseAdapter
 from graph.adapters.registry import get_adapter, list_adapters
 from graph.adapters.ris import RisAdapter
 from graph.adapters.text import TextAdapter
@@ -2641,6 +2642,7 @@ class TestRegistry:
             "pocket",
             "zotero_rdf",
             "hypothesis",
+            "readwise",
         }
 
     def test_get_adapter(self):
@@ -2710,6 +2712,10 @@ class TestRegistry:
         hypothesis_adapter = get_adapter("hypothesis", path="/tmp/hypothesis.json")
         assert isinstance(hypothesis_adapter, HypothesisAdapter)
         assert hypothesis_adapter.name == "hypothesis"
+
+        readwise_adapter = get_adapter("readwise", path="/tmp/readwise.json")
+        assert isinstance(readwise_adapter, ReadwiseAdapter)
+        assert readwise_adapter.name == "readwise"
 
     def test_unknown_adapter(self):
         with pytest.raises(KeyError):
