@@ -21,7 +21,7 @@ from graph.rag.search import (
     validate_search_sort,
     validate_snippet_length,
 )
-from graph.store.db import MetadataPathError, Store, metadata_path_matches
+from graph.store.db import DatabaseBackupError, MetadataPathError, Store, metadata_path_matches
 from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
 from graph.types.models import KnowledgeUnit, SyncState
 
@@ -578,6 +578,14 @@ def _do_import_collections(
     payload = json.loads(input_path.read_text())
     stats = store.import_collections(payload, missing_units="strict" if strict else "skip")
     return {"path": str(input_path), **stats}
+
+
+def _do_backup_database(store: Store, path: str | Path, *, force: bool = False) -> dict:
+    return store.backup_database(path, force=force)
+
+
+def _do_restore_database(store: Store, path: str | Path, *, force: bool = False) -> dict:
+    return store.restore_database(path, force=force)
 
 
 def _parse_metadata_json(value: str | dict | None) -> dict:
@@ -5069,6 +5077,62 @@ def maintenance_rebuild_fts() -> None:
     payload = _do_rebuild_fts_index(store)
     store.close()
     _json_echo(payload)
+
+
+@maintenance_app.command(name="backup")
+def maintenance_backup(
+    path: Path = typer.Argument(..., help="Destination SQLite backup path"),
+    force: bool = typer.Option(False, "--force", help="Overwrite an existing backup file"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Create a consistent SQLite backup of the active graph database."""
+    store = _get_store()
+    try:
+        payload = _do_backup_database(store, path, force=force)
+    except DatabaseBackupError as exc:
+        if json_output:
+            _json_echo({"error": "backup_failed", "message": str(exc)})
+            raise typer.Exit(1)
+        raise typer.BadParameter(str(exc)) from exc
+    finally:
+        store.close()
+
+    if json_output:
+        _json_echo(payload)
+        return
+
+    typer.echo(
+        f"Backed up {payload['source_path']} to {payload['destination_path']} "
+        f"({payload['copied_file_size']} bytes)"
+    )
+
+
+@maintenance_app.command(name="restore")
+def maintenance_restore(
+    path: Path = typer.Argument(..., help="Source SQLite backup path"),
+    force: bool = typer.Option(False, "--force", help="Overwrite the active database"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Restore the active graph database from a validated SQLite backup."""
+    store = _get_store()
+    try:
+        payload = _do_restore_database(store, path, force=force)
+    except DatabaseBackupError as exc:
+        if json_output:
+            _json_echo({"error": "restore_failed", "message": str(exc)})
+            raise typer.Exit(1)
+        raise typer.BadParameter(str(exc)) from exc
+    finally:
+        store.close()
+
+    if json_output:
+        _json_echo(payload)
+        return
+
+    typer.echo(
+        f"Restored {payload['source_path']} to {payload['destination_path']} "
+        f"({payload['copied_file_size']} bytes)"
+    )
 
 
 @app.command()

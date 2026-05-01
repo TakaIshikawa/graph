@@ -2335,6 +2335,108 @@ class TestEmbedding:
 
 
 class TestJsonBackup:
+    def test_sqlite_backup_contains_units_and_edges(self, tmp_path):
+        source_path = tmp_path / "source.db"
+        backup_path = tmp_path / "nested" / "backup.db"
+        source = Store(str(source_path))
+
+        try:
+            first = source.insert_unit(
+                KnowledgeUnit(
+                    source_project=SourceProject.FORTY_TWO,
+                    source_id="backup-a",
+                    source_entity_type="knowledge_node",
+                    title="Backup A",
+                    content="First backup unit",
+                )
+            )
+            second = source.insert_unit(
+                KnowledgeUnit(
+                    source_project=SourceProject.MAX,
+                    source_id="backup-b",
+                    source_entity_type="insight",
+                    title="Backup B",
+                    content="Second backup unit",
+                )
+            )
+            source.insert_edge(
+                KnowledgeEdge(
+                    from_unit_id=first.id,
+                    to_unit_id=second.id,
+                    relation=EdgeRelation.RELATES_TO,
+                    source=EdgeSource.MANUAL,
+                )
+            )
+
+            stats = source.backup_database(backup_path)
+
+            assert stats["source_path"] == str(source_path)
+            assert stats["destination_path"] == str(backup_path)
+            assert stats["copied_file_size"] == backup_path.stat().st_size
+            with sqlite3.connect(backup_path) as conn:
+                assert conn.execute("SELECT COUNT(*) FROM knowledge_units").fetchone()[0] == 2
+                assert conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0] == 1
+        finally:
+            _close_and_unlink(source, source_path)
+            backup_path.unlink(missing_ok=True)
+
+    def test_restore_rejects_non_sqlite_and_missing_graph_tables(self, tmp_path):
+        non_sqlite = tmp_path / "not-sqlite.db"
+        non_sqlite.write_text("not a sqlite database")
+        with pytest.raises(ValueError, match="valid SQLite|readable SQLite"):
+            Store.validate_database_backup(non_sqlite)
+
+        missing_tables = tmp_path / "missing.db"
+        with sqlite3.connect(missing_tables) as conn:
+            conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
+            conn.execute("INSERT INTO schema_version VALUES (?)", (4,))
+
+        with pytest.raises(ValueError, match="missing required graph tables"):
+            Store.validate_database_backup(missing_tables)
+
+    def test_restore_refuses_active_database_without_force(self, tmp_path):
+        source_path = tmp_path / "source.db"
+        backup_path = tmp_path / "backup.db"
+        target_path = tmp_path / "target.db"
+        source = Store(str(source_path))
+        target = Store(str(target_path))
+
+        try:
+            unit = source.insert_unit(
+                KnowledgeUnit(
+                    source_project=SourceProject.MAX,
+                    source_id="restore-source",
+                    source_entity_type="insight",
+                    title="Restore source",
+                    content="Restore source content",
+                )
+            )
+            source.backup_database(backup_path)
+
+            with pytest.raises(ValueError, match="without --force"):
+                target.restore_database(backup_path)
+
+            stats = target.restore_database(backup_path, force=True)
+
+            assert stats["source_path"] == str(backup_path)
+            assert stats["destination_path"] == str(target_path)
+            restored = Store(str(target_path))
+            try:
+                assert restored.get_unit(unit.id).title == "Restore source"
+            finally:
+                restored.close()
+        finally:
+            source.close()
+            target.close()
+            _cleanup_paths = [source_path, backup_path, target_path]
+            for path in _cleanup_paths:
+                for candidate in (
+                    path,
+                    path.with_name(path.name + "-wal"),
+                    path.with_name(path.name + "-shm"),
+                ):
+                    candidate.unlink(missing_ok=True)
+
     def test_export_json_contains_required_top_level_fields(
         self, store: Store, sample_unit: KnowledgeUnit
     ):

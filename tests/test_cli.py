@@ -5653,6 +5653,80 @@ def test_maintenance_rebuild_fts_command_emits_json_and_restores_search(monkeypa
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_maintenance_backup_restore_commands_emit_json_and_validate(monkeypatch, tmp_path):
+    source = _make_store()
+    unit = source.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="sqlite-backup-cli",
+            source_entity_type="insight",
+            title="SQLite backup CLI",
+            content="CLI backup and restore content.",
+        )
+    )
+    backup_path = tmp_path / "nested" / "graph.db"
+    source_proxy = StoreProxy(source)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: source_proxy)
+
+    backup_result = runner.invoke(
+        app,
+        ["maintenance", "backup", str(backup_path), "--json"],
+    )
+
+    assert backup_result.exit_code == 0
+    backup_payload = json.loads(backup_result.output)
+    assert backup_payload["source_path"] == source._test_db_path  # type: ignore[attr-defined]
+    assert backup_payload["destination_path"] == str(backup_path)
+    assert backup_payload["copied_file_size"] == backup_path.stat().st_size
+
+    target = _make_store()
+    target_proxy = StoreProxy(target)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: target_proxy)
+
+    blocked = runner.invoke(
+        app,
+        ["maintenance", "restore", str(backup_path), "--json"],
+    )
+
+    assert blocked.exit_code == 1
+    blocked_payload = json.loads(blocked.output)
+    assert blocked_payload["error"] == "restore_failed"
+    assert "without --force" in blocked_payload["message"]
+
+    restored = runner.invoke(
+        app,
+        ["maintenance", "restore", str(backup_path), "--force", "--json"],
+    )
+
+    try:
+        assert restored.exit_code == 0
+        restored_payload = json.loads(restored.output)
+        assert restored_payload["source_path"] == str(backup_path)
+        assert restored_payload["destination_path"] == target._test_db_path  # type: ignore[attr-defined]
+        assert restored_payload["copied_file_size"] == Path(
+            target._test_db_path  # type: ignore[attr-defined]
+        ).stat().st_size
+        reopened = Store(target._test_db_path)  # type: ignore[attr-defined]
+        try:
+            assert reopened.get_unit(unit.id).title == "SQLite backup CLI"
+        finally:
+            reopened.close()
+
+        invalid_path = tmp_path / "invalid.db"
+        invalid_path.write_text("nope")
+        invalid = runner.invoke(
+            app,
+            ["maintenance", "restore", str(invalid_path), "--force", "--json"],
+        )
+        assert invalid.exit_code == 1
+        assert json.loads(invalid.output)["error"] == "restore_failed"
+    finally:
+        source.close()
+        target.close()
+        _cleanup_db(source._test_db_path)  # type: ignore[attr-defined]
+        _cleanup_db(target._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_edge_management_cli_json_lists_updates_and_deletes(monkeypatch):
     store = _make_store()
     center = store.insert_unit(

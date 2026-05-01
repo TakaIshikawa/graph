@@ -18,6 +18,12 @@ from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 SAVED_QUERIES_SCHEMA_VERSION = 2
 COLLECTIONS_SCHEMA_VERSION = 1
 SUPPORTED_QUERY_SCHEDULES = {"daily", "weekly", "monthly"}
+REQUIRED_SQLITE_BACKUP_OBJECTS = {
+    "schema_version",
+    "knowledge_units",
+    "edges",
+    "knowledge_fts",
+}
 
 if TYPE_CHECKING:
     from graph.adapters.base import IngestResult
@@ -25,6 +31,10 @@ if TYPE_CHECKING:
 
 class MetadataPathError(ValueError):
     """Raised when a dotted metadata path cannot be applied safely."""
+
+
+class DatabaseBackupError(ValueError):
+    """Raised when a SQLite backup or restore cannot be completed safely."""
 
 
 class _EmbeddingStatus(dict):
@@ -253,6 +263,7 @@ def _metadata_filter_sql(
 
 class Store:
     def __init__(self, db_path: str) -> None:
+        self.db_path = Path(db_path)
         self.conn = sqlite3.connect(db_path)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
@@ -261,6 +272,117 @@ class Store:
 
     def close(self) -> None:
         self.conn.close()
+
+    def backup_database(self, destination: str | Path, *, force: bool = False) -> dict:
+        destination_path = Path(destination)
+        if destination_path.exists() and not force:
+            raise DatabaseBackupError(f"Backup destination already exists: {destination_path}")
+        if self.db_path.resolve() == destination_path.resolve():
+            raise DatabaseBackupError("Backup destination must be different from the active database.")
+
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        if destination_path.exists():
+            destination_path.unlink()
+
+        self.conn.commit()
+        target = sqlite3.connect(str(destination_path))
+        try:
+            self.conn.backup(target)
+            target.commit()
+        finally:
+            target.close()
+
+        return {
+            "source_path": str(self.db_path),
+            "destination_path": str(destination_path),
+            "copied_file_size": destination_path.stat().st_size,
+        }
+
+    @classmethod
+    def validate_database_backup(cls, source: str | Path) -> None:
+        source_path = Path(source)
+        if not source_path.exists() or not source_path.is_file():
+            raise DatabaseBackupError(f"Restore source does not exist: {source_path}")
+
+        try:
+            conn = sqlite3.connect(f"{source_path.resolve().as_uri()}?mode=ro", uri=True)
+        except sqlite3.Error as exc:
+            raise DatabaseBackupError(
+                f"Restore source is not a readable SQLite database: {source_path}"
+            ) from exc
+
+        try:
+            quick_check = conn.execute("PRAGMA quick_check").fetchone()
+            if quick_check is None or quick_check[0] != "ok":
+                raise DatabaseBackupError("Restore source failed SQLite integrity checks.")
+
+            objects = {
+                row[0]
+                for row in conn.execute(
+                    """
+                    SELECT name
+                    FROM sqlite_schema
+                    WHERE type IN ('table', 'view')
+                    """
+                ).fetchall()
+            }
+            missing = sorted(REQUIRED_SQLITE_BACKUP_OBJECTS - objects)
+            if missing:
+                raise DatabaseBackupError(
+                    "Restore source is missing required graph tables: " + ", ".join(missing)
+                )
+
+            version_row = conn.execute(
+                "SELECT version FROM schema_version ORDER BY rowid DESC LIMIT 1"
+            ).fetchone()
+            if version_row is None or version_row[0] != SCHEMA_VERSION:
+                found = None if version_row is None else version_row[0]
+                raise DatabaseBackupError(
+                    f"Restore source schema version {found!r} is not supported; "
+                    f"expected {SCHEMA_VERSION}."
+                )
+        except sqlite3.DatabaseError as exc:
+            raise DatabaseBackupError(
+                f"Restore source is not a valid SQLite database: {source_path}"
+            ) from exc
+        finally:
+            conn.close()
+
+    def restore_database(self, source: str | Path, *, force: bool = False) -> dict:
+        source_path = Path(source)
+        if self.db_path.exists() and not force:
+            raise DatabaseBackupError(
+                f"Refusing to overwrite active database without --force: {self.db_path}"
+            )
+        if source_path.resolve() == self.db_path.resolve():
+            raise DatabaseBackupError("Restore source must be different from the active database.")
+
+        self.validate_database_backup(source_path)
+        self.close()
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = self.db_path.with_name(f".{self.db_path.name}.restore-{uuid.uuid4().hex}.tmp")
+        source_conn = sqlite3.connect(f"{source_path.resolve().as_uri()}?mode=ro", uri=True)
+        target_conn = sqlite3.connect(str(temp_path))
+        try:
+            source_conn.backup(target_conn)
+            target_conn.commit()
+        finally:
+            target_conn.close()
+            source_conn.close()
+
+        for candidate in (
+            self.db_path,
+            self.db_path.with_name(self.db_path.name + "-wal"),
+            self.db_path.with_name(self.db_path.name + "-shm"),
+        ):
+            candidate.unlink(missing_ok=True)
+        temp_path.replace(self.db_path)
+
+        return {
+            "source_path": str(source_path),
+            "destination_path": str(self.db_path),
+            "copied_file_size": self.db_path.stat().st_size,
+        }
 
     # --- Unit CRUD ---
 
