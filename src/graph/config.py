@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     jsonl_path: str = ""
     yaml_root: str = ""
     opml_path: str = ""
+    org_root: str = ""
     pdf_path: str = ""
     me_config: str = ""
     markdown_root: str = ""

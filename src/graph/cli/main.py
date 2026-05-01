@@ -55,6 +55,7 @@ SUPPORTED_SYNC_PROJECTS = [
     "jsonl",
     "yaml",
     "opml",
+    "org",
     "pdf",
     "email",
     "text",
@@ -88,6 +89,7 @@ def _get_adapter_for_project(name: str):
     from graph.adapters.max_adapter import MaxAdapter
     from graph.adapters.me import MeAdapter
     from graph.adapters.opml import OpmlAdapter
+    from graph.adapters.org import OrgAdapter
     from graph.adapters.pdf import PdfAdapter
     from graph.adapters.presence import PresenceAdapter
     from graph.adapters.ris import RisAdapter
@@ -111,6 +113,7 @@ def _get_adapter_for_project(name: str):
         "jsonl": lambda: JsonlAdapter(path=settings.jsonl_path),
         "yaml": lambda: YamlAdapter(root_path=settings.yaml_root),
         "opml": lambda: OpmlAdapter(path=settings.opml_path),
+        "org": lambda: OrgAdapter(root_path=settings.org_root),
         "pdf": lambda: PdfAdapter(path=settings.pdf_path),
         "email": lambda: EmailAdapter(path=settings.email_path),
         "text": lambda: TextAdapter(root_path=settings.text_root),
@@ -2298,6 +2301,7 @@ def _do_ingest(
             "jsonl",
             "yaml",
             "opml",
+            "org",
             "email",
             "text",
             "html",
