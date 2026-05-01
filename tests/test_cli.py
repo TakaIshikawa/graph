@@ -1093,6 +1093,105 @@ def test_export_markdown_command_writes_filtered_folder_and_json_stats(tmp_path,
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_export_ics_command_writes_filtered_calendar_and_json_stats(tmp_path, monkeypatch):
+    store = _make_store()
+    dated = store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="dated",
+            source_entity_type="task",
+            title="Review launch plan",
+            content="Review the launch plan before the weekly planning meeting.",
+            content_type=ContentType.INSIGHT,
+            metadata={"due_date": "2026-05-04"},
+            tags=["energy", "planning"],
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="undated",
+            source_entity_type="note",
+            title="Undated note",
+            content="This should be scanned but not exported.",
+            content_type=ContentType.INSIGHT,
+            tags=["energy"],
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="wrong-tag",
+            source_entity_type="event",
+            title="Wrong tag event",
+            content="This is dated but excluded by tag.",
+            content_type=ContentType.INSIGHT,
+            metadata={"scheduled_at": "2026-05-05T09:30:00+00:00"},
+            tags=["research"],
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="wrong-source",
+            source_entity_type="event",
+            title="Wrong source event",
+            content="This is dated but excluded by source.",
+            content_type=ContentType.INSIGHT,
+            metadata={"event_date": "2026-05-06"},
+            tags=["energy"],
+        )
+    )
+    export_path = tmp_path / "graph.ics"
+
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    result = runner.invoke(
+        app,
+        [
+            "export-ics",
+            str(export_path),
+            "--source-project",
+            "max",
+            "--content-type",
+            "insight",
+            "--tag",
+            "energy",
+            "--json",
+        ],
+    )
+
+    try:
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["path"] == str(export_path)
+        assert payload["units_scanned"] == 2
+        assert payload["events_exported"] == 1
+        assert payload["filters"] == {
+            "tag": "energy",
+            "source_project": "max",
+            "content_type": "insight",
+        }
+
+        raw = export_path.read_bytes()
+        assert raw.startswith(b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\n")
+        assert raw.endswith(b"END:VCALENDAR\r\n")
+        text = raw.decode()
+        assert text.count("BEGIN:VEVENT") == 1
+        assert f"UID:{dated.id}@graph.local" in text
+        assert "DTSTART;VALUE=DATE:20260504" in text
+        assert "SUMMARY:Review launch plan" in text
+        assert "X-GRAPH-SOURCE-PROJECT:max" in text
+        assert "CATEGORIES:energy,planning" in text
+        assert "Source: max/task" in text
+        assert "Wrong tag event" not in text
+        assert "Wrong source event" not in text
+        assert "Undated note" not in text
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
 def test_export_jsonl_command_writes_filtered_newline_records(tmp_path, monkeypatch):
     store = _make_store()
     a_id, b_id, _, _ = _populate_graph(store)

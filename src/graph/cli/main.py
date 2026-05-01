@@ -377,6 +377,32 @@ def _do_export_markdown(
     )
 
 
+def _do_export_ics(
+    store: Store,
+    path: str | Path,
+    *,
+    tag: str | None = None,
+    source_project: str | None = None,
+    content_type: str | None = None,
+) -> dict:
+    from graph.export.ical import export_units_to_ics
+
+    if content_type is not None:
+        content_type = ContentType(content_type).value
+
+    units = store.get_units(source_project=source_project, content_type=content_type)
+    if tag is not None:
+        units = [unit for unit in units if tag in unit.tags]
+
+    stats = export_units_to_ics(units, path, units_scanned=len(units))
+    stats["filters"] = {
+        "tag": tag,
+        "source_project": source_project,
+        "content_type": content_type,
+    }
+    return stats
+
+
 def _do_export_neighborhood(
     store: Store, unit_id: str, path: str | Path, *, depth: int = 1
 ) -> dict:
@@ -2663,6 +2689,39 @@ def export_markdown(
         return
 
     typer.echo(f"Exported {stats['units_exported']} Markdown files to {stats['path']}")
+
+
+@app.command(name="export-ics")
+def export_ics(
+    path: Path = typer.Argument(..., help="Destination iCalendar file path"),
+    tag: str | None = typer.Option(None, "--tag", help="Require an exact graph tag"),
+    source_project: str | None = typer.Option(
+        None,
+        "--source-project",
+        help="Filter by source project",
+    ),
+    content_type: str | None = typer.Option(None, "--content-type", help="Filter by content type"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Export dated units as an iCalendar file."""
+    store = _get_store()
+    stats = _do_export_ics(
+        store,
+        path,
+        tag=tag,
+        source_project=source_project,
+        content_type=content_type,
+    )
+    store.close()
+
+    if json_output:
+        _json_echo(stats)
+        return
+
+    typer.echo(
+        f"Exported {stats['events_exported']} calendar events "
+        f"from {stats['units_scanned']} units to {stats['path']}"
+    )
 
 
 @app.command(name="export-neighborhood")
