@@ -15,6 +15,7 @@ from graph.adapters.git_adapter import GitAdapter
 from graph.adapters.html import HtmlAdapter
 from graph.adapters.ical import ICalAdapter
 from graph.adapters.ipynb import IpynbAdapter
+from graph.adapters.jats import JatsAdapter
 from graph.adapters.jsonl_adapter import JsonlAdapter
 from graph.adapters.kindle import KindleAdapter
 from graph.adapters.markdown import MarkdownAdapter
@@ -57,6 +58,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "bibtex": BibtexAdapter,
     "csl_json": CslJsonAdapter,
     "ris": RisAdapter,
+    "jats": JatsAdapter,
     "git": GitAdapter,
     "transcript": TranscriptAdapter,
     "pocket": PocketAdapter,
