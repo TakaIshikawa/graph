@@ -1745,6 +1745,113 @@ class GraphService:
         records.sort(key=lambda record: (-record["score"], record["unit_ids"]))
         return records[:capped_limit]
 
+    def analyze_edge_bridges(self, limit: int = 20) -> list[dict]:
+        """Identify edge bridges in the undirected knowledge graph projection."""
+        try:
+            capped_limit = int(limit)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("limit must be a non-negative integer.") from exc
+        if capped_limit < 0:
+            raise ValueError("limit must be a non-negative integer.")
+        if capped_limit == 0:
+            return []
+
+        units_by_id = {unit.id: unit for unit in self.store.get_all_units(limit=1000000000)}
+        if len(units_by_id) < 2:
+            return []
+
+        edge_groups: dict[tuple[str, str], dict] = {}
+        for edge in sorted(
+            self.store.get_all_edges(),
+            key=lambda item: (
+                min(item.from_unit_id, item.to_unit_id),
+                max(item.from_unit_id, item.to_unit_id),
+                str(item.relation),
+                str(item.source),
+                -float(item.weight or 0.0),
+                item.id,
+            ),
+        ):
+            if edge.from_unit_id not in units_by_id or edge.to_unit_id not in units_by_id:
+                continue
+            if edge.from_unit_id == edge.to_unit_id:
+                continue
+
+            pair = tuple(sorted((edge.from_unit_id, edge.to_unit_id)))
+            group = edge_groups.setdefault(
+                pair,
+                {
+                    "unit_ids": list(pair),
+                    "edges": [],
+                    "relations": set(),
+                    "sources": set(),
+                    "weight": 0.0,
+                    "total_weight": 0.0,
+                },
+            )
+            edge_weight = float(edge.weight or 0.0)
+            group["edges"].append(edge)
+            group["relations"].add(str(edge.relation))
+            group["sources"].add(str(edge.source))
+            group["weight"] = max(float(group["weight"]), edge_weight)
+            group["total_weight"] = float(group["total_weight"]) + edge_weight
+
+        if not edge_groups:
+            return []
+
+        projection = nx.Graph()
+        projection.add_nodes_from(units_by_id)
+        projection.add_edges_from(edge_groups)
+        component_count_before = nx.number_connected_components(projection)
+
+        records = []
+        for bridge_pair in sorted(tuple(sorted(pair)) for pair in nx.bridges(projection)):
+            left_id, right_id = bridge_pair
+            group = edge_groups[bridge_pair]
+            component_before = nx.node_connected_component(projection, left_id)
+
+            without_bridge = projection.copy()
+            without_bridge.remove_edge(left_id, right_id)
+            left_component_size = len(nx.node_connected_component(without_bridge, left_id))
+            right_component_size = len(nx.node_connected_component(without_bridge, right_id))
+            smaller_component_size = min(left_component_size, right_component_size)
+            larger_component_size = max(left_component_size, right_component_size)
+
+            records.append(
+                {
+                    "unit_ids": list(bridge_pair),
+                    "endpoints": [
+                        self._unit_summary_data(units_by_id[left_id]),
+                        self._unit_summary_data(units_by_id[right_id]),
+                    ],
+                    "edges": [self._edge_export_data(edge) for edge in group["edges"]],
+                    "relations": sorted(group["relations"]),
+                    "sources": sorted(group["sources"]),
+                    "weight": round(float(group["weight"]), 6),
+                    "total_weight": round(float(group["total_weight"]), 6),
+                    "impact": {
+                        "component_count_before": component_count_before,
+                        "component_count_after": component_count_before + 1,
+                        "original_component_size": len(component_before),
+                        "endpoint_component_sizes": {
+                            left_id: left_component_size,
+                            right_id: right_component_size,
+                        },
+                        "smaller_component_size": smaller_component_size,
+                        "larger_component_size": larger_component_size,
+                    },
+                }
+            )
+
+        records.sort(
+            key=lambda record: (
+                -record["impact"]["smaller_component_size"],
+                -record["impact"]["original_component_size"],
+                record["unit_ids"],
+            )
+        )
+        return records[:capped_limit]
+
     def get_bridges(self, limit: int = 10) -> list[tuple[str, float]]:
         """Find bridge nodes (betweenness centrality)."""
         if not self.G.nodes:
