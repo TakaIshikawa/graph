@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import os
 import tempfile
@@ -5083,6 +5084,108 @@ def test_export_search_html_command_honors_filters_sort_and_empty_results(monkey
         assert payload["filters"] == {"source_project": "max", "tag": "missing-tag"}
         assert payload["snippet_length"] == 80
         assert "No results found." in output_path.read_text(encoding="utf-8")
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_export_search_csv_command_writes_rows_and_honors_filters(monkeypatch, tmp_path):
+    store = _make_store()
+    _populate_search_graph(store)
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    output_path = tmp_path / "results.csv"
+
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "export-search-csv",
+                str(output_path),
+                "solar",
+                "--mode",
+                "fulltext",
+                "--limit",
+                "5",
+                "--source-project",
+                "max",
+                "--content-type",
+                "insight",
+                "--tag",
+                "energy",
+                "--exclude-tag",
+                "research",
+                "--metadata-key",
+                "review_state",
+                "--metadata-value",
+                "approved",
+                "--created-after",
+                "2026-04-21",
+                "--created-before",
+                "2026-04-23",
+                "--min-utility",
+                "0.9",
+                "--sort",
+                "created_at_desc",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["path"] == str(output_path)
+        assert payload["row_count"] == 1
+        assert payload["query"] == "solar"
+        assert payload["mode"] == "fulltext"
+        assert payload["sort"] == "created_at_desc"
+        assert payload["filters"]["source_project"] == "max"
+        assert payload["filters"]["metadata_key"] == "review_state"
+
+        with output_path.open(newline="", encoding="utf-8") as handle:
+            rows = list(csv.DictReader(handle))
+        assert rows == [
+            {
+                "unit_id": store.get_unit_by_source("max", "approved", "insight").id,
+                "title": "Solar approved insight",
+                "source_project": "max",
+                "source_entity_type": "insight",
+                "content_type": "insight",
+                "score": "",
+                "created_at": "2026-04-22T00:00:00+00:00",
+                "updated_at": rows[0]["updated_at"],
+                "tags": "energy; solar",
+                "snippet": "Solar energy storage market growth",
+            }
+        ]
+    finally:
+        store.close()
+        _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]
+
+
+def test_export_search_csv_command_emits_json_errors(monkeypatch, tmp_path):
+    store = _make_store()
+    proxy = StoreProxy(store)
+    monkeypatch.setattr("graph.cli.main._get_store", lambda: proxy)
+    output_path = tmp_path / "results.csv"
+
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "export-search-csv",
+                str(output_path),
+                "solar",
+                "--mode",
+                "unknown",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert "Unknown mode: unknown" in payload["error"]
+        assert payload["path"] == str(output_path)
+        assert not output_path.exists()
     finally:
         store.close()
         _cleanup_db(store._test_db_path)  # type: ignore[attr-defined]

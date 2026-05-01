@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import uuid
 from datetime import datetime, timezone
@@ -214,6 +215,73 @@ def _do_export_search_html(
     return {
         "path": str(output_path),
         "result_count": len(payload.get("results", [])),
+        "query": payload["query"],
+        "mode": payload["mode"],
+        "sort": payload["sort"],
+        "filters": payload.get("filters", {}),
+        "snippet_length": snippet_length,
+    }
+
+
+def _plain_search_snippet(value: object) -> str:
+    return " ".join(str(value or "").split())
+
+
+def _do_export_search_csv(
+    store: Store,
+    path: str | Path,
+    query: str,
+    *,
+    limit: int = 10,
+    mode: str = "fulltext",
+    filters: dict | None = None,
+    sort: str = "relevance",
+    snippet_length: int = DEFAULT_SEARCH_SNIPPET_LENGTH,
+) -> dict:
+    output_path = Path(path)
+    payload = _do_search(
+        store,
+        query,
+        limit=limit,
+        mode=mode,
+        filters=filters,
+        sort=sort,
+        snippet_length=snippet_length,
+    )
+    fieldnames = [
+        "unit_id",
+        "title",
+        "source_project",
+        "source_entity_type",
+        "content_type",
+        "score",
+        "created_at",
+        "updated_at",
+        "tags",
+        "snippet",
+    ]
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for result in payload.get("results", []):
+            writer.writerow(
+                {
+                    "unit_id": result["id"],
+                    "title": result["title"],
+                    "source_project": result["source_project"],
+                    "source_entity_type": result["source_entity_type"],
+                    "content_type": result["content_type"],
+                    "score": result.get("score", ""),
+                    "created_at": result["created_at"],
+                    "updated_at": result["updated_at"],
+                    "tags": "; ".join(result.get("tags", [])),
+                    "snippet": _plain_search_snippet(result.get("snippet", "")),
+                }
+            )
+    return {
+        "path": str(output_path),
+        "row_count": len(payload.get("results", [])),
         "query": payload["query"],
         "mode": payload["mode"],
         "sort": payload["sort"],
@@ -4392,6 +4460,146 @@ def export_search_html(
         typer.echo(stats["error"])
         raise typer.Exit(code=1)
     typer.echo(f"Exported {stats['result_count']} search results to {stats['path']}")
+
+
+@app.command(name="export-search-csv")
+def export_search_csv(
+    path: Path = typer.Argument(..., help="Destination CSV file path"),
+    query: str = typer.Argument(..., help="Search query"),
+    limit: int = typer.Option(10, "--limit", "-n", help="Max results"),
+    mode: str = typer.Option(
+        "fulltext", "--mode", "-m", help="Search mode: fulltext | semantic | hybrid"
+    ),
+    sort: str = typer.Option(
+        "relevance",
+        "--sort",
+        help="Sort order: relevance | created_at_desc | created_at_asc | updated_at_desc | utility_desc | confidence_desc",
+    ),
+    source_project: str | None = typer.Option(
+        None,
+        "--source-project",
+        "--project",
+        "-p",
+        help="Filter by source project",
+    ),
+    content_type: str | None = typer.Option(None, "--content-type", help="Filter by content type"),
+    tag: str | None = typer.Option(None, "--tag", help="Require an exact tag"),
+    exclude_tag: str | None = typer.Option(None, "--exclude-tag", help="Exclude an exact tag"),
+    review_state: str | None = typer.Option(
+        None,
+        "--review-state",
+        help="Filter by review state metadata",
+    ),
+    metadata_key: str | None = typer.Option(
+        None,
+        "--metadata-key",
+        help="Dotted metadata path to filter by",
+    ),
+    metadata_value: str | None = typer.Option(
+        None,
+        "--metadata-value",
+        help="Exact metadata value required at --metadata-key",
+    ),
+    created_after: str | None = typer.Option(
+        None,
+        "--created-after",
+        help="Filter to units created on or after an ISO-8601 date/datetime",
+    ),
+    created_before: str | None = typer.Option(
+        None,
+        "--created-before",
+        help="Filter to units created on or before an ISO-8601 date/datetime",
+    ),
+    updated_after: str | None = typer.Option(
+        None,
+        "--updated-after",
+        help="Filter to units updated on or after an ISO-8601 date/datetime",
+    ),
+    updated_before: str | None = typer.Option(
+        None,
+        "--updated-before",
+        help="Filter to units updated on or before an ISO-8601 date/datetime",
+    ),
+    min_utility: float | None = typer.Option(
+        None,
+        "--min-utility",
+        help="Filter to units with utility score at least this value",
+    ),
+    max_utility: float | None = typer.Option(
+        None,
+        "--max-utility",
+        help="Filter to units with utility score at most this value",
+    ),
+    min_confidence: float | None = typer.Option(
+        None,
+        "--min-confidence",
+        help="Filter to units with confidence at least this value",
+    ),
+    max_confidence: float | None = typer.Option(
+        None,
+        "--max-confidence",
+        help="Filter to units with confidence at most this value",
+    ),
+    snippet_length: int = typer.Option(
+        DEFAULT_SEARCH_SNIPPET_LENGTH,
+        "--snippet-length",
+        help="Maximum characters to include in each result snippet",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Export search results as CSV."""
+    store = _get_store()
+    try:
+        stats = _do_export_search_csv(
+            store,
+            path,
+            query,
+            limit=limit,
+            mode=mode,
+            sort=sort,
+            snippet_length=snippet_length,
+            filters=_search_filters_dict(
+                source_project=source_project,
+                content_type=content_type,
+                tag=tag,
+                exclude_tag=exclude_tag,
+                review_state=review_state,
+                metadata_key=metadata_key,
+                metadata_value=metadata_value,
+                created_after=created_after,
+                created_before=created_before,
+                updated_after=updated_after,
+                updated_before=updated_before,
+                min_utility=min_utility,
+                max_utility=max_utility,
+                min_confidence=min_confidence,
+                max_confidence=max_confidence,
+            ),
+        )
+    except ValueError as exc:
+        stats = {
+            "error": str(exc),
+            "path": str(path),
+            "query": query,
+            "mode": mode,
+            "filters": {},
+            "valid_modes": ["fulltext", "semantic", "hybrid"],
+            "valid_sorts": list(SEARCH_SORTS),
+            "valid_snippet_length": {
+                "min": 1,
+                "max": 2000,
+            },
+        }
+    finally:
+        store.close()
+
+    if json_output:
+        _json_echo(stats)
+        return
+    if stats.get("error"):
+        typer.echo(stats["error"])
+        raise typer.Exit(code=1)
+    typer.echo(f"Exported {stats['row_count']} search result rows to {stats['path']}")
 
 
 @app.command()
