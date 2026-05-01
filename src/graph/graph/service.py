@@ -1640,6 +1640,93 @@ class GraphService:
         records.sort(key=lambda record: (-record["size"], record["unit_ids"]))
         return records[:limit]
 
+    def analyze_condensation_dag(self, limit: int = 20) -> dict:
+        """Collapse strongly connected components into a directed acyclic graph."""
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+            raise ValueError("limit must be a positive integer.")
+
+        units_by_id = {unit.id: unit for unit in self.store.get_all_units(limit=1000000000)}
+        graph = nx.DiGraph()
+        graph.add_nodes_from(sorted(units_by_id))
+        graph.add_edges_from(
+            sorted(
+                (edge.from_unit_id, edge.to_unit_id)
+                for edge in self.store.get_all_edges()
+                if edge.from_unit_id in units_by_id and edge.to_unit_id in units_by_id
+            )
+        )
+
+        if not graph.nodes:
+            return {
+                "component_count": 0,
+                "cyclic_component_count": 0,
+                "source_component_count": 0,
+                "sink_component_count": 0,
+                "topological_order": [],
+                "components": [],
+            }
+
+        strongly_connected_components = sorted(
+            (set(component_ids) for component_ids in nx.strongly_connected_components(graph)),
+            key=lambda component_ids: sorted(str(unit_id) for unit_id in component_ids),
+        )
+        condensation = nx.condensation(graph, strongly_connected_components)
+        component_unit_ids = {
+            component_id: sorted(str(unit_id) for unit_id in data["members"])
+            for component_id, data in condensation.nodes(data=True)
+        }
+        topological_component_ids = list(
+            nx.lexicographical_topological_sort(
+                condensation,
+                key=lambda component_id: component_unit_ids[component_id],
+            )
+        )
+        public_component_ids = {
+            component_id: f"component-{index:03d}"
+            for index, component_id in enumerate(topological_component_ids, start=1)
+        }
+
+        components = []
+        for component_id in topological_component_ids:
+            unit_ids = component_unit_ids[component_id]
+            units = [units_by_id[unit_id] for unit_id in unit_ids]
+            is_cyclic = len(unit_ids) > 1 or any(
+                graph.has_edge(unit_id, unit_id) for unit_id in unit_ids
+            )
+            components.append(
+                {
+                    "component_id": public_component_ids[component_id],
+                    "size": len(unit_ids),
+                    "unit_ids": unit_ids,
+                    "representative_titles": [unit.title for unit in units[:3]],
+                    "incoming_component_count": condensation.in_degree(component_id),
+                    "outgoing_component_count": condensation.out_degree(component_id),
+                    "cyclic": is_cyclic,
+                }
+            )
+
+        return {
+            "component_count": len(components),
+            "cyclic_component_count": sum(
+                1 for component in components if component["cyclic"]
+            ),
+            "source_component_count": sum(
+                1
+                for component_id in topological_component_ids
+                if condensation.in_degree(component_id) == 0
+            ),
+            "sink_component_count": sum(
+                1
+                for component_id in topological_component_ids
+                if condensation.out_degree(component_id) == 0
+            ),
+            "topological_order": [
+                public_component_ids[component_id]
+                for component_id in topological_component_ids
+            ],
+            "components": components[:limit],
+        }
+
     def get_central_nodes(self, limit: int = 10) -> list[tuple[str, float]]:
         """Top nodes by PageRank."""
         if not self.G.nodes:
@@ -1682,7 +1769,7 @@ class GraphService:
         return sorted_pr[:limit]
 
     def get_pagerank(self, limit: int = 10, weight: str = "weight") -> list[dict]:
-        """Return ranked unit summaries using NetworkX weighted PageRank."""
+        """Return ranked unit summaries using weighted PageRank."""
         capped_limit = max(0, int(limit))
         if capped_limit == 0:
             return []
@@ -1692,7 +1779,41 @@ class GraphService:
         if not self.G.nodes:
             return []
 
-        scores = nx.pagerank(self.G, weight=weight)
+        nodes = list(self.G.nodes)
+        node_count = len(nodes)
+        if node_count == 1:
+            scores = {nodes[0]: 1.0}
+        else:
+            damping = 0.85
+            scores = {node: 1.0 / node_count for node in nodes}
+
+            for _ in range(100):
+                sink_rank = sum(
+                    scores[node] for node in nodes if self.G.out_degree(node) == 0
+                )
+                base_rank = (1.0 - damping) / node_count
+                sink_share = damping * sink_rank / node_count
+                next_scores = {node: base_rank + sink_share for node in nodes}
+
+                for node in nodes:
+                    out_edges = list(self.G.out_edges(node, data=True))
+                    if not out_edges:
+                        continue
+                    total_weight = sum(
+                        float(data.get(weight, 1.0)) for _, _, data in out_edges
+                    )
+                    if total_weight <= 0:
+                        continue
+                    share = damping * scores[node]
+                    for _, target, data in out_edges:
+                        edge_weight = float(data.get(weight, 1.0))
+                        next_scores[target] += share * (edge_weight / total_weight)
+
+                delta = sum(abs(next_scores[node] - scores[node]) for node in nodes)
+                scores = next_scores
+                if delta < 1e-12:
+                    break
+
         ranked = sorted(
             scores.items(),
             key=lambda item: (
