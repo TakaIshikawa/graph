@@ -5341,6 +5341,82 @@ class GraphService:
             },
         }
 
+    def tag_influence(self, top_n: int = 10) -> dict:
+        """Rank tags by the graph degree of the units carrying each tag."""
+        if not isinstance(top_n, int) or isinstance(top_n, bool) or top_n < 0:
+            raise ValueError("top_n must be a non-negative integer.")
+
+        units = sorted(
+            self.store.get_all_units(limit=1000000000),
+            key=lambda unit: unit.id,
+        )
+        units_by_id = {unit.id: unit for unit in units}
+        valid_edges = [
+            edge
+            for edge in self.store.get_all_edges()
+            if edge.from_unit_id in units_by_id and edge.to_unit_id in units_by_id
+        ]
+
+        degree_by_unit_id: Counter[str] = Counter()
+        for edge in valid_edges:
+            degree_by_unit_id[edge.from_unit_id] += 1
+            degree_by_unit_id[edge.to_unit_id] += 1
+
+        unit_ids_by_tag: dict[str, set[str]] = {}
+        tagged_unit_ids: set[str] = set()
+        for unit in units:
+            unit_tags = sorted(
+                {str(unit_tag).strip() for unit_tag in unit.tags if str(unit_tag).strip()}
+            )
+            if not unit_tags:
+                continue
+            tagged_unit_ids.add(unit.id)
+            for tag in unit_tags:
+                unit_ids_by_tag.setdefault(tag, set()).add(unit.id)
+
+        tag_records = []
+        for tag, unit_ids in unit_ids_by_tag.items():
+            ordered_unit_ids = sorted(
+                unit_ids,
+                key=lambda unit_id: (-degree_by_unit_id[unit_id], unit_id),
+            )
+            edge_touch_count = sum(degree_by_unit_id[unit_id] for unit_id in unit_ids)
+            unit_count = len(unit_ids)
+            average_degree = edge_touch_count / unit_count if unit_count else 0.0
+            tag_records.append(
+                {
+                    "tag": tag,
+                    "unit_count": unit_count,
+                    "edge_touch_count": edge_touch_count,
+                    "average_degree": average_degree,
+                    "representative_unit_ids": ordered_unit_ids[:3],
+                }
+            )
+
+        tag_records.sort(
+            key=lambda record: (
+                -record["edge_touch_count"],
+                -record["average_degree"],
+                -record["unit_count"],
+                record["tag"],
+            )
+        )
+        tags = tag_records[:top_n]
+
+        return {
+            "top_n": top_n,
+            "tag_count": len(tags),
+            "tags": tags,
+            "stats": {
+                "unit_count": len(units),
+                "edge_count": len(valid_edges),
+                "tagged_unit_count": len(tagged_unit_ids),
+                "untagged_unit_count": len(units) - len(tagged_unit_ids),
+                "unique_tags": len(tag_records),
+                "returned_tags": len(tags),
+            },
+        }
+
     def analyze_timeline(
         self,
         *,
