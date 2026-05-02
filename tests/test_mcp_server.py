@@ -3291,9 +3291,12 @@ def test_export_context_pack_tool_is_advertised_with_unit_id_schema():
     tools = asyncio.run(mcp_server.list_tools())
     export_tool = next(tool for tool in tools if tool.name == "export_context_pack")
 
-    assert export_tool.inputSchema["required"] == ["unit_ids"]
+    assert "required" not in export_tool.inputSchema
     assert export_tool.inputSchema["properties"]["unit_ids"]["type"] == "array"
     assert export_tool.inputSchema["properties"]["unit_ids"]["items"] == {"type": "string"}
+    assert export_tool.inputSchema["properties"]["query"]["type"] == "string"
+    assert export_tool.inputSchema["properties"]["tag"]["type"] == "string"
+    assert export_tool.inputSchema["properties"]["limit"]["minimum"] == 1
     assert export_tool.inputSchema["properties"]["max_chars"]["minimum"] == 1
     assert export_tool.inputSchema["properties"]["options"]["type"] == "object"
 

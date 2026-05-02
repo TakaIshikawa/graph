@@ -72,12 +72,14 @@ from graph.cli.main import (
     _list_edges_payload,
     _knowledge_edge_to_json,
     _search_filters_dict,
+    _unit_matches_search_filters,
     _unit_to_json,
     _validate_search_filters,
     DEFAULT_SEARCH_SNIPPET_LENGTH,
     SEARCH_SORTS,
 )
 from graph.graph.service import GraphService
+from graph.rag.search import sort_search_results
 from graph.store.db import Store
 from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
 from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
@@ -537,17 +539,19 @@ def _do_export_context_pack(
     store: Store,
     unit_ids: object,
     *,
+    query: str | None = None,
+    limit: int = 10,
+    mode: str = "fulltext",
+    filters: dict | None = None,
+    sort: str = "relevance",
     title: str | None = None,
     max_chars: int | None = None,
 ) -> dict:
-    if (
-        not isinstance(unit_ids, list)
-        or not unit_ids
-        or any(not isinstance(unit_id, str) or not unit_id for unit_id in unit_ids)
-    ):
+    filters = filters or {}
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
         return {
-            "error": "invalid_unit_ids",
-            "message": "unit_ids must be a non-empty list of strings",
+            "error": "invalid_limit",
+            "message": "limit must be a positive integer",
             "metadata": {"requested_count": 0, "exported_count": 0},
         }
 
@@ -557,28 +561,111 @@ def _do_export_context_pack(
         return {
             "error": "invalid_options",
             "message": "max_chars must be a positive integer",
-            "metadata": {"requested_count": len(unit_ids), "exported_count": 0},
+            "metadata": {
+                "requested_count": len(unit_ids) if isinstance(unit_ids, list) else 0,
+                "exported_count": 0,
+            },
         }
 
     units: list[KnowledgeUnit] = []
-    missing_ids: list[str] = []
-    for unit_id in unit_ids:
-        unit = store.get_unit(unit_id)
-        if unit is None:
-            missing_ids.append(unit_id)
-        else:
-            units.append(unit)
+    requested_unit_ids: list[str] = []
+    selector = "unit_ids"
+    if unit_ids is not None:
+        if (
+            not isinstance(unit_ids, list)
+            or not unit_ids
+            or any(not isinstance(unit_id, str) or not unit_id for unit_id in unit_ids)
+        ):
+            return {
+                "error": "invalid_unit_ids",
+                "message": "unit_ids must be a non-empty list of strings",
+                "metadata": {"requested_count": 0, "exported_count": 0},
+            }
 
-    if missing_ids:
+        missing_ids: list[str] = []
+        for unit_id in unit_ids:
+            unit = store.get_unit(unit_id)
+            if unit is None:
+                missing_ids.append(unit_id)
+            else:
+                units.append(unit)
+
+        if missing_ids:
+            return {
+                "error": "unknown_unit_ids",
+                "message": "One or more requested unit ids were not found",
+                "missing_unit_ids": missing_ids,
+                "metadata": {
+                    "requested_count": len(unit_ids),
+                    "exported_count": 0,
+                    "found_count": len(units),
+                },
+            }
+        requested_unit_ids = list(unit_ids)
+    elif query is not None:
+        selector = "query"
+        if not isinstance(query, str) or not query.strip():
+            return {
+                "error": "invalid_query",
+                "message": "query must be a non-empty string",
+                "metadata": {"requested_count": 0, "exported_count": 0},
+            }
+        try:
+            search_payload = _do_search(
+                store,
+                query,
+                limit=limit,
+                mode=mode,
+                filters=filters,
+                sort=sort,
+            )
+        except ValueError as exc:
+            return {
+                "error": "invalid_search",
+                "message": str(exc),
+                "metadata": {"requested_count": 0, "exported_count": 0},
+            }
+        requested_unit_ids = [result["id"] for result in search_payload["results"]]
+        units = [unit for unit_id in requested_unit_ids if (unit := store.get_unit(unit_id))]
+    elif filters:
+        selector = "filters"
+        try:
+            filtered_units = [
+                unit
+                for unit in store.get_all_units(limit=1000000000)
+                if _unit_matches_search_filters(
+                    unit,
+                    source_project=filters.get("source_project"),
+                    content_type=filters.get("content_type"),
+                    tag=filters.get("tag"),
+                    exclude_tag=filters.get("exclude_tag"),
+                    review_state=filters.get("review_state"),
+                    created_after=filters.get("created_after"),
+                    created_before=filters.get("created_before"),
+                    updated_after=filters.get("updated_after"),
+                    updated_before=filters.get("updated_before"),
+                    min_utility=filters.get("min_utility"),
+                    max_utility=filters.get("max_utility"),
+                    min_confidence=filters.get("min_confidence"),
+                    max_confidence=filters.get("max_confidence"),
+                    metadata_key=filters.get("metadata_key"),
+                    metadata_value=filters.get("metadata_value"),
+                )
+            ]
+            sorted_pairs = sort_search_results([(unit, "") for unit in filtered_units], sort)
+            units = [unit for unit, _ in sorted_pairs[:limit]]
+        except ValueError as exc:
+            return {
+                "error": "invalid_search",
+                "message": str(exc),
+                "metadata": {"requested_count": 0, "exported_count": 0},
+            }
+        requested_unit_ids = [unit.id for unit in units]
+    else:
         return {
-            "error": "unknown_unit_ids",
-            "message": "One or more requested unit ids were not found",
-            "missing_unit_ids": missing_ids,
-            "metadata": {
-                "requested_count": len(unit_ids),
-                "exported_count": 0,
-                "found_count": len(units),
-            },
+            "error": "missing_selector",
+            "message": "Provide unit_ids, query, or at least one search filter",
+            "metadata": {"requested_count": 0, "exported_count": 0},
         }
 
     with TemporaryDirectory(prefix="graph-context-pack-") as tmp_dir:
@@ -595,12 +682,20 @@ def _do_export_context_pack(
     metadata = {key: value for key, value in stats.items() if key != "path"}
     metadata.update(
         {
-            "requested_count": len(unit_ids),
+            "requested_count": len(requested_unit_ids),
             "exported_count": stats["units_included"],
-            "requested_unit_ids": unit_ids,
+            "selector": selector,
+            "requested_unit_ids": requested_unit_ids,
             "exported_unit_ids": [unit.id for unit in units[: stats["units_included"]]],
         }
     )
+    if unit_ids is None:
+        metadata["requested_count"] = len(requested_unit_ids)
+        metadata["query"] = query
+        metadata["limit"] = limit
+        metadata["mode"] = mode
+        metadata["sort"] = sort
+        metadata["filters"] = filters
     return {"markdown": markdown, "metadata": metadata}
 
 
@@ -2228,6 +2323,29 @@ async def list_tools() -> list[Tool]:
                         "minItems": 1,
                         "description": "Knowledge unit IDs to include, in requested order",
                     },
+                    "query": {
+                        "type": "string",
+                        "description": "Search text used to select units when unit_ids is omitted",
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["fulltext", "semantic", "hybrid"],
+                        "default": "fulltext",
+                        "description": "Search mode used with query selectors",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 10,
+                        "description": "Maximum units selected by query or filters",
+                    },
+                    "sort": {
+                        "type": "string",
+                        "enum": SEARCH_SORTS,
+                        "default": "relevance",
+                        "description": "Result ordering for query or filter selectors",
+                    },
+                    **SEARCH_FILTER_SCHEMA,
                     "title": {
                         "type": "string",
                         "description": "Optional title for the Markdown context pack",
@@ -2246,7 +2364,6 @@ async def list_tools() -> list[Tool]:
                         "description": "Optional export settings; top-level title/max_chars take precedence",
                     },
                 },
-                "required": ["unit_ids"],
             },
         ),
         Tool(
@@ -3626,9 +3743,39 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     },
                 }
                 return [TextContent(type="text", text=json.dumps(payload))]
+            try:
+                filters = _search_filters_dict(
+                    source_project=arguments.get("source_project"),
+                    content_type=arguments.get("content_type"),
+                    review_state=arguments.get("review_state"),
+                    tag=arguments.get("tag"),
+                    exclude_tag=arguments.get("exclude_tag"),
+                    metadata_key=arguments.get("metadata_key"),
+                    metadata_value=arguments.get("metadata_value"),
+                    created_after=arguments.get("created_after"),
+                    created_before=arguments.get("created_before"),
+                    updated_after=arguments.get("updated_after"),
+                    updated_before=arguments.get("updated_before"),
+                    min_utility=arguments.get("min_utility"),
+                    max_utility=arguments.get("max_utility"),
+                    min_confidence=arguments.get("min_confidence"),
+                    max_confidence=arguments.get("max_confidence"),
+                )
+            except ValueError as exc:
+                payload = {
+                    "error": "invalid_filters",
+                    "message": str(exc),
+                    "metadata": {"requested_count": 0, "exported_count": 0},
+                }
+                return [TextContent(type="text", text=json.dumps(payload))]
             payload = _do_export_context_pack(
                 store,
                 arguments.get("unit_ids"),
+                query=arguments.get("query"),
+                limit=arguments.get("limit", 10),
+                mode=arguments.get("mode", "fulltext"),
+                filters=filters,
+                sort=arguments.get("sort", "relevance"),
                 title=arguments.get("title", options.get("title")),
                 max_chars=arguments.get("max_chars", options.get("max_chars")),
             )
