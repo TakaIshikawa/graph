@@ -2,6 +2,7 @@
 
 from graph.rag.cooccurrence import build_keyphrase_cooccurrence
 from graph.rag.contradictions import detect_contradiction_cues
+from graph.rag.context_gaps import detect_context_gaps
 from graph.rag.diversity import rerank_for_source_diversity
 from graph.rag.keywords import extract_keywords
 from graph.rag.query_intent import classify_query_intent
@@ -28,6 +29,7 @@ __all__ = [
     "build_source_timeline",
     "classify_query_intent",
     "detect_contradiction_cues",
+    "detect_context_gaps",
     "extract_keywords",
     "estimate_reading_time",
     "cluster_results_by_overlap",
