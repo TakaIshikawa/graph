@@ -17,6 +17,7 @@ import yaml
 from graph.adapters.bibtex import BibtexAdapter
 from graph.adapters.bookmarks import BookmarksAdapter
 from graph.adapters.csv_adapter import CsvAdapter
+from graph.adapters.crossref import CrossrefAdapter
 from graph.adapters.csl_json import CslJsonAdapter
 from graph.adapters.email import EmailAdapter
 from graph.adapters.enex import EnexAdapter
@@ -2637,6 +2638,7 @@ class TestRegistry:
             "ipynb",
             "bibtex",
             "csl_json",
+            "crossref",
             "ris",
             "jats",
             "git",
@@ -2694,6 +2696,10 @@ class TestRegistry:
 
         csl_json_adapter = get_adapter("csl_json", path="/tmp/refs.json")
         assert csl_json_adapter.name == "csl_json"
+
+        crossref_adapter = get_adapter("crossref", path="/tmp/crossref")
+        assert isinstance(crossref_adapter, CrossrefAdapter)
+        assert crossref_adapter.name == "crossref"
 
         ris_adapter = get_adapter("ris", path="/tmp/refs.ris")
         assert ris_adapter.name == "ris"
