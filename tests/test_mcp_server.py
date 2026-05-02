@@ -387,6 +387,7 @@ def test_mcp_collection_tools_manage_members_with_unit_summaries(tmp_path, monke
     tool_names = {tool.name for tool in tools}
     assert "collection_create" in tool_names
     assert "collection_members" in tool_names
+    assert "graph_collection_members" in tool_names
 
     created = asyncio.run(
         mcp_server.call_tool(
