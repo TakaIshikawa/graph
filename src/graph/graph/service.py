@@ -29,6 +29,24 @@ _EXTERNAL_URL_RE = re.compile(r"https?://[^\s<>\"]+", re.IGNORECASE)
 _TRAILING_URL_PUNCTUATION = ".,;:!?)]}'\""
 _TIMELINE_BUCKETS = {"day", "week", "month", "year"}
 _TIMELINE_FIELDS = {"created_at", "ingested_at", "updated_at"}
+_TRIAD_CENSUS_TYPES = (
+    "003",
+    "012",
+    "102",
+    "021D",
+    "021U",
+    "021C",
+    "111D",
+    "111U",
+    "030T",
+    "030C",
+    "201",
+    "120D",
+    "120U",
+    "120C",
+    "210",
+    "300",
+)
 _MERMAID_WHITESPACE_RE = re.compile(r"\s+")
 _MARKDOWN_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
 _EDGE_SUGGESTION_STOPWORDS = {
@@ -1666,6 +1684,49 @@ class GraphService:
 
         stats["returned_count"] = len(cycles)
         return {"stats": stats, "cycles": cycles}
+
+    def analyze_triad_census(self) -> dict:
+        """Return directed three-node motif counts for the current graph."""
+        if not self.G:
+            self.rebuild()
+
+        node_count = self.G.number_of_nodes()
+        if node_count < 3:
+            census = dict.fromkeys(_TRIAD_CENSUS_TYPES, 0)
+        else:
+            graph = nx.DiGraph()
+            graph.add_nodes_from(sorted(str(node_id) for node_id in self.G.nodes))
+            graph.add_edges_from(
+                sorted(
+                    (str(from_id), str(to_id))
+                    for from_id, to_id in self.G.edges
+                    if from_id != to_id
+                )
+            )
+            raw_census = nx.triadic_census(graph)
+            census = {
+                triad_type: int(raw_census.get(triad_type, 0))
+                for triad_type in _TRIAD_CENSUS_TYPES
+            }
+
+        top_types = [
+            {"type": triad_type, "count": count}
+            for triad_type, count in sorted(
+                census.items(),
+                key=lambda item: (-item[1], item[0]),
+            )
+            if count > 0
+        ]
+
+        return {
+            "total_triads": sum(census.values()),
+            "census": census,
+            "non_empty_triads": sum(
+                count for triad_type, count in census.items() if triad_type != "003"
+            ),
+            "top_types": top_types,
+            "node_count": node_count,
+        }
 
     def get_clusters(self, min_size: int = 3) -> list[list[str]]:
         """Find connected components / clusters."""
