@@ -52,6 +52,7 @@ from graph.adapters.readwise import ReadwiseAdapter
 from graph.adapters.registry import get_adapter, list_adapters
 from graph.adapters.ris import RisAdapter
 from graph.adapters.roam import RoamAdapter
+from graph.adapters.sqlite_query_log import SqliteQueryLogAdapter
 from graph.adapters.text import TextAdapter
 from graph.adapters.text_outline import TextOutlineAdapter
 from graph.adapters.tana_paste import TanaPasteAdapter
@@ -2675,6 +2676,7 @@ class TestRegistry:
             "readwise",
             "roam",
             "logseq",
+            "sqlite_query_log",
         }
 
     def test_get_adapter(self):
@@ -2800,6 +2802,12 @@ class TestRegistry:
         logseq_adapter = get_adapter("logseq", file_path="/tmp/logseq.edn")
         assert isinstance(logseq_adapter, LogseqAdapter)
         assert logseq_adapter.name == "logseq"
+
+        sqlite_query_log_adapter = get_adapter(
+            "sqlite_query_log", db_path="/tmp/queries.db"
+        )
+        assert isinstance(sqlite_query_log_adapter, SqliteQueryLogAdapter)
+        assert sqlite_query_log_adapter.name == "sqlite_query_log"
 
         mediawiki_adapter = get_adapter("mediawiki", path="/tmp/wiki.xml")
         assert isinstance(mediawiki_adapter, MediaWikiAdapter)
