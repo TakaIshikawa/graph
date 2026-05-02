@@ -5,6 +5,7 @@ from graph.export.concept_map import export_concept_map_markdown
 from graph.export.context_pack import export_context_pack
 from graph.export.dot import export_graph_dot
 from graph.export.edge_csv import export_edges_to_csv
+from graph.export.flashcards_markdown import export_units_to_flashcards_markdown
 from graph.export.graphson import export_graphson
 from graph.export.graph_overview_html import render_graph_overview_html
 from graph.export.ical import DATE_METADATA_KEYS, export_units_to_ics, unit_event_datetime
@@ -24,6 +25,7 @@ __all__ = [
     "export_concept_map_markdown",
     "export_context_pack",
     "export_edges_to_csv",
+    "export_units_to_flashcards_markdown",
     "export_graph_dot",
     "export_graphson",
     "export_graph_sqlite",
