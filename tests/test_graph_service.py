@@ -1741,6 +1741,12 @@ class TestGraphService:
         assert gs.get_clusters() == []
         assert gs.get_central_nodes() == []
         assert gs.get_bridges() == []
+        assert gs.analyze_tag_bridges() == {
+            "min_tags": 2,
+            "limit": None,
+            "bridge_count": 0,
+            "bridges": [],
+        }
         assert gs.analyze_articulation_points() == []
         assert gs.analyze_strongly_connected_components() == []
         assert gs.find_gaps() == []

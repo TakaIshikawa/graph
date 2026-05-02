@@ -2131,6 +2131,91 @@ class GraphService:
             "transitions": transitions,
         }
 
+    def analyze_tag_bridges(
+        self,
+        *,
+        min_tags: int = 2,
+        limit: int | None = None,
+    ) -> dict:
+        """Identify units whose incident neighbors span multiple tag groups."""
+        if not isinstance(min_tags, int) or isinstance(min_tags, bool) or min_tags < 2:
+            raise ValueError("min_tags must be an integer greater than or equal to 2.")
+        if limit is not None and (
+            not isinstance(limit, int) or isinstance(limit, bool) or limit < 0
+        ):
+            raise ValueError("limit must be a non-negative integer or None.")
+
+        units_by_id = {
+            unit.id: unit for unit in self.store.get_all_units(limit=1000000000)
+        }
+        neighbor_ids_by_unit_id: dict[str, set[str]] = {
+            unit_id: set() for unit_id in units_by_id
+        }
+        for edge in self.store.get_all_edges():
+            if edge.from_unit_id not in units_by_id or edge.to_unit_id not in units_by_id:
+                continue
+            neighbor_ids_by_unit_id[edge.from_unit_id].add(edge.to_unit_id)
+            neighbor_ids_by_unit_id[edge.to_unit_id].add(edge.from_unit_id)
+
+        bridges = []
+        for unit_id in sorted(units_by_id):
+            tag_to_neighbor_ids: dict[str, set[str]] = {}
+            for neighbor_id in sorted(neighbor_ids_by_unit_id[unit_id]):
+                neighbor = units_by_id[neighbor_id]
+                neighbor_tags = sorted(
+                    {str(tag).strip() for tag in neighbor.tags if str(tag).strip()}
+                )
+                for tag in neighbor_tags:
+                    tag_to_neighbor_ids.setdefault(tag, set()).add(neighbor_id)
+
+            tag_count = len(tag_to_neighbor_ids)
+            if tag_count < min_tags:
+                continue
+
+            tagged_neighbor_ids = sorted(
+                {neighbor_id for ids in tag_to_neighbor_ids.values() for neighbor_id in ids}
+            )
+            bridge_score = sum(
+                len(left_ids | right_ids)
+                for left_tag, left_ids in tag_to_neighbor_ids.items()
+                for right_tag, right_ids in tag_to_neighbor_ids.items()
+                if left_tag < right_tag
+            )
+            bridging_tags = [
+                tag
+                for tag, _ in sorted(
+                    tag_to_neighbor_ids.items(), key=lambda item: (-len(item[1]), item[0])
+                )
+            ]
+
+            bridges.append(
+                {
+                    "unit_id": unit_id,
+                    "title": units_by_id[unit_id].title,
+                    "bridge_score": bridge_score,
+                    "tag_count": tag_count,
+                    "neighbor_count": len(tagged_neighbor_ids),
+                    "bridging_tags": bridging_tags,
+                    "evidence_neighbor_ids": tagged_neighbor_ids,
+                }
+            )
+
+        bridges.sort(
+            key=lambda item: (
+                -item["bridge_score"],
+                -item["tag_count"],
+                -item["neighbor_count"],
+                item["title"],
+                item["unit_id"],
+            )
+        )
+        return {
+            "min_tags": min_tags,
+            "limit": limit,
+            "bridge_count": len(bridges),
+            "bridges": bridges if limit is None else bridges[:limit],
+        }
+
     def analyze_strongly_connected_components(
         self,
         min_size: int = 2,
