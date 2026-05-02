@@ -44,6 +44,7 @@ from graph.adapters.presence import PresenceAdapter
 from graph.adapters.raindrop import RaindropAdapter
 from graph.adapters.readwise import ReadwiseAdapter
 from graph.adapters.roam import RoamAdapter
+from graph.adapters.slack_json import SlackJsonAdapter
 from graph.adapters.sota import SOTAAdapter
 from graph.adapters.sqlite_query_log import SqliteQueryLogAdapter
 from graph.adapters.ris import RisAdapter
@@ -105,6 +106,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "roam": RoamAdapter,
     "logseq": LogseqAdapter,
     "sqlite_query_log": SqliteQueryLogAdapter,
+    "slack_json": SlackJsonAdapter,
 }
 
 

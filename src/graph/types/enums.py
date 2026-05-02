@@ -45,6 +45,7 @@ class SourceProject(StrEnum):
     ROAM = "roam"
     LOGSEQ = "logseq"
     SQLITE_QUERY_LOG = "sqlite_query_log"
+    SLACK_JSON = "slack_json"
 
 
 class ContentType(StrEnum):
