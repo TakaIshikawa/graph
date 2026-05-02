@@ -4,6 +4,7 @@ from graph.rag.cooccurrence import build_keyphrase_cooccurrence
 from graph.rag.contradictions import detect_contradiction_cues
 from graph.rag.diversity import rerank_for_source_diversity
 from graph.rag.keywords import extract_keywords
+from graph.rag.query_intent import classify_query_intent
 from graph.rag.dedupe import rank_duplicate_candidates
 from graph.rag.facets import build_result_facets
 from graph.rag.reading_order import plan_reading_order
@@ -21,6 +22,7 @@ __all__ = [
     "build_keyphrase_cooccurrence",
     "build_reading_queue",
     "build_result_facets",
+    "classify_query_intent",
     "detect_contradiction_cues",
     "extract_keywords",
     "estimate_reading_time",
