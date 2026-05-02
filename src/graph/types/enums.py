@@ -35,6 +35,7 @@ class SourceProject(StrEnum):
     OBSIDIAN_CANVAS = "obsidian_canvas"
     NOTION_MARKDOWN = "notion_markdown"
     TRANSCRIPT = "transcript"
+    WEBVTT = "webvtt"
     POCKET = "pocket"
     POCKET_CSV = "pocket_csv"
     PINBOARD = "pinboard"

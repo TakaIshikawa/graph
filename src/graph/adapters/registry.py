@@ -52,6 +52,7 @@ from graph.adapters.text import TextAdapter
 from graph.adapters.text_outline import TextOutlineAdapter
 from graph.adapters.tana_paste import TanaPasteAdapter
 from graph.adapters.transcript import TranscriptAdapter
+from graph.adapters.webvtt import WebVttAdapter
 from graph.adapters.yaml_adapter import YamlAdapter
 from graph.adapters.zotero_rdf import ZoteroRdfAdapter
 
@@ -96,6 +97,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "git": GitAdapter,
     "google_keep": GoogleKeepAdapter,
     "transcript": TranscriptAdapter,
+    "webvtt": WebVttAdapter,
     "pocket": PocketAdapter,
     "pocket_csv": PocketCsvAdapter,
     "pinboard": PinboardAdapter,
