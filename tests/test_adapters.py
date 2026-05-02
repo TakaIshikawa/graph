@@ -49,6 +49,7 @@ from graph.adapters.ris import RisAdapter
 from graph.adapters.roam import RoamAdapter
 from graph.adapters.text import TextAdapter
 from graph.adapters.text_outline import TextOutlineAdapter
+from graph.adapters.tana_paste import TanaPasteAdapter
 from graph.adapters.transcript import TranscriptAdapter
 from graph.adapters.yaml_adapter import YamlAdapter
 from graph.store.db import Store
@@ -2644,6 +2645,7 @@ class TestRegistry:
             "enex",
             "text",
             "text_outline",
+            "tana_paste",
             "html",
             "ical",
             "ipynb",
@@ -2696,6 +2698,10 @@ class TestRegistry:
         text_outline_adapter = get_adapter("text_outline", path="/tmp/outline.txt")
         assert isinstance(text_outline_adapter, TextOutlineAdapter)
         assert text_outline_adapter.name == "text_outline"
+
+        tana_paste_adapter = get_adapter("tana_paste", path="/tmp/tana.txt")
+        assert isinstance(tana_paste_adapter, TanaPasteAdapter)
+        assert tana_paste_adapter.name == "tana_paste"
 
         html_adapter = get_adapter("html", root_path="/tmp/html")
         assert html_adapter.name == "html"
