@@ -7,6 +7,7 @@ from graph.export.graphson import export_graphson
 from graph.export.ical import DATE_METADATA_KEYS, export_units_to_ics, unit_event_datetime
 from graph.export.llms_txt import export_units_to_llms_txt
 from graph.export.org import export_units_to_org
+from graph.export.schema_inventory import export_unit_schema_inventory
 from graph.export.sqlite_snapshot import export_graph_sqlite
 from graph.export.unit_csv import export_units_to_csv
 from graph.export.unit_yaml import export_units_to_yaml
@@ -18,6 +19,7 @@ __all__ = [
     "export_edges_to_csv",
     "export_graphson",
     "export_graph_sqlite",
+    "export_unit_schema_inventory",
     "export_units_to_anki_tsv",
     "export_units_to_csv",
     "export_units_to_jsonl",
