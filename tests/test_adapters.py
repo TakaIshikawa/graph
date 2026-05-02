@@ -38,6 +38,7 @@ from graph.adapters.org import OrgAdapter
 from graph.adapters.pdf import PdfAdapter
 from graph.adapters.pinboard import PinboardAdapter
 from graph.adapters.presence import PresenceAdapter
+from graph.adapters.raindrop import RaindropAdapter
 from graph.adapters.readwise import ReadwiseAdapter
 from graph.adapters.registry import get_adapter, list_adapters
 from graph.adapters.ris import RisAdapter
@@ -2647,6 +2648,7 @@ class TestRegistry:
             "transcript",
             "pocket",
             "pinboard",
+            "raindrop",
             "zotero_rdf",
             "hypothesis",
             "readwise",
@@ -2725,6 +2727,10 @@ class TestRegistry:
         pinboard_adapter = get_adapter("pinboard", path="/tmp/pinboard.json")
         assert isinstance(pinboard_adapter, PinboardAdapter)
         assert pinboard_adapter.name == "pinboard"
+
+        raindrop_adapter = get_adapter("raindrop", path="/tmp/raindrop.json")
+        assert isinstance(raindrop_adapter, RaindropAdapter)
+        assert raindrop_adapter.name == "raindrop"
 
         zotero_rdf_adapter = get_adapter("zotero_rdf", path="/tmp/library.rdf")
         assert zotero_rdf_adapter.name == "zotero_rdf"

@@ -27,6 +27,7 @@ class SourceProject(StrEnum):
     TRANSCRIPT = "transcript"
     POCKET = "pocket"
     PINBOARD = "pinboard"
+    RAINDROP = "raindrop"
     ZOTERO_RDF = "zotero_rdf"
     HYPOTHESIS = "hypothesis"
     READWISE = "readwise"
