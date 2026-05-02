@@ -948,6 +948,19 @@ class GraphService:
             "content_type": str(unit.content_type),
         }
 
+    def _unit_path_summary_data(self, unit, *, snippet_length: int = 160) -> dict | None:
+        if unit is None:
+            return None
+
+        content = " ".join((unit.content or "").split())
+        if len(content) > snippet_length:
+            content = content[: max(0, snippet_length - 3)].rstrip() + "..."
+
+        return {
+            **self._unit_summary_data(unit),
+            "content_snippet": content,
+        }
+
     def _edge_with_endpoint_summaries(self, edge) -> dict:
         return {
             **self._edge_export_data(edge),
@@ -1340,6 +1353,75 @@ class GraphService:
             )
 
         return explanations
+
+    def build_shortest_path_explanation(
+        self,
+        from_unit_id: str,
+        to_unit_id: str,
+    ) -> dict:
+        """Build a hop-by-hop explanation for the deterministic shortest path."""
+        paths = self.shortest_path_between(from_unit_id, to_unit_id, max_paths=1)
+        if not paths:
+            return {
+                "from_unit_id": from_unit_id,
+                "to_unit_id": to_unit_id,
+                "path_found": False,
+                "unit_ids": [],
+                "units": [],
+                "hops": [],
+                "relations": [],
+                "relation_labels": [],
+                "hop_count": 0,
+                "total_weight": 0.0,
+                "message": "No path found between the selected units.",
+            }
+
+        path = paths[0]
+        units_by_id = {
+            unit.id: unit for unit in self.store.get_all_units(limit=1000000000)
+        }
+        unit_summaries = [
+            self._unit_path_summary_data(units_by_id.get(unit_id))
+            for unit_id in path["unit_ids"]
+        ]
+        unit_summaries = [unit for unit in unit_summaries if unit is not None]
+
+        hops = []
+        for edge in path["edges"]:
+            from_unit = units_by_id.get(edge["traversal_from_unit_id"])
+            to_unit = units_by_id.get(edge["traversal_to_unit_id"])
+            relation = edge["relation"]
+            hops.append(
+                {
+                    "edge_id": edge["id"],
+                    "from_unit_id": edge["from_unit_id"],
+                    "to_unit_id": edge["to_unit_id"],
+                    "relation": relation,
+                    "relation_label": relation.replace("_", " "),
+                    "weight": edge["weight"],
+                    "source": edge["source"],
+                    "traversal_from_unit_id": edge["traversal_from_unit_id"],
+                    "traversal_to_unit_id": edge["traversal_to_unit_id"],
+                    "traversal_direction": edge["traversal_direction"],
+                    "from_unit": self._unit_path_summary_data(from_unit),
+                    "to_unit": self._unit_path_summary_data(to_unit),
+                }
+            )
+
+        return {
+            "from_unit_id": from_unit_id,
+            "to_unit_id": to_unit_id,
+            "path_found": True,
+            "unit_ids": path["unit_ids"],
+            "units": unit_summaries,
+            "hops": hops,
+            "relations": path["relations"],
+            "relation_labels": [
+                relation.replace("_", " ") for relation in path["relations"]
+            ],
+            "hop_count": path["hop_count"],
+            "total_weight": path["total_weight"],
+        }
 
     def build_shortest_path_payload(self, from_unit_id: str, to_unit_id: str) -> dict:
         """Build a structured shortest-path payload for API/MCP callers."""
