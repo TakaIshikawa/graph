@@ -1635,6 +1635,66 @@ class Store:
             },
         }
 
+    def preview_tag_rename(
+        self,
+        old_tag: str,
+        new_tag: str,
+        *,
+        limit: int = 50,
+    ) -> dict:
+        """Return a deterministic dry-run report for an exact tag rename."""
+        old_tag = old_tag.strip()
+        new_tag = new_tag.strip()
+        if not old_tag:
+            raise ValueError("old_tag must not be empty.")
+        if not new_tag:
+            raise ValueError("new_tag must not be empty.")
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
+            raise ValueError("limit must be a non-negative integer.")
+
+        rows = self.conn.execute(
+            """SELECT *
+               FROM knowledge_units
+               WHERE EXISTS (
+                   SELECT 1
+                   FROM json_each(knowledge_units.tags)
+                   WHERE value = ?
+               )
+               ORDER BY title COLLATE NOCASE, title, source_project, source_id, id""",
+            (old_tag,),
+        ).fetchall()
+
+        affected_units = []
+        for unit in [_row_to_unit(row) for row in rows]:
+            after_tags: list[str] = []
+            for tag in unit.tags:
+                candidate = new_tag if tag == old_tag else tag
+                if candidate not in after_tags:
+                    after_tags.append(candidate)
+
+            if after_tags == unit.tags:
+                continue
+
+            affected_units.append(
+                {
+                    "id": unit.id,
+                    "title": unit.title,
+                    "source_project": str(unit.source_project),
+                    "source_id": unit.source_id,
+                    "source_entity_type": unit.source_entity_type,
+                    "content_type": str(unit.content_type),
+                    "before_tags": unit.tags,
+                    "after_tags": after_tags,
+                }
+            )
+
+        return {
+            "old_tag": old_tag,
+            "new_tag": new_tag,
+            "affected_count": len(affected_units),
+            "returned_units": affected_units[:limit],
+        }
+
     def remove_tag(
         self,
         tag: str,
