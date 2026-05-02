@@ -3254,6 +3254,22 @@ class Store:
             items_synced=row["items_synced"],
         )
 
+    def get_all_sync_state(self) -> list[SyncState]:
+        rows = self.conn.execute(
+            """SELECT * FROM sync_state
+               ORDER BY source_project ASC, source_entity_type ASC"""
+        ).fetchall()
+        return [
+            SyncState(
+                source_project=row["source_project"],
+                source_entity_type=row["source_entity_type"],
+                last_sync_at=row["last_sync_at"],
+                last_source_id=row["last_source_id"],
+                items_synced=row["items_synced"],
+            )
+            for row in rows
+        ]
+
     def upsert_sync_state(self, state: SyncState) -> None:
         self.conn.execute(
             """INSERT INTO sync_state
