@@ -12,6 +12,7 @@ class SourceProject(StrEnum):
     KINDLE = "kindle"
     SOTA = "sota"
     BOOKMARKS = "bookmarks"
+    BROWSER_HISTORY_CSV = "browser_history_csv"
     CSV = "csv"
     JSONL = "jsonl"
     YAML = "yaml"
