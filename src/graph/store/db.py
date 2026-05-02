@@ -466,6 +466,74 @@ class Store:
         ).fetchall()
         return [_row_to_unit(r) for r in rows]
 
+    def find_source_id_collisions(
+        self,
+        *,
+        source_project: str | None = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        """Find duplicate non-empty source ids grouped by source project."""
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
+            raise ValueError("limit must be a non-negative integer.")
+
+        where_parts = ["TRIM(source_id) != ''"]
+        params: list[object] = []
+        if source_project:
+            where_parts.append("source_project = ?")
+            params.append(source_project)
+        where = " AND ".join(where_parts)
+
+        rows = self.conn.execute(
+            f"""WITH duplicate_groups AS (
+                    SELECT source_project, source_id, COUNT(*) AS duplicate_count
+                    FROM knowledge_units
+                    WHERE {where}
+                    GROUP BY source_project, source_id
+                    HAVING COUNT(*) > 1
+                )
+                SELECT
+                    duplicate_groups.source_project,
+                    duplicate_groups.source_id,
+                    duplicate_groups.duplicate_count,
+                    (
+                        SELECT json_group_array(id)
+                        FROM (
+                            SELECT id
+                            FROM knowledge_units
+                            WHERE source_project = duplicate_groups.source_project
+                              AND source_id = duplicate_groups.source_id
+                            ORDER BY id
+                        )
+                    ) AS unit_ids,
+                    (
+                        SELECT json_group_array(title)
+                        FROM (
+                            SELECT title
+                            FROM knowledge_units
+                            WHERE source_project = duplicate_groups.source_project
+                              AND source_id = duplicate_groups.source_id
+                            ORDER BY id
+                        )
+                    ) AS titles
+                FROM duplicate_groups
+                ORDER BY
+                    duplicate_groups.duplicate_count DESC,
+                    duplicate_groups.source_project,
+                    duplicate_groups.source_id
+                LIMIT ?""",
+            [*params, limit],
+        ).fetchall()
+        return [
+            {
+                "source_project": row["source_project"],
+                "source_id": row["source_id"],
+                "count": row["duplicate_count"],
+                "unit_ids": json.loads(row["unit_ids"]),
+                "titles": json.loads(row["titles"]),
+            }
+            for row in rows
+        ]
+
     def tag_vocabulary(self, *, exclude_unit_id: str | None = None) -> dict[str, int]:
         """Return existing graph tags and counts, optionally excluding one unit."""
         query = """SELECT json_each.value AS tag, COUNT(*) AS count
