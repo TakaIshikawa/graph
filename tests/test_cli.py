@@ -907,6 +907,7 @@ def test_export_tag_glossary_command_is_listed_in_help():
 
     assert result.exit_code == 0
     assert "export-tag-glossary" in result.output
+    assert "export-unit-markdown-table" in result.output
 
 
 def test_export_graphml_command_writes_valid_graphml(tmp_path, monkeypatch):

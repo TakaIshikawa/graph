@@ -11,7 +11,7 @@ from pathlib import Path
 import typer
 
 from graph.config import settings
-from graph.export import export_tag_glossary_markdown
+from graph.export import export_tag_glossary_markdown, export_units_to_markdown_table
 from graph.export.html_report import render_search_html_report
 from graph.rag.search import (
     DEFAULT_MMR_LAMBDA,
@@ -414,6 +414,33 @@ def _do_export_ics(
         "content_type": content_type,
     }
     return stats
+
+
+def _do_export_unit_markdown_table(
+    store: Store,
+    path: str | Path,
+    *,
+    tag: str | None = None,
+    source_project: str | None = None,
+    content_type: str | None = None,
+) -> dict:
+    if content_type is not None:
+        content_type = ContentType(content_type).value
+
+    units = store.get_units(source_project=source_project, content_type=content_type, limit=None)
+    if tag is not None:
+        units = [unit for unit in units if tag in unit.tags]
+
+    export_units_to_markdown_table(units, path)
+    return {
+        "path": str(Path(path)),
+        "units_exported": len(units),
+        "filters": {
+            "tag": tag,
+            "source_project": source_project,
+            "content_type": content_type,
+        },
+    }
 
 
 def _validate_source_project_filter(source_project: str | None) -> str | None:
@@ -2769,6 +2796,36 @@ def export_ics(
         f"Exported {stats['events_exported']} calendar events "
         f"from {stats['units_scanned']} units to {stats['path']}"
     )
+
+
+@app.command(name="export-unit-markdown-table")
+def export_unit_markdown_table(
+    path: Path = typer.Argument(..., help="Destination Markdown table file path"),
+    tag: str | None = typer.Option(None, "--tag", help="Require an exact graph tag"),
+    source_project: str | None = typer.Option(
+        None,
+        "--source-project",
+        help="Filter by source project",
+    ),
+    content_type: str | None = typer.Option(None, "--content-type", help="Filter by content type"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Export matching units as a single Markdown table."""
+    store = _get_store()
+    stats = _do_export_unit_markdown_table(
+        store,
+        path,
+        tag=tag,
+        source_project=source_project,
+        content_type=content_type,
+    )
+    store.close()
+
+    if json_output:
+        _json_echo(stats)
+        return
+
+    typer.echo(f"Exported {stats['units_exported']} units to {stats['path']}")
 
 
 @app.command(name="export-tag-glossary")
