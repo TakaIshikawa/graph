@@ -32,6 +32,7 @@ from graph.adapters.ipynb import IpynbAdapter
 from graph.adapters.jsonl_adapter import JsonlAdapter
 from graph.adapters.logseq import LogseqAdapter
 from graph.adapters.markdown import MarkdownAdapter
+from graph.adapters.markdown_links import MarkdownLinksAdapter
 from graph.adapters.max_adapter import MaxAdapter
 from graph.adapters.me import MeAdapter
 from graph.adapters.mediawiki import MediaWikiAdapter
@@ -2625,6 +2626,7 @@ class TestRegistry:
             "me",
             "mediawiki",
             "markdown",
+            "markdown_links",
             "kindle",
             "sota",
             "feed",
@@ -2758,6 +2760,10 @@ class TestRegistry:
         mediawiki_adapter = get_adapter("mediawiki", path="/tmp/wiki.xml")
         assert isinstance(mediawiki_adapter, MediaWikiAdapter)
         assert mediawiki_adapter.name == "mediawiki"
+
+        markdown_links_adapter = get_adapter("markdown_links", path="/tmp/notes")
+        assert isinstance(markdown_links_adapter, MarkdownLinksAdapter)
+        assert markdown_links_adapter.name == "markdown_links"
 
     def test_unknown_adapter(self):
         with pytest.raises(KeyError):

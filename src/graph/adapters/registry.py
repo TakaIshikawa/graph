@@ -23,6 +23,7 @@ from graph.adapters.jsonl_adapter import JsonlAdapter
 from graph.adapters.kindle import KindleAdapter
 from graph.adapters.logseq import LogseqAdapter
 from graph.adapters.markdown import MarkdownAdapter
+from graph.adapters.markdown_links import MarkdownLinksAdapter
 from graph.adapters.max_adapter import MaxAdapter
 from graph.adapters.me import MeAdapter
 from graph.adapters.mediawiki import MediaWikiAdapter
@@ -49,6 +50,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "me": MeAdapter,
     "mediawiki": MediaWikiAdapter,
     "markdown": MarkdownAdapter,
+    "markdown_links": MarkdownLinksAdapter,
     "kindle": KindleAdapter,
     "sota": SOTAAdapter,
     "feed": FeedAdapter,
