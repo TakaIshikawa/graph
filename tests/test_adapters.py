@@ -60,6 +60,7 @@ from graph.adapters.text import TextAdapter
 from graph.adapters.text_outline import TextOutlineAdapter
 from graph.adapters.tana_paste import TanaPasteAdapter
 from graph.adapters.transcript import TranscriptAdapter
+from graph.adapters.webvtt import WebVttAdapter
 from graph.adapters.yaml_adapter import YamlAdapter
 from graph.store.db import Store
 from graph.types.models import SyncState
@@ -2672,6 +2673,7 @@ class TestRegistry:
             "git",
             "google_keep",
             "transcript",
+            "webvtt",
             "pocket",
             "pocket_csv",
             "pinboard",
@@ -2774,6 +2776,10 @@ class TestRegistry:
 
         transcript_adapter = get_adapter("transcript", root_path="/tmp/transcripts")
         assert transcript_adapter.name == "transcript"
+
+        webvtt_adapter = get_adapter("webvtt", path="/tmp/transcript.vtt")
+        assert isinstance(webvtt_adapter, WebVttAdapter)
+        assert webvtt_adapter.name == "webvtt"
 
         pocket_adapter = get_adapter("pocket", path="/tmp/pocket.csv")
         assert pocket_adapter.name == "pocket"
