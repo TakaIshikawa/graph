@@ -2675,3 +2675,43 @@ def test_integrity_audit_repairs_only_fts_drift(store: Store):
     assert result["categories"]["stale_fts_rows"]["count"] == 0
     assert store.get_unit(unit.id) is not None
     assert store.fts_search("Repairable")[0]["unit_id"] == unit.id
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"min_size": 0}, "min_size must be a positive integer"),
+        ({"limit": -1}, "limit must be a non-negative integer or None"),
+        (
+            {"representative_limit": True},
+            "representative_limit must be a non-negative integer",
+        ),
+        ({"bridge_limit": "1"}, "bridge_limit must be a non-negative integer or None"),
+    ],
+)
+def test_topical_communities_validates_arguments(
+    store: Store, kwargs: dict, message: str
+):
+    with pytest.raises(ValueError, match=message):
+        GraphService(store).topical_communities(**kwargs)
+
+
+def test_topical_communities_aliases_match(store: Store):
+    store.insert_unit(
+        KnowledgeUnit(
+            id="unit-a",
+            source_project=SourceProject.MAX,
+            source_id="source-unit-a",
+            source_entity_type="insight",
+            title="Alpha",
+            content="Alpha note",
+            tags=["alpha"],
+        )
+    )
+
+    gs = GraphService(store)
+
+    assert gs.topical_communities(min_size=1) == gs.analyze_topical_communities(
+        min_size=1
+    )
+    assert gs.topical_communities(min_size=1) == gs.get_topical_communities(min_size=1)
