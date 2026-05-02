@@ -1,6 +1,7 @@
 """Export helpers for graph reports."""
 
 from graph.export.anki import export_units_to_anki_tsv
+from graph.export.concept_map import export_concept_map_markdown
 from graph.export.context_pack import export_context_pack
 from graph.export.dot import export_graph_dot
 from graph.export.edge_csv import export_edges_to_csv
@@ -16,6 +17,7 @@ from graph.export.units_jsonl import export_units_to_jsonl
 
 __all__ = [
     "DATE_METADATA_KEYS",
+    "export_concept_map_markdown",
     "export_context_pack",
     "export_edges_to_csv",
     "export_graph_dot",
