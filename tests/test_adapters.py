@@ -38,6 +38,7 @@ from graph.adapters.logseq import LogseqAdapter
 from graph.adapters.markdown import MarkdownAdapter
 from graph.adapters.markdown_callouts import MarkdownCalloutsAdapter
 from graph.adapters.markdown_links import MarkdownLinksAdapter
+from graph.adapters.markdown_tasks import MarkdownTasksAdapter
 from graph.adapters.mastodon import MastodonAdapter
 from graph.adapters.max_adapter import MaxAdapter
 from graph.adapters.me import MeAdapter
@@ -2650,6 +2651,7 @@ class TestRegistry:
             "markdown",
             "markdown_callouts",
             "markdown_links",
+            "markdown_tasks",
             "mastodon",
             "kindle",
             "sota",
@@ -2855,6 +2857,10 @@ class TestRegistry:
         markdown_callouts_adapter = get_adapter("markdown_callouts", path="/tmp/notes")
         assert isinstance(markdown_callouts_adapter, MarkdownCalloutsAdapter)
         assert markdown_callouts_adapter.name == "markdown_callouts"
+
+        markdown_tasks_adapter = get_adapter("markdown_tasks", path="/tmp/notes")
+        assert isinstance(markdown_tasks_adapter, MarkdownTasksAdapter)
+        assert markdown_tasks_adapter.name == "markdown_tasks"
 
         mastodon_adapter = get_adapter("mastodon", path="/tmp/outbox.json")
         assert isinstance(mastodon_adapter, MastodonAdapter)
