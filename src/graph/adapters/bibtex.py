@@ -14,7 +14,7 @@ from graph.types.models import KnowledgeUnit, SyncState
 
 SKIPPED_ENTRY_TYPES = {"comment", "preamble", "string"}
 VENUE_FIELDS = ("journal", "booktitle", "publisher", "school", "institution", "organization")
-CONTENT_FIELDS = ("abstract", "note", "annote", "author", "year")
+CONTENT_FIELDS = ("abstract", "note", "annote")
 
 
 class BibtexParseError(ValueError):
@@ -146,13 +146,15 @@ class BibtexAdapter(SourceAdapter):
         body = text[body_start:body_end]
         comma = self._find_top_level_comma(body)
         if comma == -1:
-            raise BibtexParseError("missing citation key")
+            citation_key = body.strip()
+            fields: dict[str, str] = {}
+        else:
+            citation_key = body[:comma].strip()
+            fields = self._parse_fields(body[comma + 1 :])
 
-        citation_key = body[:comma].strip()
         if not citation_key:
             raise BibtexParseError("empty citation key")
 
-        fields = self._parse_fields(body[comma + 1 :])
         return {
             "entry_type": entry_type,
             "citation_key": citation_key,
@@ -228,16 +230,20 @@ class BibtexAdapter(SourceAdapter):
         source_file = path.relative_to(root).as_posix()
         title = self._field(fields, "title") or self._field(fields, "booktitle") or citation_key
         authors = self._authors(self._field(fields, "author"))
+        tags = self._tags(self._field(fields, "keywords"))
 
         metadata = {
             "citation_key": citation_key,
             "entry_type": str(entry["entry_type"]),
+            "title": title,
             "authors": authors,
             "year": self._field(fields, "year"),
             "doi": self._field(fields, "doi"),
             "url": self._field(fields, "url"),
             "journal": self._field(fields, "journal"),
             "booktitle": self._field(fields, "booktitle"),
+            "abstract": self._field(fields, "abstract"),
+            "keywords": tags,
             "source_file": source_file,
         }
 
@@ -246,31 +252,42 @@ class BibtexAdapter(SourceAdapter):
             source_id=f"{source_file}:{citation_key}",
             source_entity_type="bibtex_entry",
             title=title,
-            content=self._content(fields),
+            content=self._content(title, authors, tags, fields),
             content_type=ContentType.INSIGHT,
             metadata=metadata,
-            tags=self._tags(self._field(fields, "keywords")),
+            tags=tags,
             created_at=datetime.fromtimestamp(created_timestamp, tz=timezone.utc),
         )
 
-    def _content(self, fields: dict[str, str]) -> str:
-        parts: list[str] = []
-        author = self._field(fields, "author")
+    def _content(
+        self,
+        title: str,
+        authors: list[str],
+        tags: list[str],
+        fields: dict[str, str],
+    ) -> str:
+        parts: list[str] = [f"Title: {title}"]
         year = self._field(fields, "year")
         venue = self._venue(fields)
-        if author:
-            parts.append(f"Authors: {author}")
+        doi = self._field(fields, "doi")
+        url = self._field(fields, "url")
+        if authors:
+            parts.append(f"Authors: {'; '.join(authors)}")
         if year:
             parts.append(f"Year: {year}")
         if venue:
             parts.append(f"Venue: {venue}")
         for key in CONTENT_FIELDS:
-            if key in {"author", "year"}:
-                continue
             value = self._field(fields, key)
             if value:
                 label = "Notes" if key in {"note", "annote"} else key.title()
                 parts.append(f"{label}: {value}")
+        if doi:
+            parts.append(f"DOI: {doi}")
+        if url:
+            parts.append(f"URL: {url}")
+        if tags:
+            parts.append(f"Keywords: {', '.join(tags)}")
         return "\n\n".join(parts)
 
     def _venue(self, fields: dict[str, str]) -> str:
