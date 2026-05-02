@@ -1923,6 +1923,89 @@ class GraphService:
             results.append({"unit": summary, "score": item["score"]})
         return results
 
+    def analyze_hits(self, limit: int = 20, normalized: bool = True) -> dict:
+        """Return HITS authority and hub rankings for the directed graph."""
+        if isinstance(limit, bool):
+            raise ValueError("limit must be a non-negative integer.")
+        try:
+            capped_limit = int(limit)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("limit must be a non-negative integer.") from exc
+        if capped_limit < 0:
+            raise ValueError("limit must be a non-negative integer.")
+
+        if not self.G:
+            self.rebuild()
+
+        stats = {
+            "node_count": len(self.G.nodes),
+            "edge_count": len(self.G.edges),
+            "normalized": bool(normalized),
+            "converged": True,
+            "max_iter": 0,
+            "error": None,
+        }
+
+        if not self.G.nodes:
+            return {
+                "stats": stats,
+                "authorities": [],
+                "hubs": [],
+            }
+
+        try:
+            hubs, authorities = nx.hits(
+                self.G,
+                max_iter=100,
+                normalized=bool(normalized),
+            )
+            stats["max_iter"] = 100
+        except nx.PowerIterationFailedConvergence:
+            try:
+                hubs, authorities = nx.hits(
+                    self.G,
+                    max_iter=1000,
+                    normalized=bool(normalized),
+                )
+                stats["max_iter"] = 1000
+            except nx.PowerIterationFailedConvergence as exc:
+                stats["converged"] = False
+                stats["max_iter"] = 1000
+                stats["error"] = str(exc)
+                return {
+                    "stats": stats,
+                    "authorities": [],
+                    "hubs": [],
+                }
+
+        def _score(value: float) -> float:
+            score = float(value)
+            return 0.0 if abs(score) < 1e-15 else score
+
+        def _record(unit_id: str) -> dict:
+            node_data = self.G.nodes[unit_id]
+            return {
+                "unit_id": unit_id,
+                "title": str(node_data.get("title", "")),
+                "authority_score": _score(authorities.get(unit_id, 0.0)),
+                "hub_score": _score(hubs.get(unit_id, 0.0)),
+            }
+
+        authority_ids = sorted(
+            self.G.nodes,
+            key=lambda unit_id: (-_score(authorities.get(unit_id, 0.0)), str(unit_id)),
+        )
+        hub_ids = sorted(
+            self.G.nodes,
+            key=lambda unit_id: (-_score(hubs.get(unit_id, 0.0)), str(unit_id)),
+        )
+
+        return {
+            "stats": stats,
+            "authorities": [_record(unit_id) for unit_id in authority_ids[:capped_limit]],
+            "hubs": [_record(unit_id) for unit_id in hub_ids[:capped_limit]],
+        }
+
     def analyze_degree_distribution(
         self,
         *,
