@@ -699,6 +699,24 @@ def _do_export_context_pack(
     return {"markdown": markdown, "metadata": metadata}
 
 
+def _do_graph_collection_members(
+    store: Store,
+    collection_name: str,
+    *,
+    limit: object = None,
+) -> dict:
+    if limit is not None and (
+        not isinstance(limit, int) or isinstance(limit, bool) or limit < 1
+    ):
+        return {
+            "error": "invalid_limit",
+            "message": "limit must be a positive integer",
+            "collection_name": collection_name,
+            "limit": limit,
+        }
+    return store.list_collection_members(collection_name, limit=limit)
+
+
 def _result_summary(result: dict) -> dict:
     summary = {
         "id": result.get("id"),
@@ -947,6 +965,25 @@ async def list_tools() -> list[Tool]:
                     "limit": {"type": "integer", "description": "Maximum members to return"},
                 },
                 "required": ["name"],
+            },
+        ),
+        Tool(
+            name="graph_collection_members",
+            description="List members of a named graph collection with collection metadata and unit summaries.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "collection_name": {
+                        "type": "string",
+                        "description": "Collection name",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Maximum members to return",
+                    },
+                },
+                "required": ["collection_name"],
             },
         ),
         Tool(
@@ -2738,6 +2775,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             payload = _do_collection_members(
                 store,
                 arguments["name"],
+                limit=arguments.get("limit"),
+            )
+            return [TextContent(type="text", text=json.dumps(payload, default=str))]
+
+        elif name == "graph_collection_members":
+            payload = _do_graph_collection_members(
+                store,
+                arguments["collection_name"],
                 limit=arguments.get("limit"),
             )
             return [TextContent(type="text", text=json.dumps(payload, default=str))]
