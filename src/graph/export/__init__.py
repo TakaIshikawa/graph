@@ -2,6 +2,7 @@
 
 from graph.export.adjacency_markdown import export_graph_adjacency_markdown
 from graph.export.anki import export_units_to_anki_tsv
+from graph.export.backlinks import export_unit_backlinks_markdown
 from graph.export.concept_map import export_concept_map_markdown
 from graph.export.context_pack import export_context_pack
 from graph.export.dot import export_graph_dot
@@ -42,6 +43,7 @@ __all__ = [
     "render_graph_overview_html",
     "export_tag_cooccurrence_csv",
     "export_tag_glossary_markdown",
+    "export_unit_backlinks_markdown",
     "export_unit_schema_inventory",
     "export_units_to_anki_tsv",
     "export_units_to_csv",
