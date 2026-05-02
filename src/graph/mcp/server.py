@@ -1499,6 +1499,34 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="freshness_summary",
+            description=(
+                "Summarize how recently knowledge units were created, ingested, or updated."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "field": {
+                        "type": "string",
+                        "enum": ["created_at", "ingested_at", "updated_at"],
+                        "default": "updated_at",
+                    },
+                    "buckets": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Increasing age buckets like 7d, 30d, 90d, "
+                            "optionally ending with older"
+                        ),
+                    },
+                    "as_of": {
+                        "type": "string",
+                        "description": "Reference ISO-8601 date/datetime; defaults to now",
+                    },
+                },
+            },
+        ),
+        Tool(
             name="analyze_tags",
             description="Analyze graph tags with counts, source/type breakdowns, matching units, and co-occurrences.",
             inputSchema={
@@ -3349,6 +3377,15 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 content_type=arguments.get("content_type"),
                 min_count=arguments.get("min_count", 1),
                 limit=arguments.get("limit", 20),
+            )
+            return [TextContent(type="text", text=json.dumps(result))]
+
+        elif name == "freshness_summary":
+            gs = GraphService(store)
+            result = gs.freshness_summary(
+                field=arguments.get("field", "updated_at"),
+                buckets=arguments.get("buckets"),
+                as_of=arguments.get("as_of"),
             )
             return [TextContent(type="text", text=json.dumps(result))]
 

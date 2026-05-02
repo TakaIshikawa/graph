@@ -4265,6 +4265,45 @@ def test_timeline_tool_matches_service_schema_and_validates_inputs(tmp_path, mon
         raise AssertionError("timeline should reject unsupported fields")
 
 
+def test_freshness_summary_tool_matches_service_schema(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    _populate_timeline_graph(store)
+    store.close()
+
+    monkeypatch.setattr(
+        mcp_server,
+        "_get_store",
+        lambda: Store(str(db_path)),
+    )
+
+    tools = asyncio.run(mcp_server.list_tools())
+    freshness_tool = next(tool for tool in tools if tool.name == "freshness_summary")
+    assert freshness_tool.inputSchema["properties"]["field"]["enum"] == [
+        "created_at",
+        "ingested_at",
+        "updated_at",
+    ]
+
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "freshness_summary",
+            {
+                "field": "created_at",
+                "as_of": "2026-05-01T00:00:00+00:00",
+            },
+        )
+    )
+    payload = json.loads(response[0].text)
+    expected_store = Store(str(db_path))
+    expected = GraphService(expected_store).freshness_summary(
+        field="created_at",
+        as_of="2026-05-01T00:00:00+00:00",
+    )
+    expected_store.close()
+    assert payload == expected
+
+
 def test_suggest_tag_synonyms_tool_matches_service_structure(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))

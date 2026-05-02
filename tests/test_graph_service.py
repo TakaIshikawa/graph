@@ -493,6 +493,22 @@ class TestGraphService:
         assert result["total"] == 0
         assert result["buckets"] == []
 
+    def test_freshness_summary_empty_graph(self, store: Store):
+        result = GraphService(store).freshness_summary(
+            as_of=datetime.fromisoformat("2026-05-01T00:00:00+00:00")
+        )
+
+        assert result["field"] == "updated_at"
+        assert result["total"] == 0
+        assert result["dated_count"] == 0
+        assert result["undated_count"] == 0
+        assert [item["bucket"] for item in result["buckets"]] == [
+            "7d",
+            "30d",
+            "90d",
+            "older",
+        ]
+
     def test_analyze_timeline_validates_bucket_and_field(self, store: Store):
         gs = GraphService(store)
 
