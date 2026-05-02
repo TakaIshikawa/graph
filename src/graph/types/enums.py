@@ -19,6 +19,7 @@ class SourceProject(StrEnum):
     ENEX = "enex"
     BIBTEX = "bibtex"
     CSL_JSON = "csl_json"
+    CROSSREF = "crossref"
     RIS = "ris"
     JATS = "jats"
     GIT = "git"

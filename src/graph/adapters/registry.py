@@ -6,6 +6,7 @@ from graph.adapters.base import SourceAdapter
 from graph.adapters.bibtex import BibtexAdapter
 from graph.adapters.bookmarks import BookmarksAdapter
 from graph.adapters.csv_adapter import CsvAdapter
+from graph.adapters.crossref import CrossrefAdapter
 from graph.adapters.csl_json import CslJsonAdapter
 from graph.adapters.email import EmailAdapter
 from graph.adapters.enex import EnexAdapter
@@ -61,6 +62,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "ipynb": IpynbAdapter,
     "bibtex": BibtexAdapter,
     "csl_json": CslJsonAdapter,
+    "crossref": CrossrefAdapter,
     "ris": RisAdapter,
     "jats": JatsAdapter,
     "git": GitAdapter,
