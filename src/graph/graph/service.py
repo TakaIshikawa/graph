@@ -1226,6 +1226,7 @@ class GraphService:
             for unit in (self.store.get_unit(found_id) for found_id in sorted(node_ids))
             if unit is not None
         ]
+        units_by_id = {unit.id: unit for unit in units}
         edges = sorted(
             (
                 edge
@@ -1233,10 +1234,12 @@ class GraphService:
                 if edge.from_unit_id in node_ids and edge.to_unit_id in node_ids
             ),
             key=lambda edge: (
+                units_by_id[edge.from_unit_id].title.lower(),
+                units_by_id[edge.to_unit_id].title.lower(),
+                edge.id,
                 edge.from_unit_id,
                 edge.to_unit_id,
                 str(edge.relation),
-                edge.id,
             ),
         )
 
@@ -3569,6 +3572,95 @@ class GraphService:
                 project_pairs.items(), key=lambda x: x[1], reverse=True
             )
         ]
+
+    def analyze_source_mixing(self, *, limit: int = 20) -> dict:
+        """Summarize how graph edges connect units across source projects."""
+        if isinstance(limit, bool):
+            raise ValueError("limit must be a non-negative integer.")
+        try:
+            example_limit = int(limit)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("limit must be a non-negative integer.") from exc
+        if example_limit < 0:
+            raise ValueError("limit must be a non-negative integer.")
+
+        units_by_id = {unit.id: unit for unit in self.store.get_all_units(limit=1000000000)}
+
+        def _source_project(unit_id: str) -> str:
+            unit = units_by_id.get(unit_id)
+            if unit is None:
+                return "unknown"
+            source_project = str(unit.source_project or "").strip()
+            return source_project or "unknown"
+
+        pair_records: dict[tuple[str, str], dict] = {}
+        total_edge_count = 0
+        same_source_edge_count = 0
+        cross_source_edge_count = 0
+
+        edges = sorted(
+            self.store.get_all_edges(),
+            key=lambda edge: (
+                edge.id,
+                edge.from_unit_id,
+                edge.to_unit_id,
+                str(edge.relation),
+            ),
+        )
+        for edge in edges:
+            from_source = _source_project(edge.from_unit_id)
+            to_source = _source_project(edge.to_unit_id)
+            key = (from_source, to_source)
+            record = pair_records.setdefault(
+                key,
+                {
+                    "from_source": from_source,
+                    "to_source": to_source,
+                    "edge_count": 0,
+                    "relation_counts": Counter(),
+                    "example_edge_ids": [],
+                },
+            )
+
+            total_edge_count += 1
+            if from_source == to_source:
+                same_source_edge_count += 1
+            else:
+                cross_source_edge_count += 1
+
+            record["edge_count"] += 1
+            record["relation_counts"][str(edge.relation)] += 1
+            if len(record["example_edge_ids"]) < example_limit:
+                record["example_edge_ids"].append(edge.id)
+
+        source_pairs = []
+        for record in pair_records.values():
+            source_pairs.append(
+                {
+                    "from_source": record["from_source"],
+                    "to_source": record["to_source"],
+                    "edge_count": record["edge_count"],
+                    "relation_counts": dict(sorted(record["relation_counts"].items())),
+                    "example_edge_ids": record["example_edge_ids"],
+                }
+            )
+        source_pairs.sort(
+            key=lambda record: (
+                -record["edge_count"],
+                record["from_source"],
+                record["to_source"],
+            )
+        )
+
+        return {
+            "total_edge_count": total_edge_count,
+            "same_source_edge_count": same_source_edge_count,
+            "cross_source_edge_count": cross_source_edge_count,
+            "cross_source_ratio": (
+                cross_source_edge_count / total_edge_count if total_edge_count else 0.0
+            ),
+            "source_pairs": source_pairs,
+        }
 
     def analyze_assortativity(self, *, top_edge_limit: int = 10) -> dict:
         """Report whether graph edges connect similar units by source, type, and tags."""
