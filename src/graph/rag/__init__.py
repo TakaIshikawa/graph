@@ -12,6 +12,7 @@ from graph.rag.reading_queue import build_reading_queue
 from graph.rag.reading_time import estimate_reading_time
 from graph.rag.result_clusters import cluster_results_by_overlap
 from graph.rag.snippets import highlight_result_snippets
+from graph.rag.source_timeline import build_source_timeline
 from graph.rag.tag_cooccurrence import build_tag_cooccurrence_matrix
 from graph.rag.tag_hierarchy import build_tag_hierarchy
 from graph.rag.tag_normalization import suggest_tag_normalizations
@@ -23,6 +24,7 @@ __all__ = [
     "build_keyphrase_cooccurrence",
     "build_reading_queue",
     "build_result_facets",
+    "build_source_timeline",
     "classify_query_intent",
     "detect_contradiction_cues",
     "extract_keywords",
