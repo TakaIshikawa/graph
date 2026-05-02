@@ -11,6 +11,7 @@ from pathlib import Path
 import typer
 
 from graph.config import settings
+from graph.export import export_tag_glossary_markdown
 from graph.export.html_report import render_search_html_report
 from graph.rag.search import (
     DEFAULT_MMR_LAMBDA,
@@ -412,6 +413,37 @@ def _do_export_ics(
         "source_project": source_project,
         "content_type": content_type,
     }
+    return stats
+
+
+def _validate_source_project_filter(source_project: str | None) -> str | None:
+    if source_project is None:
+        return None
+    try:
+        return SourceProject(source_project).value
+    except ValueError as exc:
+        valid = ", ".join(project.value for project in SourceProject)
+        raise ValueError(f"source_project must be one of: {valid}") from exc
+
+
+def _do_export_tag_glossary(
+    store: Store,
+    path: str | Path,
+    *,
+    min_count: int = 1,
+    include_descriptions: bool = True,
+    source_project: str | None = None,
+) -> dict:
+    source_project_filter = _validate_source_project_filter(source_project)
+    units = store.get_units(source_project=source_project_filter, limit=None)
+    stats = export_tag_glossary_markdown(
+        units,
+        path,
+        min_count=min_count,
+        include_examples=3 if include_descriptions else 0,
+    )
+    stats["source_project"] = source_project_filter
+    stats["include_descriptions"] = include_descriptions
     return stats
 
 
@@ -2736,6 +2768,55 @@ def export_ics(
     typer.echo(
         f"Exported {stats['events_exported']} calendar events "
         f"from {stats['units_scanned']} units to {stats['path']}"
+    )
+
+
+@app.command(name="export-tag-glossary")
+def export_tag_glossary(
+    path: Path = typer.Argument(..., help="Destination Markdown report path"),
+    min_count: int = typer.Option(
+        1,
+        "--min-count",
+        min=1,
+        help="Minimum unit count required for a tag to be exported",
+    ),
+    include_descriptions: bool = typer.Option(
+        True,
+        "--include-descriptions/--no-include-descriptions",
+        help="Include unit examples in each tag section",
+    ),
+    source_project: str | None = typer.Option(
+        None,
+        "--source-project",
+        help="Filter by source project",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Export a Markdown glossary of graph tag usage."""
+    store = _get_store()
+    try:
+        stats = _do_export_tag_glossary(
+            store,
+            path,
+            min_count=min_count,
+            include_descriptions=include_descriptions,
+            source_project=source_project,
+        )
+    except (OSError, ValueError) as exc:
+        if json_output:
+            _json_echo({"error": "export_failed", "message": str(exc), "path": str(path)})
+            raise typer.Exit(code=1) from exc
+        raise typer.BadParameter(str(exc)) from exc
+    finally:
+        store.close()
+
+    if json_output:
+        _json_echo(stats)
+        return
+
+    typer.echo(
+        f"Exported {stats['tags_exported']} tags from "
+        f"{stats['units_scanned']} units to {stats['path']}"
     )
 
 
