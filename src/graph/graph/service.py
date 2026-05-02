@@ -4500,6 +4500,91 @@ class GraphService:
             "topics": returned,
         }
 
+    def analyze_leaf_nodes(self, *, sort_by: str = "title") -> list[dict]:
+        """Return units with exactly one incident edge and their sole neighbor."""
+        valid_sorts = {"title", "source", "neighbor"}
+        if sort_by not in valid_sorts:
+            raise ValueError(
+                "sort_by must be one of: neighbor, source, title."
+            )
+
+        units = self.store.get_all_units(limit=1000000000)
+        units_by_id = {unit.id: unit for unit in units}
+        incident_edges: dict[str, list] = {unit.id: [] for unit in units}
+
+        for edge in self.store.get_all_edges():
+            if edge.from_unit_id not in units_by_id or edge.to_unit_id not in units_by_id:
+                continue
+            if edge.from_unit_id == edge.to_unit_id:
+                continue
+            incident_edges[edge.from_unit_id].append(edge)
+            incident_edges[edge.to_unit_id].append(edge)
+
+        def _unit_with_tags(unit) -> dict:
+            return {
+                **self._unit_summary_data(unit),
+                "tags": list(unit.tags or []),
+            }
+
+        records = []
+        for unit in units:
+            edges = incident_edges.get(unit.id, [])
+            if len(edges) != 1:
+                continue
+
+            edge = edges[0]
+            is_outgoing = edge.from_unit_id == unit.id
+            neighbor_id = edge.to_unit_id if is_outgoing else edge.from_unit_id
+            neighbor = units_by_id[neighbor_id]
+            in_degree = 0 if is_outgoing else 1
+            out_degree = 1 if is_outgoing else 0
+            direction = "outgoing" if is_outgoing else "incoming"
+
+            records.append(
+                {
+                    "unit": _unit_with_tags(unit),
+                    "neighbor": _unit_with_tags(neighbor),
+                    "edge": self._edge_export_data(edge),
+                    "relationship": str(edge.relation),
+                    "direction": direction,
+                    "degree": 1,
+                    "in_degree": in_degree,
+                    "out_degree": out_degree,
+                    "reason_code": f"single_{direction}_edge",
+                    "reason": (
+                        "Only one outgoing relationship connects this unit."
+                        if is_outgoing
+                        else "Only one incoming relationship connects this unit."
+                    ),
+                }
+            )
+
+        def _sort_key(record: dict) -> tuple:
+            unit = record["unit"]
+            neighbor = record["neighbor"]
+            if sort_by == "source":
+                return (
+                    str(unit["source_project"]),
+                    str(unit["source_id"]),
+                    str(unit["title"]).lower(),
+                    str(unit["id"]),
+                )
+            if sort_by == "neighbor":
+                return (
+                    str(neighbor["title"]).lower(),
+                    str(neighbor["source_project"]),
+                    str(unit["title"]).lower(),
+                    str(unit["id"]),
+                )
+            return (
+                str(unit["title"]).lower(),
+                str(unit["source_project"]),
+                str(unit["id"]),
+            )
+
+        records.sort(key=_sort_key)
+        return records
+
     def cross_project_connections(self) -> list[dict]:
         """Analyze cross-project edge density."""
         project_pairs: dict[tuple[str, str], int] = {}
