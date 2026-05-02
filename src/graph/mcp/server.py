@@ -1763,6 +1763,20 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="tag_influence",
+            description="Rank tags by aggregate unit graph degree with representative unit ids.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "top_n": {
+                        "type": "integer",
+                        "default": 10,
+                        "description": "Maximum number of ranked tags to return",
+                    },
+                },
+            },
+        ),
+        Tool(
             name="suggest_tag_synonyms",
             description="Suggest likely synonymous or variant tags without modifying stored data.",
             inputSchema={
@@ -3676,6 +3690,11 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 min_count=arguments.get("min_count", 1),
                 limit=arguments.get("limit", 20),
             )
+            return [TextContent(type="text", text=json.dumps(result))]
+
+        elif name == "tag_influence":
+            gs = GraphService(store)
+            result = gs.tag_influence(top_n=arguments.get("top_n", 10))
             return [TextContent(type="text", text=json.dumps(result))]
 
         elif name == "freshness_summary":
