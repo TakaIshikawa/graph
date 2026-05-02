@@ -3,6 +3,7 @@
 from graph.rag.cooccurrence import build_keyphrase_cooccurrence
 from graph.rag.contradictions import detect_contradiction_cues
 from graph.rag.context_gaps import detect_context_gaps
+from graph.rag.coverage import build_result_coverage_checklist
 from graph.rag.diversity import rerank_for_source_diversity
 from graph.rag.keywords import extract_keywords
 from graph.rag.query_intent import classify_query_intent
@@ -26,6 +27,7 @@ __all__ = [
     "build_tag_hierarchy",
     "build_keyphrase_cooccurrence",
     "build_reading_queue",
+    "build_result_coverage_checklist",
     "build_result_facets",
     "build_source_timeline",
     "classify_query_intent",
