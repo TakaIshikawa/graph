@@ -96,6 +96,13 @@ _TAG_SUGGESTION_STOPWORDS = _EDGE_SUGGESTION_STOPWORDS | {
     "you",
     "your",
 }
+_TOPICAL_TERM_STOPWORDS = _TAG_SUGGESTION_STOPWORDS | {
+    "content",
+    "knowledge",
+    "note",
+    "notes",
+    "unit",
+}
 _REFERENCE_URL_METADATA_FIELDS = {"url", "link", "canonical_url", "source_url", "source_id"}
 _DUPLICATE_URL_METADATA_FIELDS = {"canonical_url", "link"}
 
@@ -591,6 +598,7 @@ class GraphService:
                 source_project=u.source_project,
                 source_entity_type=u.source_entity_type,
                 content_type=u.content_type,
+                content=u.content,
                 confidence=u.confidence or 0.0,
                 utility_score=u.utility_score or 0.0,
                 tags=u.tags,
@@ -2244,6 +2252,257 @@ class GraphService:
             limit=limit,
             representative_limit=representative_limit,
         )
+
+    def topical_communities(
+        self,
+        *,
+        min_size: int = 2,
+        limit: int | None = None,
+        representative_limit: int = 5,
+        bridge_limit: int | None = None,
+    ) -> dict:
+        """Detect topical graph communities with representative labels and bridges."""
+        if not isinstance(min_size, int) or isinstance(min_size, bool) or min_size < 1:
+            raise ValueError("min_size must be a positive integer.")
+        if limit is not None and (
+            not isinstance(limit, int) or isinstance(limit, bool) or limit < 0
+        ):
+            raise ValueError("limit must be a non-negative integer or None.")
+        if (
+            not isinstance(representative_limit, int)
+            or isinstance(representative_limit, bool)
+            or representative_limit < 0
+        ):
+            raise ValueError("representative_limit must be a non-negative integer.")
+        if bridge_limit is not None and (
+            not isinstance(bridge_limit, int)
+            or isinstance(bridge_limit, bool)
+            or bridge_limit < 0
+        ):
+            raise ValueError("bridge_limit must be a non-negative integer or None.")
+
+        if not self.G:
+            self.rebuild()
+
+        node_count = int(self.G.number_of_nodes())
+        edge_count = int(self.G.number_of_edges())
+        if node_count == 0:
+            return {
+                "node_count": 0,
+                "edge_count": 0,
+                "community_count": 0,
+                "communities": [],
+                "bridge_units": [],
+                "cross_community_edges": [],
+            }
+
+        undirected = self.G.to_undirected()
+        raw_communities = [
+            sorted(unit_ids)
+            for unit_ids in self._detect_raw_communities(undirected)
+            if len(unit_ids) >= min_size
+        ]
+
+        community_records = []
+        unit_to_community_id: dict[str, str] = {}
+        for member_ids in raw_communities:
+            community_graph = undirected.subgraph(member_ids)
+            internal_edge_count = int(community_graph.number_of_edges())
+            density = round(float(nx.density(community_graph)), 6)
+            digest = hashlib.sha1("\n".join(member_ids).encode("utf-8")).hexdigest()[:12]
+            community_id = f"community-{digest}"
+            representative_unit_ids = sorted(
+                member_ids,
+                key=lambda unit_id: (
+                    -int(community_graph.degree(unit_id)),
+                    str(self.G.nodes[unit_id].get("title", "") or unit_id).lower(),
+                    unit_id,
+                ),
+            )[:representative_limit]
+            record = {
+                "community_id": community_id,
+                "unit_ids": member_ids,
+                "size": len(member_ids),
+                "representative_tags": self._representative_tags(
+                    member_ids,
+                    limit=representative_limit,
+                ),
+                "representative_terms": self._representative_terms(
+                    member_ids,
+                    limit=representative_limit,
+                ),
+                "representative_unit_ids": representative_unit_ids,
+                "internal_edge_count": internal_edge_count,
+                "density": density,
+            }
+            community_records.append(record)
+            for unit_id in member_ids:
+                unit_to_community_id[unit_id] = community_id
+
+        community_records.sort(
+            key=lambda record: (
+                -record["size"],
+                -record["density"],
+                -record["internal_edge_count"],
+                record["unit_ids"],
+            )
+        )
+        limited_community_ids = {
+            record["community_id"]
+            for record in (
+                community_records[:limit] if limit is not None else community_records
+            )
+        }
+
+        cross_community_edges = []
+        bridge_unit_communities: dict[str, set[str]] = {}
+        bridge_unit_edge_counts: Counter[str] = Counter()
+        for from_id, to_id, edge_data in sorted(
+            self.G.edges(data=True),
+            key=lambda item: (
+                str(item[0]),
+                str(item[1]),
+                str(item[2].get("id", "")),
+            ),
+        ):
+            from_community_id = unit_to_community_id.get(str(from_id))
+            to_community_id = unit_to_community_id.get(str(to_id))
+            if (
+                from_community_id is None
+                or to_community_id is None
+                or from_community_id == to_community_id
+            ):
+                continue
+            if (
+                from_community_id not in limited_community_ids
+                or to_community_id not in limited_community_ids
+            ):
+                continue
+
+            edge_record = {
+                "from_unit_id": str(from_id),
+                "to_unit_id": str(to_id),
+                "from_community_id": from_community_id,
+                "to_community_id": to_community_id,
+            }
+            edge_id = edge_data.get("id")
+            if edge_id is not None:
+                edge_record["edge_id"] = str(edge_id)
+            relation = edge_data.get("relation")
+            if relation is not None:
+                edge_record["relation"] = str(relation)
+            cross_community_edges.append(edge_record)
+
+            for unit_id, community_id, other_community_id in [
+                (str(from_id), from_community_id, to_community_id),
+                (str(to_id), to_community_id, from_community_id),
+            ]:
+                bridge_unit_communities.setdefault(unit_id, set()).update(
+                    {community_id, other_community_id}
+                )
+                bridge_unit_edge_counts[unit_id] += 1
+
+        bridge_units = [
+            {
+                "unit_id": unit_id,
+                "community_id": unit_to_community_id[unit_id],
+                "connected_community_ids": sorted(connected_community_ids),
+                "cross_community_edge_count": bridge_unit_edge_counts[unit_id],
+            }
+            for unit_id, connected_community_ids in bridge_unit_communities.items()
+        ]
+        bridge_units.sort(
+            key=lambda record: (
+                -record["cross_community_edge_count"],
+                record["unit_id"],
+            )
+        )
+        if bridge_limit is not None:
+            bridge_units = bridge_units[:bridge_limit]
+
+        communities = community_records[:limit] if limit is not None else community_records
+        return {
+            "node_count": node_count,
+            "edge_count": edge_count,
+            "community_count": len(community_records),
+            "communities": communities,
+            "bridge_units": bridge_units,
+            "cross_community_edges": cross_community_edges,
+        }
+
+    def analyze_topical_communities(
+        self,
+        *,
+        min_size: int = 2,
+        limit: int | None = None,
+        representative_limit: int = 5,
+        bridge_limit: int | None = None,
+    ) -> dict:
+        """Alias for topical_communities."""
+        return self.topical_communities(
+            min_size=min_size,
+            limit=limit,
+            representative_limit=representative_limit,
+            bridge_limit=bridge_limit,
+        )
+
+    def get_topical_communities(
+        self,
+        *,
+        min_size: int = 2,
+        limit: int | None = None,
+        representative_limit: int = 5,
+        bridge_limit: int | None = None,
+    ) -> dict:
+        """Alias for topical_communities."""
+        return self.topical_communities(
+            min_size=min_size,
+            limit=limit,
+            representative_limit=representative_limit,
+            bridge_limit=bridge_limit,
+        )
+
+    def _representative_tags(self, unit_ids: list[str], *, limit: int) -> list[str]:
+        counts: Counter[str] = Counter()
+        first_seen: dict[str, str] = {}
+        for unit_id in unit_ids:
+            tags = self.G.nodes[unit_id].get("tags") or []
+            for raw_tag in tags:
+                tag = str(raw_tag).strip()
+                if not tag:
+                    continue
+                key = tag.lower()
+                counts[key] += 1
+                first_seen.setdefault(key, tag)
+        return [
+            first_seen[key]
+            for key, _count in sorted(
+                counts.items(),
+                key=lambda item: (-item[1], first_seen[item[0]].lower(), first_seen[item[0]]),
+            )[:limit]
+        ]
+
+    def _representative_terms(self, unit_ids: list[str], *, limit: int) -> list[str]:
+        counts: Counter[str] = Counter()
+        for unit_id in unit_ids:
+            node = self.G.nodes[unit_id]
+            text = " ".join(
+                str(value)
+                for value in [node.get("title", ""), node.get("content", "")]
+                if value
+            )
+            for token in _normalize_text(text).split():
+                term = _singularize_token(token)
+                if len(term) < 3 or term in _TOPICAL_TERM_STOPWORDS:
+                    continue
+                counts[term] += 1
+        return [
+            term
+            for term, _count in sorted(
+                counts.items(),
+                key=lambda item: (-item[1], item[0]),
+            )[:limit]
+        ]
 
     def analyze_relation_transitions(
         self,
