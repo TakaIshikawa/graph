@@ -874,6 +874,22 @@ class TestGraphService:
         assert result["nodes"][0]["in_degree"] == 1
         assert result["nodes"][0]["out_degree"] == 1
 
+    def test_get_betweenness_centrality_returns_unit_payload(
+        self, populated_store: Store
+    ):
+        result = GraphService(populated_store).get_betweenness_centrality(limit=1)
+
+        assert result == [
+            {
+                "unit_id": result[0]["unit_id"],
+                "title": "Node B",
+                "source_project": "forty_two",
+                "source_id": "b",
+                "content_type": "insight",
+                "betweenness_score": pytest.approx(0.16666666666666666),
+            }
+        ]
+
     def test_get_pagerank_returns_unit_summaries_sorted_by_score(
         self, populated_store: Store
     ):
