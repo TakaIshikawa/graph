@@ -54,6 +54,7 @@ from graph.adapters.pocket_csv import PocketCsvAdapter
 from graph.adapters.presence import PresenceAdapter
 from graph.adapters.raindrop import RaindropAdapter
 from graph.adapters.readwise import ReadwiseAdapter
+from graph.adapters.readwise_csv import ReadwiseCsvAdapter
 from graph.adapters.registry import get_adapter, list_adapters
 from graph.adapters.ris import RisAdapter
 from graph.adapters.roam import RoamAdapter
@@ -2694,6 +2695,7 @@ class TestRegistry:
             "zotero_rdf",
             "hypothesis",
             "readwise",
+            "readwise_csv",
             "roam",
             "logseq",
             "sqlite_query_log",
@@ -2833,6 +2835,10 @@ class TestRegistry:
         readwise_adapter = get_adapter("readwise", path="/tmp/readwise.json")
         assert isinstance(readwise_adapter, ReadwiseAdapter)
         assert readwise_adapter.name == "readwise"
+
+        readwise_csv_adapter = get_adapter("readwise_csv", path="/tmp/readwise.csv")
+        assert isinstance(readwise_csv_adapter, ReadwiseCsvAdapter)
+        assert readwise_csv_adapter.name == "readwise_csv"
 
         roam_adapter = get_adapter("roam", file_path="/tmp/roam.json")
         assert isinstance(roam_adapter, RoamAdapter)

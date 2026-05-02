@@ -1,0 +1,126 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+from graph.adapters.readwise_csv import ReadwiseCsvAdapter
+from graph.adapters.registry import get_adapter, list_adapters
+from graph.types.enums import ContentType, SourceProject
+
+
+def test_readwise_csv_ingests_quoted_multiline_highlights_and_notes(tmp_path):
+    export = tmp_path / "readwise.csv"
+    export.write_text(
+        (
+            "Highlight,Book Title,Book Author,URL,Category,Tags,Note,Location,Highlighted at\n"
+            '"First line\nsecond line",Deep Work,Cal Newport,https://example.com/deep,'
+            'books,"focus, #productivity","Remember this\nfor planning",42,'
+            "2025-01-02T10:30:00Z\n"
+        ),
+        encoding="utf-8",
+    )
+
+    result = ReadwiseCsvAdapter(path=str(export)).ingest()
+
+    assert len(result.units) == 1
+    unit = result.units[0]
+    assert unit.source_project == SourceProject.READWISE_CSV
+    assert unit.source_entity_type == "highlight"
+    assert unit.content_type == ContentType.INSIGHT
+    assert unit.title == "Deep Work"
+    assert "First line\nsecond line" in unit.content
+    assert "Note: Remember this\nfor planning" in unit.content
+    assert "Author: Cal Newport" in unit.content
+    assert "URL: https://example.com/deep" in unit.content
+    assert "Location: 42" in unit.content
+    assert "Category: books" in unit.content
+    assert unit.tags == ["focus", "productivity"]
+    assert unit.metadata["tags"] == ["focus", "productivity"]
+    assert unit.metadata["title"] == "Deep Work"
+    assert unit.metadata["author"] == "Cal Newport"
+    assert unit.metadata["url"] == "https://example.com/deep"
+    assert unit.metadata["category"] == "books"
+    assert unit.metadata["note"] == "Remember this\nfor planning"
+    assert unit.metadata["highlighted_at"] == "2025-01-02T10:30:00Z"
+    assert unit.created_at == datetime(2025, 1, 2, 10, 30, tzinfo=timezone.utc)
+    assert unit.updated_at == datetime(2025, 1, 2, 10, 30, tzinfo=timezone.utc)
+
+
+def test_readwise_csv_handles_missing_optional_columns(tmp_path):
+    export = tmp_path / "minimal.csv"
+    export.write_text("Highlight\nA standalone highlight\n", encoding="utf-8")
+
+    result = ReadwiseCsvAdapter(path=str(export)).ingest()
+
+    assert len(result.units) == 1
+    unit = result.units[0]
+    assert unit.title == "Readwise highlight"
+    assert unit.content == "A standalone highlight"
+    assert unit.metadata["source_file"] == "minimal.csv"
+    assert unit.metadata["row_number"] == 2
+    assert unit.metadata["title"] == ""
+    assert unit.metadata["author"] == ""
+    assert unit.metadata["tags"] == []
+
+
+def test_readwise_csv_parses_tags_from_multiple_delimiters(tmp_path):
+    export = tmp_path / "tags.csv"
+    export.write_text(
+        "Highlight,Tags\nTagged highlight,\"#alpha; beta|gamma, alpha\"\n",
+        encoding="utf-8",
+    )
+
+    unit = ReadwiseCsvAdapter(path=str(export)).ingest().units[0]
+
+    assert unit.tags == ["alpha", "beta", "gamma"]
+    assert unit.metadata["tags"] == ["alpha", "beta", "gamma"]
+    assert "Tags: alpha, beta, gamma" in unit.content
+
+
+def test_readwise_csv_uses_author_title_metadata(tmp_path):
+    export = tmp_path / "book.csv"
+    export.write_text(
+        "Highlight,Book Title,Book Author\nA useful passage,The Book,The Author\n",
+        encoding="utf-8",
+    )
+
+    unit = ReadwiseCsvAdapter(path=str(export)).ingest().units[0]
+
+    assert unit.title == "The Book"
+    assert unit.metadata["title"] == "The Book"
+    assert unit.metadata["author"] == "The Author"
+    assert "Title: The Book" in unit.content
+    assert "Author: The Author" in unit.content
+
+
+def test_readwise_csv_source_ids_are_deterministic(tmp_path):
+    export = tmp_path / "stable.csv"
+    export.write_text(
+        "Highlight,Book Title,Book Author,Location,Highlighted at\n"
+        "Stable passage,Stable Book,Stable Author,7,2025-01-01T00:00:00Z\n",
+        encoding="utf-8",
+    )
+
+    first = ReadwiseCsvAdapter(path=str(export)).ingest().units[0]
+    second = ReadwiseCsvAdapter(path=str(export)).ingest().units[0]
+
+    assert first.source_id == second.source_id
+    assert first.source_id.startswith("readwise_csv:")
+
+
+def test_readwise_csv_uses_exported_highlight_id_when_present(tmp_path):
+    export = tmp_path / "id.csv"
+    export.write_text(
+        "Highlight ID,Highlight,Book Title\nrw-1,Highlight with id,Book\n",
+        encoding="utf-8",
+    )
+
+    unit = ReadwiseCsvAdapter(path=str(export)).ingest().units[0]
+
+    assert unit.source_id == "readwise_csv:rw-1"
+
+
+def test_readwise_csv_adapter_is_registered():
+    assert "readwise_csv" in list_adapters()
+    adapter = get_adapter("readwise_csv", path="/tmp/readwise.csv")
+    assert isinstance(adapter, ReadwiseCsvAdapter)
+    assert adapter.name == "readwise_csv"
