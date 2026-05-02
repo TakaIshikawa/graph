@@ -28,6 +28,7 @@ class SourceProject(StrEnum):
     ZOTERO_RDF = "zotero_rdf"
     HYPOTHESIS = "hypothesis"
     READWISE = "readwise"
+    ROAM = "roam"
 
 
 class ContentType(StrEnum):
