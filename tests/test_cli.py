@@ -902,6 +902,13 @@ def test_json_export_and_import_commands_round_trip(tmp_path, monkeypatch):
         _cleanup_db(target._test_db_path)  # type: ignore[attr-defined]
 
 
+def test_export_tag_glossary_command_is_listed_in_help():
+    result = runner.invoke(app, ["--help"])
+
+    assert result.exit_code == 0
+    assert "export-tag-glossary" in result.output
+
+
 def test_export_graphml_command_writes_valid_graphml(tmp_path, monkeypatch):
     store = _make_store()
     a_id, b_id, _, _ = _populate_graph(store)
