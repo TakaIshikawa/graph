@@ -2013,6 +2013,99 @@ class GraphService:
 
         return {"stats": stats, "nodes": nodes}
 
+    def betweenness_centrality(
+        self,
+        limit: int | None = 10,
+        *,
+        normalized: bool = True,
+        weight: str | bool | None = None,
+    ) -> dict:
+        """Return betweenness centrality rankings for the undirected graph projection."""
+        if limit is None:
+            capped_limit = None
+        else:
+            if isinstance(limit, bool):
+                raise ValueError("limit must be a non-negative integer or None.")
+            try:
+                capped_limit = int(limit)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("limit must be a non-negative integer or None.") from exc
+            if capped_limit < 0:
+                raise ValueError("limit must be a non-negative integer or None.")
+
+        if not isinstance(normalized, bool):
+            raise ValueError("normalized must be a boolean.")
+
+        if weight is True:
+            weight_key = "weight"
+        elif weight is False:
+            weight_key = None
+        elif weight is None or isinstance(weight, str):
+            weight_key = weight
+        else:
+            raise ValueError("weight must be a string, True, False, or None.")
+
+        if not self.G:
+            self.rebuild()
+
+        projection = nx.Graph()
+        projection.add_nodes_from(self.G.nodes(data=True))
+        for from_id, to_id, data in self.G.edges(data=True):
+            if from_id == to_id:
+                continue
+            if projection.has_edge(from_id, to_id):
+                if weight_key is not None:
+                    existing_weight = float(projection[from_id][to_id].get(weight_key, 1.0))
+                    edge_weight = float(data.get(weight_key, 1.0))
+                    projection[from_id][to_id][weight_key] = min(existing_weight, edge_weight)
+                continue
+            projection.add_edge(from_id, to_id, **data)
+
+        stats = {
+            "node_count": projection.number_of_nodes(),
+            "edge_count": projection.number_of_edges(),
+            "limit": capped_limit,
+            "normalized": normalized,
+            "weight": weight_key,
+        }
+
+        if not projection.nodes:
+            return {"stats": stats, "nodes": []}
+
+        scores = nx.betweenness_centrality(
+            projection,
+            normalized=normalized,
+            weight=weight_key,
+        )
+
+        def _score(value: float) -> float:
+            score = float(value)
+            return 0.0 if abs(score) < 1e-15 else score
+
+        ranked_ids = sorted(
+            projection.nodes,
+            key=lambda unit_id: (-_score(scores.get(unit_id, 0.0)), str(unit_id)),
+        )
+        if capped_limit is not None:
+            ranked_ids = ranked_ids[:capped_limit]
+
+        nodes = []
+        for unit_id in ranked_ids:
+            node_data = projection.nodes[unit_id]
+            nodes.append(
+                {
+                    "unit_id": unit_id,
+                    "title": str(node_data.get("title", "")),
+                    "score": _score(scores.get(unit_id, 0.0)),
+                    "source_project": str(node_data.get("source_project", "")),
+                    "degree": int(projection.degree(unit_id)),
+                    "in_degree": int(self.G.in_degree(unit_id)),
+                    "out_degree": int(self.G.out_degree(unit_id)),
+                }
+            )
+
+        return {"stats": stats, "nodes": nodes}
+
     def analyze_hits(self, limit: int = 20, normalized: bool = True) -> dict:
         """Return HITS authority and hub rankings for the directed graph."""
         if isinstance(limit, bool):
