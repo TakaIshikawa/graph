@@ -11,6 +11,7 @@ from graph.export.graphson import export_graphson
 from graph.export.graph_overview_html import render_graph_overview_html
 from graph.export.ical import DATE_METADATA_KEYS, export_units_to_ics, unit_event_datetime
 from graph.export.llms_txt import export_units_to_llms_txt
+from graph.export.mermaid_mindmap import export_units_to_mermaid_mindmap
 from graph.export.opml import export_units_to_opml
 from graph.export.org import export_units_to_org
 from graph.export.schema_inventory import export_unit_schema_inventory
@@ -43,6 +44,7 @@ __all__ = [
     "export_units_to_jsonl",
     "export_units_to_llms_txt",
     "export_units_to_markdown_table",
+    "export_units_to_mermaid_mindmap",
     "export_units_to_opml",
     "export_units_to_org",
     "export_units_to_yaml",
