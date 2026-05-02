@@ -1,5 +1,6 @@
 """Export helpers for graph reports."""
 
+from graph.export.adjacency_markdown import export_graph_adjacency_markdown
 from graph.export.anki import export_units_to_anki_tsv
 from graph.export.concept_map import export_concept_map_markdown
 from graph.export.context_pack import export_context_pack
@@ -26,6 +27,7 @@ __all__ = [
     "export_concept_map_markdown",
     "export_context_pack",
     "export_edges_to_csv",
+    "export_graph_adjacency_markdown",
     "export_units_to_flashcards_markdown",
     "export_graph_dot",
     "export_graphson",
