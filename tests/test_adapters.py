@@ -41,6 +41,7 @@ from graph.adapters.opml import OpmlAdapter
 from graph.adapters.org import OrgAdapter
 from graph.adapters.pdf import PdfAdapter
 from graph.adapters.pinboard import PinboardAdapter
+from graph.adapters.pocket_csv import PocketCsvAdapter
 from graph.adapters.presence import PresenceAdapter
 from graph.adapters.raindrop import RaindropAdapter
 from graph.adapters.readwise import ReadwiseAdapter
@@ -2658,6 +2659,7 @@ class TestRegistry:
             "git",
             "transcript",
             "pocket",
+            "pocket_csv",
             "pinboard",
             "raindrop",
             "zotero_rdf",
@@ -2743,6 +2745,10 @@ class TestRegistry:
 
         pocket_adapter = get_adapter("pocket", path="/tmp/pocket.csv")
         assert pocket_adapter.name == "pocket"
+
+        pocket_csv_adapter = get_adapter("pocket_csv", path="/tmp/pocket.csv")
+        assert isinstance(pocket_csv_adapter, PocketCsvAdapter)
+        assert pocket_csv_adapter.name == "pocket_csv"
 
         pinboard_adapter = get_adapter("pinboard", path="/tmp/pinboard.json")
         assert isinstance(pinboard_adapter, PinboardAdapter)

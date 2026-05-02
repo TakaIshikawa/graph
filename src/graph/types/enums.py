@@ -31,6 +31,7 @@ class SourceProject(StrEnum):
     GIT = "git"
     TRANSCRIPT = "transcript"
     POCKET = "pocket"
+    POCKET_CSV = "pocket_csv"
     PINBOARD = "pinboard"
     RAINDROP = "raindrop"
     ZOTERO_RDF = "zotero_rdf"
