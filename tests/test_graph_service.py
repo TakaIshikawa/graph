@@ -2715,3 +2715,17 @@ def test_topical_communities_aliases_match(store: Store):
         min_size=1
     )
     assert gs.topical_communities(min_size=1) == gs.get_topical_communities(min_size=1)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"field": "ingested_at"}, "Unsupported edge lag field"),
+        ({"example_limit": True}, "example_limit must be a non-negative integer"),
+    ],
+)
+def test_analyze_edge_lag_validates_arguments(
+    store: Store, kwargs: dict, message: str
+):
+    with pytest.raises(ValueError, match=message):
+        GraphService(store).analyze_edge_lag(**kwargs)
