@@ -11,6 +11,7 @@ from graph.export.llms_txt import export_units_to_llms_txt
 from graph.export.org import export_units_to_org
 from graph.export.schema_inventory import export_unit_schema_inventory
 from graph.export.sqlite_snapshot import export_graph_sqlite
+from graph.export.tag_glossary import export_tag_glossary_markdown
 from graph.export.unit_csv import export_units_to_csv
 from graph.export.unit_yaml import export_units_to_yaml
 from graph.export.units_jsonl import export_units_to_jsonl
@@ -23,6 +24,7 @@ __all__ = [
     "export_graph_dot",
     "export_graphson",
     "export_graph_sqlite",
+    "export_tag_glossary_markdown",
     "export_unit_schema_inventory",
     "export_units_to_anki_tsv",
     "export_units_to_csv",
