@@ -1021,6 +1021,29 @@ class TestGraphService:
             "title",
         }
 
+    def test_analyze_source_authority_service_wrapper_returns_payload(
+        self, populated_store: Store
+    ):
+        result = GraphService(populated_store).analyze_source_authority(
+            limit=1,
+            top_units_per_source=1,
+        )
+
+        assert result["stats"]["node_count"] == 4
+        assert result["stats"]["edge_count"] == 2
+        assert result["stats"]["source_count"] == 3
+        assert len(result["sources"]) == 1
+        assert set(result["sources"][0]) >= {
+            "source_project",
+            "unit_count",
+            "outgoing_edges",
+            "incoming_edges",
+            "average_degree",
+            "pagerank_sum",
+            "top_units",
+        }
+        assert len(result["sources"][0]["top_units"]) == 1
+
     def test_analyze_k_core_uses_max_core_by_default(self, k_core_store: Store):
         result = GraphService(k_core_store).analyze_k_core()
 

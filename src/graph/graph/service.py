@@ -4508,6 +4508,140 @@ class GraphService:
             "source_pairs": source_pairs,
         }
 
+    def analyze_source_authority(
+        self, *, limit: int = 20, top_units_per_source: int = 3
+    ) -> dict:
+        """Summarize structural authority by source project."""
+        if isinstance(limit, bool):
+            raise ValueError("limit must be a non-negative integer.")
+        try:
+            capped_limit = int(limit)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("limit must be a non-negative integer.") from exc
+        if capped_limit < 0:
+            raise ValueError("limit must be a non-negative integer.")
+
+        if isinstance(top_units_per_source, bool):
+            raise ValueError("top_units_per_source must be a non-negative integer.")
+        try:
+            capped_top_units = int(top_units_per_source)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "top_units_per_source must be a non-negative integer."
+            ) from exc
+        if capped_top_units < 0:
+            raise ValueError("top_units_per_source must be a non-negative integer.")
+
+        if not self.G:
+            self.rebuild()
+
+        node_count = self.G.number_of_nodes()
+        edge_count = self.G.number_of_edges()
+        if node_count == 0:
+            return {
+                "stats": {
+                    "source_count": 0,
+                    "node_count": 0,
+                    "edge_count": 0,
+                    "limit": capped_limit,
+                    "top_units_per_source": capped_top_units,
+                    "pagerank_total": 0.0,
+                },
+                "sources": [],
+            }
+
+        pagerank_scores = {
+            item["id"]: float(item["score"])
+            for item in self.pagerank_centrality(top_n=None, weight="weight")
+        }
+
+        source_records: dict[str, dict] = {}
+        for unit_id, node_data in self.G.nodes(data=True):
+            source_project = str(node_data.get("source_project", "") or "").strip()
+            source_project = source_project or "unknown"
+            record = source_records.setdefault(
+                source_project,
+                {
+                    "source_project": source_project,
+                    "unit_ids": [],
+                    "outgoing_edges": 0,
+                    "incoming_edges": 0,
+                    "degree_total": 0,
+                    "pagerank_sum": 0.0,
+                },
+            )
+            record["unit_ids"].append(str(unit_id))
+            record["degree_total"] += int(self.G.degree(unit_id))
+            record["pagerank_sum"] += float(pagerank_scores.get(unit_id, 0.0))
+
+        for from_id, to_id in self.G.edges():
+            from_source = str(
+                self.G.nodes[from_id].get("source_project", "") or ""
+            ).strip() or "unknown"
+            to_source = str(self.G.nodes[to_id].get("source_project", "") or "").strip() or "unknown"
+            source_records[from_source]["outgoing_edges"] += 1
+            source_records[to_source]["incoming_edges"] += 1
+
+        def _unit_record(unit_id: str) -> dict:
+            node_data = self.G.nodes[unit_id]
+            return {
+                "unit_id": unit_id,
+                "title": str(node_data.get("title", "")),
+                "pagerank_score": float(pagerank_scores.get(unit_id, 0.0)),
+                "incoming_edges": int(self.G.in_degree(unit_id)),
+                "outgoing_edges": int(self.G.out_degree(unit_id)),
+                "degree": int(self.G.degree(unit_id)),
+            }
+
+        sources = []
+        for record in source_records.values():
+            unit_count = len(record["unit_ids"])
+            top_unit_ids = sorted(
+                record["unit_ids"],
+                key=lambda unit_id: (
+                    -float(pagerank_scores.get(unit_id, 0.0)),
+                    -int(self.G.degree(unit_id)),
+                    str(self.G.nodes[unit_id].get("title", "")).lower(),
+                    unit_id,
+                ),
+            )[:capped_top_units]
+            sources.append(
+                {
+                    "source_project": record["source_project"],
+                    "unit_count": unit_count,
+                    "outgoing_edges": int(record["outgoing_edges"]),
+                    "incoming_edges": int(record["incoming_edges"]),
+                    "average_degree": (
+                        float(record["degree_total"]) / unit_count if unit_count else 0.0
+                    ),
+                    "pagerank_sum": float(record["pagerank_sum"]),
+                    "top_units": [_unit_record(unit_id) for unit_id in top_unit_ids],
+                }
+            )
+
+        sources.sort(
+            key=lambda source: (
+                -source["pagerank_sum"],
+                -source["incoming_edges"],
+                -source["outgoing_edges"],
+                -source["average_degree"],
+                -source["unit_count"],
+                source["source_project"],
+            )
+        )
+
+        return {
+            "stats": {
+                "source_count": len(source_records),
+                "node_count": node_count,
+                "edge_count": edge_count,
+                "limit": capped_limit,
+                "top_units_per_source": capped_top_units,
+                "pagerank_total": float(sum(pagerank_scores.values())),
+            },
+            "sources": sources[:capped_limit],
+        }
+
     def analyze_assortativity(self, *, top_edge_limit: int = 10) -> dict:
         """Report whether graph edges connect similar units by source, type, and tags."""
         if not self.G:
