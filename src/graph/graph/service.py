@@ -4900,6 +4900,125 @@ class GraphService:
             "units": [self._unit_export_data(unit) for unit in returned_units],
         }
 
+    def analyze_orphan_units(
+        self,
+        min_degree: int = 1,
+        *,
+        include_metadata: bool = True,
+    ) -> dict:
+        """Return units whose total graph degree is below the requested threshold."""
+        if isinstance(min_degree, bool):
+            raise ValueError("min_degree must be a non-negative integer.")
+        try:
+            degree_threshold = int(min_degree)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("min_degree must be a non-negative integer.") from exc
+        if degree_threshold < 0:
+            raise ValueError("min_degree must be a non-negative integer.")
+
+        if not self.G:
+            self.rebuild()
+
+        units_by_id = {
+            unit.id: unit for unit in self.store.get_all_units(limit=1000000000)
+        }
+
+        records = []
+        for unit_id in sorted(str(node_id) for node_id in self.G.nodes):
+            unit = units_by_id.get(unit_id)
+            node_data = self.G.nodes[unit_id]
+            in_degree = int(self.G.in_degree(unit_id))
+            out_degree = int(self.G.out_degree(unit_id))
+            degree = in_degree + out_degree
+            if degree >= degree_threshold:
+                continue
+
+            title = (
+                unit.title
+                if unit is not None
+                else str(node_data.get("title", ""))
+            )
+            record = {
+                "unit_id": unit_id,
+                "title": title,
+                "degree": degree,
+                "in_degree": in_degree,
+                "out_degree": out_degree,
+            }
+
+            if include_metadata:
+                tags = (
+                    list(unit.tags or [])
+                    if unit is not None
+                    else list(node_data.get("tags") or [])
+                )
+                tag_set = {str(tag) for tag in tags}
+                neighboring_tag_counts: Counter[str] = Counter()
+                neighbor_ids = set(self.G.predecessors(unit_id)) | set(
+                    self.G.successors(unit_id)
+                )
+                for neighbor_id in neighbor_ids:
+                    neighbor_unit = units_by_id.get(str(neighbor_id))
+                    if neighbor_unit is not None:
+                        neighbor_tags = neighbor_unit.tags or []
+                    else:
+                        neighbor_tags = self.G.nodes[neighbor_id].get("tags") or []
+                    neighboring_tag_counts.update(
+                        str(tag)
+                        for tag in neighbor_tags
+                        if str(tag).strip() and str(tag) not in tag_set
+                    )
+
+                record.update(
+                    {
+                        "source_project": (
+                            str(unit.source_project)
+                            if unit is not None
+                            else str(node_data.get("source_project", ""))
+                        ),
+                        "source_id": unit.source_id if unit is not None else "",
+                        "source_entity_type": (
+                            unit.source_entity_type
+                            if unit is not None
+                            else str(node_data.get("source_entity_type", ""))
+                        ),
+                        "content_type": (
+                            str(unit.content_type)
+                            if unit is not None
+                            else str(node_data.get("content_type", ""))
+                        ),
+                        "tags": tags,
+                        "suggested_neighboring_tags": [
+                            {"tag": tag, "neighbor_count": count}
+                            for tag, count in sorted(
+                                neighboring_tag_counts.items(),
+                                key=lambda item: (-item[1], item[0].lower(), item[0]),
+                            )
+                        ],
+                    }
+                )
+
+            records.append(record)
+
+        records.sort(
+            key=lambda record: (
+                int(record["degree"]),
+                int(record["in_degree"]),
+                int(record["out_degree"]),
+                str(record["title"]).lower(),
+                str(record["unit_id"]),
+            )
+        )
+
+        return {
+            "min_degree": degree_threshold,
+            "node_count": self.G.number_of_nodes(),
+            "edge_count": self.G.number_of_edges(),
+            "candidate_count": len(records),
+            "include_metadata": bool(include_metadata),
+            "units": records,
+        }
+
     def analyze_orphan_topics(
         self,
         *,
