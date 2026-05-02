@@ -21,6 +21,7 @@ from graph.adapters.bookmarks import BookmarksAdapter
 from graph.adapters.browser_history_csv import BrowserHistoryCsvAdapter
 from graph.adapters.chatgpt_json import ChatGptJsonAdapter
 from graph.adapters.csv_adapter import CsvAdapter
+from graph.adapters.csv_rows import CsvRowsAdapter
 from graph.adapters.crossref import CrossrefAdapter
 from graph.adapters.csl_json import CslJsonAdapter
 from graph.adapters.email import EmailAdapter
@@ -2660,6 +2661,7 @@ class TestRegistry:
             "browser_history_csv",
             "chatgpt_json",
             "csv",
+            "csv_rows",
             "jsonl",
             "yaml",
             "notion_markdown",
@@ -2708,6 +2710,10 @@ class TestRegistry:
 
         jsonl_adapter = get_adapter("jsonl", path="/tmp/test.jsonl")
         assert jsonl_adapter.name == "jsonl"
+
+        csv_rows_adapter = get_adapter("csv_rows", path="/tmp/rows.csv")
+        assert isinstance(csv_rows_adapter, CsvRowsAdapter)
+        assert csv_rows_adapter.name == "csv_rows"
 
         yaml_adapter = get_adapter("yaml", root_path="/tmp/yaml")
         assert yaml_adapter.name == "yaml"

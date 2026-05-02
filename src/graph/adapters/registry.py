@@ -10,6 +10,7 @@ from graph.adapters.bookmarks import BookmarksAdapter
 from graph.adapters.browser_history_csv import BrowserHistoryCsvAdapter
 from graph.adapters.chatgpt_json import ChatGptJsonAdapter
 from graph.adapters.csv_adapter import CsvAdapter
+from graph.adapters.csv_rows import CsvRowsAdapter
 from graph.adapters.crossref import CrossrefAdapter
 from graph.adapters.csl_json import CslJsonAdapter
 from graph.adapters.email import EmailAdapter
@@ -77,6 +78,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "browser_history_csv": BrowserHistoryCsvAdapter,
     "chatgpt_json": ChatGptJsonAdapter,
     "csv": CsvAdapter,
+    "csv_rows": CsvRowsAdapter,
     "jsonl": JsonlAdapter,
     "yaml": YamlAdapter,
     "notion_markdown": NotionMarkdownAdapter,
