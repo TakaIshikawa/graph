@@ -31,6 +31,7 @@ class SourceProject(StrEnum):
     GIT = "git"
     GOOGLE_KEEP = "google_keep"
     OBSIDIAN_CANVAS = "obsidian_canvas"
+    NOTION_MARKDOWN = "notion_markdown"
     TRANSCRIPT = "transcript"
     POCKET = "pocket"
     POCKET_CSV = "pocket_csv"

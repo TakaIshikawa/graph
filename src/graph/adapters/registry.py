@@ -30,6 +30,7 @@ from graph.adapters.mastodon import MastodonAdapter
 from graph.adapters.max_adapter import MaxAdapter
 from graph.adapters.me import MeAdapter
 from graph.adapters.mediawiki import MediaWikiAdapter
+from graph.adapters.notion_markdown import NotionMarkdownAdapter
 from graph.adapters.opml import OpmlAdapter
 from graph.adapters.obsidian_canvas import ObsidianCanvasAdapter
 from graph.adapters.org import OrgAdapter
@@ -67,6 +68,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "csv": CsvAdapter,
     "jsonl": JsonlAdapter,
     "yaml": YamlAdapter,
+    "notion_markdown": NotionMarkdownAdapter,
     "opml": OpmlAdapter,
     "obsidian_canvas": ObsidianCanvasAdapter,
     "org": OrgAdapter,
