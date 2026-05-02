@@ -17,6 +17,7 @@ class SourceProject(StrEnum):
     PDF = "pdf"
     EMAIL = "email"
     ENEX = "enex"
+    BIBDESK = "bibdesk"
     BIBTEX = "bibtex"
     CSL_JSON = "csl_json"
     CROSSREF = "crossref"
