@@ -525,6 +525,35 @@ class TestGraphService:
         result = gs.get_neighbors("nonexistent")
         assert result["center"] is None
 
+    def test_ego_network_returns_induced_neighbor_payload(self, populated_store: Store):
+        b = populated_store.get_unit_by_source("forty_two", "b", "knowledge_node")
+
+        result = GraphService(populated_store).ego_network(b.id, radius=1)
+
+        assert sorted(node["title"] for node in result["nodes"]) == [
+            "Node A",
+            "Node B",
+            "Node C",
+        ]
+        assert [
+            (edge["from_unit_id"], edge["to_unit_id"], edge["relation"])
+            for edge in result["edges"]
+        ] == [
+            (
+                populated_store.get_unit_by_source(
+                    "forty_two", "a", "knowledge_node"
+                ).id,
+                b.id,
+                "builds_on",
+            ),
+            (
+                b.id,
+                populated_store.get_unit_by_source("max", "c", "insight").id,
+                "inspires",
+            ),
+        ]
+        assert result["summary"] == {"node_count": 3, "edge_count": 2}
+
     def test_get_ego_metrics_counts_incident_edges_and_caps_depth(
         self, populated_store: Store
     ):

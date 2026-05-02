@@ -1193,6 +1193,65 @@ class GraphService:
             "edges": edge_list,
         }
 
+    def ego_network(
+        self,
+        unit_id: str,
+        *,
+        radius: int = 1,
+        undirected: bool = True,
+    ) -> dict:
+        """Return the induced ego network around a unit."""
+        if (
+            not isinstance(radius, int)
+            or isinstance(radius, bool)
+            or radius < 1
+        ):
+            raise ValueError("radius must be a positive integer.")
+        if not isinstance(undirected, bool):
+            raise ValueError("undirected must be a boolean.")
+        if not self.G:
+            self.rebuild()
+        if unit_id not in self.G:
+            raise KeyError(f"Unit not found: {unit_id}")
+
+        subgraph = nx.ego_graph(
+            self.G,
+            unit_id,
+            radius=radius,
+            undirected=undirected,
+        )
+        node_ids = set(subgraph.nodes)
+        units = [
+            unit
+            for unit in (self.store.get_unit(found_id) for found_id in sorted(node_ids))
+            if unit is not None
+        ]
+        edges = sorted(
+            (
+                edge
+                for edge in self.store.get_all_edges()
+                if edge.from_unit_id in node_ids and edge.to_unit_id in node_ids
+            ),
+            key=lambda edge: (
+                edge.from_unit_id,
+                edge.to_unit_id,
+                str(edge.relation),
+                edge.id,
+            ),
+        )
+
+        return {
+            "center_unit_id": unit_id,
+            "radius": radius,
+            "undirected": undirected,
+            "nodes": [self._unit_summary_data(unit) for unit in units],
+            "edges": [self._edge_export_data(edge) for edge in edges],
+            "summary": {
+                "node_count": len(units),
+                "edge_count": len(edges),
+            },
+        }
+
     def get_ego_metrics(self, unit_id: str, depth: int = 1) -> dict:
         """Compute stable metrics for one unit's ego network."""
         if not self.G:
