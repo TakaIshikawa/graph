@@ -2037,6 +2037,100 @@ class GraphService:
             representative_limit=representative_limit,
         )
 
+    def analyze_relation_transitions(
+        self,
+        *,
+        path_length: int = 2,
+        limit: int = 20,
+    ) -> dict:
+        """Summarize relation chains across directed two-hop paths."""
+        if (
+            not isinstance(path_length, int)
+            or isinstance(path_length, bool)
+            or path_length != 2
+        ):
+            raise ValueError("path_length currently only supports 2.")
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
+            raise ValueError("limit must be a non-negative integer.")
+
+        units_by_id = {unit.id: unit for unit in self.store.get_all_units()}
+        edges = sorted(
+            (
+                edge
+                for edge in self.store.get_all_edges()
+                if edge.from_unit_id in units_by_id and edge.to_unit_id in units_by_id
+            ),
+            key=lambda edge: (
+                edge.from_unit_id,
+                edge.to_unit_id,
+                str(edge.relation),
+                str(edge.source),
+                edge.id,
+            ),
+        )
+
+        outgoing_edges: dict[str, list[KnowledgeEdge]] = {}
+        for edge in edges:
+            outgoing_edges.setdefault(edge.from_unit_id, []).append(edge)
+
+        transition_records: dict[tuple[str, str], dict] = {}
+        for first_edge in edges:
+            middle_unit_id = first_edge.to_unit_id
+            for second_edge in outgoing_edges.get(middle_unit_id, []):
+                unit_ids = [
+                    first_edge.from_unit_id,
+                    middle_unit_id,
+                    second_edge.to_unit_id,
+                ]
+                if len(set(unit_ids)) != len(unit_ids):
+                    continue
+
+                first_relation = str(first_edge.relation)
+                second_relation = str(second_edge.relation)
+                key = (first_relation, second_relation)
+                record = transition_records.setdefault(
+                    key,
+                    {
+                        "from_relation": first_relation,
+                        "to_relation": second_relation,
+                        "relation_sequence": [first_relation, second_relation],
+                        "count": 0,
+                        "example_paths": [],
+                    },
+                )
+                record["count"] += 1
+
+                if len(record["example_paths"]) < limit:
+                    record["example_paths"].append(
+                        {
+                            "unit_ids": unit_ids,
+                            "units": [
+                                self._unit_summary_data(units_by_id[unit_id])
+                                for unit_id in unit_ids
+                            ],
+                            "edge_ids": [first_edge.id, second_edge.id],
+                            "relations": [first_relation, second_relation],
+                            "edges": [
+                                self._edge_export_data(first_edge),
+                                self._edge_export_data(second_edge),
+                            ],
+                        }
+                    )
+
+        transitions = sorted(
+            transition_records.values(),
+            key=lambda record: (
+                -record["count"],
+                record["from_relation"],
+                record["to_relation"],
+            ),
+        )
+        return {
+            "path_length": path_length,
+            "transition_count": len(transitions),
+            "transitions": transitions,
+        }
+
     def analyze_strongly_connected_components(
         self,
         min_size: int = 2,
