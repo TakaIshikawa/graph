@@ -276,11 +276,12 @@ def detect_context_gaps(
     required_facets: Mapping[str, Any] | None = None,
     min_sources: int = 2,
     min_recent_items: int = 0,
+    recency_window_days: int = _RECENT_WINDOW_DAYS,
     now: datetime | date | None = None,
 ) -> dict[str, Any]:
     """Return deterministic coverage gaps for retrieved RAG result payloads.
 
-    Recent items are results with a parseable timestamp in the last 30 days.
+    Recent items are results with a parseable timestamp in the recency window.
     Flat result fields take precedence over metadata and optional nested
     ``unit`` fields. Inputs are inspected only and are not mutated.
     """
@@ -290,8 +291,12 @@ def detect_context_gaps(
         min_recent_items,
         "min_recent_items",
     )
+    recent_window_days = _validate_non_negative_int(
+        recency_window_days,
+        "recency_window_days",
+    )
     now_value = _coerce_now(now)
-    recent_cutoff = now_value - timedelta(days=_RECENT_WINDOW_DAYS)
+    recent_cutoff = now_value - timedelta(days=recent_window_days)
     required = _required_values(required_facets)
     result_list = list(results)
 
@@ -403,12 +408,12 @@ def detect_context_gaps(
                 "message": "Retrieved context does not include enough recent items.",
                 "current": len(recent_ids),
                 "required": min_recent_count,
-                "window_days": _RECENT_WINDOW_DAYS,
+                "window_days": recent_window_days,
             }
         )
         suggestions.append(
             "Retrieve newer context from the last "
-            f"{_RECENT_WINDOW_DAYS} days until at least "
+            f"{recent_window_days} days until at least "
             f"{min_recent_count} recent items are available."
         )
 
@@ -424,7 +429,7 @@ def detect_context_gaps(
             "recency": {
                 "dated_count": len(timestamps),
                 "recent_count": len(recent_ids),
-                "window_days": _RECENT_WINDOW_DAYS,
+                "window_days": recent_window_days,
                 "oldest_at": oldest_at,
                 "newest_at": newest_at,
             },

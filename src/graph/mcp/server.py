@@ -79,6 +79,7 @@ from graph.cli.main import (
     SEARCH_SORTS,
 )
 from graph.graph.service import GraphService
+from graph.rag import detect_context_gaps
 from graph.rag.search import sort_search_results
 from graph.store.db import Store
 from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
@@ -954,6 +955,71 @@ async def list_tools() -> list[Tool]:
                         "default": "fulltext",
                         "description": "Search mode",
                     },
+                },
+                "required": ["query"],
+            },
+        ),
+        Tool(
+            name="context_gaps",
+            description=(
+                "Search for RAG context and analyze whether retrieved results have "
+                "source, facet, and recency coverage gaps before answering."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query"},
+                    "limit": {
+                        "type": "integer",
+                        "default": 10,
+                        "minimum": 1,
+                        "description": "Maximum search results to analyze",
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["hybrid", "semantic", "fulltext"],
+                        "default": "fulltext",
+                        "description": "Search mode used to retrieve candidate context",
+                    },
+                    "required_facets": {
+                        "type": "object",
+                        "default": {},
+                        "description": (
+                            "Facet values that must appear in retrieved context. "
+                            "Supported keys: source_projects, content_types, tags, domains."
+                        ),
+                        "additionalProperties": {
+                            "oneOf": [
+                                {"type": "string"},
+                                {"type": "array", "items": {"type": "string"}},
+                            ]
+                        },
+                    },
+                    "min_sources": {
+                        "type": "integer",
+                        "default": 2,
+                        "minimum": 0,
+                        "description": "Minimum distinct source projects required",
+                    },
+                    "min_recent_items": {
+                        "type": "integer",
+                        "default": 0,
+                        "minimum": 0,
+                        "description": "Minimum items required in the recency window",
+                    },
+                    "recency_window_days": {
+                        "type": "integer",
+                        "default": 30,
+                        "minimum": 0,
+                        "description": "Number of days considered recent",
+                    },
+                    "now": {
+                        "type": "string",
+                        "description": (
+                            "Optional ISO-8601 timestamp used as the recency reference time"
+                        ),
+                    },
+                    **SEARCH_FILTER_SCHEMA,
                 },
                 "required": ["query"],
             },
@@ -2892,6 +2958,68 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             if arguments.get("sort") is not None:
                 return [TextContent(type="text", text=json.dumps(payload))]
             return [TextContent(type="text", text=json.dumps(payload["results"]))]
+
+        elif name == "context_gaps":
+            query = arguments["query"]
+            limit = arguments.get("limit", 10)
+            mode = arguments.get("mode", "fulltext")
+            try:
+                filters = _search_filters_dict(
+                    source_project=arguments.get("source_project"),
+                    content_type=arguments.get("content_type"),
+                    review_state=arguments.get("review_state"),
+                    tag=arguments.get("tag"),
+                    exclude_tag=arguments.get("exclude_tag"),
+                    metadata_key=arguments.get("metadata_key"),
+                    metadata_value=arguments.get("metadata_value"),
+                    created_after=arguments.get("created_after"),
+                    created_before=arguments.get("created_before"),
+                    updated_after=arguments.get("updated_after"),
+                    updated_before=arguments.get("updated_before"),
+                    min_utility=arguments.get("min_utility"),
+                    max_utility=arguments.get("max_utility"),
+                    min_confidence=arguments.get("min_confidence"),
+                    max_confidence=arguments.get("max_confidence"),
+                )
+                search_payload = _do_search(
+                    store,
+                    query,
+                    limit=limit,
+                    mode=mode,
+                    filters=filters,
+                )
+                now = arguments.get("now")
+                if isinstance(now, str):
+                    now = datetime.fromisoformat(now.replace("Z", "+00:00"))
+                gap_report = detect_context_gaps(
+                    search_payload["results"],
+                    required_facets=arguments.get("required_facets"),
+                    min_sources=arguments.get("min_sources", 2),
+                    min_recent_items=arguments.get("min_recent_items", 0),
+                    recency_window_days=arguments.get("recency_window_days", 30),
+                    now=now,
+                )
+                payload = {
+                    "query": query,
+                    "mode": mode,
+                    "limit": limit,
+                    "filters": filters,
+                    "search": {
+                        "result_count": len(search_payload["results"]),
+                        "result_ids": [
+                            result["id"] for result in search_payload["results"]
+                        ],
+                    },
+                    **gap_report,
+                }
+            except ValueError as exc:
+                payload = {
+                    "error": "invalid_context_gaps_request",
+                    "message": str(exc),
+                    "valid_modes": ["fulltext", "semantic", "hybrid"],
+                    "valid_sorts": list(SEARCH_SORTS),
+                }
+            return [TextContent(type="text", text=json.dumps(payload))]
 
         elif name == "pinned_units":
             payload = _do_pinned_units(
