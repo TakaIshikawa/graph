@@ -1356,20 +1356,27 @@ class TestBibtexAdapter:
         assert first.source_entity_type == "bibtex_entry"
         assert first.title == "Semantic Personal Graphs"
         assert first.tags == ["graphs", "knowledge"]
-        assert "Authors: Smith, Ada and Doe, Grace" in first.content
+        assert "Title: Semantic Personal Graphs" in first.content
+        assert "Authors: Smith, Ada; Doe, Grace" in first.content
         assert "Year: 2024" in first.content
         assert "Venue: Journal of Knowledge Systems" in first.content
         assert "Abstract: A study of personal semantic graphs." in first.content
         assert "Notes: Includes longitudinal evaluation." in first.content
+        assert "DOI: 10.1000/example" in first.content
+        assert "URL: https://example.com/paper" in first.content
+        assert "Keywords: graphs, knowledge" in first.content
         assert first.metadata == {
             "citation_key": "smith2024graph",
             "entry_type": "article",
+            "title": "Semantic Personal Graphs",
             "authors": ["Smith, Ada", "Doe, Grace"],
             "year": "2024",
             "doi": "10.1000/example",
             "url": "https://example.com/paper",
             "journal": "Journal of Knowledge Systems",
             "booktitle": "",
+            "abstract": "A study of personal semantic graphs.",
+            "keywords": ["graphs", "knowledge"],
             "source_file": "refs.bib",
         }
         assert result.units[1].title == "Proceedings of AgentConf"
