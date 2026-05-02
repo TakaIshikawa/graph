@@ -79,7 +79,7 @@ from graph.cli.main import (
     SEARCH_SORTS,
 )
 from graph.graph.service import GraphService
-from graph.rag import detect_context_gaps
+from graph.rag import detect_context_gaps, score_source_agreement
 from graph.rag.search import sort_search_results
 from graph.store.db import Store
 from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
@@ -238,6 +238,133 @@ def _adapter_catalog_payload() -> dict:
             entry["error"] = f"{type(exc).__name__}: {exc}"
         adapters.append(entry)
     return {"adapters": adapters}
+
+
+def _source_project_value(result: dict) -> str:
+    for key in ("source_project", "source", "project"):
+        value = result.get(key)
+        if value is not None:
+            return str(value)
+    metadata = result.get("metadata")
+    if isinstance(metadata, dict):
+        for key in ("source_project", "source", "project"):
+            value = metadata.get(key)
+            if value is not None:
+                return str(value)
+    unit = result.get("unit")
+    if isinstance(unit, dict):
+        value = unit.get("source_project")
+        if value is not None:
+            return str(value)
+    return "unknown"
+
+
+def _source_agreement_low_information(
+    *,
+    claim: str | None,
+    result_count: int,
+    source_count: int,
+    min_source_count: int,
+    missing_unit_ids: list[str],
+) -> dict:
+    if result_count == 0:
+        reason = "No result records or resolvable unit_ids were provided."
+    elif source_count < min_source_count:
+        reason = (
+            f"Only {source_count} distinct source project(s) were available; "
+            f"{min_source_count} required."
+        )
+    else:
+        reason = "No shared evidence keys met the agreement threshold."
+    return {
+        "claim": claim,
+        "status": "low_information",
+        "reason": reason,
+        "scores": [],
+        "stats": {
+            "result_count": result_count,
+            "source_count": source_count,
+            "min_source_count": min_source_count,
+            "missing_unit_ids": missing_unit_ids,
+        },
+    }
+
+
+def _source_agreement_payload(store: Store, arguments: dict) -> dict:
+    claim = arguments.get("claim", arguments.get("query"))
+    records = arguments.get("results", [])
+    unit_ids = arguments.get("unit_ids", [])
+
+    if records is None:
+        records = []
+    if unit_ids is None:
+        unit_ids = []
+    if not isinstance(records, list):
+        raise ValueError("results must be an array of result-like objects")
+    if not isinstance(unit_ids, list) or any(not isinstance(item, str) for item in unit_ids):
+        raise ValueError("unit_ids must be an array of strings")
+
+    resolved_records: list[dict] = []
+    missing_unit_ids: list[str] = []
+    for unit_id in unit_ids:
+        unit = store.get_unit(unit_id)
+        if unit is None:
+            missing_unit_ids.append(unit_id)
+            continue
+        resolved_records.append(_unit_to_json(unit))
+
+    for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            raise ValueError(f"results[{index}] must be an object")
+        resolved_records.append(record)
+
+    min_source_count = arguments.get("min_source_count", 2)
+    limit = arguments.get("limit", 10)
+    min_term_length = arguments.get("min_term_length", 3)
+    score_source_agreement(
+        [],
+        min_source_count=min_source_count,
+        limit=limit,
+        min_term_length=min_term_length,
+    )
+    source_count = len({_source_project_value(record) for record in resolved_records})
+
+    if not resolved_records or source_count < min_source_count:
+        return _source_agreement_low_information(
+            claim=claim,
+            result_count=len(resolved_records),
+            source_count=source_count,
+            min_source_count=min_source_count,
+            missing_unit_ids=missing_unit_ids,
+        )
+
+    scores = score_source_agreement(
+        resolved_records,
+        min_source_count=min_source_count,
+        limit=limit,
+        min_term_length=min_term_length,
+    )
+    if not scores:
+        return _source_agreement_low_information(
+            claim=claim,
+            result_count=len(resolved_records),
+            source_count=source_count,
+            min_source_count=min_source_count,
+            missing_unit_ids=missing_unit_ids,
+        )
+
+    return {
+        "claim": claim,
+        "status": "ok",
+        "scores": scores,
+        "stats": {
+            "result_count": len(resolved_records),
+            "source_count": source_count,
+            "min_source_count": min_source_count,
+            "missing_unit_ids": missing_unit_ids,
+            "limit": limit,
+        },
+    }
 
 
 def _graph_overview_summary(store: Store, *, limit: int = 10) -> dict:
@@ -1022,6 +1149,59 @@ async def list_tools() -> list[Tool]:
                     **SEARCH_FILTER_SCHEMA,
                 },
                 "required": ["query"],
+            },
+        ),
+        Tool(
+            name="source_agreement",
+            description=(
+                "Score agreement signals across retrieved results or graph unit IDs "
+                "by comparing tags, keywords, terms, and distinct source projects."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "claim": {
+                        "type": "string",
+                        "description": "Optional claim or answer draft the evidence is meant to support",
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Optional query associated with the retrieved context",
+                    },
+                    "results": {
+                        "type": "array",
+                        "default": [],
+                        "description": (
+                            "Retrieved result-like records with fields such as id, "
+                            "source_project, title, content, tags, keywords, or unit."
+                        ),
+                        "items": {"type": "object"},
+                    },
+                    "unit_ids": {
+                        "type": "array",
+                        "default": [],
+                        "description": "Graph knowledge unit IDs to fetch and score",
+                        "items": {"type": "string"},
+                    },
+                    "min_source_count": {
+                        "type": "integer",
+                        "default": 2,
+                        "minimum": 1,
+                        "description": "Minimum distinct source projects required per evidence key",
+                    },
+                    "limit": {
+                        "type": ["integer", "null"],
+                        "default": 10,
+                        "minimum": 0,
+                        "description": "Maximum agreement rows to return; null returns all rows",
+                    },
+                    "min_term_length": {
+                        "type": "integer",
+                        "default": 3,
+                        "minimum": 1,
+                        "description": "Minimum token length for extracted term evidence",
+                    },
+                },
             },
         ),
         Tool(
@@ -3032,6 +3212,27 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     "message": str(exc),
                     "valid_modes": ["fulltext", "semantic", "hybrid"],
                     "valid_sorts": list(SEARCH_SORTS),
+                }
+            return [TextContent(type="text", text=json.dumps(payload))]
+
+        elif name == "source_agreement":
+            try:
+                payload = _source_agreement_payload(store, arguments)
+            except ValueError as exc:
+                payload = {
+                    "error": "invalid_source_agreement_request",
+                    "message": str(exc),
+                    "arguments": {
+                        "claim": arguments.get("claim"),
+                        "query": arguments.get("query"),
+                        "result_count": len(arguments.get("results") or [])
+                        if isinstance(arguments.get("results") or [], list)
+                        else None,
+                        "unit_ids": arguments.get("unit_ids", []),
+                        "min_source_count": arguments.get("min_source_count", 2),
+                        "limit": arguments.get("limit", 10),
+                        "min_term_length": arguments.get("min_term_length", 3),
+                    },
                 }
             return [TextContent(type="text", text=json.dumps(payload))]
 
