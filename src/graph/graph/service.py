@@ -3015,6 +3015,115 @@ class GraphService:
         )
         return records[:capped_limit]
 
+    def analyze_reciprocal_links(self, limit: int = 20) -> dict:
+        """Identify unordered unit pairs with directed edges in both directions."""
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
+            raise ValueError("limit must be a non-negative integer.")
+
+        units_by_id = {unit.id: unit for unit in self.store.get_all_units(limit=1000000000)}
+        if len(units_by_id) < 2:
+            return {
+                "total_pair_count": 0,
+                "returned_count": 0,
+                "limit": limit,
+                "reciprocal_links": [],
+            }
+
+        edge_groups: dict[tuple[str, str], dict[str, list[KnowledgeEdge]]] = {}
+        for edge in sorted(
+            self.store.get_all_edges(),
+            key=lambda item: (
+                min(item.from_unit_id, item.to_unit_id),
+                max(item.from_unit_id, item.to_unit_id),
+                item.from_unit_id,
+                item.to_unit_id,
+                str(item.relation),
+                str(item.source),
+                -float(item.weight or 0.0),
+                item.id,
+            ),
+        ):
+            if edge.from_unit_id not in units_by_id or edge.to_unit_id not in units_by_id:
+                continue
+            if edge.from_unit_id == edge.to_unit_id:
+                continue
+
+            pair = tuple(sorted((edge.from_unit_id, edge.to_unit_id)))
+            direction_key = f"{edge.from_unit_id}->{edge.to_unit_id}"
+            directions = edge_groups.setdefault(pair, {})
+            directions.setdefault(direction_key, []).append(edge)
+
+        records = []
+        for pair, directions in edge_groups.items():
+            left_id, right_id = pair
+            left_to_right_key = f"{left_id}->{right_id}"
+            right_to_left_key = f"{right_id}->{left_id}"
+            if left_to_right_key not in directions or right_to_left_key not in directions:
+                continue
+
+            directional_records = []
+            combined_weight = 0.0
+            for from_id, to_id, direction_key in [
+                (left_id, right_id, left_to_right_key),
+                (right_id, left_id, right_to_left_key),
+            ]:
+                direction_edges = directions[direction_key]
+                direction_weight = sum(float(edge.weight or 0.0) for edge in direction_edges)
+                combined_weight += direction_weight
+                directional_records.append(
+                    {
+                        "from_unit_id": from_id,
+                        "to_unit_id": to_id,
+                        "from_title": units_by_id[from_id].title,
+                        "to_title": units_by_id[to_id].title,
+                        "edge_count": len(direction_edges),
+                        "total_weight": round(direction_weight, 6),
+                        "relations": sorted({str(edge.relation) for edge in direction_edges}),
+                        "sources": sorted({str(edge.source) for edge in direction_edges}),
+                        "edges": [
+                            self._edge_export_data(edge)
+                            for edge in sorted(
+                                direction_edges,
+                                key=lambda item: (
+                                    str(item.relation),
+                                    str(item.source),
+                                    -float(item.weight or 0.0),
+                                    item.id,
+                                ),
+                            )
+                        ],
+                    }
+                )
+
+            records.append(
+                {
+                    "unit_ids": [left_id, right_id],
+                    "endpoints": [
+                        self._unit_summary_data(units_by_id[left_id]),
+                        self._unit_summary_data(units_by_id[right_id]),
+                    ],
+                    "combined_weight": round(combined_weight, 6),
+                    "edge_count": sum(
+                        direction["edge_count"] for direction in directional_records
+                    ),
+                    "directions": directional_records,
+                }
+            )
+
+        records.sort(
+            key=lambda record: (
+                -record["combined_weight"],
+                record["unit_ids"],
+            )
+        )
+        returned = records[:limit]
+        return {
+            "total_pair_count": len(records),
+            "returned_count": len(returned),
+            "limit": limit,
+            "reciprocal_links": returned,
+        }
+
     def analyze_articulation_points(self, limit: int = 20) -> list[dict]:
         """Identify articulation points in the undirected knowledge graph projection."""
         try:
