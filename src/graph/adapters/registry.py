@@ -39,6 +39,7 @@ from graph.adapters.roam import RoamAdapter
 from graph.adapters.sota import SOTAAdapter
 from graph.adapters.ris import RisAdapter
 from graph.adapters.text import TextAdapter
+from graph.adapters.text_outline import TextOutlineAdapter
 from graph.adapters.transcript import TranscriptAdapter
 from graph.adapters.yaml_adapter import YamlAdapter
 from graph.adapters.zotero_rdf import ZoteroRdfAdapter
@@ -64,6 +65,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "email": EmailAdapter,
     "enex": EnexAdapter,
     "text": TextAdapter,
+    "text_outline": TextOutlineAdapter,
     "html": HtmlAdapter,
     "ical": ICalAdapter,
     "ipynb": IpynbAdapter,
