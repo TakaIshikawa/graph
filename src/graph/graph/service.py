@@ -1923,6 +1923,79 @@ class GraphService:
             results.append({"unit": summary, "score": item["score"]})
         return results
 
+    def get_betweenness_centrality(
+        self,
+        limit: int = 10,
+        normalized: bool = True,
+        weight: str | bool | None = None,
+    ) -> list[dict]:
+        """Return ranked unit summaries using directed betweenness centrality."""
+        if isinstance(limit, bool) or not isinstance(limit, int):
+            raise ValueError("limit must be a non-negative integer.")
+        capped_limit = limit
+        if capped_limit < 0:
+            raise ValueError("limit must be a non-negative integer.")
+
+        if not isinstance(normalized, bool):
+            raise ValueError("normalized must be a boolean.")
+
+        if weight is True:
+            weight_key = "weight"
+        elif weight is False:
+            weight_key = None
+        elif weight is None or isinstance(weight, str):
+            weight_key = weight
+        else:
+            raise ValueError("weight must be a string, True, False, or None.")
+
+        if not self.G:
+            self.rebuild()
+        if not self.G.nodes:
+            return []
+
+        scores = nx.betweenness_centrality(
+            self.G,
+            normalized=normalized,
+            weight=weight_key,
+        )
+
+        def _score(value: float) -> float:
+            score = float(value)
+            return 0.0 if abs(score) < 1e-15 else score
+
+        ranked_ids = sorted(
+            self.G.nodes,
+            key=lambda unit_id: (-_score(scores.get(unit_id, 0.0)), str(unit_id)),
+        )[:capped_limit]
+
+        results = []
+        for unit_id in ranked_ids:
+            unit = self.store.get_unit(unit_id)
+            if unit is None:
+                node_data = self.G.nodes[unit_id]
+                results.append(
+                    {
+                        "unit_id": unit_id,
+                        "title": str(node_data.get("title", "")),
+                        "source_project": str(node_data.get("source_project", "")),
+                        "source_id": "",
+                        "content_type": str(node_data.get("content_type", "")),
+                        "betweenness_score": _score(scores.get(unit_id, 0.0)),
+                    }
+                )
+                continue
+            results.append(
+                {
+                    "unit_id": unit.id,
+                    "title": unit.title,
+                    "source_project": str(unit.source_project),
+                    "source_id": unit.source_id,
+                    "content_type": str(unit.content_type),
+                    "betweenness_score": _score(scores.get(unit_id, 0.0)),
+                }
+            )
+        return results
+
     def eigenvector_centrality(
         self,
         *,

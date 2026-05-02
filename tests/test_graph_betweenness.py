@@ -175,3 +175,54 @@ def test_betweenness_centrality_rejects_invalid_normalized(store: Store, normali
 def test_betweenness_centrality_rejects_invalid_weight(store: Store, weight):
     with pytest.raises(ValueError, match="weight must be a string, True, False, or None"):
         GraphService(store).betweenness_centrality(weight=weight)
+
+
+def test_get_betweenness_centrality_ranks_directed_bridge_units(
+    betweenness_store: Store,
+):
+    result = GraphService(betweenness_store).get_betweenness_centrality(limit=2)
+
+    assert [node["unit_id"] for node in result] == ["bridge-a", "bridge-b"]
+    assert result[0] == {
+        "unit_id": "bridge-a",
+        "title": "Bridge A",
+        "source_project": "forty_two",
+        "source_id": "bridge-a",
+        "content_type": "insight",
+        "betweenness_score": result[0]["betweenness_score"],
+    }
+    assert result[0]["betweenness_score"] == pytest.approx(
+        result[1]["betweenness_score"]
+    )
+    assert result[0]["betweenness_score"] > 0.0
+
+
+def test_get_betweenness_centrality_tie_breaks_by_unit_id(store: Store):
+    _insert_unit(store, "unit-b", "Beta")
+    _insert_unit(store, "unit-a", "Alpha")
+
+    result = GraphService(store).get_betweenness_centrality()
+
+    assert [node["unit_id"] for node in result] == ["unit-a", "unit-b"]
+    assert [node["betweenness_score"] for node in result] == [0.0, 0.0]
+
+
+def test_get_betweenness_centrality_zero_limit_returns_empty_after_validation(
+    betweenness_store: Store,
+):
+    assert GraphService(betweenness_store).get_betweenness_centrality(limit=0) == []
+    with pytest.raises(ValueError, match="normalized must be a boolean"):
+        GraphService(betweenness_store).get_betweenness_centrality(
+            limit=0,
+            normalized="yes",
+        )
+
+
+def test_get_betweenness_centrality_empty_graph_returns_empty_result(store: Store):
+    assert GraphService(store).get_betweenness_centrality() == []
+
+
+@pytest.mark.parametrize("limit", [-1, 1.5, "many", True])
+def test_get_betweenness_centrality_rejects_invalid_limit(store: Store, limit):
+    with pytest.raises(ValueError, match="limit must be a non-negative integer"):
+        GraphService(store).get_betweenness_centrality(limit=limit)
