@@ -1923,6 +1923,110 @@ class GraphService:
             results.append({"unit": summary, "score": item["score"]})
         return results
 
+    def analyze_degree_distribution(
+        self,
+        *,
+        direction: str = "total",
+        top_n: int = 10,
+    ) -> dict:
+        """Summarize degree distribution for the current directed graph."""
+        if direction not in {"total", "in", "out"}:
+            raise ValueError(
+                "Unsupported degree direction: "
+                f"{direction!r}. Use 'total', 'in', or 'out'."
+            )
+
+        if isinstance(top_n, bool):
+            raise ValueError("top_n must be a positive integer.")
+        try:
+            capped_limit = int(top_n)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("top_n must be a positive integer.") from exc
+        if capped_limit < 1:
+            raise ValueError("top_n must be a positive integer.")
+
+        if not self.G:
+            self.rebuild()
+
+        if not self.G.nodes:
+            return {
+                "direction": direction,
+                "total_units": 0,
+                "isolated_unit_count": 0,
+                "histogram": [],
+                "top_units": [],
+            }
+
+        degree_rows = []
+        histogram_counts: Counter[int] = Counter()
+        isolated_unit_count = 0
+        for unit_id in self.G.nodes:
+            in_degree = int(self.G.in_degree(unit_id))
+            out_degree = int(self.G.out_degree(unit_id))
+            if direction == "in":
+                degree = in_degree
+            elif direction == "out":
+                degree = out_degree
+            else:
+                degree = in_degree + out_degree
+
+            histogram_counts[degree] += 1
+            if degree == 0:
+                isolated_unit_count += 1
+            degree_rows.append(
+                {
+                    "unit_id": unit_id,
+                    "degree": degree,
+                    "in_degree": in_degree,
+                    "out_degree": out_degree,
+                    "title": str(self.G.nodes[unit_id].get("title", "")),
+                }
+            )
+
+        degree_rows.sort(
+            key=lambda item: (
+                -int(item["degree"]),
+                -int(item["in_degree"]),
+                -int(item["out_degree"]),
+                str(item["title"]).lower(),
+                str(item["unit_id"]),
+            )
+        )
+
+        top_units = []
+        for row in degree_rows[:capped_limit]:
+            unit_id = row["unit_id"]
+            summary = self._unit_summary_data(self.store.get_unit(unit_id))
+            if summary is None:
+                node_data = self.G.nodes[unit_id]
+                summary = {
+                    "id": unit_id,
+                    "source_project": str(node_data.get("source_project", "")),
+                    "source_id": "",
+                    "source_entity_type": str(node_data.get("source_entity_type", "")),
+                    "title": str(node_data.get("title", "")),
+                    "content_type": str(node_data.get("content_type", "")),
+                }
+            top_units.append(
+                {
+                    **summary,
+                    "degree": int(row["degree"]),
+                    "in_degree": int(row["in_degree"]),
+                    "out_degree": int(row["out_degree"]),
+                }
+            )
+
+        return {
+            "direction": direction,
+            "total_units": len(self.G.nodes),
+            "isolated_unit_count": isolated_unit_count,
+            "histogram": [
+                {"degree": degree, "unit_count": count}
+                for degree, count in sorted(histogram_counts.items())
+            ],
+            "top_units": top_units,
+        }
+
     def analyze_k_core(
         self,
         k: int | None = None,
