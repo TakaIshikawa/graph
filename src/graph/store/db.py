@@ -7,9 +7,13 @@ import re
 import sqlite3
 import uuid
 import csv
+from collections import Counter, defaultdict
+from collections.abc import Mapping
+from datetime import date
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from graph.store.migrations import SCHEMA_VERSION, ensure_schema
 from graph.types.enums import EdgeRelation, EdgeSource
@@ -24,6 +28,8 @@ REQUIRED_SQLITE_BACKUP_OBJECTS = {
     "edges",
     "knowledge_fts",
 }
+_MAX_METADATA_INVENTORY_EXAMPLES = 3
+_MAX_METADATA_INVENTORY_EXAMPLE_LENGTH = 80
 
 if TYPE_CHECKING:
     from graph.adapters.base import IngestResult
@@ -242,6 +248,98 @@ def _format_metadata_path(parts: list[str]) -> str:
 
 def _metadata_json_path(path: str) -> str:
     return "$" + "".join(f'."{part}"' for part in _metadata_path_parts(path))
+
+
+def _metadata_inventory_path_part(value: Any) -> str:
+    return str(value).replace(".", "\\.")
+
+
+def _flatten_metadata_inventory(value: Any, prefix: str = "") -> list[tuple[str, Any]]:
+    if isinstance(value, Mapping):
+        if not prefix:
+            items: list[tuple[str, Any]] = []
+        elif not value:
+            return [(prefix, value)]
+        else:
+            items = []
+        for raw_key, child in sorted(value.items(), key=lambda item: str(item[0])):
+            key = _metadata_inventory_path_part(raw_key)
+            path = f"{prefix}.{key}" if prefix else key
+            items.extend(_flatten_metadata_inventory(child, path))
+        return items
+
+    if isinstance(value, list | tuple):
+        if not value:
+            return [(prefix, value)] if prefix else []
+        items = []
+        for index, child in enumerate(value):
+            path = f"{prefix}[{index}]" if prefix else f"[{index}]"
+            items.extend(_flatten_metadata_inventory(child, path))
+        return items
+
+    return [(prefix, value)] if prefix else []
+
+
+def _metadata_inventory_value_type(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int) and not isinstance(value, bool):
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, datetime):
+        return "datetime"
+    if isinstance(value, date):
+        return "date"
+    if isinstance(value, Enum):
+        return "string"
+    if isinstance(value, Mapping):
+        return "object"
+    if isinstance(value, list | tuple | set):
+        return "array"
+    return type(value).__name__
+
+
+def _metadata_inventory_normalized_value(value: Any) -> Any:
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, datetime | date):
+        return value.isoformat()
+    if isinstance(value, Mapping):
+        return {
+            str(key): _metadata_inventory_normalized_value(item)
+            for key, item in sorted(value.items(), key=lambda item: str(item[0]))
+        }
+    if isinstance(value, list | tuple):
+        return [_metadata_inventory_normalized_value(item) for item in value]
+    if isinstance(value, set):
+        return sorted((_metadata_inventory_normalized_value(item) for item in value), key=str)
+    return value
+
+
+def _metadata_inventory_example_value(value: Any) -> str:
+    normalized = _metadata_inventory_normalized_value(value)
+    if isinstance(normalized, str):
+        text = normalized
+    elif normalized is None or isinstance(normalized, int | float | bool):
+        text = str(normalized).lower() if isinstance(normalized, bool) else str(normalized)
+    else:
+        text = json.dumps(normalized, sort_keys=True, ensure_ascii=False, default=str)
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) > _MAX_METADATA_INVENTORY_EXAMPLE_LENGTH:
+        text = f"{text[: _MAX_METADATA_INVENTORY_EXAMPLE_LENGTH - 1].rstrip()}..."
+    return text
+
+
+def _metadata_inventory_counter_values(counter: Counter[str]) -> list[str]:
+    return [
+        key
+        for key, _count in sorted(counter.items(), key=lambda item: (-item[1], item[0]))
+    ]
 
 
 def metadata_path_value(metadata: dict, path: str):
@@ -465,6 +563,59 @@ class Store:
             "SELECT * FROM knowledge_units ORDER BY created_at DESC LIMIT ?", (limit,)
         ).fetchall()
         return [_row_to_unit(r) for r in rows]
+
+    def metadata_key_inventory(
+        self,
+        prefix: str | None = None,
+        *,
+        limit: int | None = None,
+    ) -> list[dict]:
+        """Return deterministic usage rows for flattened unit metadata paths."""
+        if limit is not None and (
+            not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0
+        ):
+            raise ValueError("limit must be a positive integer.")
+
+        normalized_prefix = str(prefix).strip() if prefix is not None else None
+        if normalized_prefix == "":
+            normalized_prefix = None
+
+        counts: Counter[str] = Counter()
+        value_types: dict[str, Counter[str]] = defaultdict(Counter)
+        source_projects: dict[str, Counter[str]] = defaultdict(Counter)
+        example_values: dict[str, set[str]] = defaultdict(set)
+
+        rows = self.conn.execute(
+            """SELECT id, source_project, source_id, title, metadata
+               FROM knowledge_units
+               ORDER BY source_project, source_id, title, id"""
+        ).fetchall()
+        for row in rows:
+            metadata = json.loads(row["metadata"])
+            if not isinstance(metadata, Mapping):
+                continue
+            for path, value in _flatten_metadata_inventory(metadata):
+                if normalized_prefix is not None and not path.startswith(normalized_prefix):
+                    continue
+                counts[path] += 1
+                value_types[path][_metadata_inventory_value_type(value)] += 1
+                source_projects[path][str(row["source_project"])] += 1
+                if len(example_values[path]) < _MAX_METADATA_INVENTORY_EXAMPLES:
+                    example_values[path].add(_metadata_inventory_example_value(value))
+
+        inventory_rows = [
+            {
+                "path": path,
+                "count": counts[path],
+                "value_types": _metadata_inventory_counter_values(value_types[path]),
+                "example_values": sorted(example_values[path])[
+                    :_MAX_METADATA_INVENTORY_EXAMPLES
+                ],
+                "source_projects": _metadata_inventory_counter_values(source_projects[path]),
+            }
+            for path in sorted(counts, key=lambda item: (-counts[item], item))
+        ]
+        return inventory_rows[:limit] if limit is not None else inventory_rows
 
     def find_source_id_collisions(
         self,
