@@ -30,6 +30,7 @@ from graph.adapters.hypothesis import HypothesisAdapter
 from graph.adapters.ical import ICalAdapter
 from graph.adapters.ipynb import IpynbAdapter
 from graph.adapters.jsonl_adapter import JsonlAdapter
+from graph.adapters.logseq import LogseqAdapter
 from graph.adapters.markdown import MarkdownAdapter
 from graph.adapters.max_adapter import MaxAdapter
 from graph.adapters.me import MeAdapter
@@ -2655,6 +2656,7 @@ class TestRegistry:
             "hypothesis",
             "readwise",
             "roam",
+            "logseq",
         }
 
     def test_get_adapter(self):
@@ -2748,6 +2750,10 @@ class TestRegistry:
         roam_adapter = get_adapter("roam", file_path="/tmp/roam.json")
         assert isinstance(roam_adapter, RoamAdapter)
         assert roam_adapter.name == "roam"
+
+        logseq_adapter = get_adapter("logseq", file_path="/tmp/logseq.edn")
+        assert isinstance(logseq_adapter, LogseqAdapter)
+        assert logseq_adapter.name == "logseq"
 
         mediawiki_adapter = get_adapter("mediawiki", path="/tmp/wiki.xml")
         assert isinstance(mediawiki_adapter, MediaWikiAdapter)

@@ -21,6 +21,7 @@ from graph.adapters.ipynb import IpynbAdapter
 from graph.adapters.jats import JatsAdapter
 from graph.adapters.jsonl_adapter import JsonlAdapter
 from graph.adapters.kindle import KindleAdapter
+from graph.adapters.logseq import LogseqAdapter
 from graph.adapters.markdown import MarkdownAdapter
 from graph.adapters.max_adapter import MaxAdapter
 from graph.adapters.me import MeAdapter
@@ -79,6 +80,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "hypothesis": HypothesisAdapter,
     "readwise": ReadwiseAdapter,
     "roam": RoamAdapter,
+    "logseq": LogseqAdapter,
 }
 
 
