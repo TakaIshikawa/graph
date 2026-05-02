@@ -30,6 +30,7 @@ REQUIRED_SQLITE_BACKUP_OBJECTS = {
 }
 _MAX_METADATA_INVENTORY_EXAMPLES = 3
 _MAX_METADATA_INVENTORY_EXAMPLE_LENGTH = 80
+_MAX_TAG_USAGE_EXAMPLES = 3
 
 if TYPE_CHECKING:
     from graph.adapters.base import IngestResult
@@ -699,6 +700,82 @@ class Store:
 
         rows = self.conn.execute(query, params).fetchall()
         return {str(row["tag"]): row["count"] for row in rows}
+
+    def tag_usage_summary(
+        self,
+        *,
+        limit: int = 50,
+        include_examples: bool = True,
+    ) -> dict:
+        """Return deterministic tag assignment counts and top tag usage rows."""
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
+            raise ValueError("limit must be a non-negative integer.")
+
+        total_row = self.conn.execute(
+            """SELECT
+                   COUNT(DISTINCT json_each.value) AS total_distinct_tags,
+                   COUNT(*) AS total_tag_assignments
+               FROM knowledge_units, json_each(knowledge_units.tags)
+               WHERE json_each.type = 'text'
+                 AND TRIM(json_each.value) != ''"""
+        ).fetchone()
+        total_distinct_tags = total_row["total_distinct_tags"] or 0
+        total_tag_assignments = total_row["total_tag_assignments"] or 0
+
+        rows = self.conn.execute(
+            """SELECT json_each.value AS tag, COUNT(*) AS count
+               FROM knowledge_units, json_each(knowledge_units.tags)
+               WHERE json_each.type = 'text'
+                 AND TRIM(json_each.value) != ''
+               GROUP BY json_each.value
+               ORDER BY count DESC, tag
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+
+        tags = []
+        for row in rows:
+            count = row["count"]
+            tag = str(row["tag"])
+            payload = {
+                "tag": tag,
+                "count": count,
+                "percentage": round((count / total_tag_assignments) * 100, 2)
+                if total_tag_assignments
+                else 0.0,
+            }
+            if include_examples:
+                example_rows = self.conn.execute(
+                    """SELECT id, title, source_project, source_id, source_entity_type
+                       FROM knowledge_units
+                       WHERE EXISTS (
+                           SELECT 1
+                           FROM json_each(knowledge_units.tags)
+                           WHERE json_each.value = ?
+                       )
+                       ORDER BY title COLLATE NOCASE, title, source_project, source_id, id
+                       LIMIT ?""",
+                    (tag, _MAX_TAG_USAGE_EXAMPLES),
+                ).fetchall()
+                payload["examples"] = [
+                    {
+                        "id": example["id"],
+                        "title": example["title"],
+                        "source": {
+                            "project": example["source_project"],
+                            "id": example["source_id"],
+                            "entity_type": example["source_entity_type"],
+                        },
+                    }
+                    for example in example_rows
+                ]
+            tags.append(payload)
+
+        return {
+            "total_distinct_tags": total_distinct_tags,
+            "total_tag_assignments": total_tag_assignments,
+            "tags": tags,
+        }
 
     def add_unit_alias(
         self,
