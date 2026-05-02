@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Iterable, Mapping
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 import hashlib
@@ -4583,6 +4584,59 @@ class GraphService:
             )
 
         records.sort(key=_sort_key)
+        return records
+
+    def collection_overlap(
+        self,
+        collections: Mapping[str, Iterable[str]],
+        *,
+        min_overlap: int = 1,
+    ) -> list[dict]:
+        """Return pairwise overlap metrics for named collections of unit IDs."""
+        if isinstance(min_overlap, bool):
+            raise ValueError("min_overlap must be a non-negative integer.")
+        try:
+            overlap_threshold = int(min_overlap)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("min_overlap must be a non-negative integer.") from exc
+        if overlap_threshold < 0 or overlap_threshold != min_overlap:
+            raise ValueError("min_overlap must be a non-negative integer.")
+
+        collection_sets = {
+            str(name): {str(unit_id) for unit_id in unit_ids}
+            for name, unit_ids in collections.items()
+        }
+
+        records = []
+        for left_name, right_name in combinations(sorted(collection_sets), 2):
+            left_ids = collection_sets[left_name]
+            right_ids = collection_sets[right_name]
+            shared_ids = sorted(left_ids & right_ids)
+            overlap_size = len(shared_ids)
+            if overlap_size < overlap_threshold:
+                continue
+
+            union_size = len(left_ids | right_ids)
+            jaccard = 0.0 if union_size == 0 else round(overlap_size / union_size, 6)
+            records.append(
+                {
+                    "left_collection": left_name,
+                    "right_collection": right_name,
+                    "overlap_size": overlap_size,
+                    "jaccard": jaccard,
+                    "left_only_count": len(left_ids - right_ids),
+                    "right_only_count": len(right_ids - left_ids),
+                    "shared_unit_ids": shared_ids,
+                }
+            )
+
+        records.sort(
+            key=lambda record: (
+                -int(record["overlap_size"]),
+                str(record["left_collection"]),
+                str(record["right_collection"]),
+            )
+        )
         return records
 
     def cross_project_connections(self) -> list[dict]:
