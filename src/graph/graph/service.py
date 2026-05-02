@@ -2216,6 +2216,70 @@ class GraphService:
             "bridges": bridges if limit is None else bridges[:limit],
         }
 
+    def analyze_relation_imbalance(self, *, group_by: str = "source_project") -> dict:
+        """Summarize dominant edge relations between source or content groups."""
+        if group_by not in {"source_project", "content_type"}:
+            raise ValueError("group_by must be source_project or content_type.")
+
+        units_by_id = {
+            unit.id: unit for unit in self.store.get_all_units(limit=1000000000)
+        }
+        pair_records: dict[tuple[str, str], Counter[str]] = {}
+
+        edges = sorted(
+            self.store.get_all_edges(),
+            key=lambda edge: (
+                edge.from_unit_id,
+                edge.to_unit_id,
+                str(edge.relation),
+                edge.id,
+            ),
+        )
+        for edge in edges:
+            from_unit = units_by_id.get(edge.from_unit_id)
+            to_unit = units_by_id.get(edge.to_unit_id)
+            if from_unit is None or to_unit is None:
+                continue
+
+            from_group = str(getattr(from_unit, group_by) or "").strip() or "unknown"
+            to_group = str(getattr(to_unit, group_by) or "").strip() or "unknown"
+            pair = tuple(sorted((from_group, to_group)))
+            pair_records.setdefault(pair, Counter())[str(edge.relation)] += 1
+
+        pairs = []
+        for pair, relation_counter in pair_records.items():
+            total_edges = sum(relation_counter.values())
+            dominant_relation, dominant_count = sorted(
+                relation_counter.items(),
+                key=lambda item: (-item[1], item[0]),
+            )[0]
+            pairs.append(
+                {
+                    "groups": list(pair),
+                    "relation_counts": dict(sorted(relation_counter.items())),
+                    "dominant_relation": dominant_relation,
+                    "total_edges": total_edges,
+                    "imbalance_score": (
+                        dominant_count / total_edges if total_edges else 0.0
+                    ),
+                }
+            )
+
+        pairs.sort(
+            key=lambda item: (
+                -item["imbalance_score"],
+                -item["total_edges"],
+                item["groups"][0],
+                item["groups"][1],
+                item["dominant_relation"],
+            )
+        )
+        return {
+            "group_by": group_by,
+            "pair_count": len(pairs),
+            "pairs": pairs,
+        }
+
     def analyze_strongly_connected_components(
         self,
         min_size: int = 2,
