@@ -17,6 +17,7 @@ class SourceProject(StrEnum):
     BROWSER_HISTORY_CSV = "browser_history_csv"
     CHATGPT_JSON = "chatgpt_json"
     CSV = "csv"
+    CSV_ROWS = "csv_rows"
     JSONL = "jsonl"
     YAML = "yaml"
     OPML = "opml"
