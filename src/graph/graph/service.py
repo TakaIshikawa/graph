@@ -1923,6 +1923,96 @@ class GraphService:
             results.append({"unit": summary, "score": item["score"]})
         return results
 
+    def eigenvector_centrality(
+        self,
+        *,
+        max_iter: int = 100,
+        tolerance: float = 1e-6,
+        limit: int | None = None,
+    ) -> dict:
+        """Return Eigenvector centrality rankings for the current graph."""
+        if isinstance(max_iter, bool):
+            raise ValueError("max_iter must be a positive integer.")
+        try:
+            capped_max_iter = int(max_iter)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("max_iter must be a positive integer.") from exc
+        if capped_max_iter < 1:
+            raise ValueError("max_iter must be a positive integer.")
+
+        if isinstance(tolerance, bool):
+            raise ValueError("tolerance must be a positive finite number.")
+        try:
+            capped_tolerance = float(tolerance)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("tolerance must be a positive finite number.") from exc
+        if not math.isfinite(capped_tolerance) or capped_tolerance <= 0.0:
+            raise ValueError("tolerance must be a positive finite number.")
+
+        if limit is None:
+            capped_limit = None
+        else:
+            if isinstance(limit, bool):
+                raise ValueError("limit must be a non-negative integer.")
+            try:
+                capped_limit = int(limit)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("limit must be a non-negative integer.") from exc
+            if capped_limit < 0:
+                raise ValueError("limit must be a non-negative integer.")
+
+        if not self.G:
+            self.rebuild()
+
+        stats = {
+            "node_count": self.G.number_of_nodes(),
+            "edge_count": self.G.number_of_edges(),
+            "max_iter": capped_max_iter,
+            "tolerance": capped_tolerance,
+            "limit": capped_limit,
+            "converged": True,
+            "error": None,
+        }
+
+        if not self.G.nodes:
+            return {"stats": stats, "nodes": []}
+
+        try:
+            scores = nx.eigenvector_centrality(
+                self.G,
+                max_iter=capped_max_iter,
+                tol=capped_tolerance,
+                weight="weight",
+            )
+        except nx.PowerIterationFailedConvergence as exc:
+            stats["converged"] = False
+            stats["error"] = str(exc)
+            return {"stats": stats, "nodes": []}
+
+        def _score(value: float) -> float:
+            score = float(value)
+            return 0.0 if abs(score) < 1e-15 else score
+
+        ranked_ids = sorted(
+            self.G.nodes,
+            key=lambda unit_id: (-_score(scores.get(unit_id, 0.0)), str(unit_id)),
+        )
+        if capped_limit is not None:
+            ranked_ids = ranked_ids[:capped_limit]
+
+        nodes = []
+        for unit_id in ranked_ids:
+            node_data = self.G.nodes[unit_id]
+            nodes.append(
+                {
+                    "unit_id": unit_id,
+                    "title": str(node_data.get("title", "")),
+                    "score": _score(scores.get(unit_id, 0.0)),
+                }
+            )
+
+        return {"stats": stats, "nodes": nodes}
+
     def analyze_hits(self, limit: int = 20, normalized: bool = True) -> dict:
         """Return HITS authority and hub rankings for the directed graph."""
         if isinstance(limit, bool):
