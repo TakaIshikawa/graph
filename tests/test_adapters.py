@@ -39,6 +39,7 @@ from graph.adapters.mastodon import MastodonAdapter
 from graph.adapters.max_adapter import MaxAdapter
 from graph.adapters.me import MeAdapter
 from graph.adapters.mediawiki import MediaWikiAdapter
+from graph.adapters.notion_markdown import NotionMarkdownAdapter
 from graph.adapters.opml import OpmlAdapter
 from graph.adapters.obsidian_canvas import ObsidianCanvasAdapter
 from graph.adapters.org import OrgAdapter
@@ -2643,6 +2644,7 @@ class TestRegistry:
             "csv",
             "jsonl",
             "yaml",
+            "notion_markdown",
             "opml",
             "obsidian_canvas",
             "org",
@@ -2695,6 +2697,10 @@ class TestRegistry:
         obsidian_canvas_adapter = get_adapter("obsidian_canvas", path="/tmp/map.canvas")
         assert isinstance(obsidian_canvas_adapter, ObsidianCanvasAdapter)
         assert obsidian_canvas_adapter.name == "obsidian_canvas"
+
+        notion_markdown_adapter = get_adapter("notion_markdown", path="/tmp/notion")
+        assert isinstance(notion_markdown_adapter, NotionMarkdownAdapter)
+        assert notion_markdown_adapter.name == "notion_markdown"
 
         org_adapter = get_adapter("org", root_path="/tmp/org")
         assert org_adapter.name == "org"
