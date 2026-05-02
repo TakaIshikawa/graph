@@ -2330,6 +2330,108 @@ def test_unit_metadata_tools_set_remove_and_report_errors(tmp_path, monkeypatch)
     assert json.loads(missing_response[0].text)["error"] == "unit_not_found"
 
 
+def test_metadata_value_histogram_tool_returns_counts_and_honors_limit(
+    tmp_path, monkeypatch
+):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    for source_id, state in [
+        ("approved-a", "approved"),
+        ("approved-b", "approved"),
+        ("draft-a", "draft"),
+        ("archived-a", "archived"),
+    ]:
+        store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id=source_id,
+                source_entity_type="insight",
+                title=f"Review {source_id}",
+                content="Review metadata note",
+                content_type=ContentType.INSIGHT,
+                metadata={"review": {"state": state}},
+            )
+        )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    histogram_tool = next(
+        tool for tool in tools if tool.name == "metadata_value_histogram"
+    )
+    assert histogram_tool.inputSchema["required"] == ["metadata_key"]
+    assert histogram_tool.inputSchema["properties"]["metadata_key"]["type"] == "string"
+    assert histogram_tool.inputSchema["properties"]["limit"]["minimum"] == 1
+
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "metadata_value_histogram",
+            {"metadata_key": "review.state"},
+        )
+    )
+    payload = json.loads(response[0].text)
+
+    assert payload == {
+        "path": "review.state",
+        "source_project": None,
+        "unit_count": 4,
+        "missing_count": 0,
+        "value_count": 4,
+        "values": [
+            {"value": "approved", "value_type": "string", "count": 2},
+            {"value": "archived", "value_type": "string", "count": 1},
+            {"value": "draft", "value_type": "string", "count": 1},
+        ],
+    }
+
+    limited_response = asyncio.run(
+        mcp_server.call_tool(
+            "metadata_value_histogram",
+            {"metadata_key": "review.state", "limit": 1},
+        )
+    )
+    limited_payload = json.loads(limited_response[0].text)
+    assert limited_payload["values"] == [
+        {"value": "approved", "value_type": "string", "count": 2}
+    ]
+
+
+def test_metadata_value_histogram_tool_returns_empty_values_for_unknown_key(
+    tmp_path, monkeypatch
+):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="known-metadata",
+            source_entity_type="insight",
+            title="Known metadata",
+            content="Known metadata note",
+            content_type=ContentType.INSIGHT,
+            metadata={"review": {"state": "approved"}},
+        )
+    )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "metadata_value_histogram",
+            {"metadata_key": "review.missing"},
+        )
+    )
+    payload = json.loads(response[0].text)
+
+    assert payload["path"] == "review.missing"
+    assert payload["unit_count"] == 1
+    assert payload["missing_count"] == 1
+    assert payload["value_count"] == 0
+    assert payload["values"] == []
+
+
 def test_create_unit_tool_validates_metadata_and_indexes_unit(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))
