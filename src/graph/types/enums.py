@@ -30,6 +30,7 @@ class SourceProject(StrEnum):
     JATS = "jats"
     GIT = "git"
     GOOGLE_KEEP = "google_keep"
+    OBSIDIAN_CANVAS = "obsidian_canvas"
     TRANSCRIPT = "transcript"
     POCKET = "pocket"
     POCKET_CSV = "pocket_csv"

@@ -31,6 +31,7 @@ from graph.adapters.max_adapter import MaxAdapter
 from graph.adapters.me import MeAdapter
 from graph.adapters.mediawiki import MediaWikiAdapter
 from graph.adapters.opml import OpmlAdapter
+from graph.adapters.obsidian_canvas import ObsidianCanvasAdapter
 from graph.adapters.org import OrgAdapter
 from graph.adapters.pdf import PdfAdapter
 from graph.adapters.pinboard import PinboardAdapter
@@ -67,6 +68,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "jsonl": JsonlAdapter,
     "yaml": YamlAdapter,
     "opml": OpmlAdapter,
+    "obsidian_canvas": ObsidianCanvasAdapter,
     "org": OrgAdapter,
     "pdf": PdfAdapter,
     "email": EmailAdapter,

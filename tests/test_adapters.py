@@ -40,6 +40,7 @@ from graph.adapters.max_adapter import MaxAdapter
 from graph.adapters.me import MeAdapter
 from graph.adapters.mediawiki import MediaWikiAdapter
 from graph.adapters.opml import OpmlAdapter
+from graph.adapters.obsidian_canvas import ObsidianCanvasAdapter
 from graph.adapters.org import OrgAdapter
 from graph.adapters.pdf import PdfAdapter
 from graph.adapters.pinboard import PinboardAdapter
@@ -2643,6 +2644,7 @@ class TestRegistry:
             "jsonl",
             "yaml",
             "opml",
+            "obsidian_canvas",
             "org",
             "pdf",
             "email",
@@ -2689,6 +2691,10 @@ class TestRegistry:
 
         opml_adapter = get_adapter("opml", path="/tmp/test.opml")
         assert opml_adapter.name == "opml"
+
+        obsidian_canvas_adapter = get_adapter("obsidian_canvas", path="/tmp/map.canvas")
+        assert isinstance(obsidian_canvas_adapter, ObsidianCanvasAdapter)
+        assert obsidian_canvas_adapter.name == "obsidian_canvas"
 
         org_adapter = get_adapter("org", root_path="/tmp/org")
         assert org_adapter.name == "org"
