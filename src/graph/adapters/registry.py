@@ -43,6 +43,7 @@ from graph.adapters.raindrop import RaindropAdapter
 from graph.adapters.readwise import ReadwiseAdapter
 from graph.adapters.roam import RoamAdapter
 from graph.adapters.sota import SOTAAdapter
+from graph.adapters.sqlite_query_log import SqliteQueryLogAdapter
 from graph.adapters.ris import RisAdapter
 from graph.adapters.text import TextAdapter
 from graph.adapters.text_outline import TextOutlineAdapter
@@ -99,6 +100,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "readwise": ReadwiseAdapter,
     "roam": RoamAdapter,
     "logseq": LogseqAdapter,
+    "sqlite_query_log": SqliteQueryLogAdapter,
 }
 
 

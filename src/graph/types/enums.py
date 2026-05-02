@@ -42,6 +42,7 @@ class SourceProject(StrEnum):
     READWISE = "readwise"
     ROAM = "roam"
     LOGSEQ = "logseq"
+    SQLITE_QUERY_LOG = "sqlite_query_log"
 
 
 class ContentType(StrEnum):
