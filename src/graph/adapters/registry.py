@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from graph.adapters.base import SourceAdapter
+from graph.adapters.atom import AtomAdapter
 from graph.adapters.bibdesk import BibDeskAdapter
 from graph.adapters.bibtex import BibtexAdapter
 from graph.adapters.bookmarks import BookmarksAdapter
@@ -48,6 +49,7 @@ from graph.adapters.yaml_adapter import YamlAdapter
 from graph.adapters.zotero_rdf import ZoteroRdfAdapter
 
 _ADAPTERS: dict[str, type[SourceAdapter]] = {
+    "atom": AtomAdapter,
     "forty_two": FortyTwoAdapter,
     "max": MaxAdapter,
     "presence": PresenceAdapter,

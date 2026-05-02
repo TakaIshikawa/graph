@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from graph.adapters.atom import AtomAdapter
 from graph.adapters.bibdesk import BibDeskAdapter
 from graph.adapters.bibtex import BibtexAdapter
 from graph.adapters.bookmarks import BookmarksAdapter
@@ -2624,6 +2625,7 @@ class TestRegistry:
     def test_list_adapters(self):
         adapters = list_adapters()
         assert set(adapters) == {
+            "atom",
             "forty_two",
             "max",
             "presence",
@@ -2672,6 +2674,10 @@ class TestRegistry:
     def test_get_adapter(self):
         adapter = get_adapter("me", config_path="/tmp/test.yaml")
         assert adapter.name == "me"
+
+        atom_adapter = get_adapter("atom", path="/tmp/feed.xml")
+        assert isinstance(atom_adapter, AtomAdapter)
+        assert atom_adapter.name == "atom"
 
         jsonl_adapter = get_adapter("jsonl", path="/tmp/test.jsonl")
         assert jsonl_adapter.name == "jsonl"
