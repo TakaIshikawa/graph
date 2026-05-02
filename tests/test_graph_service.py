@@ -1747,6 +1747,11 @@ class TestGraphService:
             "bridge_count": 0,
             "bridges": [],
         }
+        assert gs.analyze_relation_imbalance() == {
+            "group_by": "source_project",
+            "pair_count": 0,
+            "pairs": [],
+        }
         assert gs.analyze_articulation_points() == []
         assert gs.analyze_strongly_connected_components() == []
         assert gs.find_gaps() == []
