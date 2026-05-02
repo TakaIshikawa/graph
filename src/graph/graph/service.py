@@ -3222,6 +3222,62 @@ class GraphService:
             "top_units": top_units,
         }
 
+    def analyze_source_sink_units(self, limit: int = 20) -> dict:
+        """Find directional source-only and sink-only units."""
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
+            raise ValueError("limit must be a non-negative integer.")
+
+        units = self.store.get_all_units(limit=1000000000)
+        unit_by_id = {unit.id: unit for unit in units}
+        in_degrees: Counter[str] = Counter()
+        out_degrees: Counter[str] = Counter()
+
+        for edge in self.store.get_all_edges():
+            if edge.from_unit_id not in unit_by_id or edge.to_unit_id not in unit_by_id:
+                continue
+            out_degrees[edge.from_unit_id] += 1
+            in_degrees[edge.to_unit_id] += 1
+
+        sources = []
+        sinks = []
+        isolated_count = 0
+        for unit in units:
+            in_degree = int(in_degrees.get(unit.id, 0))
+            out_degree = int(out_degrees.get(unit.id, 0))
+            row = {
+                "unit": self._unit_summary_data(unit),
+                "in_degree": in_degree,
+                "out_degree": out_degree,
+            }
+            if out_degree > 0 and in_degree == 0:
+                sources.append(row)
+            elif in_degree > 0 and out_degree == 0:
+                sinks.append(row)
+            elif in_degree == 0 and out_degree == 0:
+                isolated_count += 1
+
+        def _sort_key(item: dict, degree_key: str) -> tuple:
+            unit = item["unit"]
+            return (
+                -int(item[degree_key]),
+                str(unit["title"]).lower(),
+                str(unit["id"]),
+            )
+
+        sources.sort(key=lambda item: _sort_key(item, "out_degree"))
+        sinks.sort(key=lambda item: _sort_key(item, "in_degree"))
+
+        return {
+            "sources": sources[:limit],
+            "sinks": sinks[:limit],
+            "summary": {
+                "total_node_count": len(units),
+                "source_count": len(sources),
+                "sink_count": len(sinks),
+                "isolated_count": isolated_count,
+            },
+        }
+
     def analyze_k_core(
         self,
         k: int | None = None,
