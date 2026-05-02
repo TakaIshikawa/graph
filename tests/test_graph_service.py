@@ -861,6 +861,19 @@ class TestGraphService:
         # Each entry is (node_id, pagerank_score)
         assert all(isinstance(score, float) for _, score in central)
 
+    def test_betweenness_centrality_returns_unit_degree_context(
+        self, populated_store: Store
+    ):
+        result = GraphService(populated_store).betweenness_centrality(limit=1)
+
+        assert len(result["nodes"]) == 1
+        assert result["nodes"][0]["title"] == "Node B"
+        assert result["nodes"][0]["score"] == pytest.approx(0.3333333333333333)
+        assert result["nodes"][0]["source_project"] == "forty_two"
+        assert result["nodes"][0]["degree"] == 2
+        assert result["nodes"][0]["in_degree"] == 1
+        assert result["nodes"][0]["out_degree"] == 1
+
     def test_get_pagerank_returns_unit_summaries_sorted_by_score(
         self, populated_store: Store
     ):
