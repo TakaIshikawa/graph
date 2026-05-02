@@ -94,6 +94,22 @@ class TestUnitCRUD:
         units = store.get_all_units()
         assert len(units) == 5
 
+    def test_metadata_key_profile_is_available_on_store(
+        self, store: Store, sample_unit: KnowledgeUnit
+    ):
+        sample_unit.metadata = {"owner": "alice"}
+        store.insert_unit(sample_unit)
+
+        assert store.metadata_key_profile() == [
+            {
+                "key": "owner",
+                "occurrence_count": 1,
+                "distinct_value_count": 1,
+                "value_types": ["string"],
+                "sample_values": ["alice"],
+            }
+        ]
+
     def test_unit_aliases_are_idempotent_and_searchable(
         self, store: Store, sample_unit: KnowledgeUnit
     ):
