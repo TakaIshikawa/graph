@@ -29,6 +29,9 @@ _EXTERNAL_URL_RE = re.compile(r"https?://[^\s<>\"]+", re.IGNORECASE)
 _TRAILING_URL_PUNCTUATION = ".,;:!?)]}'\""
 _TIMELINE_BUCKETS = {"day", "week", "month", "year"}
 _TIMELINE_FIELDS = {"created_at", "ingested_at", "updated_at"}
+_FRESHNESS_FIELDS = {"created_at", "ingested_at", "updated_at"}
+_DEFAULT_FRESHNESS_BUCKETS = ("7d", "30d", "90d", "older")
+_FRESHNESS_BUCKET_RE = re.compile(r"^([1-9][0-9]*)d$")
 _TRIAD_CENSUS_TYPES = (
     "003",
     "012",
@@ -322,6 +325,74 @@ def _parse_timeline_datetime(value: str | datetime | None, *, name: str) -> date
         except ValueError as exc:
             raise ValueError(f"{name} must be an ISO-8601 date or datetime.") from exc
     return _ensure_aware(parsed)
+
+
+def _parse_optional_datetime(value: object) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return _ensure_aware(value)
+
+    raw = str(value).strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = f"{raw[:-1]}+00:00"
+    try:
+        return _ensure_aware(datetime.fromisoformat(raw))
+    except ValueError:
+        return None
+
+
+def _parse_freshness_as_of(value: str | datetime | None) -> datetime:
+    parsed = _parse_optional_datetime(value)
+    if parsed is None:
+        if value is None:
+            return datetime.now(timezone.utc)
+        raise ValueError("as_of must be an ISO-8601 date or datetime.")
+    return parsed
+
+
+def _normalize_freshness_buckets(buckets: list[str] | tuple[str, ...] | None) -> list[str]:
+    if isinstance(buckets, str):
+        raise ValueError("buckets must be a sequence of strings, not a single string.")
+    try:
+        raw_buckets = list(_DEFAULT_FRESHNESS_BUCKETS if buckets is None else buckets)
+    except TypeError as exc:
+        raise ValueError("buckets must be a sequence of strings.") from exc
+    if not raw_buckets:
+        raise ValueError("buckets must include at least one day bucket.")
+
+    normalized: list[str] = []
+    last_days = 0
+    seen_older = False
+    for bucket in raw_buckets:
+        if not isinstance(bucket, str):
+            raise ValueError("Freshness buckets must be strings like '7d' or 'older'.")
+        value = bucket.strip().lower()
+        if value == "older":
+            if seen_older or len(normalized) != len(raw_buckets) - 1:
+                raise ValueError("'older' freshness bucket must appear once at the end.")
+            seen_older = True
+            normalized.append(value)
+            continue
+
+        if seen_older:
+            raise ValueError("'older' freshness bucket must appear once at the end.")
+        match = _FRESHNESS_BUCKET_RE.fullmatch(value)
+        if match is None:
+            raise ValueError("Freshness day buckets must be positive values like '7d'.")
+        days = int(match.group(1))
+        if days <= last_days:
+            raise ValueError("Freshness day buckets must be strictly increasing.")
+        last_days = days
+        normalized.append(value)
+
+    if not any(bucket != "older" for bucket in normalized):
+        raise ValueError("buckets must include at least one day bucket.")
+    if not seen_older:
+        normalized.append("older")
+    return normalized
 
 
 def _timeline_bucket_start(value: datetime, bucket: str) -> datetime:
@@ -3276,6 +3347,82 @@ class GraphService:
                 "sink_count": len(sinks),
                 "isolated_count": isolated_count,
             },
+        }
+
+    def freshness_summary(
+        self,
+        field: str = "updated_at",
+        buckets: list[str] | tuple[str, ...] | None = None,
+        *,
+        as_of: str | datetime | None = None,
+    ) -> dict:
+        """Summarize unit freshness by age buckets for a timestamp field."""
+        if field not in _FRESHNESS_FIELDS:
+            raise ValueError(
+                f"Unsupported freshness field: {field}. Use created_at, ingested_at, or updated_at."
+            )
+
+        normalized_buckets = _normalize_freshness_buckets(buckets)
+        as_of_at = _parse_freshness_as_of(as_of)
+        bucket_counts = dict.fromkeys(normalized_buckets, 0)
+        day_limits = [
+            (bucket, int(bucket[:-1]))
+            for bucket in normalized_buckets
+            if bucket != "older"
+        ]
+
+        total_count = 0
+        dated_count = 0
+        undated_count = 0
+        rows = self.store.conn.execute(f"SELECT {field} AS value FROM knowledge_units").fetchall()
+        for row in rows:
+            total_count += 1
+            value = _parse_optional_datetime(row["value"])
+            if value is None:
+                undated_count += 1
+                continue
+
+            dated_count += 1
+            age_days = max(0.0, (as_of_at - value).total_seconds() / 86400)
+            for bucket, max_days in day_limits:
+                if age_days <= max_days:
+                    bucket_counts[bucket] += 1
+                    break
+            else:
+                bucket_counts["older"] += 1
+
+        bucket_items = []
+        previous_days: int | None = None
+        for bucket in normalized_buckets:
+            if bucket == "older":
+                bucket_items.append(
+                    {
+                        "bucket": bucket,
+                        "min_age_days": previous_days,
+                        "max_age_days": None,
+                        "count": bucket_counts[bucket],
+                    }
+                )
+                continue
+
+            max_days = int(bucket[:-1])
+            bucket_items.append(
+                {
+                    "bucket": bucket,
+                    "min_age_days": previous_days,
+                    "max_age_days": max_days,
+                    "count": bucket_counts[bucket],
+                }
+            )
+            previous_days = max_days
+
+        return {
+            "field": field,
+            "as_of": as_of_at.isoformat(),
+            "total": total_count,
+            "dated_count": dated_count,
+            "undated_count": undated_count,
+            "buckets": bucket_items,
         }
 
     def analyze_k_core(
