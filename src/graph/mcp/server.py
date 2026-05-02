@@ -367,6 +367,102 @@ def _source_agreement_payload(store: Store, arguments: dict) -> dict:
     }
 
 
+def _relation_motifs_payload(store: Store, arguments: dict) -> dict:
+    relation_types = arguments.get("relation_types")
+    relation_sequence = arguments.get("relation_sequence")
+    limit = arguments.get("limit", 20)
+    min_count = arguments.get("min_count", 1)
+    path_length = arguments.get("path_length", 2)
+
+    if (
+        not isinstance(path_length, int)
+        or isinstance(path_length, bool)
+        or path_length != 2
+    ):
+        raise ValueError("path_length currently only supports 2.")
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
+        raise ValueError("limit must be a non-negative integer.")
+    if (
+        not isinstance(min_count, int)
+        or isinstance(min_count, bool)
+        or min_count < 1
+    ):
+        raise ValueError("min_count must be a positive integer.")
+    if relation_types is None:
+        relation_types = []
+    if relation_sequence is None:
+        relation_sequence = []
+    if not isinstance(relation_types, list) or any(
+        not isinstance(item, str) for item in relation_types
+    ):
+        raise ValueError("relation_types must be an array of strings")
+    if not isinstance(relation_sequence, list) or any(
+        not isinstance(item, str) for item in relation_sequence
+    ):
+        raise ValueError("relation_sequence must be an array of strings")
+    if relation_sequence and len(relation_sequence) != path_length:
+        raise ValueError("relation_sequence length must match path_length")
+
+    valid_relations = {str(relation) for relation in EdgeRelation}
+    invalid_relations = sorted(
+        {
+            relation
+            for relation in [*relation_types, *relation_sequence]
+            if relation not in valid_relations
+        }
+    )
+    if invalid_relations:
+        raise ValueError(
+            "Invalid relation type(s): " + ", ".join(invalid_relations)
+        )
+
+    gs = GraphService(store)
+    if relation_types or relation_sequence:
+        # Fetch all service-computed motifs first so MCP filters are applied
+        # before the client-facing limit.
+        edge_count = len(store.get_all_edges())
+        analysis_limit = max(limit, edge_count * edge_count)
+    else:
+        analysis_limit = limit
+
+    result = gs.analyze_relation_motifs(
+        path_length=path_length,
+        limit=analysis_limit,
+        min_count=min_count,
+    )
+
+    if relation_types or relation_sequence:
+        allowed_relations = set(relation_types)
+        motifs = result["motifs"]
+        if allowed_relations:
+            motifs = [
+                motif
+                for motif in motifs
+                if all(
+                    relation in allowed_relations
+                    for relation in motif["relation_sequence"]
+                )
+            ]
+        if relation_sequence:
+            motifs = [
+                motif
+                for motif in motifs
+                if motif["relation_sequence"] == relation_sequence
+            ]
+        limited_motifs = motifs[:limit]
+        result["motifs"] = limited_motifs
+        result["motif_count"] = len(limited_motifs)
+        result["limit"] = limit
+        result["stats"]["matching_motifs"] = len(motifs)
+        result["stats"]["returned_motifs"] = len(limited_motifs)
+        result["filters"] = {
+            "relation_types": relation_types,
+            "relation_sequence": relation_sequence,
+        }
+
+    return result
+
+
 def _graph_overview_summary(store: Store, *, limit: int = 10) -> dict:
     gs = GraphService(store)
     snapshot = gs.stats_snapshot(top_degree_limit=limit)
@@ -1749,6 +1845,54 @@ async def list_tools() -> list[Tool]:
                         "type": "boolean",
                         "default": True,
                         "description": "Include embedded unit summaries in node entries",
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="analyze_relation_motifs",
+            description=(
+                "Summarize common directed two-hop relation sequences with example "
+                "unit paths and edge metadata."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path_length": {
+                        "type": "integer",
+                        "default": 2,
+                        "enum": [2],
+                        "description": "Directed path length to analyze; currently only 2 is supported",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "default": 20,
+                        "minimum": 0,
+                        "description": "Maximum motif rows to return",
+                    },
+                    "min_count": {
+                        "type": "integer",
+                        "default": 1,
+                        "minimum": 1,
+                        "description": "Minimum number of paths required for a motif",
+                    },
+                    "relation_types": {
+                        "type": "array",
+                        "default": [],
+                        "description": "Optional set of relation types allowed in returned motifs",
+                        "items": {
+                            "type": "string",
+                            "enum": [str(relation) for relation in EdgeRelation],
+                        },
+                    },
+                    "relation_sequence": {
+                        "type": "array",
+                        "default": [],
+                        "description": "Optional exact relation sequence to return",
+                        "items": {
+                            "type": "string",
+                            "enum": [str(relation) for relation in EdgeRelation],
+                        },
                     },
                 },
             },
@@ -3785,6 +3929,23 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                         "k": arguments.get("k"),
                         "limit": arguments.get("limit", 50),
                         "include_units": arguments.get("include_units", True),
+                    },
+                }
+            return [TextContent(type="text", text=json.dumps(result, default=str))]
+
+        elif name == "analyze_relation_motifs":
+            try:
+                result = _relation_motifs_payload(store, arguments)
+            except ValueError as exc:
+                result = {
+                    "error": "invalid_relation_motifs_request",
+                    "message": str(exc),
+                    "arguments": {
+                        "path_length": arguments.get("path_length", 2),
+                        "limit": arguments.get("limit", 20),
+                        "min_count": arguments.get("min_count", 1),
+                        "relation_types": arguments.get("relation_types", []),
+                        "relation_sequence": arguments.get("relation_sequence", []),
                     },
                 }
             return [TextContent(type="text", text=json.dumps(result, default=str))]
