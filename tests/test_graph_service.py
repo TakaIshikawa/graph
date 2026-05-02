@@ -1529,6 +1529,29 @@ class TestGraphService:
         isolated = [g for g in gaps if g["gap_type"] == "isolated"]
         assert len(isolated) == 1
 
+    def test_analyze_orphan_topics_reports_isolated_units(self, populated_store: Store):
+        result = GraphService(populated_store).analyze_orphan_topics()
+        isolated = populated_store.get_unit_by_source(
+            "presence", "d", "knowledge_item"
+        )
+
+        assert result["summary"]["candidate_count"] == 1
+        assert result["topics"] == [
+            {
+                "unit_id": isolated.id,
+                "title": "Node D",
+                "source_project": "presence",
+                "source_id": "d",
+                "source_entity_type": "knowledge_item",
+                "content_type": "artifact",
+                "tags": [],
+                "degree": 0,
+                "in_degree": 0,
+                "out_degree": 0,
+                "reason_code": "isolated",
+            }
+        ]
+
     def test_find_orphan_units_excludes_incoming_and_outgoing_and_filters(
         self, store: Store
     ):
