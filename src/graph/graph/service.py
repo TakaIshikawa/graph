@@ -2280,6 +2280,102 @@ class GraphService:
             "pairs": pairs,
         }
 
+    def analyze_relation_entropy(
+        self, group_by: str = "source_project", *, limit: int = 20
+    ) -> dict:
+        """Summarize relation diversity within source, tag, or content groups."""
+        if group_by not in {"source_project", "tag", "content_type"}:
+            raise ValueError("group_by must be source_project, tag, or content_type.")
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
+            raise ValueError("limit must be a non-negative integer.")
+
+        units_by_id = {
+            unit.id: unit for unit in self.store.get_all_units(limit=1000000000)
+        }
+        global_relation_counts: Counter[str] = Counter()
+        group_relation_counts: dict[str, Counter[str]] = {}
+
+        edges = sorted(
+            self.store.get_all_edges(),
+            key=lambda edge: (
+                edge.from_unit_id,
+                edge.to_unit_id,
+                str(edge.relation),
+                edge.id,
+            ),
+        )
+        for edge in edges:
+            from_unit = units_by_id.get(edge.from_unit_id)
+            to_unit = units_by_id.get(edge.to_unit_id)
+            if from_unit is None or to_unit is None:
+                continue
+
+            relation = str(edge.relation)
+            global_relation_counts[relation] += 1
+
+            if group_by == "tag":
+                groups = sorted(
+                    {
+                        str(tag).strip()
+                        for unit in (from_unit, to_unit)
+                        for tag in unit.tags
+                        if str(tag).strip()
+                    }
+                )
+            else:
+                groups = sorted(
+                    {
+                        str(getattr(unit, group_by) or "").strip()
+                        for unit in (from_unit, to_unit)
+                        if str(getattr(unit, group_by) or "").strip()
+                    }
+                )
+
+            for group in groups:
+                group_relation_counts.setdefault(group, Counter())[relation] += 1
+
+        groups = []
+        for group, relation_counter in group_relation_counts.items():
+            total_edges = sum(relation_counter.values())
+            dominant_relation, dominant_count = sorted(
+                relation_counter.items(),
+                key=lambda item: (-item[1], item[0]),
+            )[0]
+            entropy = -sum(
+                (count / total_edges) * math.log2(count / total_edges)
+                for count in relation_counter.values()
+                if count
+            )
+            groups.append(
+                {
+                    "group": group,
+                    "relation_counts": dict(sorted(relation_counter.items())),
+                    "dominant_relation": dominant_relation,
+                    "dominant_relation_share": (
+                        dominant_count / total_edges if total_edges else 0.0
+                    ),
+                    "entropy": entropy,
+                    "total_edges": total_edges,
+                }
+            )
+
+        groups.sort(
+            key=lambda item: (
+                item["entropy"],
+                -item["total_edges"],
+                item["group"],
+                item["dominant_relation"],
+            )
+        )
+        return {
+            "group_by": group_by,
+            "limit": limit,
+            "total_edges": sum(global_relation_counts.values()),
+            "global_relation_counts": dict(sorted(global_relation_counts.items())),
+            "group_count": len(groups),
+            "groups": groups[:limit],
+        }
+
     def analyze_strongly_connected_components(
         self,
         min_size: int = 2,

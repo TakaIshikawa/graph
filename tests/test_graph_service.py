@@ -1752,6 +1752,14 @@ class TestGraphService:
             "pair_count": 0,
             "pairs": [],
         }
+        assert gs.analyze_relation_entropy() == {
+            "group_by": "source_project",
+            "limit": 20,
+            "total_edges": 0,
+            "global_relation_counts": {},
+            "group_count": 0,
+            "groups": [],
+        }
         assert gs.analyze_articulation_points() == []
         assert gs.analyze_strongly_connected_components() == []
         assert gs.find_gaps() == []
