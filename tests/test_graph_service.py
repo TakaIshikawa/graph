@@ -1004,6 +1004,23 @@ class TestGraphService:
 
         assert scores[heavy.id] > scores[light.id]
 
+    def test_analyze_hub_authority_service_wrapper_returns_payload(
+        self, populated_store: Store
+    ):
+        result = GraphService(populated_store).analyze_hub_authority(top_n=1)
+
+        assert result["node_count"] == 4
+        assert result["edge_count"] == 2
+        assert len(result["top_hubs"]) == 1
+        assert len(result["top_authorities"]) == 1
+        assert set(result["top_hubs"][0]) >= {"unit_id", "score", "hub_score", "title"}
+        assert set(result["top_authorities"][0]) >= {
+            "unit_id",
+            "score",
+            "authority_score",
+            "title",
+        }
+
     def test_analyze_k_core_uses_max_core_by_default(self, k_core_store: Store):
         result = GraphService(k_core_store).analyze_k_core()
 

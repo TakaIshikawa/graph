@@ -99,6 +99,142 @@ _REFERENCE_URL_METADATA_FIELDS = {"url", "link", "canonical_url", "source_url", 
 _DUPLICATE_URL_METADATA_FIELDS = {"canonical_url", "link"}
 
 
+def _object_value(value: object, *keys: str, default: object = None) -> object:
+    for key in keys:
+        if isinstance(value, dict) and key in value:
+            return value[key]
+        if hasattr(value, key):
+            return getattr(value, key)
+    return default
+
+
+def _stable_score(value: float) -> float:
+    score = float(value)
+    return 0.0 if abs(score) < 1e-15 else score
+
+
+def analyze_hub_authority(
+    units,
+    edges,
+    *,
+    top_n: int = 10,
+    weight_key: str | None = None,
+) -> dict:
+    """Return HITS hub and authority rankings for unit and edge iterables."""
+    if isinstance(top_n, bool):
+        raise ValueError("top_n must be a non-negative integer.")
+    try:
+        capped_top_n = int(top_n)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("top_n must be a non-negative integer.") from exc
+    if capped_top_n < 0:
+        raise ValueError("top_n must be a non-negative integer.")
+
+    graph = nx.DiGraph()
+    unit_data: dict[str, dict] = {}
+    for unit in units:
+        raw_id = unit if isinstance(unit, str) else _object_value(unit, "id")
+        if raw_id is None:
+            continue
+        unit_id = str(raw_id)
+        title = _object_value(unit, "title", default=None)
+        payload = {"unit_id": unit_id}
+        if title is not None:
+            payload["title"] = str(title)
+        unit_data[unit_id] = payload
+        graph.add_node(unit_id)
+
+    for edge in edges:
+        from_id = _object_value(edge, "from_unit_id", "source", "from_id", "from")
+        to_id = _object_value(edge, "to_unit_id", "target", "to_id", "to")
+        if from_id is None or to_id is None:
+            continue
+        from_unit_id = str(from_id)
+        to_unit_id = str(to_id)
+        if from_unit_id == to_unit_id:
+            continue
+        if from_unit_id not in graph or to_unit_id not in graph:
+            continue
+
+        attrs = {}
+        if weight_key is not None:
+            raw_weight = _object_value(edge, weight_key, default=1.0)
+            try:
+                weight = float(raw_weight)
+            except (TypeError, ValueError):
+                weight = 1.0
+            attrs["weight"] = weight
+        graph.add_edge(from_unit_id, to_unit_id, **attrs)
+
+    convergence = {"converged": True, "max_iter": 0, "error": None}
+    node_count = graph.number_of_nodes()
+    edge_count = graph.number_of_edges()
+
+    if node_count == 0:
+        hubs: dict[str, float] = {}
+        authorities: dict[str, float] = {}
+    elif edge_count == 0:
+        hubs = {node: 0.0 for node in graph.nodes}
+        authorities = {node: 0.0 for node in graph.nodes}
+    else:
+        try:
+            hubs, authorities = nx.hits(
+                graph,
+                max_iter=100,
+                normalized=True,
+            )
+            convergence["max_iter"] = 100
+        except nx.PowerIterationFailedConvergence:
+            try:
+                hubs, authorities = nx.hits(
+                    graph,
+                    max_iter=1000,
+                    normalized=True,
+                )
+                convergence["max_iter"] = 1000
+            except nx.PowerIterationFailedConvergence as exc:
+                convergence["converged"] = False
+                convergence["max_iter"] = 1000
+                convergence["error"] = str(exc)
+                hubs = {node: 0.0 for node in graph.nodes}
+                authorities = {node: 0.0 for node in graph.nodes}
+
+    def _hub_record(unit_id: str) -> dict:
+        score = _stable_score(hubs.get(unit_id, 0.0))
+        return {
+            **unit_data.get(unit_id, {"unit_id": unit_id}),
+            "score": score,
+            "hub_score": score,
+        }
+
+    def _authority_record(unit_id: str) -> dict:
+        score = _stable_score(authorities.get(unit_id, 0.0))
+        return {
+            **unit_data.get(unit_id, {"unit_id": unit_id}),
+            "score": score,
+            "authority_score": score,
+        }
+
+    hub_ids = sorted(
+        graph.nodes,
+        key=lambda unit_id: (-_stable_score(hubs.get(unit_id, 0.0)), unit_id),
+    )
+    authority_ids = sorted(
+        graph.nodes,
+        key=lambda unit_id: (-_stable_score(authorities.get(unit_id, 0.0)), unit_id),
+    )
+
+    return {
+        "top_hubs": [_hub_record(unit_id) for unit_id in hub_ids[:capped_top_n]],
+        "top_authorities": [
+            _authority_record(unit_id) for unit_id in authority_ids[:capped_top_n]
+        ],
+        "node_count": node_count,
+        "edge_count": edge_count,
+        "convergence": convergence,
+    }
+
+
 def _normalize_text(value: str) -> str:
     return _NORMALIZED_TEXT_RE.sub(" ", value.lower()).strip()
 
@@ -3115,6 +3251,20 @@ class GraphService:
             "authorities": [_record(unit_id) for unit_id in authority_ids[:capped_limit]],
             "hubs": [_record(unit_id) for unit_id in hub_ids[:capped_limit]],
         }
+
+    def analyze_hub_authority(
+        self,
+        *,
+        top_n: int = 10,
+        weight_key: str | None = None,
+    ) -> dict:
+        """Return HITS hub and authority rankings for stored knowledge units."""
+        return analyze_hub_authority(
+            self.store.get_all_units(),
+            self.store.get_all_edges(),
+            top_n=top_n,
+            weight_key=weight_key,
+        )
 
     def isolated_units(
         self,
