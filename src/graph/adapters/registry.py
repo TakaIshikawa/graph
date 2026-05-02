@@ -30,6 +30,7 @@ from graph.adapters.logseq import LogseqAdapter
 from graph.adapters.markdown import MarkdownAdapter
 from graph.adapters.markdown_callouts import MarkdownCalloutsAdapter
 from graph.adapters.markdown_links import MarkdownLinksAdapter
+from graph.adapters.markdown_notes import MarkdownNotesAdapter
 from graph.adapters.markdown_tasks import MarkdownTasksAdapter
 from graph.adapters.mastodon import MastodonAdapter
 from graph.adapters.max_adapter import MaxAdapter
@@ -70,6 +71,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "markdown": MarkdownAdapter,
     "markdown_callouts": MarkdownCalloutsAdapter,
     "markdown_links": MarkdownLinksAdapter,
+    "markdown_notes": MarkdownNotesAdapter,
     "markdown_tasks": MarkdownTasksAdapter,
     "mastodon": MastodonAdapter,
     "kindle": KindleAdapter,
