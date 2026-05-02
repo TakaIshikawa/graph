@@ -12,7 +12,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
 from graph.config import settings
-from graph.export import export_context_pack
+from graph.export import export_context_pack, render_graph_overview_html
 from graph.cli.main import (
     _backlinks_payload,
     _do_context_pack,
@@ -237,6 +237,113 @@ def _adapter_catalog_payload() -> dict:
             entry["error"] = f"{type(exc).__name__}: {exc}"
         adapters.append(entry)
     return {"adapters": adapters}
+
+
+def _graph_overview_summary(store: Store, *, limit: int = 10) -> dict:
+    gs = GraphService(store)
+    snapshot = gs.stats_snapshot(top_degree_limit=limit)
+    stats = gs.stats()
+    unit_count = int(snapshot["unit_counts"]["total"])
+    edge_count = int(snapshot["edge_counts"]["total"])
+    isolated_count = int(snapshot["isolated_count"])
+
+    central_units = []
+    for item in snapshot["top_degree_units"]:
+        unit = store.get_unit(item["id"])
+        central_units.append(
+            {
+                **item,
+                "tags": list(unit.tags) if unit is not None else [],
+            }
+        )
+
+    components = []
+    for index, unit_ids in enumerate(gs.get_clusters(min_size=1)[: max(0, limit)], start=1):
+        component_graph = gs.G.subgraph(unit_ids)
+        component_unit_count = len(unit_ids)
+        component_edge_count = component_graph.number_of_edges()
+        density = (
+            round(component_edge_count / (component_unit_count * (component_unit_count - 1)), 6)
+            if component_unit_count > 1
+            else 0.0
+        )
+        sample_units = []
+        for unit_id in sorted(unit_ids)[:5]:
+            unit = store.get_unit(unit_id)
+            sample_units.append(unit.title if unit is not None else unit_id)
+        components.append(
+            {
+                "id": f"component-{index}",
+                "unit_count": component_unit_count,
+                "edge_count": component_edge_count,
+                "density": density,
+                "sample_units": sample_units,
+            }
+        )
+
+    warnings = []
+    if isolated_count:
+        warnings.append(f"{isolated_count} isolated units")
+
+    return {
+        "counts": {
+            "units": unit_count,
+            "edges": edge_count,
+            "components": int(stats["components"]),
+            "density": stats["density"],
+            "isolated_units": isolated_count,
+        },
+        "top_tags": [
+            {"tag": tag, "count": count}
+            for tag, count in sorted(
+                snapshot["unit_counts"]["by_tag"].items(),
+                key=lambda item: (-int(item[1]), str(item[0])),
+            )[: max(0, limit)]
+        ],
+        "top_sources": snapshot["unit_counts"]["by_source_project"],
+        "central_units": central_units,
+        "components": components,
+        "warnings": warnings,
+    }
+
+
+def _graph_overview_report_counts(summary: dict) -> dict:
+    return {
+        "top_tags": len(summary.get("top_tags") or []),
+        "top_sources": len(summary.get("top_sources") or {}),
+        "central_units": len(summary.get("central_units") or []),
+        "components": len(summary.get("components") or []),
+        "warnings": len(summary.get("warnings") or []),
+    }
+
+
+def _do_export_graph_overview_html(
+    store: Store,
+    path: str | Path | None = None,
+    *,
+    limit: int = 10,
+) -> dict:
+    output_path = Path(path) if path else Path("graph-overview.html")
+    if not str(output_path).strip():
+        raise ValueError("Output path must be a non-empty file path")
+    if output_path.exists() and output_path.is_dir():
+        raise ValueError(f"Output path is a directory: {output_path}")
+
+    summary = _graph_overview_summary(store, limit=limit)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(render_graph_overview_html(summary), encoding="utf-8")
+    counts = summary["counts"]
+    return {
+        "path": str(output_path),
+        "exported": True,
+        "graph": {
+            "unit_count": counts["units"],
+            "edge_count": counts["edges"],
+            "component_count": counts["components"],
+            "isolated_count": counts["isolated_units"],
+        },
+        "report": _graph_overview_report_counts(summary),
+    }
 
 
 def _get_adapter(name: str):
@@ -2446,6 +2553,25 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="export_graph_overview_html",
+            description="Export a standalone HTML overview report of graph counts, tags, sources, central units, and components.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Destination HTML file path. Defaults to graph-overview.html in the current working directory.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 10,
+                        "description": "Maximum ranked tags, central units, and components to include.",
+                    },
+                },
+            },
+        ),
+        Tool(
             name="export_mermaid",
             description="Export a capped graph view or focused unit neighborhood as Mermaid Markdown.",
             inputSchema={
@@ -3865,6 +3991,22 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
         elif name == "export_graphml":
             stats = _do_export_graphml(store, arguments["path"])
+            return [TextContent(type="text", text=json.dumps(stats))]
+
+        elif name == "export_graph_overview_html":
+            try:
+                stats = _do_export_graph_overview_html(
+                    store,
+                    arguments.get("path"),
+                    limit=int(arguments.get("limit", 10)),
+                )
+            except (OSError, ValueError) as exc:
+                stats = {
+                    "path": arguments.get("path"),
+                    "exported": False,
+                    "error": "invalid_output_path",
+                    "message": str(exc),
+                }
             return [TextContent(type="text", text=json.dumps(stats))]
 
         elif name == "export_mermaid":
