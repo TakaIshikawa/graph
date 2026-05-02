@@ -79,7 +79,7 @@ from graph.cli.main import (
     SEARCH_SORTS,
 )
 from graph.graph.service import GraphService
-from graph.rag import detect_context_gaps, score_source_agreement
+from graph.rag import build_reading_queue, detect_context_gaps, score_source_agreement
 from graph.rag.search import sort_search_results
 from graph.store.db import Store
 from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
@@ -364,6 +364,144 @@ def _source_agreement_payload(store: Store, arguments: dict) -> dict:
             "missing_unit_ids": missing_unit_ids,
             "limit": limit,
         },
+    }
+
+
+def _reading_queue_unit(record: dict, index: int) -> KnowledgeUnit:
+    unit_record = record.get("unit")
+    if isinstance(unit_record, dict):
+        merged = {**record, **unit_record}
+    else:
+        merged = dict(record)
+
+    unit_id = str(merged.get("id") or merged.get("unit_id") or f"result-{index + 1}")
+    metadata = merged.get("metadata")
+    if metadata is None:
+        metadata = {}
+    if not isinstance(metadata, dict):
+        raise ValueError(f"results[{index}].metadata must be an object")
+    metadata = dict(metadata)
+    for key in ("priority", "read_status", "last_read_at"):
+        if key in merged and key not in metadata:
+            metadata[key] = merged[key]
+
+    tags = merged.get("tags", [])
+    if tags is None:
+        tags = []
+    if not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags):
+        raise ValueError(f"results[{index}].tags must be an array of strings")
+
+    try:
+        return KnowledgeUnit(
+            id=unit_id,
+            source_project=str(
+                merged.get("source_project")
+                or merged.get("source")
+                or merged.get("project")
+                or "unknown"
+            ),
+            source_id=str(merged.get("source_id") or unit_id),
+            source_entity_type=str(
+                merged.get("source_entity_type")
+                or merged.get("entity_type")
+                or "search_result"
+            ),
+            title=str(merged.get("title") or unit_id),
+            content=str(merged.get("content") or merged.get("snippet") or ""),
+            content_type=str(merged.get("content_type") or "insight"),
+            metadata=metadata,
+            tags=tags,
+            confidence=merged.get("confidence"),
+            utility_score=merged.get("utility_score"),
+            created_at=merged.get("created_at") or datetime.now(timezone.utc),
+            updated_at=merged.get("updated_at") or datetime.now(timezone.utc),
+        )
+    except ValueError as exc:
+        raise ValueError(f"results[{index}] is not a valid reading queue unit: {exc}") from exc
+
+
+def _reading_queue_edge(record: dict, index: int) -> KnowledgeEdge:
+    try:
+        return KnowledgeEdge(
+            id=str(record.get("id") or f"edge-{index + 1}"),
+            from_unit_id=str(record["from_unit_id"]),
+            to_unit_id=str(record["to_unit_id"]),
+            relation=record["relation"],
+            weight=record.get("weight", 1.0),
+            source=record.get("source", EdgeSource.INFERRED),
+            metadata=record.get("metadata") or {},
+            created_at=record.get("created_at") or datetime.now(timezone.utc),
+        )
+    except KeyError as exc:
+        raise ValueError(f"edges[{index}] missing required field: {exc.args[0]}") from exc
+    except ValueError as exc:
+        raise ValueError(f"edges[{index}] is not a valid reading queue edge: {exc}") from exc
+
+
+def _reading_queue_payload(arguments: dict) -> dict:
+    records = arguments.get("results", [])
+    edges = arguments.get("edges", [])
+    limit = arguments.get("limit", 20)
+    now = arguments.get("now")
+
+    if records is None:
+        records = []
+    if edges is None:
+        edges = []
+    if not isinstance(records, list):
+        raise ValueError("results must be an array of result-like objects")
+    if not isinstance(edges, list):
+        raise ValueError("edges must be an array of edge-like objects")
+    if limit is not None and (
+        not isinstance(limit, int) or isinstance(limit, bool) or limit < 0
+    ):
+        raise ValueError("limit must be a non-negative integer or null")
+    if now is not None:
+        if not isinstance(now, str):
+            raise ValueError("now must be an ISO-8601 timestamp string")
+        try:
+            now = datetime.fromisoformat(now.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("now must be an ISO-8601 timestamp string") from exc
+
+    units: list[KnowledgeUnit] = []
+    for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            raise ValueError(f"results[{index}] must be an object")
+        units.append(_reading_queue_unit(record, index))
+
+    queue_edges: list[KnowledgeEdge] = []
+    for index, record in enumerate(edges):
+        if not isinstance(record, dict):
+            raise ValueError(f"edges[{index}] must be an object")
+        queue_edges.append(_reading_queue_edge(record, index))
+
+    result = build_reading_queue(units, queue_edges, limit=limit, now=now)
+    queue = [
+        {
+            "order": index,
+            "unit_id": item["id"],
+            "title": item["title"],
+            "source_project": item["source_project"],
+            "source_id": item["source_id"],
+            "source_entity_type": item["source_entity_type"],
+            "content_type": item["content_type"],
+            "score": item["score"],
+            "reason": item["explanation"],
+            "reasons": [
+                part.strip()
+                for part in item["explanation"].split(";")
+                if part.strip()
+            ],
+            "inbound_reference_count": item["inbound_reference_count"],
+        }
+        for index, item in enumerate(result["units"], start=1)
+    ]
+    return {
+        "queue": queue,
+        "units": result["units"],
+        "stats": result["stats"],
+        "options": {"limit": limit, "now": result["stats"]["now"]},
     }
 
 
@@ -1296,6 +1434,61 @@ async def list_tools() -> list[Tool]:
                         "default": 3,
                         "minimum": 1,
                         "description": "Minimum token length for extracted term evidence",
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="graph_rag_reading_queue",
+            description=(
+                "Build a prioritized RAG reading queue from search result-like records "
+                "and optional graph edges."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "results": {
+                        "type": "array",
+                        "default": [],
+                        "description": (
+                            "Search result-like records with fields such as id, "
+                            "source_project, source_id, title, content, snippet, "
+                            "tags, metadata, priority, read_status, and timestamps."
+                        ),
+                        "items": {"type": "object"},
+                    },
+                    "edges": {
+                        "type": "array",
+                        "default": [],
+                        "description": (
+                            "Optional edge-like records with from_unit_id, to_unit_id, "
+                            "and relation for inbound reference boosts."
+                        ),
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string"},
+                                "from_unit_id": {"type": "string"},
+                                "to_unit_id": {"type": "string"},
+                                "relation": {
+                                    "type": "string",
+                                    "enum": [relation.value for relation in EdgeRelation],
+                                },
+                            },
+                            "required": ["from_unit_id", "to_unit_id", "relation"],
+                        },
+                    },
+                    "limit": {
+                        "type": ["integer", "null"],
+                        "default": 20,
+                        "minimum": 0,
+                        "description": "Maximum queue items to return; null returns all items.",
+                    },
+                    "now": {
+                        "type": "string",
+                        "description": (
+                            "Optional ISO-8601 timestamp used for stale/read recency scoring."
+                        ),
                     },
                 },
             },
@@ -3400,6 +3593,26 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     },
                 }
             return [TextContent(type="text", text=json.dumps(payload))]
+
+        elif name == "graph_rag_reading_queue":
+            try:
+                payload = _reading_queue_payload(arguments)
+            except ValueError as exc:
+                payload = {
+                    "error": "invalid_reading_queue_request",
+                    "message": str(exc),
+                    "arguments": {
+                        "result_count": len(arguments.get("results") or [])
+                        if isinstance(arguments.get("results") or [], list)
+                        else None,
+                        "edge_count": len(arguments.get("edges") or [])
+                        if isinstance(arguments.get("edges") or [], list)
+                        else None,
+                        "limit": arguments.get("limit", 20),
+                        "now": arguments.get("now"),
+                    },
+                }
+            return [TextContent(type="text", text=json.dumps(payload, default=str))]
 
         elif name == "pinned_units":
             payload = _do_pinned_units(
