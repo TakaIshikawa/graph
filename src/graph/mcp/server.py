@@ -3497,16 +3497,37 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
         elif name == "timeline":
             gs = GraphService(store)
-            result = gs.analyze_timeline(
-                bucket=arguments.get("bucket", "month"),
-                field=arguments.get("field", "created_at"),
-                start=arguments.get("start"),
-                end=arguments.get("end"),
-                limit=arguments.get("limit"),
-                source_project=arguments.get("source_project"),
-                content_type=arguments.get("content_type"),
-                tag=arguments.get("tag"),
-            )
+            timeline_arguments = {
+                "bucket": arguments.get("bucket", "month"),
+                "field": arguments.get("field", "created_at"),
+                "start": arguments.get("start"),
+                "end": arguments.get("end"),
+                "limit": arguments.get("limit"),
+                "source_project": arguments.get("source_project"),
+                "content_type": arguments.get("content_type"),
+                "tag": arguments.get("tag"),
+            }
+            try:
+                result = gs.analyze_timeline(**timeline_arguments)
+            except ValueError as exc:
+                message = str(exc)
+                if message.startswith("Unsupported timeline bucket"):
+                    error = "invalid_bucket"
+                elif message.startswith("Unsupported timeline field"):
+                    error = "invalid_field"
+                elif message.startswith("limit "):
+                    error = "invalid_limit"
+                elif message.startswith("start "):
+                    error = "invalid_start"
+                elif message.startswith("end "):
+                    error = "invalid_end"
+                else:
+                    error = "invalid_timeline_request"
+                result = {
+                    "error": error,
+                    "message": message,
+                    "arguments": timeline_arguments,
+                }
             return [TextContent(type="text", text=json.dumps(result))]
 
         elif name == "analyze_tags":

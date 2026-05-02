@@ -4352,19 +4352,15 @@ def test_timeline_tool_matches_service_schema_and_validates_inputs(tmp_path, mon
     assert [item["bucket"] for item in payload["buckets"]] == ["2026-01", "2026-02"]
     assert payload["buckets"][1]["content_types"] == {"insight": 1}
 
-    try:
-        asyncio.run(mcp_server.call_tool("timeline", {"bucket": "quarter"}))
-    except ValueError as exc:
-        assert "Unsupported timeline bucket" in str(exc)
-    else:
-        raise AssertionError("timeline should reject unsupported buckets")
+    invalid_bucket = asyncio.run(mcp_server.call_tool("timeline", {"bucket": "quarter"}))
+    invalid_bucket_payload = json.loads(invalid_bucket[0].text)
+    assert invalid_bucket_payload["error"] == "invalid_bucket"
+    assert "Unsupported timeline bucket" in invalid_bucket_payload["message"]
 
-    try:
-        asyncio.run(mcp_server.call_tool("timeline", {"field": "deleted_at"}))
-    except ValueError as exc:
-        assert "Unsupported timeline field" in str(exc)
-    else:
-        raise AssertionError("timeline should reject unsupported fields")
+    invalid_field = asyncio.run(mcp_server.call_tool("timeline", {"field": "deleted_at"}))
+    invalid_field_payload = json.loads(invalid_field[0].text)
+    assert invalid_field_payload["error"] == "invalid_field"
+    assert "Unsupported timeline field" in invalid_field_payload["message"]
 
 
 def test_freshness_summary_tool_matches_service_schema(tmp_path, monkeypatch):
