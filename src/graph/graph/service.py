@@ -1883,6 +1883,160 @@ class GraphService:
         )
         return records[:limit] if limit is not None else records
 
+    def _detect_raw_communities(self, undirected: nx.Graph) -> list[set[str]]:
+        raw_communities: list[set[str]] = []
+        for component_ids in nx.connected_components(undirected):
+            component = undirected.subgraph(component_ids)
+            if component.number_of_edges() == 0:
+                raw_communities.extend({str(node_id)} for node_id in component.nodes)
+                continue
+
+            community_algorithm = getattr(
+                nx.algorithms.community,
+                "greedy_modularity_communities",
+                None,
+            )
+            if community_algorithm is None:
+                detected = [set(component.nodes)]
+            else:
+                detected = community_algorithm(component, weight="weight")
+
+            for community in detected:
+                community_graph = component.subgraph(community)
+                raw_communities.extend(
+                    {str(node_id) for node_id in connected_ids}
+                    for connected_ids in nx.connected_components(community_graph)
+                )
+        return raw_communities
+
+    def summarize_communities(
+        self,
+        *,
+        min_size: int = 1,
+        limit: int | None = None,
+        representative_limit: int = 3,
+    ) -> dict:
+        """Return deterministic summary records for graph communities."""
+        if not isinstance(min_size, int) or isinstance(min_size, bool) or min_size < 1:
+            raise ValueError("min_size must be a positive integer.")
+        if limit is not None and (
+            not isinstance(limit, int) or isinstance(limit, bool) or limit < 0
+        ):
+            raise ValueError("limit must be a non-negative integer or None.")
+        if (
+            not isinstance(representative_limit, int)
+            or isinstance(representative_limit, bool)
+            or representative_limit < 0
+        ):
+            raise ValueError("representative_limit must be a non-negative integer.")
+
+        if not self.G:
+            self.rebuild()
+
+        node_count = int(self.G.number_of_nodes())
+        edge_count = int(self.G.number_of_edges())
+        if node_count == 0:
+            return {
+                "node_count": 0,
+                "edge_count": 0,
+                "community_count": 0,
+                "communities": [],
+            }
+
+        undirected = self.G.to_undirected()
+        records = []
+        for unit_ids_set in self._detect_raw_communities(undirected):
+            if len(unit_ids_set) < min_size:
+                continue
+
+            member_ids = sorted(unit_ids_set)
+            community_graph = undirected.subgraph(member_ids)
+            internal_edge_count = int(community_graph.number_of_edges())
+            possible_edge_count = len(member_ids) * (len(member_ids) - 1) // 2
+            density = round(float(nx.density(community_graph)), 6)
+            ranked_representatives = sorted(
+                member_ids,
+                key=lambda unit_id: (
+                    -int(community_graph.degree(unit_id)),
+                    str(self.G.nodes[unit_id].get("title", "") or unit_id).lower(),
+                    unit_id,
+                ),
+            )
+            representative_labels = [
+                str(self.G.nodes[unit_id].get("title", "") or unit_id)
+                for unit_id in ranked_representatives[:representative_limit]
+            ]
+            digest = hashlib.sha1("\n".join(member_ids).encode("utf-8")).hexdigest()[:12]
+            records.append(
+                {
+                    "community_id": f"community-{digest}",
+                    "member_ids": member_ids,
+                    "size": len(member_ids),
+                    "representative_labels": representative_labels,
+                    "internal_edge_count": internal_edge_count,
+                    "possible_edge_count": possible_edge_count,
+                    "density": density,
+                }
+            )
+
+        records.sort(
+            key=lambda record: (
+                -record["size"],
+                -record["density"],
+                -record["internal_edge_count"],
+                record["member_ids"],
+            )
+        )
+        limited_records = records[:limit] if limit is not None else records
+        return {
+            "node_count": node_count,
+            "edge_count": edge_count,
+            "community_count": len(records),
+            "communities": limited_records,
+        }
+
+    def get_community_summary(
+        self,
+        *,
+        min_size: int = 1,
+        limit: int | None = None,
+        representative_limit: int = 3,
+    ) -> dict:
+        """Alias for summarize_communities."""
+        return self.summarize_communities(
+            min_size=min_size,
+            limit=limit,
+            representative_limit=representative_limit,
+        )
+
+    def analyze_community_summary(
+        self,
+        *,
+        min_size: int = 1,
+        limit: int | None = None,
+        representative_limit: int = 3,
+    ) -> dict:
+        """Alias for summarize_communities."""
+        return self.summarize_communities(
+            min_size=min_size,
+            limit=limit,
+            representative_limit=representative_limit,
+        )
+
+    def community_summary(
+        self,
+        *,
+        min_size: int = 1,
+        limit: int | None = None,
+        representative_limit: int = 3,
+    ) -> dict:
+        """Alias for summarize_communities."""
+        return self.summarize_communities(
+            min_size=min_size,
+            limit=limit,
+            representative_limit=representative_limit,
+        )
+
     def analyze_strongly_connected_components(
         self,
         min_size: int = 2,
