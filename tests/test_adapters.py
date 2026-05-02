@@ -18,6 +18,7 @@ from graph.adapters.atom import AtomAdapter
 from graph.adapters.bibdesk import BibDeskAdapter
 from graph.adapters.bibtex import BibtexAdapter
 from graph.adapters.bookmarks import BookmarksAdapter
+from graph.adapters.browser_history_csv import BrowserHistoryCsvAdapter
 from graph.adapters.csv_adapter import CsvAdapter
 from graph.adapters.crossref import CrossrefAdapter
 from graph.adapters.csl_json import CslJsonAdapter
@@ -2642,6 +2643,7 @@ class TestRegistry:
             "sota",
             "feed",
             "bookmarks",
+            "browser_history_csv",
             "csv",
             "jsonl",
             "yaml",
@@ -2775,6 +2777,12 @@ class TestRegistry:
         pocket_csv_adapter = get_adapter("pocket_csv", path="/tmp/pocket.csv")
         assert isinstance(pocket_csv_adapter, PocketCsvAdapter)
         assert pocket_csv_adapter.name == "pocket_csv"
+
+        browser_history_csv_adapter = get_adapter(
+            "browser_history_csv", path="/tmp/history.csv"
+        )
+        assert isinstance(browser_history_csv_adapter, BrowserHistoryCsvAdapter)
+        assert browser_history_csv_adapter.name == "browser_history_csv"
 
         pinboard_adapter = get_adapter("pinboard", path="/tmp/pinboard.json")
         assert isinstance(pinboard_adapter, PinboardAdapter)
