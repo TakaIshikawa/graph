@@ -24,6 +24,7 @@ from graph.adapters.kindle import KindleAdapter
 from graph.adapters.markdown import MarkdownAdapter
 from graph.adapters.max_adapter import MaxAdapter
 from graph.adapters.me import MeAdapter
+from graph.adapters.mediawiki import MediaWikiAdapter
 from graph.adapters.opml import OpmlAdapter
 from graph.adapters.org import OrgAdapter
 from graph.adapters.pdf import PdfAdapter
@@ -45,6 +46,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "max": MaxAdapter,
     "presence": PresenceAdapter,
     "me": MeAdapter,
+    "mediawiki": MediaWikiAdapter,
     "markdown": MarkdownAdapter,
     "kindle": KindleAdapter,
     "sota": SOTAAdapter,

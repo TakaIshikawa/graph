@@ -6,6 +6,7 @@ class SourceProject(StrEnum):
     MAX = "max"
     PRESENCE = "presence"
     ME = "me"
+    MEDIAWIKI = "mediawiki"
     KINDLE = "kindle"
     SOTA = "sota"
     BOOKMARKS = "bookmarks"
