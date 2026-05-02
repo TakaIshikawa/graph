@@ -14,6 +14,7 @@ class SourceProject(StrEnum):
     SOTA = "sota"
     BOOKMARKS = "bookmarks"
     BROWSER_HISTORY_CSV = "browser_history_csv"
+    CHATGPT_JSON = "chatgpt_json"
     CSV = "csv"
     JSONL = "jsonl"
     YAML = "yaml"

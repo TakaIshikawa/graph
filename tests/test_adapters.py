@@ -19,6 +19,7 @@ from graph.adapters.bibdesk import BibDeskAdapter
 from graph.adapters.bibtex import BibtexAdapter
 from graph.adapters.bookmarks import BookmarksAdapter
 from graph.adapters.browser_history_csv import BrowserHistoryCsvAdapter
+from graph.adapters.chatgpt_json import ChatGptJsonAdapter
 from graph.adapters.csv_adapter import CsvAdapter
 from graph.adapters.crossref import CrossrefAdapter
 from graph.adapters.csl_json import CslJsonAdapter
@@ -2655,6 +2656,7 @@ class TestRegistry:
             "feed",
             "bookmarks",
             "browser_history_csv",
+            "chatgpt_json",
             "csv",
             "jsonl",
             "yaml",
@@ -2800,6 +2802,10 @@ class TestRegistry:
         )
         assert isinstance(browser_history_csv_adapter, BrowserHistoryCsvAdapter)
         assert browser_history_csv_adapter.name == "browser_history_csv"
+
+        chatgpt_json_adapter = get_adapter("chatgpt_json", path="/tmp/conversations.json")
+        assert isinstance(chatgpt_json_adapter, ChatGptJsonAdapter)
+        assert chatgpt_json_adapter.name == "chatgpt_json"
 
         pinboard_adapter = get_adapter("pinboard", path="/tmp/pinboard.json")
         assert isinstance(pinboard_adapter, PinboardAdapter)

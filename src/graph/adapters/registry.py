@@ -8,6 +8,7 @@ from graph.adapters.bibdesk import BibDeskAdapter
 from graph.adapters.bibtex import BibtexAdapter
 from graph.adapters.bookmarks import BookmarksAdapter
 from graph.adapters.browser_history_csv import BrowserHistoryCsvAdapter
+from graph.adapters.chatgpt_json import ChatGptJsonAdapter
 from graph.adapters.csv_adapter import CsvAdapter
 from graph.adapters.crossref import CrossrefAdapter
 from graph.adapters.csl_json import CslJsonAdapter
@@ -72,6 +73,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "feed": FeedAdapter,
     "bookmarks": BookmarksAdapter,
     "browser_history_csv": BrowserHistoryCsvAdapter,
+    "chatgpt_json": ChatGptJsonAdapter,
     "csv": CsvAdapter,
     "jsonl": JsonlAdapter,
     "yaml": YamlAdapter,
