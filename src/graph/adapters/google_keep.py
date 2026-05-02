@@ -1,0 +1,244 @@
+"""Adapter for Google Keep Takeout JSON exports."""
+
+from __future__ import annotations
+
+import json
+import re
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from graph.adapters.base import IngestResult, SourceAdapter
+from graph.types.enums import ContentType, SourceProject
+from graph.types.models import KnowledgeUnit, SyncState
+
+
+class GoogleKeepAdapter(SourceAdapter):
+    @property
+    def name(self) -> str:
+        return "google_keep"
+
+    @property
+    def entity_types(self) -> list[str]:
+        return ["keep_note"]
+
+    def __init__(self, path: str = "") -> None:
+        self.path = path
+
+    def ingest(
+        self,
+        *,
+        since: SyncState | None = None,
+        entity_types: list[str] | None = None,
+    ) -> IngestResult:
+        result = IngestResult()
+        if entity_types and "keep_note" not in entity_types:
+            return result
+
+        sync_at = self._sync_datetime(since) if since else None
+        for path in self._iter_paths():
+            note = self._read_note(path)
+            unit = self._unit_from_note(note, path)
+            comparable_at = self._comparable_datetime(unit)
+            if sync_at and comparable_at and comparable_at <= sync_at:
+                continue
+            result.units.append(unit)
+
+        return result
+
+    def _iter_paths(self) -> list[Path]:
+        path = Path(self.path).expanduser() if self.path else None
+        if path is None or not path.exists():
+            return []
+        if path.is_file():
+            return [path] if path.suffix.lower() == ".json" else []
+        if path.is_dir():
+            return sorted(item for item in path.rglob("*.json") if item.is_file())
+        return []
+
+    def _read_note(self, path: Path) -> dict[str, Any]:
+        try:
+            parsed = json.loads(path.read_text(encoding="utf-8-sig"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Malformed Google Keep JSON in {path}: {exc.msg}") from exc
+        except UnicodeDecodeError as exc:
+            raise ValueError(f"Could not decode Google Keep JSON file {path}") from exc
+        except OSError as exc:
+            raise ValueError(f"Could not read Google Keep JSON file {path}") from exc
+
+        if not isinstance(parsed, dict):
+            raise ValueError(f"Google Keep JSON file {path} must contain one note object")
+        return parsed
+
+    def _unit_from_note(self, note: dict[str, Any], path: Path) -> KnowledgeUnit:
+        title = self._string(note.get("title")) or "Untitled Google Keep note"
+        text = self._string(note.get("textContent"))
+        checklist_items = self._checklist_items(note.get("listContent"))
+        content = self._content(title, text, checklist_items)
+        created_at = self._timestamp(note, "createdTimestampUsec", "created_at", "createdAt")
+        updated_at = self._timestamp(
+            note,
+            "userEditedTimestampUsec",
+            "updatedTimestampUsec",
+            "editedTimestampUsec",
+            "updated_at",
+            "updatedAt",
+        )
+        tags = self._tags(note.get("labels"))
+
+        metadata = {
+            "id": self._note_id(note),
+            "source_path": str(path),
+            "title": title,
+            "textContent": text,
+            "labels": tags,
+            "checklist": checklist_items,
+        }
+        for key in (
+            "isArchived",
+            "isTrashed",
+            "isPinned",
+            "color",
+            "createdTimestampUsec",
+            "userEditedTimestampUsec",
+            "updatedTimestampUsec",
+            "editedTimestampUsec",
+            "trashedTimestampUsec",
+            "created_at",
+            "createdAt",
+            "updated_at",
+            "updatedAt",
+        ):
+            if key in note:
+                metadata[key] = self._jsonable(note[key])
+
+        return KnowledgeUnit(
+            source_project=SourceProject.GOOGLE_KEEP,
+            source_id=self._source_id(note, path),
+            source_entity_type="keep_note",
+            title=title,
+            content=content,
+            content_type=ContentType.ARTIFACT,
+            metadata=metadata,
+            tags=tags,
+            created_at=created_at or updated_at or datetime.now(timezone.utc),
+            updated_at=updated_at or created_at or datetime.now(timezone.utc),
+        )
+
+    def _content(
+        self, title: str, text: str, checklist_items: list[dict[str, Any]]
+    ) -> str:
+        parts = []
+        if title:
+            parts.append(title)
+        if text:
+            parts.append(text)
+        if checklist_items:
+            parts.extend(
+                f"[{'x' if item['checked'] else ' '}] {item['text']}"
+                for item in checklist_items
+                if item["text"]
+            )
+        return "\n".join(parts) or title
+
+    def _checklist_items(self, value: Any) -> list[dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+        items: list[dict[str, Any]] = []
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            text = self._string(item.get("text"))
+            if not text:
+                continue
+            items.append(
+                {
+                    "text": text,
+                    "checked": bool(item.get("isChecked")),
+                }
+            )
+        return items
+
+    def _tags(self, value: Any) -> list[str]:
+        raw_tags: list[Any]
+        if isinstance(value, list):
+            raw_tags = value
+        elif isinstance(value, str):
+            raw_tags = re.split(r"[,;|]", value)
+        else:
+            raw_tags = []
+
+        tags: list[str] = []
+        seen: set[str] = set()
+        for tag in raw_tags:
+            if isinstance(tag, dict):
+                tag = tag.get("name") or tag.get("label") or tag.get("tag") or ""
+            normalized = re.sub(r"\s+", " ", str(tag).strip().removeprefix("#")).strip()
+            key = normalized.casefold()
+            if normalized and key not in seen:
+                tags.append(normalized)
+                seen.add(key)
+        return tags
+
+    def _note_id(self, note: dict[str, Any]) -> str:
+        for key in ("id", "uuid", "noteId"):
+            value = self._string(note.get(key))
+            if value:
+                return value
+        return ""
+
+    def _source_id(self, note: dict[str, Any], path: Path) -> str:
+        note_id = self._note_id(note)
+        if note_id:
+            return f"google_keep:{note_id}"
+        return f"google_keep:path:{path}"
+
+    def _timestamp(self, note: dict[str, Any], *keys: str) -> datetime | None:
+        for key in keys:
+            parsed = self._parse_datetime(note.get(key))
+            if parsed is not None:
+                return parsed
+        return None
+
+    def _parse_datetime(self, value: Any) -> datetime | None:
+        if value in (None, ""):
+            return None
+        if isinstance(value, (int, float)):
+            return datetime.fromtimestamp(value / 1_000_000, tz=timezone.utc)
+        text = str(value).strip()
+        if text.isdigit():
+            return datetime.fromtimestamp(int(text) / 1_000_000, tz=timezone.utc)
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    def _sync_datetime(self, since: SyncState) -> datetime:
+        value = since.last_sync_at
+        if isinstance(value, datetime):
+            parsed = value
+        else:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    def _comparable_datetime(self, unit: KnowledgeUnit) -> datetime | None:
+        return unit.updated_at or unit.created_at
+
+    def _string(self, value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, (dict, list)):
+            return json.dumps(value, sort_keys=True)
+        return str(value).strip()
+
+    def _jsonable(self, value: Any) -> Any:
+        try:
+            json.dumps(value)
+        except TypeError:
+            return str(value)
+        return value

@@ -15,6 +15,7 @@ from graph.adapters.enex import EnexAdapter
 from graph.adapters.feed import FeedAdapter
 from graph.adapters.forty_two import FortyTwoAdapter
 from graph.adapters.git_adapter import GitAdapter
+from graph.adapters.google_keep import GoogleKeepAdapter
 from graph.adapters.html import HtmlAdapter
 from graph.adapters.hypothesis import HypothesisAdapter
 from graph.adapters.ical import ICalAdapter
@@ -83,6 +84,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "ris": RisAdapter,
     "jats": JatsAdapter,
     "git": GitAdapter,
+    "google_keep": GoogleKeepAdapter,
     "transcript": TranscriptAdapter,
     "pocket": PocketAdapter,
     "pocket_csv": PocketCsvAdapter,

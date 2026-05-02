@@ -29,6 +29,7 @@ class SourceProject(StrEnum):
     RIS = "ris"
     JATS = "jats"
     GIT = "git"
+    GOOGLE_KEEP = "google_keep"
     TRANSCRIPT = "transcript"
     POCKET = "pocket"
     POCKET_CSV = "pocket_csv"

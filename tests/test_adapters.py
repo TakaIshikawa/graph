@@ -26,6 +26,7 @@ from graph.adapters.enex import EnexAdapter
 from graph.adapters.feed import FeedAdapter
 from graph.adapters.forty_two import FortyTwoAdapter
 from graph.adapters.git_adapter import GitAdapter
+from graph.adapters.google_keep import GoogleKeepAdapter
 from graph.adapters.html import HtmlAdapter
 from graph.adapters.hypothesis import HypothesisAdapter
 from graph.adapters.ical import ICalAdapter
@@ -2659,6 +2660,7 @@ class TestRegistry:
             "ris",
             "jats",
             "git",
+            "google_keep",
             "transcript",
             "pocket",
             "pocket_csv",
@@ -2745,6 +2747,10 @@ class TestRegistry:
 
         git_adapter = get_adapter("git", repos="/tmp/repo")
         assert git_adapter.name == "git"
+
+        google_keep_adapter = get_adapter("google_keep", path="/tmp/keep")
+        assert isinstance(google_keep_adapter, GoogleKeepAdapter)
+        assert google_keep_adapter.name == "google_keep"
 
         transcript_adapter = get_adapter("transcript", root_path="/tmp/transcripts")
         assert transcript_adapter.name == "transcript"
