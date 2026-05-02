@@ -46,6 +46,7 @@ from graph.adapters.pocket_csv import PocketCsvAdapter
 from graph.adapters.presence import PresenceAdapter
 from graph.adapters.raindrop import RaindropAdapter
 from graph.adapters.readwise import ReadwiseAdapter
+from graph.adapters.readwise_csv import ReadwiseCsvAdapter
 from graph.adapters.roam import RoamAdapter
 from graph.adapters.slack_json import SlackJsonAdapter
 from graph.adapters.sota import SOTAAdapter
@@ -111,6 +112,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "zotero_rdf": ZoteroRdfAdapter,
     "hypothesis": HypothesisAdapter,
     "readwise": ReadwiseAdapter,
+    "readwise_csv": ReadwiseCsvAdapter,
     "roam": RoamAdapter,
     "logseq": LogseqAdapter,
     "sqlite_query_log": SqliteQueryLogAdapter,

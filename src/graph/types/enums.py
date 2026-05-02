@@ -46,6 +46,7 @@ class SourceProject(StrEnum):
     ZOTERO_RDF = "zotero_rdf"
     HYPOTHESIS = "hypothesis"
     READWISE = "readwise"
+    READWISE_CSV = "readwise_csv"
     ROAM = "roam"
     LOGSEQ = "logseq"
     SQLITE_QUERY_LOG = "sqlite_query_log"
