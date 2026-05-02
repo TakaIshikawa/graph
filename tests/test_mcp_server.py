@@ -4218,6 +4218,26 @@ def test_analyze_k_core_tool_serializes_validation_errors(tmp_path, monkeypatch)
     }
 
 
+def test_analyze_relation_motifs_tool_is_available_from_mcp_server(
+    tmp_path,
+    monkeypatch,
+):
+    db_path = tmp_path / "graph.db"
+    Store(str(db_path)).close()
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    tool = next(tool for tool in tools if tool.name == "analyze_relation_motifs")
+    assert tool.inputSchema["properties"]["limit"]["default"] == 20
+    assert tool.inputSchema["properties"]["relation_sequence"]["items"]["enum"]
+
+    response = asyncio.run(mcp_server.call_tool("analyze_relation_motifs", {}))
+    payload = json.loads(response[0].text)
+
+    assert payload["motifs"] == []
+    assert payload["stats"]["total_paths"] == 0
+
+
 def test_analyze_tags_tool_returns_summary_and_detail_json(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))
