@@ -354,6 +354,15 @@ def metadata_path_value(metadata: dict, path: str):
     return current
 
 
+def _metadata_path_lookup(metadata: dict, path: str) -> tuple[bool, Any]:
+    current: Any = metadata
+    for part in _metadata_path_parts(path):
+        if not isinstance(current, dict) or part not in current:
+            return False, None
+        current = current[part]
+    return True, current
+
+
 def metadata_path_matches(metadata: dict, path: str, value: object) -> bool:
     return metadata_path_value(metadata, path) == value
 
@@ -617,6 +626,70 @@ class Store:
             for path in sorted(counts, key=lambda item: (-counts[item], item))
         ]
         return inventory_rows[:limit] if limit is not None else inventory_rows
+
+    def metadata_value_histogram(
+        self,
+        path: str,
+        *,
+        source_project: str | None = None,
+        limit: int | None = None,
+    ) -> dict:
+        """Count scalar metadata values at a dotted path across knowledge units."""
+        normalized_path = _format_metadata_path(_metadata_path_parts(path))
+        if limit is not None and (
+            not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0
+        ):
+            raise ValueError("limit must be a positive integer.")
+
+        where_parts, params = self._unit_filter_parts(source_project=source_project)
+        query = "SELECT source_project, metadata FROM knowledge_units"
+        if where_parts:
+            query += " WHERE " + " AND ".join(where_parts)
+        query += " ORDER BY source_project, id"
+
+        counts: Counter[tuple[str, str, Any]] = Counter()
+        missing_count = 0
+        unit_count = 0
+        value_count = 0
+
+        for row in self.conn.execute(query, params).fetchall():
+            unit_count += 1
+            metadata = json.loads(row["metadata"])
+            found, raw_value = _metadata_path_lookup(metadata, normalized_path)
+            if not found:
+                missing_count += 1
+                continue
+
+            values = raw_value if isinstance(raw_value, list) else [raw_value]
+            for value in values:
+                if isinstance(value, Mapping) or isinstance(value, list):
+                    continue
+                value_type = _metadata_inventory_value_type(value)
+                counts[(value_type, json.dumps(value, sort_keys=True), value)] += 1
+                value_count += 1
+
+        sorted_items = sorted(
+            counts.items(),
+            key=lambda item: (-item[1], item[0][0], item[0][1]),
+        )
+        if limit is not None:
+            sorted_items = sorted_items[:limit]
+
+        return {
+            "path": normalized_path,
+            "source_project": source_project,
+            "unit_count": unit_count,
+            "missing_count": missing_count,
+            "value_count": value_count,
+            "values": [
+                {
+                    "value": value,
+                    "value_type": value_type,
+                    "count": count,
+                }
+                for (value_type, _sort_value, value), count in sorted_items
+            ],
+        }
 
     def find_source_id_collisions(
         self,
