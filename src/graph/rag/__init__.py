@@ -12,6 +12,7 @@ from graph.rag.reading_queue import build_reading_queue
 from graph.rag.reading_time import estimate_reading_time
 from graph.rag.result_clusters import cluster_results_by_overlap
 from graph.rag.snippets import highlight_result_snippets
+from graph.rag.source_credibility import score_source_credibility
 from graph.rag.source_timeline import build_source_timeline
 from graph.rag.tag_cooccurrence import build_tag_cooccurrence_matrix
 from graph.rag.tag_hierarchy import build_tag_hierarchy
@@ -35,5 +36,6 @@ __all__ = [
     "plan_tag_reading_path",
     "rank_duplicate_candidates",
     "rerank_for_source_diversity",
+    "score_source_credibility",
     "suggest_tag_normalizations",
 ]
