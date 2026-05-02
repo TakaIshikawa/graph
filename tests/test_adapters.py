@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from graph.adapters.bibdesk import BibDeskAdapter
 from graph.adapters.bibtex import BibtexAdapter
 from graph.adapters.bookmarks import BookmarksAdapter
 from graph.adapters.csv_adapter import CsvAdapter
@@ -2636,6 +2637,7 @@ class TestRegistry:
             "html",
             "ical",
             "ipynb",
+            "bibdesk",
             "bibtex",
             "csl_json",
             "crossref",
@@ -2693,6 +2695,10 @@ class TestRegistry:
 
         bibtex_adapter = get_adapter("bibtex", path="/tmp/refs.bib")
         assert bibtex_adapter.name == "bibtex"
+
+        bibdesk_adapter = get_adapter("bibdesk", path="/tmp/refs.plist")
+        assert isinstance(bibdesk_adapter, BibDeskAdapter)
+        assert bibdesk_adapter.name == "bibdesk"
 
         csl_json_adapter = get_adapter("csl_json", path="/tmp/refs.json")
         assert csl_json_adapter.name == "csl_json"
