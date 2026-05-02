@@ -7,6 +7,7 @@ class SourceProject(StrEnum):
     PRESENCE = "presence"
     ME = "me"
     MEDIAWIKI = "mediawiki"
+    MARKDOWN_CALLOUTS = "markdown_callouts"
     MARKDOWN_LINKS = "markdown_links"
     MASTODON = "mastodon"
     KINDLE = "kindle"
