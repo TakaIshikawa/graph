@@ -54,6 +54,7 @@ from graph.adapters.readwise import ReadwiseAdapter
 from graph.adapters.registry import get_adapter, list_adapters
 from graph.adapters.ris import RisAdapter
 from graph.adapters.roam import RoamAdapter
+from graph.adapters.slack_json import SlackJsonAdapter
 from graph.adapters.sqlite_query_log import SqliteQueryLogAdapter
 from graph.adapters.text import TextAdapter
 from graph.adapters.text_outline import TextOutlineAdapter
@@ -2681,6 +2682,7 @@ class TestRegistry:
             "roam",
             "logseq",
             "sqlite_query_log",
+            "slack_json",
         }
 
     def test_get_adapter(self):
@@ -2818,6 +2820,10 @@ class TestRegistry:
         )
         assert isinstance(sqlite_query_log_adapter, SqliteQueryLogAdapter)
         assert sqlite_query_log_adapter.name == "sqlite_query_log"
+
+        slack_json_adapter = get_adapter("slack_json", path="/tmp/slack/general")
+        assert isinstance(slack_json_adapter, SlackJsonAdapter)
+        assert slack_json_adapter.name == "slack_json"
 
         mediawiki_adapter = get_adapter("mediawiki", path="/tmp/wiki.xml")
         assert isinstance(mediawiki_adapter, MediaWikiAdapter)
