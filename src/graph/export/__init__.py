@@ -12,6 +12,7 @@ from graph.export.llms_txt import export_units_to_llms_txt
 from graph.export.org import export_units_to_org
 from graph.export.schema_inventory import export_unit_schema_inventory
 from graph.export.sqlite_snapshot import export_graph_sqlite
+from graph.export.tag_cooccurrence_csv import export_tag_cooccurrence_csv
 from graph.export.tag_glossary import export_tag_glossary_markdown
 from graph.export.unit_csv import export_units_to_csv
 from graph.export.unit_markdown_table import export_units_to_markdown_table
@@ -27,6 +28,7 @@ __all__ = [
     "export_graphson",
     "export_graph_sqlite",
     "render_graph_overview_html",
+    "export_tag_cooccurrence_csv",
     "export_tag_glossary_markdown",
     "export_unit_schema_inventory",
     "export_units_to_anki_tsv",
