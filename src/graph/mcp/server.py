@@ -2074,6 +2074,29 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="metadata_value_histogram",
+            description="Count scalar metadata values at a dotted metadata path across knowledge units.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "metadata_key": {
+                        "type": "string",
+                        "description": "Dotted metadata path to count, e.g. review.state",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Maximum number of value buckets to return",
+                    },
+                    "source_project": {
+                        "type": "string",
+                        "description": "Optional source project filter",
+                    },
+                },
+                "required": ["metadata_key"],
+            },
+        ),
+        Tool(
             name="delete_unit",
             description="Delete a knowledge unit, its full-text row, and related edges.",
             inputSchema={
@@ -3701,6 +3724,21 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 arguments["unit_id"],
                 arguments["path"],
             )
+            return [TextContent(type="text", text=json.dumps(payload, default=str))]
+
+        elif name == "metadata_value_histogram":
+            try:
+                payload = store.metadata_value_histogram(
+                    arguments["metadata_key"],
+                    source_project=arguments.get("source_project"),
+                    limit=arguments.get("limit"),
+                )
+            except ValueError as exc:
+                payload = {
+                    "error": str(exc),
+                    "metadata_key": arguments.get("metadata_key"),
+                    "values": [],
+                }
             return [TextContent(type="text", text=json.dumps(payload, default=str))]
 
         elif name == "delete_unit":
