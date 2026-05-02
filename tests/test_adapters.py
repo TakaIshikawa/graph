@@ -33,6 +33,7 @@ from graph.adapters.jsonl_adapter import JsonlAdapter
 from graph.adapters.logseq import LogseqAdapter
 from graph.adapters.markdown import MarkdownAdapter
 from graph.adapters.markdown_links import MarkdownLinksAdapter
+from graph.adapters.mastodon import MastodonAdapter
 from graph.adapters.max_adapter import MaxAdapter
 from graph.adapters.me import MeAdapter
 from graph.adapters.mediawiki import MediaWikiAdapter
@@ -2628,6 +2629,7 @@ class TestRegistry:
             "mediawiki",
             "markdown",
             "markdown_links",
+            "mastodon",
             "kindle",
             "sota",
             "feed",
@@ -2770,6 +2772,10 @@ class TestRegistry:
         markdown_links_adapter = get_adapter("markdown_links", path="/tmp/notes")
         assert isinstance(markdown_links_adapter, MarkdownLinksAdapter)
         assert markdown_links_adapter.name == "markdown_links"
+
+        mastodon_adapter = get_adapter("mastodon", path="/tmp/outbox.json")
+        assert isinstance(mastodon_adapter, MastodonAdapter)
+        assert mastodon_adapter.name == "mastodon"
 
     def test_unknown_adapter(self):
         with pytest.raises(KeyError):
