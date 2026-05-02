@@ -6,6 +6,7 @@ from graph.export.context_pack import export_context_pack
 from graph.export.dot import export_graph_dot
 from graph.export.edge_csv import export_edges_to_csv
 from graph.export.graphson import export_graphson
+from graph.export.graph_overview_html import render_graph_overview_html
 from graph.export.ical import DATE_METADATA_KEYS, export_units_to_ics, unit_event_datetime
 from graph.export.llms_txt import export_units_to_llms_txt
 from graph.export.org import export_units_to_org
@@ -25,6 +26,7 @@ __all__ = [
     "export_graph_dot",
     "export_graphson",
     "export_graph_sqlite",
+    "render_graph_overview_html",
     "export_tag_glossary_markdown",
     "export_unit_schema_inventory",
     "export_units_to_anki_tsv",
