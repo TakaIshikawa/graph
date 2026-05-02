@@ -1012,6 +1012,21 @@ class TestGraphService:
             "components": [],
         }
 
+    def test_analyze_cycles_empty_graph_returns_zero_counts(self, store: Store):
+        result = GraphService(store).analyze_cycles()
+
+        assert result == {
+            "stats": {
+                "node_count": 0,
+                "edge_count": 0,
+                "cycle_count": 0,
+                "returned_count": 0,
+                "limit": 20,
+                "max_length": None,
+            },
+            "cycles": [],
+        }
+
     def test_analyze_k_core_can_omit_unit_payloads(self, k_core_store: Store):
         result = GraphService(k_core_store).analyze_k_core(k=0, include_units=False)
 

@@ -1500,6 +1500,91 @@ class GraphService:
 
         return results
 
+    def analyze_cycles(
+        self,
+        limit: int = 20,
+        max_length: int | None = None,
+    ) -> dict:
+        """Return a deterministic inventory of directed simple cycles."""
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
+            raise ValueError("limit must be a non-negative integer.")
+        if max_length is not None and (
+            not isinstance(max_length, int)
+            or isinstance(max_length, bool)
+            or max_length < 1
+        ):
+            raise ValueError("max_length must be a positive integer or None.")
+
+        if not self.G:
+            self.rebuild()
+
+        stats = {
+            "node_count": self.G.number_of_nodes(),
+            "edge_count": self.G.number_of_edges(),
+            "cycle_count": 0,
+            "returned_count": 0,
+            "limit": limit,
+            "max_length": max_length,
+        }
+        if self.G.number_of_nodes() == 0:
+            return {"stats": stats, "cycles": []}
+
+        graph = nx.DiGraph()
+        graph.add_nodes_from(sorted(str(node_id) for node_id in self.G.nodes))
+        graph.add_edges_from(
+            sorted(
+                (str(from_id), str(to_id))
+                for from_id, to_id in self.G.edges
+            )
+        )
+
+        def canonical_cycle(cycle: list[str]) -> list[str]:
+            return min(
+                (
+                    cycle[index:] + cycle[:index]
+                    for index in range(len(cycle))
+                ),
+                key=lambda rotation: tuple(rotation),
+            )
+
+        unique_cycles: dict[tuple[str, ...], list[str]] = {}
+        for cycle in nx.simple_cycles(graph):
+            if max_length is not None and len(cycle) > max_length:
+                continue
+            canonical = canonical_cycle([str(unit_id) for unit_id in cycle])
+            unique_cycles[tuple(canonical)] = canonical
+
+        ordered_cycles = sorted(
+            unique_cycles.values(),
+            key=lambda cycle: (len(cycle), tuple(cycle)),
+        )
+        stats["cycle_count"] = len(ordered_cycles)
+
+        cycles = []
+        for cycle in ordered_cycles[:limit]:
+            cycles.append(
+                {
+                    "unit_ids": cycle,
+                    "length": len(cycle),
+                    "units": [
+                        {
+                            "id": unit_id,
+                            "title": str(self.G.nodes[unit_id].get("title", "")),
+                            "source_project": str(
+                                self.G.nodes[unit_id].get("source_project", "")
+                            ),
+                            "content_type": str(
+                                self.G.nodes[unit_id].get("content_type", "")
+                            ),
+                        }
+                        for unit_id in cycle
+                    ],
+                }
+            )
+
+        stats["returned_count"] = len(cycles)
+        return {"stats": stats, "cycles": cycles}
+
     def get_clusters(self, min_size: int = 3) -> list[list[str]]:
         """Find connected components / clusters."""
         if not self.G.nodes:
