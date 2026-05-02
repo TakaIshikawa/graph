@@ -33,6 +33,7 @@ from graph.adapters.jsonl_adapter import JsonlAdapter
 from graph.adapters.markdown import MarkdownAdapter
 from graph.adapters.max_adapter import MaxAdapter
 from graph.adapters.me import MeAdapter
+from graph.adapters.mediawiki import MediaWikiAdapter
 from graph.adapters.opml import OpmlAdapter
 from graph.adapters.org import OrgAdapter
 from graph.adapters.pdf import PdfAdapter
@@ -2621,6 +2622,7 @@ class TestRegistry:
             "max",
             "presence",
             "me",
+            "mediawiki",
             "markdown",
             "kindle",
             "sota",
@@ -2746,6 +2748,10 @@ class TestRegistry:
         roam_adapter = get_adapter("roam", file_path="/tmp/roam.json")
         assert isinstance(roam_adapter, RoamAdapter)
         assert roam_adapter.name == "roam"
+
+        mediawiki_adapter = get_adapter("mediawiki", path="/tmp/wiki.xml")
+        assert isinstance(mediawiki_adapter, MediaWikiAdapter)
+        assert mediawiki_adapter.name == "mediawiki"
 
     def test_unknown_adapter(self):
         with pytest.raises(KeyError):
