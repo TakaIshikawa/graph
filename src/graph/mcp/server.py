@@ -2024,6 +2024,27 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="analyze_edge_lag",
+            description=(
+                "Summarize created_at or updated_at lag between connected units by edge relation."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "field": {
+                        "type": "string",
+                        "enum": ["created_at", "updated_at"],
+                        "default": "created_at",
+                    },
+                    "example_limit": {
+                        "type": "integer",
+                        "default": 5,
+                        "minimum": 0,
+                    },
+                },
+            },
+        ),
+        Tool(
             name="analyze_tags",
             description="Analyze graph tags with counts, source/type breakdowns, matching units, and co-occurrences.",
             inputSchema={
@@ -4066,6 +4087,29 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 buckets=arguments.get("buckets"),
                 as_of=arguments.get("as_of"),
             )
+            return [TextContent(type="text", text=json.dumps(result))]
+
+        elif name == "analyze_edge_lag":
+            gs = GraphService(store)
+            edge_lag_arguments = {
+                "field": arguments.get("field", "created_at"),
+                "example_limit": arguments.get("example_limit", 5),
+            }
+            try:
+                result = gs.analyze_edge_lag(**edge_lag_arguments)
+            except ValueError as exc:
+                message = str(exc)
+                if message.startswith("Unsupported edge lag field"):
+                    error = "invalid_field"
+                elif message.startswith("example_limit "):
+                    error = "invalid_example_limit"
+                else:
+                    error = "invalid_edge_lag_request"
+                result = {
+                    "error": error,
+                    "message": message,
+                    "arguments": edge_lag_arguments,
+                }
             return [TextContent(type="text", text=json.dumps(result))]
 
         elif name == "suggest_tag_synonyms":

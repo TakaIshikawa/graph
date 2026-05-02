@@ -31,6 +31,7 @@ _TRAILING_URL_PUNCTUATION = ".,;:!?)]}'\""
 _TIMELINE_BUCKETS = {"day", "week", "month", "year"}
 _TIMELINE_FIELDS = {"created_at", "ingested_at", "updated_at"}
 _FRESHNESS_FIELDS = {"created_at", "ingested_at", "updated_at"}
+_EDGE_LAG_FIELDS = {"created_at", "updated_at"}
 _DEFAULT_FRESHNESS_BUCKETS = ("7d", "30d", "90d", "older")
 _FRESHNESS_BUCKET_RE = re.compile(r"^([1-9][0-9]*)d$")
 _TRIAD_CENSUS_TYPES = (
@@ -2461,6 +2462,126 @@ class GraphService:
             representative_limit=representative_limit,
             bridge_limit=bridge_limit,
         )
+
+    def analyze_edge_lag(
+        self,
+        *,
+        field: str = "created_at",
+        example_limit: int = 5,
+    ) -> dict:
+        """Summarize endpoint date lag across graph edges by relation."""
+        if field not in _EDGE_LAG_FIELDS:
+            raise ValueError(
+                f"Unsupported edge lag field: {field}. Use created_at or updated_at."
+            )
+        if (
+            not isinstance(example_limit, int)
+            or isinstance(example_limit, bool)
+            or example_limit < 0
+        ):
+            raise ValueError("example_limit must be a non-negative integer.")
+
+        if not self.G:
+            self.rebuild()
+
+        relation_stats: dict[str, dict] = {}
+        for from_id, to_id, edge_data in sorted(
+            self.G.edges(data=True),
+            key=lambda item: (
+                str(item[2].get("relation", "")),
+                str(item[0]),
+                str(item[1]),
+                str(item[2].get("id", "")),
+            ),
+        ):
+            relation = str(edge_data.get("relation", ""))
+            stats = relation_stats.setdefault(
+                relation,
+                {
+                    "relation": relation,
+                    "edge_count": 0,
+                    "dated_edge_count": 0,
+                    "missing_date_count": 0,
+                    "lag_days": [],
+                    "examples": [],
+                },
+            )
+            stats["edge_count"] += 1
+
+            from_node = self.G.nodes[from_id] if from_id in self.G else {}
+            to_node = self.G.nodes[to_id] if to_id in self.G else {}
+            from_value = _parse_optional_datetime(from_node.get(field))
+            to_value = _parse_optional_datetime(to_node.get(field))
+            if from_value is None or to_value is None:
+                stats["missing_date_count"] += 1
+                continue
+
+            lag_days = (to_value.date() - from_value.date()).days
+            stats["dated_edge_count"] += 1
+            stats["lag_days"].append(lag_days)
+            stats["examples"].append(
+                {
+                    "from_unit_id": str(from_id),
+                    "to_unit_id": str(to_id),
+                    "relation": relation,
+                    "lag_days": lag_days,
+                }
+            )
+
+        relations = []
+        for relation, stats in relation_stats.items():
+            lags = sorted(stats["lag_days"])
+            dated_edge_count = stats["dated_edge_count"]
+            if lags:
+                midpoint = dated_edge_count // 2
+                if dated_edge_count % 2:
+                    median_days = lags[midpoint]
+                else:
+                    median_days = (lags[midpoint - 1] + lags[midpoint]) / 2
+                average_days = round(sum(lags) / dated_edge_count, 6)
+                if average_days == 0:
+                    average_days = 0.0
+                min_days = lags[0]
+                max_days = lags[-1]
+            else:
+                min_days = None
+                max_days = None
+                average_days = None
+                median_days = None
+
+            examples = sorted(
+                stats["examples"],
+                key=lambda example: (
+                    -abs(example["lag_days"]),
+                    example["lag_days"],
+                    example["from_unit_id"],
+                    example["to_unit_id"],
+                ),
+            )[:example_limit]
+            relations.append(
+                {
+                    "relation": relation,
+                    "edge_count": stats["edge_count"],
+                    "dated_edge_count": dated_edge_count,
+                    "missing_date_count": stats["missing_date_count"],
+                    "min_days": min_days,
+                    "max_days": max_days,
+                    "average_days": average_days,
+                    "median_days": median_days,
+                    "forward_count": sum(1 for lag in lags if lag >= 0),
+                    "backward_count": sum(1 for lag in lags if lag < 0),
+                    "examples": examples,
+                }
+            )
+
+        relations.sort(key=lambda record: (-record["edge_count"], record["relation"]))
+        return {
+            "field": field,
+            "node_count": int(self.G.number_of_nodes()),
+            "edge_count": int(self.G.number_of_edges()),
+            "relation_count": len(relations),
+            "relations": relations,
+        }
 
     def _representative_tags(self, unit_ids: list[str], *, limit: int) -> list[str]:
         counts: Counter[str] = Counter()
