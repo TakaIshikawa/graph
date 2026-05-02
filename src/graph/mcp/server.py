@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
 from graph.config import settings
+from graph.export import export_context_pack
 from graph.cli.main import (
     _backlinks_payload,
     _do_context_pack,
@@ -528,6 +531,77 @@ def _mcp_backlinks_payload(
         "tag": payload.get("tag"),
         "limit": payload.get("limit"),
     }
+
+
+def _do_export_context_pack(
+    store: Store,
+    unit_ids: object,
+    *,
+    title: str | None = None,
+    max_chars: int | None = None,
+) -> dict:
+    if (
+        not isinstance(unit_ids, list)
+        or not unit_ids
+        or any(not isinstance(unit_id, str) or not unit_id for unit_id in unit_ids)
+    ):
+        return {
+            "error": "invalid_unit_ids",
+            "message": "unit_ids must be a non-empty list of strings",
+            "metadata": {"requested_count": 0, "exported_count": 0},
+        }
+
+    if max_chars is not None and (
+        not isinstance(max_chars, int) or isinstance(max_chars, bool) or max_chars < 1
+    ):
+        return {
+            "error": "invalid_options",
+            "message": "max_chars must be a positive integer",
+            "metadata": {"requested_count": len(unit_ids), "exported_count": 0},
+        }
+
+    units: list[KnowledgeUnit] = []
+    missing_ids: list[str] = []
+    for unit_id in unit_ids:
+        unit = store.get_unit(unit_id)
+        if unit is None:
+            missing_ids.append(unit_id)
+        else:
+            units.append(unit)
+
+    if missing_ids:
+        return {
+            "error": "unknown_unit_ids",
+            "message": "One or more requested unit ids were not found",
+            "missing_unit_ids": missing_ids,
+            "metadata": {
+                "requested_count": len(unit_ids),
+                "exported_count": 0,
+                "found_count": len(units),
+            },
+        }
+
+    with TemporaryDirectory(prefix="graph-context-pack-") as tmp_dir:
+        path = Path(tmp_dir) / "context-pack.md"
+        stats = export_context_pack(
+            units,
+            store.get_all_edges(),
+            path,
+            title=title,
+            max_chars=max_chars,
+        )
+        markdown = path.read_text(encoding="utf-8")
+
+    metadata = {key: value for key, value in stats.items() if key != "path"}
+    metadata.update(
+        {
+            "requested_count": len(unit_ids),
+            "exported_count": stats["units_included"],
+            "requested_unit_ids": unit_ids,
+            "exported_unit_ids": [unit.id for unit in units[: stats["units_included"]]],
+        }
+    )
+    return {"markdown": markdown, "metadata": metadata}
 
 
 def _result_summary(result: dict) -> dict:
@@ -2140,6 +2214,42 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="export_context_pack",
+            description=(
+                "Export selected knowledge units as prompt-ready Markdown and return it inline. "
+                "No destination file is written."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "unit_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 1,
+                        "description": "Knowledge unit IDs to include, in requested order",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Optional title for the Markdown context pack",
+                    },
+                    "max_chars": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Optional maximum Markdown character count",
+                    },
+                    "options": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "max_chars": {"type": "integer", "minimum": 1},
+                        },
+                        "description": "Optional export settings; top-level title/max_chars take precedence",
+                    },
+                },
+                "required": ["unit_ids"],
+            },
+        ),
+        Tool(
             name="export_graphml",
             description="Export the graph to a GraphML file for tools like Gephi and yEd.",
             inputSchema={
@@ -3503,6 +3613,26 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 record_type=str(arguments.get("record_type") or "both").lower(),
             )
             return [TextContent(type="text", text=json.dumps(stats))]
+
+        elif name == "export_context_pack":
+            options = arguments.get("options") or {}
+            if not isinstance(options, dict):
+                payload = {
+                    "error": "invalid_options",
+                    "message": "options must be an object",
+                    "metadata": {
+                        "requested_count": len(arguments.get("unit_ids") or []),
+                        "exported_count": 0,
+                    },
+                }
+                return [TextContent(type="text", text=json.dumps(payload))]
+            payload = _do_export_context_pack(
+                store,
+                arguments.get("unit_ids"),
+                title=arguments.get("title", options.get("title")),
+                max_chars=arguments.get("max_chars", options.get("max_chars")),
+            )
+            return [TextContent(type="text", text=json.dumps(payload))]
 
         elif name == "export_graphml":
             stats = _do_export_graphml(store, arguments["path"])

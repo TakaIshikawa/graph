@@ -679,6 +679,7 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_pa
         "opml": ["outline"],
         "pdf": ["pdf_document"],
         "email": ["email_message"],
+        "enex": ["note"],
         "text": ["text_document"],
         "html": ["html_document"],
         "ical": ["calendar_event"],
@@ -702,6 +703,7 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_pa
     assert "csv" in ingest_tool.inputSchema["properties"]["project"]["enum"]
     assert "jsonl" in ingest_tool.inputSchema["properties"]["project"]["enum"]
     assert "opml" in ingest_tool.inputSchema["properties"]["project"]["enum"]
+    assert "enex" in ingest_tool.inputSchema["properties"]["project"]["enum"]
     assert "text" in ingest_tool.inputSchema["properties"]["project"]["enum"]
     assert "html" in ingest_tool.inputSchema["properties"]["project"]["enum"]
     assert "ical" in ingest_tool.inputSchema["properties"]["project"]["enum"]
@@ -718,6 +720,7 @@ def test_sync_status_tool_lists_supported_pairs_and_handles_missing_state(tmp_pa
     assert "csv" in search_tool.inputSchema["properties"]["source_project"]["enum"]
     assert "jsonl" in search_tool.inputSchema["properties"]["source_project"]["enum"]
     assert "opml" in search_tool.inputSchema["properties"]["source_project"]["enum"]
+    assert "enex" in search_tool.inputSchema["properties"]["source_project"]["enum"]
     assert "text" in search_tool.inputSchema["properties"]["source_project"]["enum"]
     assert "html" in search_tool.inputSchema["properties"]["source_project"]["enum"]
     assert "ical" in search_tool.inputSchema["properties"]["source_project"]["enum"]
@@ -1144,6 +1147,7 @@ def test_ingest_all_includes_sota_and_search_can_filter_sota(tmp_path, monkeypat
         "opml",
         "pdf",
         "email",
+        "enex",
         "text",
         "html",
         "ical",
@@ -3281,6 +3285,17 @@ def test_export_jsonl_tool_returns_counts_and_writes_selected_records(tmp_path, 
     assert payload["edges_exported"] == 0
     assert [record["record_type"] for record in records] == ["unit", "unit"]
     assert [record["id"] for record in records] == ["unit-a", "unit-b"]
+
+
+def test_export_context_pack_tool_is_advertised_with_unit_id_schema():
+    tools = asyncio.run(mcp_server.list_tools())
+    export_tool = next(tool for tool in tools if tool.name == "export_context_pack")
+
+    assert export_tool.inputSchema["required"] == ["unit_ids"]
+    assert export_tool.inputSchema["properties"]["unit_ids"]["type"] == "array"
+    assert export_tool.inputSchema["properties"]["unit_ids"]["items"] == {"type": "string"}
+    assert export_tool.inputSchema["properties"]["max_chars"]["minimum"] == 1
+    assert export_tool.inputSchema["properties"]["options"]["type"] == "object"
 
 
 def test_export_obsidian_tool_exports_same_vault_structure_as_cli(tmp_path, monkeypatch):
