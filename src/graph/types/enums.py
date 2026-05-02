@@ -33,6 +33,7 @@ class SourceProject(StrEnum):
     HYPOTHESIS = "hypothesis"
     READWISE = "readwise"
     ROAM = "roam"
+    LOGSEQ = "logseq"
 
 
 class ContentType(StrEnum):
