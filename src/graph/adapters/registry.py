@@ -33,6 +33,7 @@ from graph.adapters.org import OrgAdapter
 from graph.adapters.pdf import PdfAdapter
 from graph.adapters.pinboard import PinboardAdapter
 from graph.adapters.pocket import PocketAdapter
+from graph.adapters.pocket_csv import PocketCsvAdapter
 from graph.adapters.presence import PresenceAdapter
 from graph.adapters.raindrop import RaindropAdapter
 from graph.adapters.readwise import ReadwiseAdapter
@@ -82,6 +83,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "git": GitAdapter,
     "transcript": TranscriptAdapter,
     "pocket": PocketAdapter,
+    "pocket_csv": PocketCsvAdapter,
     "pinboard": PinboardAdapter,
     "raindrop": RaindropAdapter,
     "zotero_rdf": ZoteroRdfAdapter,
