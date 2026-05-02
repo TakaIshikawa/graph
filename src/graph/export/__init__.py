@@ -13,6 +13,7 @@ from graph.export.schema_inventory import export_unit_schema_inventory
 from graph.export.sqlite_snapshot import export_graph_sqlite
 from graph.export.tag_glossary import export_tag_glossary_markdown
 from graph.export.unit_csv import export_units_to_csv
+from graph.export.unit_markdown_table import export_units_to_markdown_table
 from graph.export.unit_yaml import export_units_to_yaml
 from graph.export.units_jsonl import export_units_to_jsonl
 
@@ -30,6 +31,7 @@ __all__ = [
     "export_units_to_csv",
     "export_units_to_jsonl",
     "export_units_to_llms_txt",
+    "export_units_to_markdown_table",
     "export_units_to_org",
     "export_units_to_yaml",
     "export_units_to_ics",
