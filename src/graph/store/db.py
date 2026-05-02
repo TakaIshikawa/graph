@@ -22,6 +22,8 @@ from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 SAVED_QUERIES_SCHEMA_VERSION = 2
 COLLECTIONS_SCHEMA_VERSION = 1
 SUPPORTED_QUERY_SCHEDULES = {"daily", "weekly", "monthly"}
+COLLECTION_ACTIVITY_BUCKETS = {"day", "week", "month", "year"}
+COLLECTION_ACTIVITY_FIELDS = {"created_at", "ingested_at", "updated_at"}
 REQUIRED_SQLITE_BACKUP_OBJECTS = {
     "schema_version",
     "knowledge_units",
@@ -341,6 +343,23 @@ def _metadata_inventory_counter_values(counter: Counter[str]) -> list[str]:
         key
         for key, _count in sorted(counter.items(), key=lambda item: (-item[1], item[0]))
     ]
+
+
+def _sorted_counter_dict(counter: Counter[str]) -> dict[str, int]:
+    return dict(sorted(counter.items(), key=lambda item: (-item[1], item[0])))
+
+
+def _activity_bucket_label(value: datetime, bucket: str) -> str:
+    if bucket == "day":
+        return value.date().isoformat()
+    if bucket == "week":
+        week_start = value.date() - timedelta(days=value.weekday())
+        return week_start.isoformat()
+    if bucket == "month":
+        return f"{value.year:04d}-{value.month:02d}"
+    if bucket == "year":
+        return f"{value.year:04d}"
+    raise ValueError(f"Unsupported collection activity bucket: {bucket}")
 
 
 def metadata_path_value(metadata: dict, path: str):
@@ -2150,6 +2169,84 @@ class Store:
                 }
                 for row in rows
             ],
+        }
+
+    def collection_activity_summary(
+        self,
+        collection_name: str,
+        *,
+        bucket: str = "month",
+        field: str = "created_at",
+        limit: int = 24,
+    ) -> dict:
+        bucket = str(bucket).strip().lower()
+        field = str(field).strip().lower()
+        if bucket not in COLLECTION_ACTIVITY_BUCKETS:
+            valid = ", ".join(sorted(COLLECTION_ACTIVITY_BUCKETS))
+            raise ValueError(f"Unsupported collection activity bucket: {bucket}. Use one of: {valid}.")
+        if field not in COLLECTION_ACTIVITY_FIELDS:
+            valid = ", ".join(sorted(COLLECTION_ACTIVITY_FIELDS))
+            raise ValueError(f"Unsupported collection activity field: {field}. Use one of: {valid}.")
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
+            raise ValueError("limit must be a positive integer.")
+
+        collection = self.get_collection(collection_name)
+        if collection is None:
+            return {
+                "collection": collection_name,
+                "buckets": [],
+                "source_project_counts": {},
+                "content_type_counts": {},
+                "tag_counts": {},
+                "first_seen_at": None,
+                "last_seen_at": None,
+                "error": "collection_not_found",
+                "message": f"Collection not found: {collection_name}",
+            }
+
+        rows = self.conn.execute(
+            """SELECT ku.*
+               FROM collection_units cu
+               JOIN knowledge_units ku ON ku.id = cu.unit_id
+               WHERE cu.collection_id = ?""",
+            (collection["id"],),
+        ).fetchall()
+
+        bucket_counts: Counter[str] = Counter()
+        source_project_counts: Counter[str] = Counter()
+        content_type_counts: Counter[str] = Counter()
+        tag_counts: Counter[str] = Counter()
+        seen_values: list[datetime] = []
+
+        for row in rows:
+            unit = _row_to_unit(row)
+            seen_at = _parse_datetime(getattr(unit, field))
+            if seen_at is None:
+                continue
+            seen_values.append(seen_at)
+            bucket_counts[_activity_bucket_label(seen_at, bucket)] += 1
+            source_project_counts[str(unit.source_project)] += 1
+            content_type_counts[str(unit.content_type)] += 1
+            tag_counts.update(str(tag) for tag in unit.tags)
+
+        bucket_items = sorted(bucket_counts.items(), key=lambda item: item[0])
+        if len(bucket_items) > limit:
+            bucket_items = bucket_items[-limit:]
+
+        return {
+            "collection": collection,
+            "bucket": bucket,
+            "field": field,
+            "limit": limit,
+            "buckets": [
+                {"bucket": bucket_name, "count": count}
+                for bucket_name, count in bucket_items
+            ],
+            "source_project_counts": _sorted_counter_dict(source_project_counts),
+            "content_type_counts": _sorted_counter_dict(content_type_counts),
+            "tag_counts": _sorted_counter_dict(tag_counts),
+            "first_seen_at": min(seen_values).isoformat() if seen_values else None,
+            "last_seen_at": max(seen_values).isoformat() if seen_values else None,
         }
 
     def collection_diff(
