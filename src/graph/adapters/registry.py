@@ -25,6 +25,7 @@ from graph.adapters.me import MeAdapter
 from graph.adapters.opml import OpmlAdapter
 from graph.adapters.org import OrgAdapter
 from graph.adapters.pdf import PdfAdapter
+from graph.adapters.pinboard import PinboardAdapter
 from graph.adapters.pocket import PocketAdapter
 from graph.adapters.presence import PresenceAdapter
 from graph.adapters.readwise import ReadwiseAdapter
@@ -64,6 +65,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "git": GitAdapter,
     "transcript": TranscriptAdapter,
     "pocket": PocketAdapter,
+    "pinboard": PinboardAdapter,
     "zotero_rdf": ZoteroRdfAdapter,
     "hypothesis": HypothesisAdapter,
     "readwise": ReadwiseAdapter,

@@ -34,6 +34,7 @@ from graph.adapters.me import MeAdapter
 from graph.adapters.opml import OpmlAdapter
 from graph.adapters.org import OrgAdapter
 from graph.adapters.pdf import PdfAdapter
+from graph.adapters.pinboard import PinboardAdapter
 from graph.adapters.presence import PresenceAdapter
 from graph.adapters.readwise import ReadwiseAdapter
 from graph.adapters.registry import get_adapter, list_adapters
@@ -2640,6 +2641,7 @@ class TestRegistry:
             "git",
             "transcript",
             "pocket",
+            "pinboard",
             "zotero_rdf",
             "hypothesis",
             "readwise",
@@ -2705,6 +2707,10 @@ class TestRegistry:
 
         pocket_adapter = get_adapter("pocket", path="/tmp/pocket.csv")
         assert pocket_adapter.name == "pocket"
+
+        pinboard_adapter = get_adapter("pinboard", path="/tmp/pinboard.json")
+        assert isinstance(pinboard_adapter, PinboardAdapter)
+        assert pinboard_adapter.name == "pinboard"
 
         zotero_rdf_adapter = get_adapter("zotero_rdf", path="/tmp/library.rdf")
         assert zotero_rdf_adapter.name == "zotero_rdf"
