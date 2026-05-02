@@ -345,6 +345,15 @@ def _metadata_inventory_counter_values(counter: Counter[str]) -> list[str]:
     ]
 
 
+def _metadata_inventory_distinct_key(value: Any) -> tuple[str, str]:
+    normalized = _metadata_inventory_normalized_value(value)
+    value_type = _metadata_inventory_value_type(value)
+    return (
+        value_type,
+        json.dumps(normalized, sort_keys=True, ensure_ascii=False, default=str),
+    )
+
+
 def _sorted_counter_dict(counter: Counter[str]) -> dict[str, int]:
     return dict(sorted(counter.items(), key=lambda item: (-item[1], item[0])))
 
@@ -645,6 +654,74 @@ class Store:
             for path in sorted(counts, key=lambda item: (-counts[item], item))
         ]
         return inventory_rows[:limit] if limit is not None else inventory_rows
+
+    def metadata_key_profile(
+        self,
+        prefix: str | None = None,
+        *,
+        limit: int | None = None,
+        sample_size: int = _MAX_METADATA_INVENTORY_EXAMPLES,
+    ) -> list[dict]:
+        """Profile flattened unit metadata paths by count, values, and simple types."""
+        if limit is not None and (
+            not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0
+        ):
+            raise ValueError("limit must be a positive integer.")
+        if (
+            not isinstance(sample_size, int)
+            or isinstance(sample_size, bool)
+            or sample_size <= 0
+        ):
+            raise ValueError("sample_size must be a positive integer.")
+
+        normalized_prefix = str(prefix).strip() if prefix is not None else None
+        if normalized_prefix == "":
+            normalized_prefix = None
+
+        counts: Counter[str] = Counter()
+        value_types: dict[str, Counter[str]] = defaultdict(Counter)
+        distinct_values: dict[str, dict[tuple[str, str], Any]] = defaultdict(dict)
+
+        rows = self.conn.execute(
+            """SELECT metadata
+               FROM knowledge_units
+               ORDER BY source_project, source_id, title, id"""
+        ).fetchall()
+        for row in rows:
+            metadata = json.loads(row["metadata"])
+            if not isinstance(metadata, Mapping):
+                continue
+            for path, value in _flatten_metadata_inventory(metadata):
+                if normalized_prefix is not None and not path.startswith(normalized_prefix):
+                    continue
+                counts[path] += 1
+                value_types[path][_metadata_inventory_value_type(value)] += 1
+                distinct_key = _metadata_inventory_distinct_key(value)
+                distinct_values[path].setdefault(
+                    distinct_key,
+                    _metadata_inventory_normalized_value(value),
+                )
+
+        profile_rows = []
+        for path in sorted(counts, key=lambda item: (-counts[item], item)):
+            samples = [
+                value
+                for _sort_key, value in sorted(
+                    distinct_values[path].items(),
+                    key=lambda item: item[0],
+                )[:sample_size]
+            ]
+            profile_rows.append(
+                {
+                    "key": path,
+                    "occurrence_count": counts[path],
+                    "distinct_value_count": len(distinct_values[path]),
+                    "value_types": _metadata_inventory_counter_values(value_types[path]),
+                    "sample_values": samples,
+                }
+            )
+
+        return profile_rows[:limit] if limit is not None else profile_rows
 
     def metadata_value_histogram(
         self,
