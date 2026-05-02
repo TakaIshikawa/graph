@@ -4403,6 +4403,103 @@ class GraphService:
             "units": [self._unit_export_data(unit) for unit in returned_units],
         }
 
+    def analyze_orphan_topics(
+        self,
+        *,
+        min_degree: int = 1,
+        include_isolated_tag_only_units: bool = True,
+        limit: int | None = 50,
+    ) -> dict:
+        """Identify isolated or weakly connected units that need graph maintenance."""
+        if isinstance(min_degree, bool):
+            raise ValueError("min_degree must be a non-negative integer.")
+        try:
+            degree_threshold = int(min_degree)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("min_degree must be a non-negative integer.") from exc
+        if degree_threshold < 0:
+            raise ValueError("min_degree must be a non-negative integer.")
+
+        if limit is None:
+            capped_limit = None
+        else:
+            if isinstance(limit, bool):
+                raise ValueError("limit must be a non-negative integer or None.")
+            try:
+                capped_limit = int(limit)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("limit must be a non-negative integer or None.") from exc
+            if capped_limit < 0:
+                raise ValueError("limit must be a non-negative integer or None.")
+
+        units = self.store.get_all_units(limit=1000000000)
+        units_by_id = {unit.id: unit for unit in units}
+        in_degrees: Counter[str] = Counter()
+        out_degrees: Counter[str] = Counter()
+        for edge in self.store.get_all_edges():
+            if edge.from_unit_id not in units_by_id or edge.to_unit_id not in units_by_id:
+                continue
+            if edge.from_unit_id == edge.to_unit_id:
+                continue
+            out_degrees[edge.from_unit_id] += 1
+            in_degrees[edge.to_unit_id] += 1
+
+        records = []
+        for unit in units:
+            in_degree = int(in_degrees.get(unit.id, 0))
+            out_degree = int(out_degrees.get(unit.id, 0))
+            degree = in_degree + out_degree
+            tags = list(unit.tags or [])
+            if degree == 0 and tags:
+                reason_code = "tag_only_isolate"
+            elif degree == 0:
+                reason_code = "isolated"
+            elif degree < degree_threshold:
+                reason_code = "low_degree"
+            else:
+                continue
+
+            if reason_code == "tag_only_isolate" and not include_isolated_tag_only_units:
+                continue
+
+            records.append(
+                {
+                    "unit_id": unit.id,
+                    "title": unit.title,
+                    "source_project": str(unit.source_project),
+                    "source_id": unit.source_id,
+                    "source_entity_type": unit.source_entity_type,
+                    "content_type": str(unit.content_type),
+                    "tags": tags,
+                    "degree": degree,
+                    "in_degree": in_degree,
+                    "out_degree": out_degree,
+                    "reason_code": reason_code,
+                }
+            )
+
+        records.sort(
+            key=lambda record: (
+                int(record["degree"]),
+                str(record["reason_code"]),
+                str(record["source_project"]),
+                str(record["title"]).lower(),
+                str(record["unit_id"]),
+            )
+        )
+        returned = records if capped_limit is None else records[:capped_limit]
+        return {
+            "summary": {
+                "total_units": len(units),
+                "candidate_count": len(records),
+                "returned_count": len(returned),
+                "min_degree": degree_threshold,
+                "include_isolated_tag_only_units": bool(include_isolated_tag_only_units),
+                "limit": capped_limit,
+            },
+            "topics": returned,
+        }
+
     def cross_project_connections(self) -> list[dict]:
         """Analyze cross-project edge density."""
         project_pairs: dict[tuple[str, str], int] = {}
