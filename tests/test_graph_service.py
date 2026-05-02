@@ -1839,6 +1839,19 @@ class TestGraphService:
             "group_count": 0,
             "groups": [],
         }
+        assert gs.analyze_relation_motifs() == {
+            "path_length": 2,
+            "limit": 20,
+            "min_count": 1,
+            "motif_count": 0,
+            "motifs": [],
+            "stats": {
+                "total_paths": 0,
+                "unique_motifs": 0,
+                "matching_motifs": 0,
+                "returned_motifs": 0,
+            },
+        }
         assert gs.analyze_articulation_points() == []
         assert gs.analyze_strongly_connected_components() == []
         assert gs.find_gaps() == []

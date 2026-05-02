@@ -2339,6 +2339,122 @@ class GraphService:
             "transitions": transitions,
         }
 
+    def analyze_relation_motifs(
+        self,
+        *,
+        path_length: int = 2,
+        limit: int = 20,
+        min_count: int = 1,
+    ) -> dict:
+        """Summarize common relation sequences across directed two-hop paths."""
+        if (
+            not isinstance(path_length, int)
+            or isinstance(path_length, bool)
+            or path_length != 2
+        ):
+            raise ValueError("path_length currently only supports 2.")
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
+            raise ValueError("limit must be a non-negative integer.")
+        if (
+            not isinstance(min_count, int)
+            or isinstance(min_count, bool)
+            or min_count < 1
+        ):
+            raise ValueError("min_count must be a positive integer.")
+
+        units_by_id = {unit.id: unit for unit in self.store.get_all_units()}
+        edges = sorted(
+            (
+                edge
+                for edge in self.store.get_all_edges()
+                if edge.from_unit_id in units_by_id and edge.to_unit_id in units_by_id
+            ),
+            key=lambda edge: (
+                edge.from_unit_id,
+                edge.to_unit_id,
+                str(edge.relation),
+                str(edge.source),
+                edge.id,
+            ),
+        )
+
+        outgoing_edges: dict[str, list[KnowledgeEdge]] = {}
+        for edge in edges:
+            outgoing_edges.setdefault(edge.from_unit_id, []).append(edge)
+
+        motif_records: dict[tuple[str, str], dict] = {}
+        total_paths = 0
+        max_examples = 3
+        for first_edge in edges:
+            middle_unit_id = first_edge.to_unit_id
+            for second_edge in outgoing_edges.get(middle_unit_id, []):
+                unit_ids = [
+                    first_edge.from_unit_id,
+                    middle_unit_id,
+                    second_edge.to_unit_id,
+                ]
+                if len(set(unit_ids)) != len(unit_ids):
+                    continue
+
+                total_paths += 1
+                relation_sequence = [
+                    str(first_edge.relation),
+                    str(second_edge.relation),
+                ]
+                key = tuple(relation_sequence)
+                record = motif_records.setdefault(
+                    key,
+                    {
+                        "relation_sequence": relation_sequence,
+                        "count": 0,
+                        "examples": [],
+                    },
+                )
+                record["count"] += 1
+
+                if len(record["examples"]) < max_examples:
+                    record["examples"].append(
+                        {
+                            "unit_ids": unit_ids,
+                            "edge_ids": [first_edge.id, second_edge.id],
+                            "relations": relation_sequence,
+                            "units": [
+                                self._unit_summary_data(units_by_id[unit_id])
+                                for unit_id in unit_ids
+                            ],
+                            "edges": [
+                                self._edge_export_data(first_edge),
+                                self._edge_export_data(second_edge),
+                            ],
+                        }
+                    )
+
+        all_motifs = sorted(
+            motif_records.values(),
+            key=lambda record: (
+                -record["count"],
+                tuple(record["relation_sequence"]),
+            ),
+        )
+        filtered_motifs = [
+            motif for motif in all_motifs if motif["count"] >= min_count
+        ]
+        motifs = filtered_motifs[:limit]
+
+        return {
+            "path_length": path_length,
+            "limit": limit,
+            "min_count": min_count,
+            "motif_count": len(motifs),
+            "motifs": motifs,
+            "stats": {
+                "total_paths": total_paths,
+                "unique_motifs": len(all_motifs),
+                "matching_motifs": len(filtered_motifs),
+                "returned_motifs": len(motifs),
+            },
+        }
+
     def analyze_tag_bridges(
         self,
         *,
