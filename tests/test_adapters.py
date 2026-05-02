@@ -39,6 +39,7 @@ from graph.adapters.presence import PresenceAdapter
 from graph.adapters.readwise import ReadwiseAdapter
 from graph.adapters.registry import get_adapter, list_adapters
 from graph.adapters.ris import RisAdapter
+from graph.adapters.roam import RoamAdapter
 from graph.adapters.text import TextAdapter
 from graph.adapters.transcript import TranscriptAdapter
 from graph.adapters.yaml_adapter import YamlAdapter
@@ -2645,6 +2646,7 @@ class TestRegistry:
             "zotero_rdf",
             "hypothesis",
             "readwise",
+            "roam",
         }
 
     def test_get_adapter(self):
@@ -2722,6 +2724,10 @@ class TestRegistry:
         readwise_adapter = get_adapter("readwise", path="/tmp/readwise.json")
         assert isinstance(readwise_adapter, ReadwiseAdapter)
         assert readwise_adapter.name == "readwise"
+
+        roam_adapter = get_adapter("roam", file_path="/tmp/roam.json")
+        assert isinstance(roam_adapter, RoamAdapter)
+        assert roam_adapter.name == "roam"
 
     def test_unknown_adapter(self):
         with pytest.raises(KeyError):
