@@ -2006,6 +2006,79 @@ class GraphService:
             "hubs": [_record(unit_id) for unit_id in hub_ids[:capped_limit]],
         }
 
+    def isolated_units(
+        self,
+        *,
+        limit: int = 50,
+        include_units: bool = True,
+        source_project: str | None = None,
+    ) -> dict:
+        """Return units with total degree zero in the current graph."""
+        if isinstance(limit, bool):
+            raise ValueError("limit must be a non-negative integer.")
+        try:
+            capped_limit = int(limit)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("limit must be a non-negative integer.") from exc
+        if capped_limit < 0:
+            raise ValueError("limit must be a non-negative integer.")
+
+        if not self.G:
+            self.rebuild()
+
+        source_project_filter = None if source_project is None else str(source_project)
+        total_units = self.G.number_of_nodes()
+        isolated_ids = [
+            node_id
+            for node_id, data in self.G.nodes(data=True)
+            if self.G.degree(node_id) == 0
+            and (
+                source_project_filter is None
+                or str(data.get("source_project", "")) == source_project_filter
+            )
+        ]
+
+        def _updated_at_timestamp(node_id: str) -> float:
+            value = self.G.nodes[node_id].get("updated_at")
+            if isinstance(value, datetime):
+                parsed = value
+            else:
+                try:
+                    parsed = datetime.fromisoformat(str(value))
+                except (TypeError, ValueError):
+                    return float("-inf")
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.timestamp()
+
+        isolated_ids.sort(
+            key=lambda node_id: (
+                -_updated_at_timestamp(node_id),
+                str(self.G.nodes[node_id].get("title", "")).lower(),
+                str(node_id),
+            )
+        )
+
+        units = []
+        if include_units:
+            for node_id in isolated_ids[:capped_limit]:
+                unit = self.store.get_unit(node_id)
+                if unit is not None:
+                    units.append(self._unit_export_data(unit))
+
+        isolated_count = len(isolated_ids)
+        return {
+            "isolated_count": isolated_count,
+            "total_units": total_units,
+            "ratio": isolated_count / total_units if total_units else 0.0,
+            "filters": {
+                "source_project": source_project_filter,
+                "limit": capped_limit,
+                "include_units": bool(include_units),
+            },
+            "units": units,
+        }
+
     def analyze_degree_distribution(
         self,
         *,
