@@ -12,6 +12,7 @@ from graph.rag.reading_time import estimate_reading_time
 from graph.rag.tag_cooccurrence import build_tag_cooccurrence_matrix
 from graph.rag.tag_hierarchy import build_tag_hierarchy
 from graph.rag.tag_normalization import suggest_tag_normalizations
+from graph.rag.tag_path import plan_tag_reading_path
 
 __all__ = [
     "build_tag_cooccurrence_matrix",
@@ -23,6 +24,7 @@ __all__ = [
     "extract_keywords",
     "estimate_reading_time",
     "plan_reading_order",
+    "plan_tag_reading_path",
     "rank_duplicate_candidates",
     "rerank_for_source_diversity",
     "suggest_tag_normalizations",
