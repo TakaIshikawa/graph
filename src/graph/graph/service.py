@@ -29,7 +29,9 @@ _TTL_LOCAL_NAME_RE = re.compile(r"[^A-Za-z0-9_]")
 _EXTERNAL_URL_RE = re.compile(r"https?://[^\s<>\"]+", re.IGNORECASE)
 _TRAILING_URL_PUNCTUATION = ".,;:!?)]}'\""
 _TIMELINE_BUCKETS = {"day", "week", "month", "year"}
+_ACTIVITY_BURST_BUCKETS = {"day", "month"}
 _TIMELINE_FIELDS = {"created_at", "ingested_at", "updated_at"}
+_ACTIVITY_BURST_DATE_FIELDS = ("created_at", "ingested_at", "updated_at")
 _FRESHNESS_FIELDS = {"created_at", "ingested_at", "updated_at"}
 _EDGE_LAG_FIELDS = {"created_at", "updated_at"}
 _DEFAULT_FRESHNESS_BUCKETS = ("7d", "30d", "90d", "older")
@@ -767,6 +769,28 @@ def _timeline_bucket_label(start: datetime, bucket: str) -> str:
     if bucket == "year":
         return f"{start.year:04d}"
     raise ValueError(f"Unsupported timeline bucket: {bucket}. Use day, week, month, or year.")
+
+
+def _previous_activity_bucket_start(start: datetime, bucket: str) -> datetime:
+    if bucket == "day":
+        return start - timedelta(days=1)
+    if bucket == "month":
+        if start.month == 1:
+            return start.replace(year=start.year - 1, month=12)
+        return start.replace(month=start.month - 1)
+    raise ValueError(f"Unsupported activity burst bucket: {bucket}. Use day or month.")
+
+
+def _validate_non_negative_int(value: int, name: str) -> int:
+    if isinstance(value, bool):
+        raise TypeError(f"{name} must be a non-negative integer.")
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"{name} must be a non-negative integer.") from exc
+    if normalized < 0:
+        raise ValueError(f"{name} must be a non-negative integer.")
+    return normalized
 
 
 class GraphService:
@@ -6453,6 +6477,141 @@ class GraphService:
                 "end": end,
                 "limit": limit,
             },
+        }
+
+    def analyze_activity_bursts(
+        self,
+        *,
+        bucket: str = "month",
+        min_count: int = 2,
+        limit: int = 10,
+        examples_per_burst: int = 3,
+    ) -> dict:
+        """Identify local periods of concentrated unit activity."""
+        if bucket not in _ACTIVITY_BURST_BUCKETS:
+            raise ValueError(
+                "Unsupported activity burst bucket: {bucket}. Use day or month.".format(
+                    bucket=bucket
+                )
+            )
+
+        min_count = _validate_non_negative_int(min_count, "min_count")
+        limit = _validate_non_negative_int(limit, "limit")
+        examples_per_burst = _validate_non_negative_int(
+            examples_per_burst, "examples_per_burst"
+        )
+
+        buckets: dict[datetime, dict] = {}
+        total = 0
+        dated_count = 0
+        undated_count = 0
+
+        for unit in self.store.get_all_units(limit=1000000000):
+            total += 1
+            dated_at: datetime | None = None
+            date_field: str | None = None
+            for field in _ACTIVITY_BURST_DATE_FIELDS:
+                parsed = _parse_optional_datetime(getattr(unit, field, None))
+                if parsed is not None:
+                    dated_at = parsed
+                    date_field = field
+                    break
+
+            if dated_at is None:
+                undated_count += 1
+                continue
+
+            dated_count += 1
+            bucket_start = _timeline_bucket_start(dated_at, bucket)
+            entry = buckets.setdefault(
+                bucket_start,
+                {
+                    "bucket": _timeline_bucket_label(bucket_start, bucket),
+                    "start": bucket_start.isoformat(),
+                    "end": _timeline_bucket_end(bucket_start, bucket).isoformat(),
+                    "count": 0,
+                    "source_distribution": Counter(),
+                    "tag_distribution": Counter(),
+                    "units": [],
+                },
+            )
+            entry["count"] += 1
+            entry["source_distribution"][str(unit.source_project)] += 1
+            entry["tag_distribution"].update(str(unit_tag) for unit_tag in unit.tags)
+            entry["units"].append(
+                {
+                    "id": str(unit.id),
+                    "title": str(unit.title),
+                    "source_project": str(unit.source_project),
+                    "source_id": str(unit.source_id),
+                    "content_type": str(unit.content_type),
+                    "date": dated_at.isoformat(),
+                    "date_field": date_field,
+                }
+            )
+
+        burst_items = []
+        for bucket_start, item in buckets.items():
+            previous_count = buckets.get(
+                _previous_activity_bucket_start(bucket_start, bucket), {}
+            ).get("count", 0)
+            next_count = buckets.get(_timeline_bucket_end(bucket_start, bucket), {}).get(
+                "count", 0
+            )
+            local_baseline = (previous_count + next_count) / 2
+            count = item["count"]
+            if count < min_count or count <= local_baseline:
+                continue
+
+            examples = sorted(
+                item["units"],
+                key=lambda unit_item: (
+                    unit_item["date"],
+                    unit_item["title"],
+                    unit_item["id"],
+                ),
+            )[:examples_per_burst]
+            burst_items.append(
+                {
+                    "period": item["bucket"],
+                    "start": item["start"],
+                    "end": item["end"],
+                    "count": count,
+                    "local_baseline": local_baseline,
+                    "source_distribution": dict(
+                        sorted(
+                            item["source_distribution"].items(),
+                            key=lambda source_item: (-source_item[1], source_item[0]),
+                        )
+                    ),
+                    "tag_distribution": dict(
+                        sorted(
+                            item["tag_distribution"].items(),
+                            key=lambda tag_item: (-tag_item[1], tag_item[0]),
+                        )
+                    ),
+                    "example_units": examples,
+                }
+            )
+
+        burst_items.sort(
+            key=lambda item: (
+                -(item["count"] - item["local_baseline"]),
+                -item["count"],
+                item["period"],
+            )
+        )
+
+        return {
+            "bucket": bucket,
+            "min_count": min_count,
+            "limit": limit,
+            "examples_per_burst": examples_per_burst,
+            "total": total,
+            "dated_count": dated_count,
+            "undated_count": undated_count,
+            "burst_count": len(burst_items),
+            "bursts": burst_items[:limit],
         }
 
     def suggest_tag_synonyms(
