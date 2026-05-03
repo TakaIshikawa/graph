@@ -10,6 +10,7 @@ from graph.rag.keywords import extract_keywords
 from graph.rag.query_intent import classify_query_intent
 from graph.rag.dedupe import rank_duplicate_candidates
 from graph.rag.facets import build_result_facets
+from graph.rag.citations import format_result_citations
 from graph.rag.reading_order import plan_reading_order
 from graph.rag.reading_queue import build_reading_queue
 from graph.rag.reading_time import estimate_reading_time
@@ -37,6 +38,7 @@ __all__ = [
     "detect_context_gaps",
     "extract_keywords",
     "estimate_reading_time",
+    "format_result_citations",
     "cluster_results_by_overlap",
     "highlight_result_snippets",
     "plan_reading_order",
