@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from graph.adapters.base import IngestResult, SourceAdapter
 from graph.types.enums import ContentType, SourceProject
@@ -177,8 +178,11 @@ class ICalAdapter(SourceAdapter):
         values = event.get(name, [])
         if not values:
             return ""
-        value = str(values[0]["value"]).strip()
-        return self._parse_datetime_value(value).isoformat()
+        item = values[0]
+        value = str(item["value"]).strip()
+        params = item.get("params", {})
+        tzid = str(params.get("TZID", "")) if isinstance(params, dict) else ""
+        return self._parse_datetime_value(value, tzid=tzid).isoformat()
 
     def _participant(self, event: dict[str, list[dict[str, object]]], name: str) -> str:
         values = event.get(name, [])
@@ -236,16 +240,35 @@ class ICalAdapter(SourceAdapter):
         ]
         return any(timestamp > sync_at for timestamp in timestamps)
 
-    def _parse_datetime_value(self, value: str) -> datetime:
+    def _parse_datetime_value(self, value: str, tzid: str = "") -> datetime:
         value = value.strip()
         if not value:
             raise ValueError("empty datetime")
+
+        # All-day date (YYYYMMDD)
         if len(value) == 8 and value.isdigit():
             return datetime.strptime(value, "%Y%m%d").replace(tzinfo=timezone.utc)
+
+        # UTC timestamp with Z suffix
         if value.endswith("Z"):
             return datetime.strptime(value, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+
+        # Basic format with TZID parameter (e.g., DTSTART;TZID=America/New_York:20230101T120000)
+        if tzid and "T" in value and "-" not in value:
+            naive_dt = datetime.strptime(value, "%Y%m%dT%H%M%S")
+            try:
+                tz = ZoneInfo(tzid)
+                localized_dt = naive_dt.replace(tzinfo=tz)
+                return localized_dt.astimezone(timezone.utc)
+            except ZoneInfoNotFoundError:
+                # Fall back to UTC if timezone is not recognized
+                return naive_dt.replace(tzinfo=timezone.utc)
+
+        # Basic format without TZID (naive timestamp)
         if "T" in value and "-" not in value:
             return datetime.strptime(value, "%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc)
+
+        # ISO format timestamps
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         if parsed.tzinfo is None:
             return parsed.replace(tzinfo=timezone.utc)
