@@ -2739,6 +2739,17 @@ def test_component_summary_is_available_on_graph_service(populated_store: Store)
     assert result["components"][0]["size"] == 3
 
 
+def test_leaf_cluster_summary_is_available_on_graph_service(populated_store: Store):
+    result = GraphService(populated_store).leaf_cluster_summary()
+
+    assert result["total_leaf_count"] == 3
+    assert result["isolated_leaf_count"] == 1
+    assert result["parent_count"] == 1
+    assert result["parents"][0]["unit_id"] == next(
+        unit.id for unit in populated_store.get_all_units() if unit.title == "Node B"
+    )
+
+
 def test_analyze_relation_mix_is_available_on_graph_service(populated_store: Store):
     result = GraphService(populated_store).analyze_relation_mix()
 
