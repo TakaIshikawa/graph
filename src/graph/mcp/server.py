@@ -2161,6 +2161,35 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="analyze_orphan_units",
+            description=(
+                "Analyze isolated and weakly connected knowledge units below a "
+                "configurable graph degree threshold."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "min_degree": {
+                        "type": "integer",
+                        "default": 1,
+                        "minimum": 0,
+                        "description": (
+                            "Return units whose total in-degree plus out-degree is "
+                            "less than this threshold."
+                        ),
+                    },
+                    "include_metadata": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": (
+                            "Include source, content, tag, and suggested neighboring "
+                            "tag metadata for each unit."
+                        ),
+                    },
+                },
+            },
+        ),
+        Tool(
             name="analyze_central",
             description="Find the most central/important knowledge units by PageRank.",
             inputSchema={
@@ -4298,6 +4327,22 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 limit=arguments.get("limit", 20),
             )
             return [TextContent(type="text", text=json.dumps(result))]
+
+        elif name == "analyze_orphan_units":
+            gs = GraphService(store)
+            orphan_arguments = {
+                "min_degree": arguments.get("min_degree", 1),
+                "include_metadata": arguments.get("include_metadata", True),
+            }
+            try:
+                result = gs.analyze_orphan_units(**orphan_arguments)
+            except ValueError as exc:
+                result = {
+                    "error": "invalid_orphan_units_request",
+                    "message": str(exc),
+                    "arguments": orphan_arguments,
+                }
+            return [TextContent(type="text", text=json.dumps(result, default=str))]
 
         elif name == "analyze_central":
             gs = GraphService(store)
