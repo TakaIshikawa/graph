@@ -66,6 +66,7 @@ from graph.adapters.text import TextAdapter
 from graph.adapters.text_outline import TextOutlineAdapter
 from graph.adapters.tana_paste import TanaPasteAdapter
 from graph.adapters.transcript import TranscriptAdapter
+from graph.adapters.twitter_archive import TwitterArchiveAdapter
 from graph.adapters.webvtt import WebVttAdapter
 from graph.adapters.yaml_adapter import YamlAdapter
 from graph.store.db import Store
@@ -2691,6 +2692,7 @@ class TestRegistry:
             "git",
             "google_keep",
             "transcript",
+            "twitter_archive",
             "webvtt",
             "pocket",
             "pocket_csv",
@@ -2799,6 +2801,10 @@ class TestRegistry:
 
         transcript_adapter = get_adapter("transcript", root_path="/tmp/transcripts")
         assert transcript_adapter.name == "transcript"
+
+        twitter_archive_adapter = get_adapter("twitter_archive", path="/tmp/tweets.js")
+        assert isinstance(twitter_archive_adapter, TwitterArchiveAdapter)
+        assert twitter_archive_adapter.name == "twitter_archive"
 
         webvtt_adapter = get_adapter("webvtt", path="/tmp/transcript.vtt")
         assert isinstance(webvtt_adapter, WebVttAdapter)

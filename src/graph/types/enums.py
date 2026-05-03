@@ -40,6 +40,7 @@ class SourceProject(StrEnum):
     OBSIDIAN_CANVAS = "obsidian_canvas"
     NOTION_MARKDOWN = "notion_markdown"
     TRANSCRIPT = "transcript"
+    TWITTER_ARCHIVE = "twitter_archive"
     WEBVTT = "webvtt"
     POCKET = "pocket"
     POCKET_CSV = "pocket_csv"
