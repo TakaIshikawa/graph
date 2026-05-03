@@ -43,6 +43,7 @@ from graph.adapters.logseq import LogseqAdapter
 from graph.adapters.markdown import MarkdownAdapter
 from graph.adapters.markdown_callouts import MarkdownCalloutsAdapter
 from graph.adapters.markdown_definitions import MarkdownDefinitionsAdapter
+from graph.adapters.markdown_frontmatter import MarkdownFrontmatterAdapter
 from graph.adapters.markdown_links import MarkdownLinksAdapter
 from graph.adapters.markdown_notes import MarkdownNotesAdapter
 from graph.adapters.markdown_tasks import MarkdownTasksAdapter
@@ -2663,6 +2664,7 @@ class TestRegistry:
             "markdown",
             "markdown_callouts",
             "markdown_definitions",
+            "markdown_frontmatter",
             "markdown_links",
             "markdown_notes",
             "markdown_tasks",
@@ -2933,6 +2935,12 @@ class TestRegistry:
         )
         assert isinstance(markdown_definitions_adapter, MarkdownDefinitionsAdapter)
         assert markdown_definitions_adapter.name == "markdown_definitions"
+
+        markdown_frontmatter_adapter = get_adapter(
+            "markdown_frontmatter", path="/tmp/notes"
+        )
+        assert isinstance(markdown_frontmatter_adapter, MarkdownFrontmatterAdapter)
+        assert markdown_frontmatter_adapter.name == "markdown_frontmatter"
 
         markdown_tasks_adapter = get_adapter("markdown_tasks", path="/tmp/notes")
         assert isinstance(markdown_tasks_adapter, MarkdownTasksAdapter)
