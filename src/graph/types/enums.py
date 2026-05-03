@@ -48,6 +48,7 @@ class SourceProject(StrEnum):
     PINBOARD = "pinboard"
     RAINDROP = "raindrop"
     RAINDROP_JSON = "raindrop_json"
+    SAFARI_BOOKMARKS = "safari_bookmarks"
     ZOTERO_RDF = "zotero_rdf"
     HYPOTHESIS = "hypothesis"
     READWISE = "readwise"
