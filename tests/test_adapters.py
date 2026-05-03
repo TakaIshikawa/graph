@@ -18,6 +18,7 @@ from graph.adapters.atom import AtomAdapter
 from graph.adapters.bibdesk import BibDeskAdapter
 from graph.adapters.bibtex import BibtexAdapter
 from graph.adapters.bookmarks import BookmarksAdapter
+from graph.adapters.bookmarks_html import BookmarksHtmlAdapter
 from graph.adapters.browser_history_csv import BrowserHistoryCsvAdapter
 from graph.adapters.chatgpt_json import ChatGptJsonAdapter
 from graph.adapters.csv_adapter import CsvAdapter
@@ -2663,6 +2664,7 @@ class TestRegistry:
             "sota",
             "feed",
             "bookmarks",
+            "bookmarks_html",
             "browser_history_csv",
             "chatgpt_json",
             "discord_json",
@@ -2822,6 +2824,10 @@ class TestRegistry:
         )
         assert isinstance(browser_history_csv_adapter, BrowserHistoryCsvAdapter)
         assert browser_history_csv_adapter.name == "browser_history_csv"
+
+        bookmarks_html_adapter = get_adapter("bookmarks_html", path="/tmp/bookmarks.html")
+        assert isinstance(bookmarks_html_adapter, BookmarksHtmlAdapter)
+        assert bookmarks_html_adapter.name == "bookmarks_html"
 
         chatgpt_json_adapter = get_adapter("chatgpt_json", path="/tmp/conversations.json")
         assert isinstance(chatgpt_json_adapter, ChatGptJsonAdapter)

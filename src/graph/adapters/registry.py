@@ -7,6 +7,7 @@ from graph.adapters.atom import AtomAdapter
 from graph.adapters.bibdesk import BibDeskAdapter
 from graph.adapters.bibtex import BibtexAdapter
 from graph.adapters.bookmarks import BookmarksAdapter
+from graph.adapters.bookmarks_html import BookmarksHtmlAdapter
 from graph.adapters.browser_history_csv import BrowserHistoryCsvAdapter
 from graph.adapters.chatgpt_json import ChatGptJsonAdapter
 from graph.adapters.csv_adapter import CsvAdapter
@@ -80,6 +81,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "sota": SOTAAdapter,
     "feed": FeedAdapter,
     "bookmarks": BookmarksAdapter,
+    "bookmarks_html": BookmarksHtmlAdapter,
     "browser_history_csv": BrowserHistoryCsvAdapter,
     "chatgpt_json": ChatGptJsonAdapter,
     "discord_json": DiscordJsonAdapter,
