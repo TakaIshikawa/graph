@@ -14,6 +14,7 @@ from graph.adapters.csv_adapter import CsvAdapter
 from graph.adapters.csv_rows import CsvRowsAdapter
 from graph.adapters.crossref import CrossrefAdapter
 from graph.adapters.csl_json import CslJsonAdapter
+from graph.adapters.daily_journal import DailyJournalAdapter
 from graph.adapters.discord_json import DiscordJsonAdapter
 from graph.adapters.email import EmailAdapter
 from graph.adapters.enex import EnexAdapter
@@ -95,6 +96,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "csv_rows": CsvRowsAdapter,
     "jsonl": JsonlAdapter,
     "jsonl_notes": JsonlNotesAdapter,
+    "daily_journal": DailyJournalAdapter,
     "yaml": YamlAdapter,
     "notion_markdown": NotionMarkdownAdapter,
     "opml": OpmlAdapter,

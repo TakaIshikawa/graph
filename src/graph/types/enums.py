@@ -24,6 +24,7 @@ class SourceProject(StrEnum):
     CSV_ROWS = "csv_rows"
     JSONL = "jsonl"
     JSONL_NOTES = "jsonl_notes"
+    DAILY_JOURNAL = "daily_journal"
     YAML = "yaml"
     OPML = "opml"
     ORG = "org"
