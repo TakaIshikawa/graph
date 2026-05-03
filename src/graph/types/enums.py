@@ -30,6 +30,7 @@ class SourceProject(StrEnum):
     OPML = "opml"
     ORG = "org"
     PDF = "pdf"
+    PLAIN_TEXT = "plain_text"
     EMAIL = "email"
     ENEX = "enex"
     TEXT_OUTLINE = "text_outline"
