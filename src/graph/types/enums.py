@@ -64,6 +64,7 @@ class SourceProject(StrEnum):
     SQLITE_QUERY_LOG = "sqlite_query_log"
     SLACK_JSON = "slack_json"
     VCARD = "vcard"
+    YAML_FRONTMATTER = "yaml_frontmatter"
 
 
 class ContentType(StrEnum):
