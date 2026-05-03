@@ -6,6 +6,7 @@ from graph.export.backlinks import export_unit_backlinks_markdown
 from graph.export.concept_map import export_concept_map_markdown
 from graph.export.context_pack import export_context_pack
 from graph.export.dot import export_graph_dot
+from graph.export.duplicate_candidates import export_duplicate_candidates_markdown
 from graph.export.edge_csv import export_edges_to_csv
 from graph.export.edge_adjacency_markdown import export_edge_adjacency_markdown
 from graph.export.flashcards_markdown import export_units_to_flashcards_markdown
@@ -35,6 +36,7 @@ __all__ = [
     "DATE_METADATA_KEYS",
     "export_concept_map_markdown",
     "export_context_pack",
+    "export_duplicate_candidates_markdown",
     "export_edge_adjacency_markdown",
     "export_edges_to_csv",
     "export_graph_adjacency_markdown",
