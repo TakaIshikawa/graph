@@ -68,8 +68,10 @@ from graph.adapters.text_outline import TextOutlineAdapter
 from graph.adapters.tana_paste import TanaPasteAdapter
 from graph.adapters.transcript import TranscriptAdapter
 from graph.adapters.twitter_archive import TwitterArchiveAdapter
+from graph.adapters.vcard import VCardAdapter
 from graph.adapters.webvtt import WebVttAdapter
 from graph.adapters.yaml_adapter import YamlAdapter
+from graph.adapters.yaml_frontmatter import YamlFrontmatterAdapter
 from graph.adapters.zotero_rdf import ZoteroRdfAdapter
 
 _ADAPTERS: dict[str, type[SourceAdapter]] = {
@@ -141,6 +143,8 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "logseq": LogseqAdapter,
     "sqlite_query_log": SqliteQueryLogAdapter,
     "slack_json": SlackJsonAdapter,
+    "vcard": VCardAdapter,
+    "yaml_frontmatter": YamlFrontmatterAdapter,
 }
 
 
