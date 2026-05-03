@@ -5273,3 +5273,216 @@ def test_duplicate_external_urls_tool_respects_limit_parameter(tmp_path, monkeyp
     payload = json.loads(response[0].text)
 
     assert len(payload) == 2
+
+
+def test_metadata_key_frequency_tool_returns_empty_for_empty_graph(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(mcp_server.call_tool("metadata_key_frequency", {}))
+    payload = json.loads(response[0].text)
+
+    assert payload == []
+
+
+def test_metadata_key_frequency_tool_counts_metadata_keys(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+
+    # Insert units with various metadata keys
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="unit1",
+            source_entity_type="insight",
+            title="First Unit",
+            content="Content",
+            content_type=ContentType.INSIGHT,
+            metadata={"author": "Alice", "year": 2024},
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="unit2",
+            source_entity_type="insight",
+            title="Second Unit",
+            content="Content",
+            content_type=ContentType.INSIGHT,
+            metadata={"author": "Bob", "category": "research"},
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="unit3",
+            source_entity_type="insight",
+            title="Third Unit",
+            content="Content",
+            content_type=ContentType.INSIGHT,
+            metadata={"author": "Charlie"},
+        )
+    )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(mcp_server.call_tool("metadata_key_frequency", {}))
+    payload = json.loads(response[0].text)
+
+    # Should return metadata keys sorted by frequency (count descending, then path)
+    assert len(payload) == 3
+    assert payload[0]["path"] == "author"
+    assert payload[0]["count"] == 3
+    assert "max" in payload[0]["source_projects"]
+    assert "forty_two" in payload[0]["source_projects"]
+
+
+def test_metadata_key_frequency_tool_filters_by_prefix(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="unit1",
+            source_entity_type="insight",
+            title="Unit",
+            content="Content",
+            content_type=ContentType.INSIGHT,
+            metadata={
+                "citation": {"author": "Alice", "year": 2024},
+                "summary": "Summary text",
+            },
+        )
+    )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(
+        mcp_server.call_tool("metadata_key_frequency", {"prefix": "citation"})
+    )
+    payload = json.loads(response[0].text)
+
+    # Should only return keys starting with "citation"
+    assert len(payload) == 2
+    assert all(item["path"].startswith("citation") for item in payload)
+    assert {item["path"] for item in payload} == {"citation.author", "citation.year"}
+
+
+def test_metadata_key_frequency_tool_respects_limit(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="unit1",
+            source_entity_type="insight",
+            title="Unit",
+            content="Content",
+            content_type=ContentType.INSIGHT,
+            metadata={"key1": "a", "key2": "b", "key3": "c"},
+        )
+    )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(mcp_server.call_tool("metadata_key_frequency", {"limit": 2}))
+    payload = json.loads(response[0].text)
+
+    assert len(payload) == 2
+
+
+def test_metadata_key_frequency_tool_filters_by_source_project(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+
+    # Insert units from different projects with shared metadata keys
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="unit1",
+            source_entity_type="insight",
+            title="Max Unit",
+            content="Content",
+            content_type=ContentType.INSIGHT,
+            metadata={"author": "Alice", "project_specific": "max_value"},
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="unit2",
+            source_entity_type="insight",
+            title="42 Unit",
+            content="Content",
+            content_type=ContentType.INSIGHT,
+            metadata={"author": "Bob", "other_key": "value"},
+        )
+    )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(
+        mcp_server.call_tool("metadata_key_frequency", {"source_project": "max"})
+    )
+    payload = json.loads(response[0].text)
+
+    # Should only include keys from MAX project
+    assert len(payload) == 2
+    author_item = next(item for item in payload if item["path"] == "author")
+    # Total count includes all units, but source_projects is filtered
+    assert author_item["count"] == 2  # Total across both projects
+    assert author_item["source_projects"] == ["max"]  # Only showing MAX
+
+    # project_specific should only appear in MAX
+    project_item = next(item for item in payload if item["path"] == "project_specific")
+    assert project_item["count"] == 1
+    assert project_item["source_projects"] == ["max"]
+
+
+def test_metadata_key_frequency_tool_handles_units_without_metadata(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+
+    # Mix of units with and without metadata
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="unit1",
+            source_entity_type="insight",
+            title="With Metadata",
+            content="Content",
+            content_type=ContentType.INSIGHT,
+            metadata={"author": "Alice"},
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="unit2",
+            source_entity_type="insight",
+            title="Without Metadata",
+            content="Content",
+            content_type=ContentType.INSIGHT,
+            metadata={},
+        )
+    )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(mcp_server.call_tool("metadata_key_frequency", {}))
+    payload = json.loads(response[0].text)
+
+    # Should only count the unit with metadata
+    assert len(payload) == 1
+    assert payload[0]["path"] == "author"
+    assert payload[0]["count"] == 1
