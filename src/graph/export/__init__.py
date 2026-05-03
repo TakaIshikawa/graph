@@ -12,6 +12,7 @@ from graph.export.edge_csv import export_edges_to_csv
 from graph.export.edge_adjacency_markdown import export_edge_adjacency_markdown
 from graph.export.flashcards_markdown import export_units_to_flashcards_markdown
 from graph.export.gexf import export_graph_gexf
+from graph.export.graphml import export_graph_graphml
 from graph.export.graphson import export_graphson
 from graph.export.graph_overview_html import render_graph_overview_html
 from graph.export.html_report import render_search_html_report
@@ -46,6 +47,7 @@ __all__ = [
     "export_units_to_flashcards_markdown",
     "export_graph_dot",
     "export_graph_gexf",
+    "export_graph_graphml",
     "export_graphson",
     "export_graph_sqlite",
     "export_metadata_completeness_markdown",
