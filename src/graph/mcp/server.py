@@ -4161,6 +4161,24 @@ async def list_tools() -> list[Tool]:
             ),
             inputSchema={"type": "object", "properties": {}},
         ),
+        Tool(
+            name="duplicate_external_urls",
+            description=(
+                "Find normalized external URLs referenced by two or more knowledge units. "
+                "Returns duplicate URL clusters with counts and affected unit summaries."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "default": 50,
+                        "minimum": 0,
+                        "description": "Maximum duplicate URL groups to return",
+                    },
+                },
+            },
+        ),
     ]
 
 
@@ -5588,6 +5606,11 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         elif name == "stats":
             payload = _do_stats_snapshot(store)
             return [TextContent(type="text", text=json.dumps(payload))]
+
+        elif name == "duplicate_external_urls":
+            limit = arguments.get("limit", 50)
+            duplicates = store.find_duplicate_external_urls(limit=limit)
+            return [TextContent(type="text", text=json.dumps(duplicates))]
 
         elif name == "export_obsidian":
             vault_path = arguments.get("vault_path") or settings.obsidian_vault_path
