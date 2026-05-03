@@ -81,6 +81,7 @@ from graph.cli.main import (
 from graph.graph.service import GraphService
 from graph.rag import (
     build_reading_queue,
+    build_source_timeline,
     detect_context_gaps,
     score_source_agreement,
     suggest_tag_normalizations,
@@ -507,6 +508,111 @@ def _reading_queue_payload(arguments: dict) -> dict:
         "units": result["units"],
         "stats": result["stats"],
         "options": {"limit": limit, "now": result["stats"]["now"]},
+    }
+
+
+def _validate_non_negative_integer(value, *, name: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValueError(f"{name} must be a non-negative integer")
+    return value
+
+
+def _source_timeline_payload(store: Store, arguments: dict) -> dict:
+    query = arguments.get("query")
+    mode = arguments.get("mode", "fulltext")
+    sort = arguments.get("sort", "relevance")
+    result_limit = _validate_non_negative_integer(
+        arguments.get("result_limit", 100),
+        name="result_limit",
+    )
+    bucket = arguments.get("bucket", "month")
+    bucket_limit = arguments.get("limit")
+    if bucket_limit is not None:
+        bucket_limit = _validate_non_negative_integer(bucket_limit, name="limit")
+
+    filters = _search_filters_dict(
+        source_project=arguments.get("source_project"),
+        content_type=arguments.get("content_type"),
+        review_state=arguments.get("review_state"),
+        tag=arguments.get("tag"),
+        exclude_tag=arguments.get("exclude_tag"),
+        metadata_key=arguments.get("metadata_key"),
+        metadata_value=arguments.get("metadata_value"),
+        created_after=arguments.get("created_after"),
+        created_before=arguments.get("created_before"),
+        updated_after=arguments.get("updated_after"),
+        updated_before=arguments.get("updated_before"),
+        min_utility=arguments.get("min_utility"),
+        max_utility=arguments.get("max_utility"),
+        min_confidence=arguments.get("min_confidence"),
+        max_confidence=arguments.get("max_confidence"),
+    )
+
+    if query is not None:
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError("query must be a non-empty string when provided")
+        search_payload = _do_search(
+            store,
+            query,
+            limit=result_limit,
+            mode=mode,
+            filters=filters,
+            sort=sort,
+        )
+        results = search_payload["results"]
+        selection = {
+            "source": "search",
+            "query": query,
+            "mode": mode,
+            "sort": sort,
+            "result_limit": result_limit,
+            "result_count": len(results),
+            "result_ids": [result["id"] for result in results],
+        }
+    else:
+        _validate_search_filters(filters)
+        sorted_pairs = sort_search_results(
+            [
+                (unit, "")
+                for unit in store.get_all_units(limit=1000000000)
+                if _unit_matches_search_filters(
+                    unit,
+                    source_project=filters.get("source_project"),
+                    content_type=filters.get("content_type"),
+                    tag=filters.get("tag"),
+                    exclude_tag=filters.get("exclude_tag"),
+                    review_state=filters.get("review_state"),
+                    created_after=filters.get("created_after"),
+                    created_before=filters.get("created_before"),
+                    updated_after=filters.get("updated_after"),
+                    updated_before=filters.get("updated_before"),
+                    min_utility=filters.get("min_utility"),
+                    max_utility=filters.get("max_utility"),
+                    min_confidence=filters.get("min_confidence"),
+                    max_confidence=filters.get("max_confidence"),
+                    metadata_key=filters.get("metadata_key"),
+                    metadata_value=filters.get("metadata_value"),
+                )
+            ],
+            sort,
+        )
+        units = [unit for unit, _ in sorted_pairs[:result_limit]]
+        results = [_unit_to_json(unit, include_content=False) for unit in units]
+        selection = {
+            "source": "store",
+            "query": None,
+            "mode": None,
+            "sort": sort,
+            "result_limit": result_limit,
+            "result_count": len(results),
+            "result_ids": [result["id"] for result in results],
+        }
+
+    timeline = build_source_timeline(results, bucket=bucket, limit=bucket_limit)
+    return {
+        **timeline,
+        "filters": filters,
+        "selection": selection,
     }
 
 
@@ -1490,6 +1596,52 @@ async def list_tools() -> list[Tool]:
                     **SEARCH_FILTER_SCHEMA,
                 },
                 "required": ["query"],
+            },
+        ),
+        Tool(
+            name="source_timeline",
+            description=(
+                "Build a source-by-time timeline from search results or filtered graph units."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Optional search query used to select timeline units",
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["hybrid", "semantic", "fulltext"],
+                        "default": "fulltext",
+                        "description": "Search mode when query is provided",
+                    },
+                    "sort": {
+                        "type": "string",
+                        "enum": list(SEARCH_SORTS),
+                        "default": "relevance",
+                        "description": "Result ordering before timeline bucketing",
+                    },
+                    "result_limit": {
+                        "type": "integer",
+                        "default": 100,
+                        "minimum": 0,
+                        "description": "Maximum matching units to include before bucketing",
+                    },
+                    "bucket": {
+                        "type": "string",
+                        "enum": ["day", "week", "month", "year"],
+                        "default": "month",
+                        "description": "Timeline bucket size",
+                    },
+                    "limit": {
+                        "type": ["integer", "null"],
+                        "default": None,
+                        "minimum": 0,
+                        "description": "Maximum timeline buckets to return; null returns all buckets",
+                    },
+                    **SEARCH_FILTER_SCHEMA,
+                },
             },
         ),
         Tool(
@@ -3755,6 +3907,39 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     "valid_sorts": list(SEARCH_SORTS),
                 }
             return [TextContent(type="text", text=json.dumps(payload))]
+
+        elif name == "source_timeline":
+            try:
+                payload = _source_timeline_payload(store, arguments)
+            except ValueError as exc:
+                payload = {
+                    "error": "invalid_source_timeline_request",
+                    "message": str(exc),
+                    "arguments": {
+                        "query": arguments.get("query"),
+                        "mode": arguments.get("mode", "fulltext"),
+                        "sort": arguments.get("sort", "relevance"),
+                        "result_limit": arguments.get("result_limit", 100),
+                        "bucket": arguments.get("bucket", "month"),
+                        "limit": arguments.get("limit"),
+                        "source_project": arguments.get("source_project"),
+                        "content_type": arguments.get("content_type"),
+                        "review_state": arguments.get("review_state"),
+                        "tag": arguments.get("tag"),
+                        "exclude_tag": arguments.get("exclude_tag"),
+                        "metadata_key": arguments.get("metadata_key"),
+                        "metadata_value": arguments.get("metadata_value"),
+                        "created_after": arguments.get("created_after"),
+                        "created_before": arguments.get("created_before"),
+                        "updated_after": arguments.get("updated_after"),
+                        "updated_before": arguments.get("updated_before"),
+                        "min_utility": arguments.get("min_utility"),
+                        "max_utility": arguments.get("max_utility"),
+                        "min_confidence": arguments.get("min_confidence"),
+                        "max_confidence": arguments.get("max_confidence"),
+                    },
+                }
+            return [TextContent(type="text", text=json.dumps(payload, default=str))]
 
         elif name == "source_agreement":
             try:
