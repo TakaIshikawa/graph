@@ -47,6 +47,7 @@ class SourceProject(StrEnum):
     POCKET_CSV = "pocket_csv"
     PINBOARD = "pinboard"
     RAINDROP = "raindrop"
+    RAINDROP_JSON = "raindrop_json"
     ZOTERO_RDF = "zotero_rdf"
     HYPOTHESIS = "hypothesis"
     READWISE = "readwise"
