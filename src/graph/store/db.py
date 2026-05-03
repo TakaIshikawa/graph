@@ -391,6 +391,16 @@ def _metadata_path_lookup(metadata: dict, path: str) -> tuple[bool, Any]:
     return True, current
 
 
+def _metadata_value_is_present(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, Mapping | list):
+        return bool(value)
+    return True
+
+
 def metadata_path_matches(metadata: dict, path: str, value: object) -> bool:
     return metadata_path_value(metadata, path) == value
 
@@ -785,6 +795,65 @@ class Store:
                 }
                 for (value_type, _sort_value, value), count in sorted_items
             ],
+        }
+
+    def metadata_completeness_summary(
+        self,
+        required_keys: list[str],
+        *,
+        source_project: str | None = None,
+        content_type: str | None = None,
+    ) -> dict:
+        """Summarize required metadata path presence across knowledge units."""
+        normalized_keys = sorted(
+            {_format_metadata_path(_metadata_path_parts(str(key))) for key in required_keys}
+        )
+        present_counts: dict[str, int] = {key: 0 for key in normalized_keys}
+        missing_unit_ids: dict[str, list[str]] = {key: [] for key in normalized_keys}
+
+        where_parts, params = self._unit_filter_parts(
+            source_project=source_project,
+            content_type=content_type,
+        )
+        query = "SELECT id, source_project, source_id, title, metadata FROM knowledge_units"
+        if where_parts:
+            query += " WHERE " + " AND ".join(where_parts)
+        query += " ORDER BY source_project, source_id, title, id"
+
+        rows = self.conn.execute(query, params).fetchall()
+        total_units = len(rows)
+
+        for row in rows:
+            metadata = json.loads(row["metadata"])
+            for key in normalized_keys:
+                found, value = _metadata_path_lookup(metadata, key)
+                if found and _metadata_value_is_present(value):
+                    present_counts[key] += 1
+                else:
+                    missing_unit_ids[key].append(row["id"])
+
+        missing_counts = {
+            key: total_units - present_counts[key] for key in normalized_keys
+        }
+        keys = [
+            {
+                "key": key,
+                "present_count": present_counts[key],
+                "missing_count": missing_counts[key],
+                "missing_unit_ids": missing_unit_ids[key],
+            }
+            for key in normalized_keys
+        ]
+
+        return {
+            "total_units": total_units,
+            "required_keys": normalized_keys,
+            "source_project": source_project,
+            "content_type": content_type,
+            "keys": keys,
+            "present_counts": present_counts,
+            "missing_counts": missing_counts,
+            "missing_unit_ids": missing_unit_ids,
         }
 
     def find_source_id_collisions(
