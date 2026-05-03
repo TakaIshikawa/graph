@@ -82,7 +82,7 @@ class FeedAdapter(SourceAdapter):
 
                 result.units.append(
                     KnowledgeUnit(
-                        source_project=SourceProject.ME,
+                        source_project=SourceProject.FEED,
                         source_id=self._source_id(source, item),
                         source_entity_type="feed_item",
                         title=item["title"],

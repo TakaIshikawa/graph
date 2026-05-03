@@ -27,6 +27,7 @@ class SourceProject(StrEnum):
     JSONL_NOTES = "jsonl_notes"
     DAILY_JOURNAL = "daily_journal"
     YAML = "yaml"
+    FEED = "feed"
     OPML = "opml"
     ORG = "org"
     PDF = "pdf"
