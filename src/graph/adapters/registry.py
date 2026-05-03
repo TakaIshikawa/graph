@@ -142,15 +142,22 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
 }
 
 
+def _normalize_name(name: str) -> str:
+    """Normalize adapter name: strip whitespace, lowercase, replace hyphens with underscores."""
+    return name.strip().lower().replace("-", "_")
+
+
 def get_adapter(name: str, **kwargs: str) -> SourceAdapter:
-    cls = _ADAPTERS.get(name)
+    normalized = _normalize_name(name)
+    cls = _ADAPTERS.get(normalized)
     if cls is None:
-        raise KeyError(f"Unknown adapter: {name}. Available: {list(_ADAPTERS)}")
+        available = sorted(_ADAPTERS.keys())
+        raise KeyError(f"Unknown adapter: {normalized}. Available: {available}")
     return cls(**kwargs)
 
 
 def list_adapters() -> list[str]:
-    return list(_ADAPTERS)
+    return sorted(_ADAPTERS.keys())
 
 
 def get_all_adapters(**kwargs: str) -> list[SourceAdapter]:

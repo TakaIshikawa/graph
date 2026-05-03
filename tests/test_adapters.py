@@ -2654,7 +2654,7 @@ class TestGitAdapter:
 class TestRegistry:
     def test_list_adapters(self):
         adapters = list_adapters()
-        assert set(adapters) == {
+        expected = {
             "atom",
             "forty_two",
             "max",
@@ -2723,6 +2723,9 @@ class TestRegistry:
             "sqlite_query_log",
             "slack_json",
         }
+        assert set(adapters) == expected
+        # Verify sorted order
+        assert adapters == sorted(expected)
 
     def test_get_adapter(self):
         adapter = get_adapter("me", config_path="/tmp/test.yaml")
@@ -2951,5 +2954,57 @@ class TestRegistry:
         assert mastodon_adapter.name == "mastodon"
 
     def test_unknown_adapter(self):
-        with pytest.raises(KeyError):
+        with pytest.raises(KeyError) as exc_info:
             get_adapter("unknown")
+        # Verify error message includes normalized name and sorted available adapters
+        error_msg = str(exc_info.value)
+        assert "unknown" in error_msg
+        assert "Available:" in error_msg
+
+    def test_adapter_name_normalization_whitespace(self):
+        # Leading/trailing whitespace should be stripped
+        adapter1 = get_adapter(" jsonl ", path="/tmp/test.jsonl")
+        assert isinstance(adapter1, JsonlAdapter)
+        assert adapter1.name == "jsonl"
+
+        adapter2 = get_adapter("  csv  ", path="/tmp/test.csv")
+        assert isinstance(adapter2, CsvAdapter)
+        assert adapter2.name == "csv"
+
+    def test_adapter_name_normalization_case(self):
+        # Case-insensitive lookup
+        adapter1 = get_adapter("JSONL", path="/tmp/test.jsonl")
+        assert isinstance(adapter1, JsonlAdapter)
+        assert adapter1.name == "jsonl"
+
+        adapter2 = get_adapter("Markdown", root_path="/tmp/notes")
+        assert isinstance(adapter2, MarkdownAdapter)
+        assert adapter2.name == "markdown"
+
+        adapter3 = get_adapter("CSV_ROWS", path="/tmp/rows.csv")
+        assert isinstance(adapter3, CsvRowsAdapter)
+        assert adapter3.name == "csv_rows"
+
+    def test_adapter_name_normalization_hyphens(self):
+        # Hyphens should be treated as underscores
+        adapter1 = get_adapter("jsonl-notes", path="/tmp/notes.jsonl")
+        assert isinstance(adapter1, JsonlNotesAdapter)
+        assert adapter1.name == "jsonl_notes"
+
+        adapter2 = get_adapter("csv-rows", path="/tmp/rows.csv")
+        assert isinstance(adapter2, CsvRowsAdapter)
+        assert adapter2.name == "csv_rows"
+
+        adapter3 = get_adapter("markdown-links", path="/tmp/notes")
+        assert isinstance(adapter3, MarkdownLinksAdapter)
+        assert adapter3.name == "markdown_links"
+
+    def test_adapter_name_normalization_combined(self):
+        # Combined: whitespace + case + hyphens
+        adapter1 = get_adapter(" JSONL-NOTES ", path="/tmp/notes.jsonl")
+        assert isinstance(adapter1, JsonlNotesAdapter)
+        assert adapter1.name == "jsonl_notes"
+
+        adapter2 = get_adapter("  Markdown-Callouts  ", path="/tmp/notes")
+        assert isinstance(adapter2, MarkdownCalloutsAdapter)
+        assert adapter2.name == "markdown_callouts"
