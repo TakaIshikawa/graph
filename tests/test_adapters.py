@@ -56,6 +56,7 @@ from graph.adapters.pinboard import PinboardAdapter
 from graph.adapters.pocket_csv import PocketCsvAdapter
 from graph.adapters.presence import PresenceAdapter
 from graph.adapters.raindrop import RaindropAdapter
+from graph.adapters.raindrop_csv import RaindropCsvAdapter
 from graph.adapters.raindrop_json import RaindropJsonAdapter
 from graph.adapters.readwise import ReadwiseAdapter
 from graph.adapters.readwise_csv import ReadwiseCsvAdapter
@@ -2702,6 +2703,7 @@ class TestRegistry:
             "pocket_csv",
             "pinboard",
             "raindrop",
+            "raindrop_csv",
             "raindrop_json",
             "safari_bookmarks",
             "zotero_rdf",
@@ -2848,6 +2850,10 @@ class TestRegistry:
         raindrop_adapter = get_adapter("raindrop", path="/tmp/raindrop.json")
         assert isinstance(raindrop_adapter, RaindropAdapter)
         assert raindrop_adapter.name == "raindrop"
+
+        raindrop_csv_adapter = get_adapter("raindrop_csv", path="/tmp/raindrop.csv")
+        assert isinstance(raindrop_csv_adapter, RaindropCsvAdapter)
+        assert raindrop_csv_adapter.name == "raindrop_csv"
 
         raindrop_json_adapter = get_adapter("raindrop_json", path="/tmp/raindrop.json")
         assert isinstance(raindrop_json_adapter, RaindropJsonAdapter)
