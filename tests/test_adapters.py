@@ -24,6 +24,7 @@ from graph.adapters.csv_adapter import CsvAdapter
 from graph.adapters.csv_rows import CsvRowsAdapter
 from graph.adapters.crossref import CrossrefAdapter
 from graph.adapters.csl_json import CslJsonAdapter
+from graph.adapters.discord_json import DiscordJsonAdapter
 from graph.adapters.email import EmailAdapter
 from graph.adapters.enex import EnexAdapter
 from graph.adapters.feed import FeedAdapter
@@ -2663,6 +2664,7 @@ class TestRegistry:
             "bookmarks",
             "browser_history_csv",
             "chatgpt_json",
+            "discord_json",
             "csv",
             "csv_rows",
             "jsonl",
@@ -2818,6 +2820,10 @@ class TestRegistry:
         chatgpt_json_adapter = get_adapter("chatgpt_json", path="/tmp/conversations.json")
         assert isinstance(chatgpt_json_adapter, ChatGptJsonAdapter)
         assert chatgpt_json_adapter.name == "chatgpt_json"
+
+        discord_json_adapter = get_adapter("discord_json", path="/tmp/discord")
+        assert isinstance(discord_json_adapter, DiscordJsonAdapter)
+        assert discord_json_adapter.name == "discord_json"
 
         pinboard_adapter = get_adapter("pinboard", path="/tmp/pinboard.json")
         assert isinstance(pinboard_adapter, PinboardAdapter)
