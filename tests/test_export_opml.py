@@ -42,7 +42,9 @@ def parsed_body(xml: str) -> ET.Element:
     root = ET.fromstring(xml)
     assert root.tag == "opml"
     assert root.attrib["version"] == "2.0"
-    return root.find("body")  # type: ignore[return-value]
+    body = root.find("body")
+    assert body is not None, "OPML must have a body element"
+    return body
 
 
 def outline_texts(outline: ET.Element) -> list[str]:

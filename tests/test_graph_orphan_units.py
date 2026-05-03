@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from typing import cast
 
 import pytest
 
@@ -188,4 +189,4 @@ def test_analyze_orphan_units_validates_min_degree(
     min_degree: object,
 ):
     with pytest.raises(ValueError, match="min_degree must be a non-negative integer"):
-        GraphService(store).analyze_orphan_units(min_degree=min_degree)  # type: ignore[arg-type]
+        GraphService(store).analyze_orphan_units(min_degree=cast(int, min_degree))
