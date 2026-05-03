@@ -31,6 +31,7 @@ from graph.adapters.kindle import KindleAdapter
 from graph.adapters.logseq import LogseqAdapter
 from graph.adapters.markdown import MarkdownAdapter
 from graph.adapters.markdown_callouts import MarkdownCalloutsAdapter
+from graph.adapters.markdown_definitions import MarkdownDefinitionsAdapter
 from graph.adapters.markdown_links import MarkdownLinksAdapter
 from graph.adapters.markdown_notes import MarkdownNotesAdapter
 from graph.adapters.markdown_tasks import MarkdownTasksAdapter
@@ -76,6 +77,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "mediawiki": MediaWikiAdapter,
     "markdown": MarkdownAdapter,
     "markdown_callouts": MarkdownCalloutsAdapter,
+    "markdown_definitions": MarkdownDefinitionsAdapter,
     "markdown_links": MarkdownLinksAdapter,
     "markdown_notes": MarkdownNotesAdapter,
     "markdown_tasks": MarkdownTasksAdapter,
