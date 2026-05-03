@@ -40,6 +40,7 @@ from graph.adapters.markdown_notes import MarkdownNotesAdapter
 from graph.adapters.markdown_tasks import MarkdownTasksAdapter
 from graph.adapters.mastodon import MastodonAdapter
 from graph.adapters.max_adapter import MaxAdapter
+from graph.adapters.mbox import MboxAdapter
 from graph.adapters.me import MeAdapter
 from graph.adapters.mediawiki import MediaWikiAdapter
 from graph.adapters.notion_markdown import NotionMarkdownAdapter
@@ -92,6 +93,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "kindle": KindleAdapter,
     "sota": SOTAAdapter,
     "feed": FeedAdapter,
+    "mbox": MboxAdapter,
     "bookmarks": BookmarksAdapter,
     "bookmarks_html": BookmarksHtmlAdapter,
     "browser_history_csv": BrowserHistoryCsvAdapter,
