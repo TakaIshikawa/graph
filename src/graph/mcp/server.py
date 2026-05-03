@@ -563,6 +563,26 @@ def _validate_non_negative_integer(value, *, name: str) -> int:
     return value
 
 
+def _metadata_completeness_payload(store: Store, arguments: dict) -> dict:
+    metadata_keys = arguments.get("metadata_keys", arguments.get("required_keys", []))
+    if not isinstance(metadata_keys, list) or any(
+        not isinstance(key, str) or not key.strip() for key in metadata_keys
+    ):
+        raise ValueError("metadata_keys must be an array of non-empty strings")
+
+    limit = arguments.get("limit")
+    if limit is not None:
+        _validate_non_negative_integer(limit, name="limit")
+
+    return store.metadata_completeness_summary(
+        metadata_keys,
+        source_project=arguments.get("source_project"),
+        source_entity_type=arguments.get("source_entity_type"),
+        content_type=arguments.get("content_type"),
+        limit=limit,
+    )
+
+
 _MCP_TIMELINE_DATE_KEY = "_timeline_date"
 _MCP_TIMELINE_SOURCE_KEY = "_timeline_source"
 
@@ -3391,6 +3411,48 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="metadata_completeness",
+            description=(
+                "Summarize required metadata key presence across knowledge units, "
+                "optionally filtered by source project, source entity type, or content type."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "metadata_keys": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Dotted metadata paths to check, e.g. author or review.state"
+                        ),
+                    },
+                    "source_project": {
+                        "type": "string",
+                        "enum": SUPPORTED_SYNC_PROJECTS,
+                        "description": "Filter units by source project",
+                    },
+                    "source_entity_type": {
+                        "type": "string",
+                        "description": "Filter units by source entity type",
+                    },
+                    "content_type": {
+                        "type": "string",
+                        "enum": [content_type.value for content_type in ContentType],
+                        "description": "Filter units by content type",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": (
+                            "Maximum missing unit IDs to include per metadata key; "
+                            "counts still reflect all matching units"
+                        ),
+                    },
+                },
+                "required": ["metadata_keys"],
+            },
+        ),
+        Tool(
             name="delete_unit",
             description="Delete a knowledge unit, its full-text row, and related edges.",
             inputSchema={
@@ -5312,6 +5374,19 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     "error": str(exc),
                     "metadata_key": arguments.get("metadata_key"),
                     "values": [],
+                }
+            return [TextContent(type="text", text=json.dumps(payload, default=str))]
+
+        elif name == "metadata_completeness":
+            try:
+                payload = _metadata_completeness_payload(store, arguments)
+            except ValueError as exc:
+                payload = {
+                    "error": str(exc),
+                    "metadata_keys": arguments.get("metadata_keys")
+                    if isinstance(arguments, dict)
+                    else None,
+                    "keys": [],
                 }
             return [TextContent(type="text", text=json.dumps(payload, default=str))]
 

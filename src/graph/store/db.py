@@ -802,9 +802,15 @@ class Store:
         required_keys: list[str],
         *,
         source_project: str | None = None,
+        source_entity_type: str | None = None,
         content_type: str | None = None,
+        limit: int | None = None,
     ) -> dict:
         """Summarize required metadata path presence across knowledge units."""
+        if limit is not None and (
+            not isinstance(limit, int) or isinstance(limit, bool) or limit < 0
+        ):
+            raise ValueError("limit must be a non-negative integer or None")
         normalized_keys = sorted(
             {_format_metadata_path(_metadata_path_parts(str(key))) for key in required_keys}
         )
@@ -813,6 +819,7 @@ class Store:
 
         where_parts, params = self._unit_filter_parts(
             source_project=source_project,
+            source_entity_type=source_entity_type,
             content_type=content_type,
         )
         query = "SELECT id, source_project, source_id, title, metadata FROM knowledge_units"
@@ -830,7 +837,8 @@ class Store:
                 if found and _metadata_value_is_present(value):
                     present_counts[key] += 1
                 else:
-                    missing_unit_ids[key].append(row["id"])
+                    if limit is None or len(missing_unit_ids[key]) < limit:
+                        missing_unit_ids[key].append(row["id"])
 
         missing_counts = {
             key: total_units - present_counts[key] for key in normalized_keys
@@ -849,6 +857,7 @@ class Store:
             "total_units": total_units,
             "required_keys": normalized_keys,
             "source_project": source_project,
+            "source_entity_type": source_entity_type,
             "content_type": content_type,
             "keys": keys,
             "present_counts": present_counts,
@@ -1404,6 +1413,7 @@ class Store:
         self,
         *,
         source_project: str | None = None,
+        source_entity_type: str | None = None,
         content_type: str | None = None,
     ) -> tuple[list[str], list]:
         where_parts: list[str] = []
@@ -1411,6 +1421,9 @@ class Store:
         if source_project:
             where_parts.append("source_project = ?")
             params.append(source_project)
+        if source_entity_type:
+            where_parts.append("source_entity_type = ?")
+            params.append(source_entity_type)
         if content_type:
             where_parts.append("content_type = ?")
             params.append(content_type)
@@ -1420,10 +1433,12 @@ class Store:
         self,
         *,
         source_project: str | None = None,
+        source_entity_type: str | None = None,
         content_type: str | None = None,
     ) -> tuple[str, list]:
         where_parts, params = self._unit_filter_parts(
             source_project=source_project,
+            source_entity_type=source_entity_type,
             content_type=content_type,
         )
         where = "WHERE " + " AND ".join(where_parts) if where_parts else ""

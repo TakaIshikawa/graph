@@ -101,6 +101,7 @@ def test_metadata_completeness_summary_counts_flat_nested_and_missing_keys(store
             "review.state",
         ],
         "source_project": None,
+        "source_entity_type": None,
         "content_type": None,
         "keys": [
             {
@@ -220,6 +221,7 @@ def test_metadata_completeness_summary_empty_requirements_counts_filtered_units(
         "total_units": 1,
         "required_keys": [],
         "source_project": "max",
+        "source_entity_type": None,
         "content_type": None,
         "keys": [],
         "present_counts": {},
