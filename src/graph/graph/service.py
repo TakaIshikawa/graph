@@ -2208,6 +2208,99 @@ class GraphService:
         components.sort(key=len, reverse=True)
         return components
 
+    def analyze_connected_components(
+        self,
+        *,
+        limit: int | None = None,
+        representative_limit: int = 3,
+    ) -> dict:
+        """Return deterministic summaries of weakly connected graph components."""
+        if limit is not None and (
+            not isinstance(limit, int) or isinstance(limit, bool) or limit < 0
+        ):
+            raise ValueError("limit must be a non-negative integer or None.")
+        if (
+            not isinstance(representative_limit, int)
+            or isinstance(representative_limit, bool)
+            or representative_limit < 0
+        ):
+            raise ValueError("representative_limit must be a non-negative integer.")
+
+        if not self.G:
+            self.rebuild()
+
+        node_count = int(self.G.number_of_nodes())
+        edge_count = int(self.G.number_of_edges())
+        if node_count == 0:
+            return {
+                "node_count": 0,
+                "edge_count": 0,
+                "component_count": 0,
+                "isolated_component_count": 0,
+                "components": [],
+            }
+
+        undirected = self.G.to_undirected()
+        raw_components = []
+        for component_ids in nx.connected_components(undirected):
+            unit_ids = sorted(str(unit_id) for unit_id in component_ids)
+            component_graph = self.G.subgraph(unit_ids)
+            internal_edge_count = int(component_graph.number_of_edges())
+            ranked_representatives = sorted(
+                unit_ids,
+                key=lambda unit_id: (
+                    -int(undirected.degree(unit_id)),
+                    str(self.G.nodes[unit_id].get("title", "") or unit_id).lower(),
+                    unit_id,
+                ),
+            )
+            raw_components.append(
+                {
+                    "unit_ids": unit_ids,
+                    "size": len(unit_ids),
+                    "representative_titles": [
+                        str(self.G.nodes[unit_id].get("title", "") or unit_id)
+                        for unit_id in ranked_representatives[:representative_limit]
+                    ],
+                    "internal_edge_count": internal_edge_count,
+                    "isolated": len(unit_ids) == 1 and internal_edge_count == 0,
+                }
+            )
+
+        raw_components.sort(
+            key=lambda record: (
+                -record["size"],
+                -record["internal_edge_count"],
+                record["unit_ids"],
+            )
+        )
+        components = [
+            {"component_id": f"component-{index:03d}", **record}
+            for index, record in enumerate(raw_components, start=1)
+        ]
+
+        return {
+            "node_count": node_count,
+            "edge_count": edge_count,
+            "component_count": len(components),
+            "isolated_component_count": sum(
+                1 for component in components if component["isolated"]
+            ),
+            "components": components[:limit] if limit is not None else components,
+        }
+
+    def connected_component_summary(
+        self,
+        *,
+        limit: int | None = None,
+        representative_limit: int = 3,
+    ) -> dict:
+        """Alias for analyze_connected_components."""
+        return self.analyze_connected_components(
+            limit=limit,
+            representative_limit=representative_limit,
+        )
+
     def detect_communities(
         self,
         *,
