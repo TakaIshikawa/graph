@@ -149,6 +149,6 @@ def test_source_freshness_histogram_rejects_invalid_thresholds(
 ):
     with pytest.raises(ValueError, match=match):
         store.source_freshness_histogram(
-            fresh_days=fresh_days,  # type: ignore[arg-type]
-            stale_days=stale_days,  # type: ignore[arg-type]
+            fresh_days=fresh_days,
+            stale_days=stale_days,
         )
