@@ -4695,6 +4695,35 @@ class GraphService:
             for node_id in ranked_node_ids
         ]
 
+        core_groups = []
+        for core_number in sorted(
+            {
+                int(core_number)
+                for core_number in core_numbers.values()
+                if int(core_number) >= min_core
+            },
+            reverse=True,
+        ):
+            group_node_ids = sorted(
+                (
+                    node_id
+                    for node_id, node_core_number in core_numbers.items()
+                    if int(node_core_number) == core_number
+                ),
+                key=lambda node_id: (
+                    -int(projection.degree(node_id)),
+                    str(units_by_id[node_id].title).lower(),
+                    str(node_id),
+                ),
+            )
+            core_groups.append(
+                {
+                    "core_number": core_number,
+                    "unit_count": len(group_node_ids),
+                    "unit_ids": group_node_ids,
+                }
+            )
+
         return {
             "stats": {
                 "node_count": projection.number_of_nodes(),
@@ -4702,6 +4731,7 @@ class GraphService:
                 "max_core": int(max_core),
                 "returned_count": len(nodes),
             },
+            "core_groups": core_groups,
             "nodes": nodes,
         }
 
