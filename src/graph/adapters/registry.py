@@ -48,6 +48,7 @@ from graph.adapters.obsidian_canvas import ObsidianCanvasAdapter
 from graph.adapters.org import OrgAdapter
 from graph.adapters.pdf import PdfAdapter
 from graph.adapters.pinboard import PinboardAdapter
+from graph.adapters.plain_text import PlainTextAdapter
 from graph.adapters.pocket import PocketAdapter
 from graph.adapters.pocket_csv import PocketCsvAdapter
 from graph.adapters.presence import PresenceAdapter
@@ -105,6 +106,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "obsidian_canvas": ObsidianCanvasAdapter,
     "org": OrgAdapter,
     "pdf": PdfAdapter,
+    "plain_text": PlainTextAdapter,
     "email": EmailAdapter,
     "enex": EnexAdapter,
     "text": TextAdapter,

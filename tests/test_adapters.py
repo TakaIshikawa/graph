@@ -57,6 +57,7 @@ from graph.adapters.obsidian_canvas import ObsidianCanvasAdapter
 from graph.adapters.org import OrgAdapter
 from graph.adapters.pdf import PdfAdapter
 from graph.adapters.pinboard import PinboardAdapter
+from graph.adapters.plain_text import PlainTextAdapter
 from graph.adapters.pocket_csv import PocketCsvAdapter
 from graph.adapters.presence import PresenceAdapter
 from graph.adapters.raindrop import RaindropAdapter
@@ -2785,6 +2786,7 @@ class TestRegistry:
             "obsidian_canvas",
             "org",
             "pdf",
+            "plain_text",
             "email",
             "enex",
             "text",
@@ -2866,6 +2868,10 @@ class TestRegistry:
 
         pdf_adapter = get_adapter("pdf", path="/tmp/test.pdf")
         assert pdf_adapter.name == "pdf"
+
+        plain_text_adapter = get_adapter("plain_text", path="/tmp/notes.txt")
+        assert isinstance(plain_text_adapter, PlainTextAdapter)
+        assert plain_text_adapter.name == "plain_text"
 
         email_adapter = get_adapter("email", path="/tmp/mail")
         assert email_adapter.name == "email"
