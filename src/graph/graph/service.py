@@ -2301,6 +2301,147 @@ class GraphService:
             representative_limit=representative_limit,
         )
 
+    def weak_component_summary(
+        self,
+        *,
+        limit: int | None = None,
+        representative_limit: int = 3,
+    ) -> dict:
+        """Return source- and tag-aware weak component summaries."""
+        if limit is not None and (
+            not isinstance(limit, int) or isinstance(limit, bool) or limit < 0
+        ):
+            raise ValueError("limit must be a non-negative integer or None.")
+        if (
+            not isinstance(representative_limit, int)
+            or isinstance(representative_limit, bool)
+            or representative_limit < 0
+        ):
+            raise ValueError("representative_limit must be a non-negative integer.")
+
+        if not self.G:
+            self.rebuild()
+
+        node_count = int(self.G.number_of_nodes())
+        edge_count = int(self.G.number_of_edges())
+        if node_count == 0:
+            return {
+                "node_count": 0,
+                "edge_count": 0,
+                "component_count": 0,
+                "isolated_component_count": 0,
+                "components": [],
+            }
+
+        undirected = self.G.to_undirected()
+        raw_components = []
+        for component_ids in nx.connected_components(undirected):
+            unit_ids = sorted(str(unit_id) for unit_id in component_ids)
+            component_graph = self.G.subgraph(unit_ids)
+            internal_edge_count = int(component_graph.number_of_edges())
+
+            ranked_representatives = sorted(
+                unit_ids,
+                key=lambda unit_id: (
+                    -int(undirected.degree(unit_id)),
+                    str(self.G.nodes[unit_id].get("title", "") or unit_id).lower(),
+                    unit_id,
+                ),
+            )
+            representative_unit_ids = ranked_representatives[:representative_limit]
+            representative_titles = [
+                str(self.G.nodes[unit_id].get("title", "") or unit_id)
+                for unit_id in representative_unit_ids
+            ]
+            source_counts = Counter(
+                str(self.G.nodes[unit_id].get("source_project", ""))
+                for unit_id in unit_ids
+            )
+            tag_counts = Counter(
+                str(tag)
+                for unit_id in unit_ids
+                for tag in (self.G.nodes[unit_id].get("tags") or [])
+            )
+            source_project_counts = dict(
+                sorted(source_counts.items(), key=lambda item: (-item[1], item[0]))
+            )
+            tag_breakdown = dict(
+                sorted(tag_counts.items(), key=lambda item: (-item[1], item[0]))
+            )
+
+            representative_sort_id = (
+                representative_unit_ids[0] if representative_unit_ids else unit_ids[0]
+            )
+            representative_sort_title = str(
+                self.G.nodes[representative_sort_id].get("title", "")
+                or representative_sort_id
+            ).lower()
+            raw_components.append(
+                {
+                    "unit_ids": unit_ids,
+                    "size": len(unit_ids),
+                    "representative_unit_ids": representative_unit_ids,
+                    "representative_titles": representative_titles,
+                    "source_project_counts": source_project_counts,
+                    "source_breakdown": source_project_counts,
+                    "tag_breakdown": tag_breakdown,
+                    "tag_counts": tag_breakdown,
+                    "internal_edge_count": internal_edge_count,
+                    "isolated": len(unit_ids) == 1 and internal_edge_count == 0,
+                    "_sort_title": representative_sort_title,
+                    "_sort_id": representative_sort_id,
+                }
+            )
+
+        raw_components.sort(
+            key=lambda record: (
+                -record["size"],
+                record["_sort_title"],
+                record["_sort_id"],
+            )
+        )
+
+        components = []
+        for index, record in enumerate(raw_components, start=1):
+            component = dict(record)
+            del component["_sort_title"]
+            del component["_sort_id"]
+            components.append({"component_id": f"component-{index:03d}", **component})
+
+        return {
+            "node_count": node_count,
+            "edge_count": edge_count,
+            "component_count": len(components),
+            "isolated_component_count": sum(
+                1 for component in components if component["isolated"]
+            ),
+            "components": components[:limit] if limit is not None else components,
+        }
+
+    def analyze_weak_components(
+        self,
+        *,
+        limit: int | None = None,
+        representative_limit: int = 3,
+    ) -> dict:
+        """Alias for weak_component_summary."""
+        return self.weak_component_summary(
+            limit=limit,
+            representative_limit=representative_limit,
+        )
+
+    def summarize_weak_components(
+        self,
+        *,
+        limit: int | None = None,
+        representative_limit: int = 3,
+    ) -> dict:
+        """Alias for weak_component_summary."""
+        return self.weak_component_summary(
+            limit=limit,
+            representative_limit=representative_limit,
+        )
+
     def detect_communities(
         self,
         *,
