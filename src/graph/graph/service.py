@@ -3539,7 +3539,9 @@ class GraphService:
         if limit == 0:
             return []
 
-        units_by_id = {unit.id: unit for unit in self.store.get_all_units(limit=1000000000)}
+        units_by_id = {
+            unit.id: unit for unit in self.store.get_all_units(limit=1000000000)
+        }
         if len(units_by_id) < min_size:
             return []
 
@@ -4734,6 +4736,83 @@ class GraphService:
             "core_groups": core_groups,
             "nodes": nodes,
         }
+
+    def analyze_density(
+        self,
+        *,
+        by_source_project: bool = False,
+        by_content_type: bool = False,
+    ) -> dict:
+        """Return directed density and sparsity metrics for the knowledge graph."""
+        if not isinstance(by_source_project, bool):
+            raise ValueError("by_source_project must be a boolean.")
+        if not isinstance(by_content_type, bool):
+            raise ValueError("by_content_type must be a boolean.")
+
+        units_by_id = {unit.id: unit for unit in self.store.get_all_units(limit=1000000000)}
+        graph = nx.DiGraph()
+        for unit_id, unit in sorted(units_by_id.items()):
+            graph.add_node(
+                unit_id,
+                source_project=str(unit.source_project or "unknown"),
+                content_type=str(unit.content_type or "unknown"),
+            )
+        graph.add_edges_from(
+            sorted(
+                (edge.from_unit_id, edge.to_unit_id)
+                for edge in self.store.get_all_edges()
+                if edge.from_unit_id in units_by_id and edge.to_unit_id in units_by_id
+            )
+        )
+
+        def _metrics(subgraph: nx.DiGraph) -> dict:
+            node_count = int(subgraph.number_of_nodes())
+            edge_count = int(subgraph.number_of_edges())
+            if node_count == 0:
+                weak_component_count = 0
+                isolated_node_count = 0
+            else:
+                weak_component_count = nx.number_weakly_connected_components(subgraph)
+                isolated_node_count = sum(
+                    1
+                    for node_id in subgraph.nodes
+                    if subgraph.in_degree(node_id) == 0 and subgraph.out_degree(node_id) == 0
+                )
+
+            return {
+                "node_count": node_count,
+                "edge_count": edge_count,
+                "density": round(float(nx.density(subgraph)), 6),
+                "weak_component_count": int(weak_component_count),
+                "isolated_node_count": int(isolated_node_count),
+                "average_in_degree": round(
+                    edge_count / node_count if node_count else 0.0,
+                    6,
+                ),
+                "average_out_degree": round(
+                    edge_count / node_count if node_count else 0.0,
+                    6,
+                ),
+            }
+
+        result = _metrics(graph)
+
+        def _breakdown(attribute: str) -> dict:
+            grouped_node_ids: dict[str, list[str]] = {}
+            for node_id, data in graph.nodes(data=True):
+                key = str(data.get(attribute) or "unknown")
+                grouped_node_ids.setdefault(key, []).append(str(node_id))
+            return {
+                key: _metrics(graph.subgraph(sorted(node_ids)).copy())
+                for key, node_ids in sorted(grouped_node_ids.items())
+            }
+
+        if by_source_project:
+            result["by_source_project"] = _breakdown("source_project")
+        if by_content_type:
+            result["by_content_type"] = _breakdown("content_type")
+
+        return result
 
     def analyze_triangles(
         self,
