@@ -5155,3 +5155,121 @@ def test_infer_edges_tool_returns_counts_and_inserts_edges(tmp_path, monkeypatch
         assert {edges[0].from_unit_id, edges[0].to_unit_id} == {a.id, b.id}
     finally:
         store.close()
+
+
+def test_duplicate_external_urls_tool_returns_duplicate_clusters(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+
+    # Insert units with duplicate URLs
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="canonical",
+            source_entity_type="insight",
+            title="Canonical Report",
+            content="Content",
+            content_type=ContentType.INSIGHT,
+            metadata={"canonical_url": "https://example.com/report"},
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="source",
+            source_entity_type="knowledge_node",
+            title="Source Reference",
+            content="Content",
+            metadata={"citation": {"source_url": "https://example.com/report/"}},
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="unique",
+            source_entity_type="insight",
+            title="Unique URL",
+            content="Content",
+            content_type=ContentType.INSIGHT,
+            metadata={"external_url": "https://example.com/unique"},
+        )
+    )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    assert next(tool for tool in tools if tool.name == "duplicate_external_urls")
+
+    response = asyncio.run(mcp_server.call_tool("duplicate_external_urls", {}))
+    payload = json.loads(response[0].text)
+
+    assert len(payload) == 1
+    assert payload[0]["url"] == "https://example.com/report"
+    assert payload[0]["count"] == 2
+    assert len(payload[0]["units"]) == 2
+
+
+def test_duplicate_external_urls_tool_returns_empty_when_no_duplicates(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+
+    # Insert units with unique URLs only
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="unit1",
+            source_entity_type="insight",
+            title="First Unit",
+            content="Content",
+            content_type=ContentType.INSIGHT,
+            metadata={"url": "https://example.com/first"},
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="unit2",
+            source_entity_type="insight",
+            title="Second Unit",
+            content="Content",
+            content_type=ContentType.INSIGHT,
+            metadata={"url": "https://example.com/second"},
+        )
+    )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(mcp_server.call_tool("duplicate_external_urls", {}))
+    payload = json.loads(response[0].text)
+
+    assert payload == []
+
+
+def test_duplicate_external_urls_tool_respects_limit_parameter(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+
+    # Create three duplicate URL groups
+    for group_id in ["a", "b", "c"]:
+        for unit_id in [f"{group_id}1", f"{group_id}2"]:
+            store.insert_unit(
+                KnowledgeUnit(
+                    source_project=SourceProject.MAX,
+                    source_id=unit_id,
+                    source_entity_type="insight",
+                    title=f"Unit {unit_id}",
+                    content="Content",
+                    content_type=ContentType.INSIGHT,
+                    metadata={"url": f"https://example.com/{group_id}"},
+                )
+            )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(mcp_server.call_tool("duplicate_external_urls", {"limit": 2}))
+    payload = json.loads(response[0].text)
+
+    assert len(payload) == 2
