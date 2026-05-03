@@ -865,6 +865,69 @@ class Store:
             "missing_unit_ids": missing_unit_ids,
         }
 
+    def source_freshness_histogram(
+        self,
+        *,
+        fresh_days: int = 30,
+        stale_days: int = 90,
+    ) -> list[dict]:
+        """Bucket unit updated_at freshness counts by source project."""
+        if (
+            not isinstance(fresh_days, int)
+            or isinstance(fresh_days, bool)
+            or not isinstance(stale_days, int)
+            or isinstance(stale_days, bool)
+        ):
+            raise ValueError("fresh_days and stale_days must be non-negative integers.")
+        if fresh_days < 0 or stale_days < 0:
+            raise ValueError("fresh_days and stale_days must be non-negative integers.")
+        if fresh_days > stale_days:
+            raise ValueError("fresh_days must be less than or equal to stale_days.")
+
+        now = datetime.now(timezone.utc)
+        buckets: dict[str, Counter[str]] = defaultdict(Counter)
+        rows = self.conn.execute(
+            """SELECT source_project, updated_at
+               FROM knowledge_units
+               ORDER BY source_project, id"""
+        ).fetchall()
+
+        for row in rows:
+            source_project = str(row["source_project"])
+            buckets[source_project]["total"] += 1
+            raw_updated_at = row["updated_at"]
+            if raw_updated_at is None or str(raw_updated_at).strip() == "":
+                buckets[source_project]["unknown"] += 1
+                continue
+            try:
+                updated_at = _parse_datetime(raw_updated_at)
+            except ValueError:
+                buckets[source_project]["unknown"] += 1
+                continue
+            if updated_at is None:
+                buckets[source_project]["unknown"] += 1
+                continue
+
+            age_days = (now - updated_at).total_seconds() / 86400
+            if age_days <= fresh_days:
+                buckets[source_project]["fresh"] += 1
+            elif age_days <= stale_days:
+                buckets[source_project]["aging"] += 1
+            else:
+                buckets[source_project]["stale"] += 1
+
+        return [
+            {
+                "source_project": source_project,
+                "total": buckets[source_project]["total"],
+                "fresh": buckets[source_project]["fresh"],
+                "aging": buckets[source_project]["aging"],
+                "stale": buckets[source_project]["stale"],
+                "unknown": buckets[source_project]["unknown"],
+            }
+            for source_project in sorted(buckets)
+        ]
+
     def find_source_id_collisions(
         self,
         *,
