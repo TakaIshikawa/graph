@@ -5,6 +5,7 @@ from graph.export.anki import export_units_to_anki_tsv
 from graph.export.backlinks import export_unit_backlinks_markdown
 from graph.export.concept_map import export_concept_map_markdown
 from graph.export.context_pack import export_context_pack
+from graph.export.cypher import export_graph_cypher
 from graph.export.dot import export_graph_dot
 from graph.export.duplicate_candidates import export_duplicate_candidates_markdown
 from graph.export.edge_csv import export_edges_to_csv
@@ -41,6 +42,7 @@ __all__ = [
     "export_edge_adjacency_markdown",
     "export_edges_to_csv",
     "export_graph_adjacency_markdown",
+    "export_graph_cypher",
     "export_units_to_flashcards_markdown",
     "export_graph_dot",
     "export_graph_gexf",
