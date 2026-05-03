@@ -40,6 +40,7 @@ from graph.adapters.jsonl_adapter import JsonlAdapter
 from graph.adapters.logseq import LogseqAdapter
 from graph.adapters.markdown import MarkdownAdapter
 from graph.adapters.markdown_callouts import MarkdownCalloutsAdapter
+from graph.adapters.markdown_definitions import MarkdownDefinitionsAdapter
 from graph.adapters.markdown_links import MarkdownLinksAdapter
 from graph.adapters.markdown_notes import MarkdownNotesAdapter
 from graph.adapters.markdown_tasks import MarkdownTasksAdapter
@@ -2659,6 +2660,7 @@ class TestRegistry:
             "mediawiki",
             "markdown",
             "markdown_callouts",
+            "markdown_definitions",
             "markdown_links",
             "markdown_notes",
             "markdown_tasks",
@@ -2913,6 +2915,12 @@ class TestRegistry:
         markdown_callouts_adapter = get_adapter("markdown_callouts", path="/tmp/notes")
         assert isinstance(markdown_callouts_adapter, MarkdownCalloutsAdapter)
         assert markdown_callouts_adapter.name == "markdown_callouts"
+
+        markdown_definitions_adapter = get_adapter(
+            "markdown_definitions", path="/tmp/notes"
+        )
+        assert isinstance(markdown_definitions_adapter, MarkdownDefinitionsAdapter)
+        assert markdown_definitions_adapter.name == "markdown_definitions"
 
         markdown_tasks_adapter = get_adapter("markdown_tasks", path="/tmp/notes")
         assert isinstance(markdown_tasks_adapter, MarkdownTasksAdapter)
