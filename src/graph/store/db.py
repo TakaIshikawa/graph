@@ -25,6 +25,8 @@ COLLECTIONS_SCHEMA_VERSION = 1
 SUPPORTED_QUERY_SCHEDULES = {"daily", "weekly", "monthly"}
 COLLECTION_ACTIVITY_BUCKETS = {"day", "week", "month", "year"}
 COLLECTION_ACTIVITY_FIELDS = {"created_at", "ingested_at", "updated_at"}
+UNIT_ACTIVITY_BUCKETS = {"day", "week", "month"}
+UNIT_ACTIVITY_FIELDS = {"created_at", "ingested_at", "updated_at"}
 REQUIRED_SQLITE_BACKUP_OBJECTS = {
     "schema_version",
     "knowledge_units",
@@ -438,6 +440,51 @@ def _activity_bucket_label(value: datetime, bucket: str) -> str:
     if bucket == "year":
         return f"{value.year:04d}"
     raise ValueError(f"Unsupported collection activity bucket: {bucket}")
+
+
+def _activity_bucket_start(value: datetime, bucket: str) -> date:
+    value_date = value.date()
+    if bucket == "day":
+        return value_date
+    if bucket == "week":
+        return value_date - timedelta(days=value_date.weekday())
+    if bucket == "month":
+        return date(value_date.year, value_date.month, 1)
+    raise ValueError(f"Unsupported activity bucket: {bucket}")
+
+
+def _activity_bucket_label_from_date(value: date, bucket: str) -> str:
+    if bucket in {"day", "week"}:
+        return value.isoformat()
+    if bucket == "month":
+        return f"{value.year:04d}-{value.month:02d}"
+    raise ValueError(f"Unsupported activity bucket: {bucket}")
+
+
+def _next_activity_bucket(value: date, bucket: str) -> date:
+    if bucket == "day":
+        return value + timedelta(days=1)
+    if bucket == "week":
+        return value + timedelta(days=7)
+    if bucket == "month":
+        if value.month == 12:
+            return date(value.year + 1, 1, 1)
+        return date(value.year, value.month + 1, 1)
+    raise ValueError(f"Unsupported activity bucket: {bucket}")
+
+
+def _activity_empty_bucket_labels(
+    start: datetime,
+    end: datetime,
+    bucket: str,
+) -> list[str]:
+    current = _activity_bucket_start(start, bucket)
+    final = _activity_bucket_start(end, bucket)
+    labels: list[str] = []
+    while current <= final:
+        labels.append(_activity_bucket_label_from_date(current, bucket))
+        current = _next_activity_bucket(current, bucket)
+    return labels
 
 
 def metadata_path_value(metadata: dict, path: str):
@@ -1119,6 +1166,89 @@ class Store:
 
         duplicate_rows.sort(key=lambda row: (-row["count"], row["url"]))
         return duplicate_rows[:limit]
+
+    def unit_activity_summary(
+        self,
+        *,
+        field: str = "created_at",
+        bucket: str = "month",
+        start: datetime | str | None = None,
+        end: datetime | str | None = None,
+        include_empty: bool = False,
+    ) -> dict:
+        """Bucket knowledge units by a timestamp field with per-bucket breakdowns."""
+        field = str(field).strip().lower()
+        bucket = str(bucket).strip().lower()
+        if field not in UNIT_ACTIVITY_FIELDS:
+            valid = ", ".join(sorted(UNIT_ACTIVITY_FIELDS))
+            raise ValueError(f"Unsupported unit activity field: {field}. Use one of: {valid}.")
+        if bucket not in UNIT_ACTIVITY_BUCKETS:
+            valid = ", ".join(sorted(UNIT_ACTIVITY_BUCKETS))
+            raise ValueError(f"Unsupported unit activity bucket: {bucket}. Use one of: {valid}.")
+        if not isinstance(include_empty, bool):
+            raise ValueError("include_empty must be a boolean.")
+
+        try:
+            parsed_start = _parse_datetime(start)
+        except ValueError as exc:
+            raise ValueError("start must be an ISO-8601 date or datetime.") from exc
+        try:
+            parsed_end = _parse_datetime(end)
+        except ValueError as exc:
+            raise ValueError("end must be an ISO-8601 date or datetime.") from exc
+        if parsed_start is not None and parsed_end is not None and parsed_start > parsed_end:
+            raise ValueError("start must be on or before end.")
+
+        rows = self.conn.execute(
+            f"""SELECT id, source_project, content_type, {field} AS activity_at
+                FROM knowledge_units
+                ORDER BY {field} ASC, id ASC"""
+        ).fetchall()
+
+        bucket_counts: Counter[str] = Counter()
+        source_project_counts: dict[str, Counter[str]] = defaultdict(Counter)
+        content_type_counts: dict[str, Counter[str]] = defaultdict(Counter)
+        seen_values: list[datetime] = []
+
+        for row in rows:
+            activity_at = _parse_datetime(row["activity_at"])
+            if activity_at is None:
+                continue
+            if parsed_start is not None and activity_at < parsed_start:
+                continue
+            if parsed_end is not None and activity_at > parsed_end:
+                continue
+
+            label = _activity_bucket_label(activity_at, bucket)
+            seen_values.append(activity_at)
+            bucket_counts[label] += 1
+            source_project_counts[label][str(row["source_project"])] += 1
+            content_type_counts[label][str(row["content_type"])] += 1
+
+        labels = set(bucket_counts)
+        if include_empty and parsed_start is not None and parsed_end is not None:
+            labels.update(_activity_empty_bucket_labels(parsed_start, parsed_end, bucket))
+
+        bucket_rows = [
+            {
+                "bucket": label,
+                "count": bucket_counts[label],
+                "source_project_counts": _sorted_counter_dict(source_project_counts[label]),
+                "content_type_counts": _sorted_counter_dict(content_type_counts[label]),
+            }
+            for label in sorted(labels)
+        ]
+
+        return {
+            "field": field,
+            "bucket": bucket,
+            "start": parsed_start.isoformat() if parsed_start is not None else None,
+            "end": parsed_end.isoformat() if parsed_end is not None else None,
+            "include_empty": include_empty,
+            "buckets": bucket_rows,
+            "first_seen_at": min(seen_values).isoformat() if seen_values else None,
+            "last_seen_at": max(seen_values).isoformat() if seen_values else None,
+        }
 
     def tag_vocabulary(self, *, exclude_unit_id: str | None = None) -> dict[str, int]:
         """Return existing graph tags and counts, optionally excluding one unit."""
