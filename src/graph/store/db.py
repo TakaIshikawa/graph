@@ -981,6 +981,25 @@ class Store:
             "missing_unit_ids": missing_unit_ids,
         }
 
+    def metadata_key_usage_frequency(self) -> dict[str, int]:
+        """Return frequency counts of top-level metadata keys across all units."""
+        key_counts: Counter[str] = Counter()
+
+        rows = self.conn.execute(
+            """SELECT metadata
+               FROM knowledge_units
+               ORDER BY id"""
+        ).fetchall()
+
+        for row in rows:
+            metadata = json.loads(row["metadata"])
+            if not isinstance(metadata, Mapping):
+                continue
+            for key in metadata.keys():
+                key_counts[key] += 1
+
+        return dict(sorted(key_counts.items(), key=lambda item: (-item[1], item[0])))
+
     def source_freshness_histogram(
         self,
         *,
@@ -3887,6 +3906,26 @@ class Store:
         self.conn.execute(f"DELETE FROM edges WHERE id IN ({placeholders})", edge_ids)
         self.conn.commit()
         return edges
+
+    def edge_relation_distribution(self) -> dict[EdgeRelation, int]:
+        """Return distribution statistics of edge relations across the graph."""
+        relation_counts: Counter[EdgeRelation] = Counter()
+
+        rows = self.conn.execute(
+            """SELECT relation
+               FROM edges
+               ORDER BY id"""
+        ).fetchall()
+
+        for row in rows:
+            try:
+                relation = EdgeRelation(row["relation"])
+                relation_counts[relation] += 1
+            except ValueError:
+                # Skip invalid relation values
+                continue
+
+        return dict(sorted(relation_counts.items(), key=lambda item: (-item[1], item[0].value)))
 
     # --- Integrity audit helpers ---
 
