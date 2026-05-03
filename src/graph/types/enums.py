@@ -15,6 +15,7 @@ class SourceProject(StrEnum):
     KINDLE = "kindle"
     SOTA = "sota"
     BOOKMARKS = "bookmarks"
+    BOOKMARKS_HTML = "bookmarks_html"
     BROWSER_HISTORY_CSV = "browser_history_csv"
     CHATGPT_JSON = "chatgpt_json"
     DISCORD_JSON = "discord_json"

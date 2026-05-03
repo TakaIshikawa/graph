@@ -94,6 +94,8 @@ class _BookmarksParser(HTMLParser):
 
 
 class BookmarksAdapter(SourceAdapter):
+    source_project = SourceProject.BOOKMARKS
+
     @property
     def name(self) -> str:
         return "bookmarks"
@@ -133,7 +135,7 @@ class BookmarksAdapter(SourceAdapter):
             folder_path = "/".join(bookmark.folder_path)
             result.units.append(
                 KnowledgeUnit(
-                    source_project=SourceProject.BOOKMARKS,
+                    source_project=self.source_project,
                     source_id=bookmark.url,
                     source_entity_type="bookmark",
                     title=bookmark.title,
