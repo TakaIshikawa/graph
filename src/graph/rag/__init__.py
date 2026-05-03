@@ -11,6 +11,7 @@ from graph.rag.query_intent import classify_query_intent
 from graph.rag.dedupe import rank_duplicate_candidates
 from graph.rag.facets import build_result_facets
 from graph.rag.citations import format_result_citations
+from graph.rag.recency import rerank_for_recency
 from graph.rag.reading_order import plan_reading_order
 from graph.rag.reading_queue import build_reading_queue
 from graph.rag.reading_time import estimate_reading_time
@@ -44,6 +45,7 @@ __all__ = [
     "plan_reading_order",
     "plan_tag_reading_path",
     "rank_duplicate_candidates",
+    "rerank_for_recency",
     "rerank_for_source_diversity",
     "score_source_agreement",
     "score_source_credibility",
