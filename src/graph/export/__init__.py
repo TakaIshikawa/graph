@@ -21,6 +21,7 @@ from graph.export.mermaid_mindmap import export_units_to_mermaid_mindmap
 from graph.export.opml import export_units_to_opml
 from graph.export.org import export_units_to_org
 from graph.export.relation_evidence import export_relation_evidence_markdown
+from graph.export.ris import export_units_to_ris
 from graph.export.schema_inventory import export_unit_schema_inventory
 from graph.export.source_coverage import export_source_coverage_markdown
 from graph.export.source_timeline_csv import export_source_timeline_csv
@@ -47,6 +48,7 @@ __all__ = [
     "export_graph_sqlite",
     "export_metadata_completeness_markdown",
     "export_relation_evidence_markdown",
+    "export_units_to_ris",
     "export_source_coverage_markdown",
     "export_source_timeline_csv",
     "render_search_html_report",
