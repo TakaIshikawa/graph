@@ -91,6 +91,23 @@ def test_get_k_core_decomposition_returns_ranked_core_numbers_for_nested_cluster
         "max_core": 3,
         "returned_count": 7,
     }
+    assert result["core_groups"] == [
+        {
+            "core_number": 3,
+            "unit_count": 4,
+            "unit_ids": ["unit-d", "unit-a", "unit-b", "unit-c"],
+        },
+        {
+            "core_number": 2,
+            "unit_count": 2,
+            "unit_ids": ["unit-f", "unit-e"],
+        },
+        {
+            "core_number": 1,
+            "unit_count": 1,
+            "unit_ids": ["unit-g"],
+        },
+    ]
     assert result["nodes"] == [
         {
             "unit_id": "unit-d",
