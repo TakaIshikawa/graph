@@ -4952,6 +4952,153 @@ class GraphService:
             "components": components[:limit],
         }
 
+    def analyze_relation_mix(
+        self,
+        *,
+        include_pairs: bool = True,
+        top_pair_limit: int = 20,
+    ) -> dict:
+        """Summarize graph edge relation, source, and source-project pair mix."""
+        if (
+            not isinstance(top_pair_limit, int)
+            or isinstance(top_pair_limit, bool)
+            or top_pair_limit < 0
+        ):
+            raise ValueError("top_pair_limit must be a non-negative integer.")
+
+        edges = sorted(
+            self.store.get_all_edges(),
+            key=lambda edge: (
+                str(edge.relation),
+                str(edge.source),
+                edge.from_unit_id,
+                edge.to_unit_id,
+                edge.id,
+            ),
+        )
+        units_by_id = {unit.id: unit for unit in self.store.get_all_units(limit=1000000000)}
+        total_edge_count = len(edges)
+        total_weight = sum(float(edge.weight or 0.0) for edge in edges)
+
+        relation_counts: Counter[str] = Counter()
+        relation_weights: Counter[str] = Counter()
+        edge_source_counts: Counter[str] = Counter()
+        edge_source_weights: Counter[str] = Counter()
+        pair_records: dict[tuple[str, str], dict] = {}
+        pair_edge_count = 0
+        missing_endpoint_edge_count = 0
+
+        for edge in edges:
+            relation = str(edge.relation)
+            edge_source = str(edge.source)
+            weight = float(edge.weight or 0.0)
+
+            relation_counts[relation] += 1
+            relation_weights[relation] += weight
+            edge_source_counts[edge_source] += 1
+            edge_source_weights[edge_source] += weight
+
+            from_unit = units_by_id.get(edge.from_unit_id)
+            to_unit = units_by_id.get(edge.to_unit_id)
+            if from_unit is None or to_unit is None:
+                missing_endpoint_edge_count += 1
+                continue
+
+            from_source_project = str(from_unit.source_project or "unknown")
+            to_source_project = str(to_unit.source_project or "unknown")
+            pair_key = (from_source_project, to_source_project)
+            pair = pair_records.setdefault(
+                pair_key,
+                {
+                    "from_source_project": from_source_project,
+                    "to_source_project": to_source_project,
+                    "edge_count": 0,
+                    "total_weight": 0.0,
+                    "relation_counts": Counter(),
+                    "edge_source_counts": Counter(),
+                },
+            )
+            pair_edge_count += 1
+            pair["edge_count"] += 1
+            pair["total_weight"] += weight
+            pair["relation_counts"][relation] += 1
+            pair["edge_source_counts"][edge_source] += 1
+
+        def _percentage(numerator: float, denominator: float) -> float:
+            return round((numerator / denominator) * 100, 6) if denominator else 0.0
+
+        relation_mix = [
+            {
+                "relation": relation,
+                "edge_count": count,
+                "total_weight": float(relation_weights[relation]),
+                "edge_percentage": _percentage(count, total_edge_count),
+                "weight_percentage": _percentage(relation_weights[relation], total_weight),
+            }
+            for relation, count in sorted(
+                relation_counts.items(),
+                key=lambda item: (-item[1], item[0]),
+            )
+        ]
+        edge_source_mix = [
+            {
+                "source": source,
+                "edge_count": count,
+                "total_weight": float(edge_source_weights[source]),
+                "edge_percentage": _percentage(count, total_edge_count),
+                "weight_percentage": _percentage(edge_source_weights[source], total_weight),
+            }
+            for source, count in sorted(
+                edge_source_counts.items(),
+                key=lambda item: (-item[1], item[0]),
+            )
+        ]
+
+        source_project_pairs = []
+        if include_pairs:
+            for pair in pair_records.values():
+                source_project_pairs.append(
+                    {
+                        "from_source_project": pair["from_source_project"],
+                        "to_source_project": pair["to_source_project"],
+                        "edge_count": pair["edge_count"],
+                        "total_weight": float(pair["total_weight"]),
+                        "edge_percentage": _percentage(
+                            pair["edge_count"], total_edge_count
+                        ),
+                        "weight_percentage": _percentage(
+                            pair["total_weight"], total_weight
+                        ),
+                        "relation_counts": dict(
+                            sorted(pair["relation_counts"].items())
+                        ),
+                        "edge_source_counts": dict(
+                            sorted(pair["edge_source_counts"].items())
+                        ),
+                    }
+                )
+            source_project_pairs.sort(
+                key=lambda pair: (
+                    -pair["edge_count"],
+                    -pair["total_weight"],
+                    pair["from_source_project"],
+                    pair["to_source_project"],
+                )
+            )
+            source_project_pairs = source_project_pairs[:top_pair_limit]
+
+        return {
+            "total_edge_count": total_edge_count,
+            "total_weight": float(total_weight),
+            "relation_mix": relation_mix,
+            "edge_source_mix": edge_source_mix,
+            "pair_edge_count": pair_edge_count if include_pairs else 0,
+            "missing_endpoint_edge_count": (
+                missing_endpoint_edge_count if include_pairs else 0
+            ),
+            "source_project_pairs": source_project_pairs,
+        }
+
     def analyze_triangles(
         self,
         limit: int = 20,
