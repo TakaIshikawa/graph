@@ -68,6 +68,18 @@ class FeedAdapter(SourceAdapter):
                 if since and created_at and created_at <= self._sync_datetime(since):
                     continue
 
+                metadata = {
+                    "feed_source": source,
+                    "feed_title": item["feed_title"],
+                    "id": item["id"],
+                    "link": item["link"],
+                    "author": item["author"],
+                    "published": item["published"],
+                    "updated": item["updated"],
+                }
+                if item.get("enclosures"):
+                    metadata["enclosures"] = item["enclosures"]
+
                 result.units.append(
                     KnowledgeUnit(
                         source_project=SourceProject.ME,
@@ -76,15 +88,7 @@ class FeedAdapter(SourceAdapter):
                         title=item["title"],
                         content=item["content"],
                         content_type=ContentType.ARTIFACT,
-                        metadata={
-                            "feed_source": source,
-                            "feed_title": item["feed_title"],
-                            "id": item["id"],
-                            "link": item["link"],
-                            "author": item["author"],
-                            "published": item["published"],
-                            "updated": item["updated"],
-                        },
+                        metadata=metadata,
                         tags=item["tags"],
                         created_at=created_at or datetime.now(timezone.utc),
                     )
@@ -135,16 +139,26 @@ class FeedAdapter(SourceAdapter):
             description = description or self._child_text(item, "description")
             published = self._child_text(item, "pubDate")
             updated = self._child_text(item, "updated")
+            enclosures = self._rss_enclosures(item)
+
+            # Use enclosure URLs in content only when no description
+            content = self._clean_text(description) if description else None
+            if content is None and enclosures:
+                enclosure_urls = " ".join(enc["url"] for enc in enclosures if enc.get("url"))
+                content = f"{title} {enclosure_urls}".strip() if enclosure_urls else title
+            content = content or title
+
             items.append(
                 {
                     "feed_title": feed_title,
                     "title": title,
-                    "content": self._clean_text(description) or title,
+                    "content": content,
                     "id": self._guid_text(item),
                     "link": self._child_text(item, "link"),
                     "author": self._child_text(item, "author")
                     or self._child_text_by_local_name(item, "creator"),
                     "tags": self._rss_categories(item),
+                    "enclosures": enclosures,
                     "published": published,
                     "updated": updated,
                     "created_at": self._parse_datetime(published or updated),
@@ -208,6 +222,20 @@ class FeedAdapter(SourceAdapter):
             if category.text:
                 self._append_tag(tags, category.text)
         return tags
+
+    def _rss_enclosures(self, item: ET.Element) -> list[dict]:
+        enclosures: list[dict] = []
+        for enclosure in item.findall("enclosure"):
+            enc_data = {}
+            if url := enclosure.attrib.get("url"):
+                enc_data["url"] = url
+            if enc_type := enclosure.attrib.get("type"):
+                enc_data["type"] = enc_type
+            if length := enclosure.attrib.get("length"):
+                enc_data["length"] = length
+            if enc_data:
+                enclosures.append(enc_data)
+        return enclosures
 
     def _atom_categories(self, entry: ET.Element) -> list[str]:
         tags: list[str] = []
