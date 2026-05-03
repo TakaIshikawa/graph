@@ -79,7 +79,12 @@ from graph.cli.main import (
     SEARCH_SORTS,
 )
 from graph.graph.service import GraphService
-from graph.rag import build_reading_queue, detect_context_gaps, score_source_agreement
+from graph.rag import (
+    build_reading_queue,
+    detect_context_gaps,
+    score_source_agreement,
+    suggest_tag_normalizations,
+)
 from graph.rag.search import sort_search_results
 from graph.store.db import Store
 from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
@@ -502,6 +507,108 @@ def _reading_queue_payload(arguments: dict) -> dict:
         "units": result["units"],
         "stats": result["stats"],
         "options": {"limit": limit, "now": result["stats"]["now"]},
+    }
+
+
+def _tag_normalization_unit(record: dict, index: int) -> KnowledgeUnit:
+    unit_record = record.get("unit")
+    if isinstance(unit_record, dict):
+        merged = {**record, **unit_record}
+    else:
+        merged = dict(record)
+
+    unit_id = str(merged.get("id") or merged.get("unit_id") or f"result-{index + 1}")
+    metadata = merged.get("metadata")
+    if metadata is None:
+        metadata = {}
+    if not isinstance(metadata, dict):
+        raise ValueError(f"results[{index}].metadata must be an object")
+
+    tags = merged.get("tags", [])
+    if tags is None:
+        tags = []
+    if not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags):
+        raise ValueError(f"results[{index}].tags must be an array of strings")
+
+    try:
+        return KnowledgeUnit(
+            id=unit_id,
+            source_project=str(
+                merged.get("source_project")
+                or merged.get("source")
+                or merged.get("project")
+                or "unknown"
+            ),
+            source_id=str(merged.get("source_id") or unit_id),
+            source_entity_type=str(
+                merged.get("source_entity_type")
+                or merged.get("entity_type")
+                or "search_result"
+            ),
+            title=str(merged.get("title") or unit_id),
+            content=str(merged.get("content") or merged.get("snippet") or ""),
+            content_type=str(merged.get("content_type") or "insight"),
+            metadata=dict(metadata),
+            tags=tags,
+            confidence=merged.get("confidence"),
+            utility_score=merged.get("utility_score"),
+            created_at=merged.get("created_at") or datetime.now(timezone.utc),
+            updated_at=merged.get("updated_at") or datetime.now(timezone.utc),
+        )
+    except ValueError as exc:
+        raise ValueError(f"results[{index}] is not a valid unit: {exc}") from exc
+
+
+def _tag_normalization_payload(store: Store, arguments: dict) -> dict:
+    explicit_records = arguments.get("units")
+    if explicit_records is None:
+        explicit_records = arguments.get("results")
+
+    min_count = arguments.get("min_count", 1)
+    min_similarity = arguments.get("min_similarity", 0.82)
+    limit = arguments.get("limit", 50)
+
+    if explicit_records is None:
+        units = store.get_all_units()
+        source = "store"
+    else:
+        if not isinstance(explicit_records, list):
+            raise ValueError("units/results must be an array of result-like objects")
+        units = []
+        for index, record in enumerate(explicit_records):
+            if not isinstance(record, dict):
+                raise ValueError(f"results[{index}] must be an object")
+            units.append(_tag_normalization_unit(record, index))
+        source = "explicit"
+
+    suggestions = suggest_tag_normalizations(
+        units,
+        min_count=min_count,
+        min_similarity=min_similarity,
+        limit=limit,
+    )
+    serialized = [
+        {
+            **suggestion,
+            "confidence": suggestion["similarity"],
+            "score": round(
+                suggestion["similarity"] * sum(suggestion["counts"].values()), 6
+            ),
+        }
+        for suggestion in suggestions
+    ]
+    return {
+        "suggestions": serialized,
+        "stats": {
+            "unit_count": len(units),
+            "suggestion_count": len(serialized),
+            "source": source,
+        },
+        "options": {
+            "min_count": min_count,
+            "min_similarity": min_similarity,
+            "limit": limit,
+        },
     }
 
 
@@ -1489,6 +1596,53 @@ async def list_tools() -> list[Tool]:
                         "description": (
                             "Optional ISO-8601 timestamp used for stale/read recency scoring."
                         ),
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="suggest_tag_normalizations",
+            description=(
+                "Suggest deterministic canonical tag merges from explicit result-like "
+                "records or from all units in the configured store."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "units": {
+                        "type": "array",
+                        "description": (
+                            "Unit-like records with id, title, content, metadata, and tags. "
+                            "When omitted, the configured store is analyzed."
+                        ),
+                        "items": {"type": "object"},
+                    },
+                    "results": {
+                        "type": "array",
+                        "description": (
+                            "Alias for units; accepts search result-like records, including "
+                            "records with nested unit objects."
+                        ),
+                        "items": {"type": "object"},
+                    },
+                    "min_count": {
+                        "type": "integer",
+                        "default": 1,
+                        "minimum": 1,
+                        "description": "Minimum total tag occurrences required for a suggestion.",
+                    },
+                    "min_similarity": {
+                        "type": "number",
+                        "default": 0.82,
+                        "minimum": 0,
+                        "maximum": 1,
+                        "description": "Minimum normalized tag similarity from 0 to 1.",
+                    },
+                    "limit": {
+                        "type": ["integer", "null"],
+                        "default": 50,
+                        "minimum": 1,
+                        "description": "Maximum suggestions to return; null returns all suggestions.",
                     },
                 },
             },
@@ -3610,6 +3764,27 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                         else None,
                         "limit": arguments.get("limit", 20),
                         "now": arguments.get("now"),
+                    },
+                }
+            return [TextContent(type="text", text=json.dumps(payload, default=str))]
+
+        elif name == "suggest_tag_normalizations":
+            try:
+                payload = _tag_normalization_payload(store, arguments)
+            except ValueError as exc:
+                records = arguments.get("units")
+                if records is None:
+                    records = arguments.get("results")
+                payload = {
+                    "error": "invalid_tag_normalization_request",
+                    "message": str(exc),
+                    "arguments": {
+                        "result_count": len(records)
+                        if isinstance(records, list)
+                        else None,
+                        "min_count": arguments.get("min_count", 1),
+                        "min_similarity": arguments.get("min_similarity", 0.82),
+                        "limit": arguments.get("limit", 50),
                     },
                 }
             return [TextContent(type="text", text=json.dumps(payload, default=str))]
