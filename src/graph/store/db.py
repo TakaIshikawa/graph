@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
+from urllib.parse import urlsplit, urlunsplit
 
 from graph.store.migrations import SCHEMA_VERSION, ensure_schema
 from graph.types.enums import EdgeRelation, EdgeSource
@@ -33,6 +34,19 @@ REQUIRED_SQLITE_BACKUP_OBJECTS = {
 _MAX_METADATA_INVENTORY_EXAMPLES = 3
 _MAX_METADATA_INVENTORY_EXAMPLE_LENGTH = 80
 _MAX_TAG_USAGE_EXAMPLES = 3
+_DUPLICATE_EXTERNAL_URL_KEYS = frozenset(
+    {
+        "url",
+        "source_url",
+        "canonical_url",
+        "external_url",
+        "link",
+        "permalink",
+        "uri",
+        "normalized_url",
+    }
+)
+_CONTENT_URL_RE = re.compile(r"https?://[^\s<>\[\]{}\"']+", re.IGNORECASE)
 
 if TYPE_CHECKING:
     from graph.adapters.base import IngestResult
@@ -352,6 +366,61 @@ def _metadata_inventory_distinct_key(value: Any) -> tuple[str, str]:
         value_type,
         json.dumps(normalized, sort_keys=True, ensure_ascii=False, default=str),
     )
+
+
+def _inline_text(value: Any) -> str:
+    return " ".join(str(value or "").strip().split())
+
+
+def _normalize_external_url(value: Any) -> str | None:
+    text = _inline_text(value)
+    if not text:
+        return None
+    text = text.rstrip(".,;:")
+    parsed = urlsplit(text)
+    if not parsed.scheme and not parsed.netloc:
+        parsed = urlsplit(f"https://{text}")
+    if parsed.scheme.casefold() not in {"http", "https"}:
+        return None
+
+    scheme = parsed.scheme.casefold() or "https"
+    hostname = (parsed.hostname or "").casefold()
+    if not hostname:
+        return None
+    try:
+        port = parsed.port
+    except ValueError:
+        return None
+    netloc = hostname
+    if port and not ((scheme == "http" and port == 80) or (scheme == "https" and port == 443)):
+        netloc = f"{hostname}:{port}"
+    path = parsed.path.rstrip("/") or "/"
+    return urlunsplit((scheme, netloc, path, parsed.query, ""))
+
+
+def _iter_metadata_external_url_values(value: Any, key: str | None = None):
+    if isinstance(value, Mapping):
+        for child_key, child_value in value.items():
+            yield from _iter_metadata_external_url_values(child_value, str(child_key))
+        return
+    if isinstance(value, list | tuple | set):
+        for child in value:
+            yield from _iter_metadata_external_url_values(child, key)
+        return
+    if key is not None and key.casefold() in _DUPLICATE_EXTERNAL_URL_KEYS:
+        yield value
+
+
+def _extract_content_external_urls(content: str) -> set[str]:
+    urls: set[str] = set()
+    for match in _CONTENT_URL_RE.finditer(content or ""):
+        text = match.group(0).rstrip(".,;:!?")
+        while text.endswith(")") and text.count("(") < text.count(")"):
+            text = text[:-1]
+        normalized = _normalize_external_url(text)
+        if normalized is not None:
+            urls.add(normalized)
+    return urls
 
 
 def _sorted_counter_dict(counter: Counter[str]) -> dict[str, int]:
@@ -995,6 +1064,61 @@ class Store:
             }
             for row in rows
         ]
+
+    def find_duplicate_external_urls(self, *, limit: int = 50) -> list[dict]:
+        """Find normalized external URLs referenced by two or more units."""
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
+            raise ValueError("limit must be a non-negative integer.")
+
+        rows = self.conn.execute(
+            """SELECT id, source_project, source_id, source_entity_type, title, metadata, content
+               FROM knowledge_units
+               ORDER BY source_project, source_id, title, id"""
+        ).fetchall()
+        units_by_url: dict[str, dict[str, dict[str, str]]] = defaultdict(dict)
+
+        for row in rows:
+            urls = _extract_content_external_urls(row["content"])
+            try:
+                metadata = json.loads(row["metadata"])
+            except json.JSONDecodeError:
+                metadata = {}
+            if isinstance(metadata, Mapping):
+                for value in _iter_metadata_external_url_values(metadata):
+                    normalized = _normalize_external_url(value)
+                    if normalized is not None:
+                        urls.add(normalized)
+
+            if not urls:
+                continue
+
+            unit_record = {
+                "id": row["id"],
+                "source_project": row["source_project"],
+                "source_id": row["source_id"],
+                "source_entity_type": row["source_entity_type"],
+                "title": row["title"],
+            }
+            for url in urls:
+                units_by_url[url][row["id"]] = unit_record
+
+        duplicate_rows = []
+        for url in sorted(units_by_url):
+            units = sorted(
+                units_by_url[url].values(),
+                key=lambda unit: (
+                    unit["source_project"],
+                    unit["source_id"],
+                    unit["title"],
+                    unit["id"],
+                ),
+            )
+            if len(units) < 2:
+                continue
+            duplicate_rows.append({"url": url, "count": len(units), "units": units})
+
+        duplicate_rows.sort(key=lambda row: (-row["count"], row["url"]))
+        return duplicate_rows[:limit]
 
     def tag_vocabulary(self, *, exclude_unit_id: str | None = None) -> dict[str, int]:
         """Return existing graph tags and counts, optionally excluding one unit."""
