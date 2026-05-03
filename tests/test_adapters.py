@@ -37,6 +37,7 @@ from graph.adapters.hypothesis import HypothesisAdapter
 from graph.adapters.ical import ICalAdapter
 from graph.adapters.ipynb import IpynbAdapter
 from graph.adapters.jsonl_adapter import JsonlAdapter
+from graph.adapters.jsonl_notes import JsonlNotesAdapter
 from graph.adapters.logseq import LogseqAdapter
 from graph.adapters.markdown import MarkdownAdapter
 from graph.adapters.markdown_callouts import MarkdownCalloutsAdapter
@@ -2676,6 +2677,7 @@ class TestRegistry:
             "csv",
             "csv_rows",
             "jsonl",
+            "jsonl_notes",
             "yaml",
             "notion_markdown",
             "opml",
@@ -2728,6 +2730,10 @@ class TestRegistry:
 
         jsonl_adapter = get_adapter("jsonl", path="/tmp/test.jsonl")
         assert jsonl_adapter.name == "jsonl"
+
+        jsonl_notes_adapter = get_adapter("jsonl_notes", path="/tmp/notes.jsonl")
+        assert isinstance(jsonl_notes_adapter, JsonlNotesAdapter)
+        assert jsonl_notes_adapter.name == "jsonl_notes"
 
         csv_rows_adapter = get_adapter("csv_rows", path="/tmp/rows.csv")
         assert isinstance(csv_rows_adapter, CsvRowsAdapter)

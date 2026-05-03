@@ -27,6 +27,7 @@ from graph.adapters.ical import ICalAdapter
 from graph.adapters.ipynb import IpynbAdapter
 from graph.adapters.jats import JatsAdapter
 from graph.adapters.jsonl_adapter import JsonlAdapter
+from graph.adapters.jsonl_notes import JsonlNotesAdapter
 from graph.adapters.kindle import KindleAdapter
 from graph.adapters.logseq import LogseqAdapter
 from graph.adapters.markdown import MarkdownAdapter
@@ -93,6 +94,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "csv": CsvAdapter,
     "csv_rows": CsvRowsAdapter,
     "jsonl": JsonlAdapter,
+    "jsonl_notes": JsonlNotesAdapter,
     "yaml": YamlAdapter,
     "notion_markdown": NotionMarkdownAdapter,
     "opml": OpmlAdapter,
