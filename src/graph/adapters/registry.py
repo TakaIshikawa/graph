@@ -52,6 +52,7 @@ from graph.adapters.raindrop_json import RaindropJsonAdapter
 from graph.adapters.readwise import ReadwiseAdapter
 from graph.adapters.readwise_csv import ReadwiseCsvAdapter
 from graph.adapters.roam import RoamAdapter
+from graph.adapters.safari_bookmarks import SafariBookmarksAdapter
 from graph.adapters.slack_json import SlackJsonAdapter
 from graph.adapters.sota import SOTAAdapter
 from graph.adapters.sqlite_query_log import SqliteQueryLogAdapter
@@ -119,6 +120,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "pinboard": PinboardAdapter,
     "raindrop": RaindropAdapter,
     "raindrop_json": RaindropJsonAdapter,
+    "safari_bookmarks": SafariBookmarksAdapter,
     "zotero_rdf": ZoteroRdfAdapter,
     "hypothesis": HypothesisAdapter,
     "readwise": ReadwiseAdapter,

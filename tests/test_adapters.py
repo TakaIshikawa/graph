@@ -62,6 +62,7 @@ from graph.adapters.readwise_csv import ReadwiseCsvAdapter
 from graph.adapters.registry import get_adapter, list_adapters
 from graph.adapters.ris import RisAdapter
 from graph.adapters.roam import RoamAdapter
+from graph.adapters.safari_bookmarks import SafariBookmarksAdapter
 from graph.adapters.slack_json import SlackJsonAdapter
 from graph.adapters.sqlite_query_log import SqliteQueryLogAdapter
 from graph.adapters.text import TextAdapter
@@ -2702,6 +2703,7 @@ class TestRegistry:
             "pinboard",
             "raindrop",
             "raindrop_json",
+            "safari_bookmarks",
             "zotero_rdf",
             "hypothesis",
             "readwise",
@@ -2850,6 +2852,12 @@ class TestRegistry:
         raindrop_json_adapter = get_adapter("raindrop_json", path="/tmp/raindrop.json")
         assert isinstance(raindrop_json_adapter, RaindropJsonAdapter)
         assert raindrop_json_adapter.name == "raindrop_json"
+
+        safari_bookmarks_adapter = get_adapter(
+            "safari_bookmarks", path="/tmp/Bookmarks.plist"
+        )
+        assert isinstance(safari_bookmarks_adapter, SafariBookmarksAdapter)
+        assert safari_bookmarks_adapter.name == "safari_bookmarks"
 
         zotero_rdf_adapter = get_adapter("zotero_rdf", path="/tmp/library.rdf")
         assert zotero_rdf_adapter.name == "zotero_rdf"
