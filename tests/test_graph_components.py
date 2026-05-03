@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from typing import Any
 
 import pytest
 
@@ -178,21 +179,21 @@ def test_analyze_connected_components_limit_keeps_component_count(store: Store):
 @pytest.mark.parametrize("limit", [-1, True, "many"])
 def test_analyze_connected_components_validates_limit(
     store: Store,
-    limit: object,
+    limit: Any,
 ):
     with pytest.raises(ValueError, match="limit must be a non-negative integer or None"):
-        GraphService(store).analyze_connected_components(limit=limit)  # type: ignore[arg-type]
+        GraphService(store).analyze_connected_components(limit=limit)
 
 
 @pytest.mark.parametrize("representative_limit", [-1, True, "many"])
 def test_analyze_connected_components_validates_representative_limit(
     store: Store,
-    representative_limit: object,
+    representative_limit: Any,
 ):
     with pytest.raises(
         ValueError,
         match="representative_limit must be a non-negative integer",
     ):
         GraphService(store).analyze_connected_components(
-            representative_limit=representative_limit,  # type: ignore[arg-type]
+            representative_limit=representative_limit,
         )
