@@ -4179,6 +4179,75 @@ async def list_tools() -> list[Tool]:
                 },
             },
         ),
+        Tool(
+            name="metadata_key_frequency",
+            description=(
+                "Report usage frequency of metadata keys across knowledge units. "
+                "Returns metadata paths with counts, value types, and source project distributions."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "prefix": {
+                        "type": "string",
+                        "description": "Optional prefix filter to match metadata key paths",
+                    },
+                    "source_project": {
+                        "type": "string",
+                        "description": "Optional source project filter (e.g., 'max', 'oura')",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum metadata keys to return",
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="edge_relation_distribution",
+            description=(
+                "Report the distribution of edge relations across the knowledge graph. "
+                "Returns counts grouped by relation type (RELATES_TO, REFERENCES, etc.)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {},
+            },
+        ),
+        Tool(
+            name="unit_creation_rate",
+            description=(
+                "Report unit creation rate over time as a time-series. "
+                "Returns creation counts bucketed by time period (daily, weekly, or monthly)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "bucket": {
+                        "type": "string",
+                        "enum": ["daily", "weekly", "monthly"],
+                        "default": "monthly",
+                        "description": "Time bucket granularity",
+                    },
+                    "source_project": {
+                        "type": "string",
+                        "description": "Optional source project filter (e.g., 'max', 'oura')",
+                    },
+                    "created_after": {
+                        "type": "string",
+                        "description": "Optional ISO-8601 timestamp to filter units created after this time",
+                    },
+                    "created_before": {
+                        "type": "string",
+                        "description": "Optional ISO-8601 timestamp to filter units created before this time",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of time buckets to return",
+                    },
+                },
+            },
+        ),
     ]
 
 
@@ -5611,6 +5680,100 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             limit = arguments.get("limit", 50)
             duplicates = store.find_duplicate_external_urls(limit=limit)
             return [TextContent(type="text", text=json.dumps(duplicates))]
+
+        elif name == "metadata_key_frequency":
+            prefix = arguments.get("prefix")
+            limit = arguments.get("limit")
+            source_project_filter = arguments.get("source_project")
+
+            inventory = store.metadata_key_inventory(prefix=prefix, limit=limit)
+
+            # Apply source_project filter if specified
+            if source_project_filter:
+                # Filter to only include keys that have the specified source project
+                filtered_inventory = []
+                for item in inventory:
+                    source_projects = item.get("source_projects", [])
+                    if source_project_filter in source_projects:
+                        # Keep only this source project in the list
+                        filtered_inventory.append({
+                            **item,
+                            "source_projects": [source_project_filter],
+                        })
+                inventory = filtered_inventory
+
+            return [TextContent(type="text", text=json.dumps(inventory))]
+
+        elif name == "edge_relation_distribution":
+            # Query edge relation counts directly from the database
+            rows = store.conn.execute(
+                """SELECT relation, COUNT(*) as count
+                   FROM edges
+                   GROUP BY relation
+                   ORDER BY count DESC, relation"""
+            ).fetchall()
+
+            distribution = [
+                {"relation": row["relation"], "count": row["count"]}
+                for row in rows
+            ]
+
+            return [TextContent(type="text", text=json.dumps(distribution))]
+
+        elif name == "unit_creation_rate":
+            bucket = arguments.get("bucket", "monthly")
+            source_project_filter = arguments.get("source_project")
+            created_after = arguments.get("created_after")
+            created_before = arguments.get("created_before")
+            limit = arguments.get("limit")
+
+            # Build SQL query with filters
+            clauses = []
+            params = []
+
+            if source_project_filter:
+                clauses.append("source_project = ?")
+                params.append(source_project_filter)
+
+            if created_after:
+                clauses.append("created_at >= ?")
+                params.append(created_after)
+
+            if created_before:
+                clauses.append("created_at < ?")
+                params.append(created_before)
+
+            where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+
+            # Determine time bucket format based on granularity
+            if bucket == "daily":
+                bucket_format = "%Y-%m-%d"
+            elif bucket == "weekly":
+                # SQLite strftime %W gives week number, we'll use %Y-W%W format
+                bucket_format = "%Y-W%W"
+            else:  # monthly
+                bucket_format = "%Y-%m"
+
+            query = f"""
+                SELECT strftime('{bucket_format}', created_at) as time_bucket,
+                       COUNT(*) as count
+                FROM knowledge_units
+                {where_clause}
+                GROUP BY time_bucket
+                ORDER BY time_bucket DESC
+            """
+
+            if limit:
+                query += f" LIMIT {int(limit)}"
+
+            rows = store.conn.execute(query, params).fetchall()
+
+            time_series = [
+                {"period": row["time_bucket"], "count": row["count"]}
+                for row in rows
+            ]
+
+            return [TextContent(type="text", text=json.dumps(time_series))]
 
         elif name == "export_obsidian":
             vault_path = arguments.get("vault_path") or settings.obsidian_vault_path

@@ -5273,3 +5273,707 @@ def test_duplicate_external_urls_tool_respects_limit_parameter(tmp_path, monkeyp
     payload = json.loads(response[0].text)
 
     assert len(payload) == 2
+
+
+def test_metadata_key_frequency_tool_returns_empty_for_empty_graph(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(mcp_server.call_tool("metadata_key_frequency", {}))
+    payload = json.loads(response[0].text)
+
+    assert payload == []
+
+
+def test_metadata_key_frequency_tool_counts_metadata_keys(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+
+    # Insert units with various metadata keys
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="unit1",
+            source_entity_type="insight",
+            title="First Unit",
+            content="Content",
+            content_type=ContentType.INSIGHT,
+            metadata={"author": "Alice", "year": 2024},
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="unit2",
+            source_entity_type="insight",
+            title="Second Unit",
+            content="Content",
+            content_type=ContentType.INSIGHT,
+            metadata={"author": "Bob", "category": "research"},
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="unit3",
+            source_entity_type="insight",
+            title="Third Unit",
+            content="Content",
+            content_type=ContentType.INSIGHT,
+            metadata={"author": "Charlie"},
+        )
+    )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(mcp_server.call_tool("metadata_key_frequency", {}))
+    payload = json.loads(response[0].text)
+
+    # Should return metadata keys sorted by frequency (count descending, then path)
+    assert len(payload) == 3
+    assert payload[0]["path"] == "author"
+    assert payload[0]["count"] == 3
+    assert "max" in payload[0]["source_projects"]
+    assert "forty_two" in payload[0]["source_projects"]
+
+
+def test_metadata_key_frequency_tool_filters_by_prefix(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="unit1",
+            source_entity_type="insight",
+            title="Unit",
+            content="Content",
+            content_type=ContentType.INSIGHT,
+            metadata={
+                "citation": {"author": "Alice", "year": 2024},
+                "summary": "Summary text",
+            },
+        )
+    )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(
+        mcp_server.call_tool("metadata_key_frequency", {"prefix": "citation"})
+    )
+    payload = json.loads(response[0].text)
+
+    # Should only return keys starting with "citation"
+    assert len(payload) == 2
+    assert all(item["path"].startswith("citation") for item in payload)
+    assert {item["path"] for item in payload} == {"citation.author", "citation.year"}
+
+
+def test_metadata_key_frequency_tool_respects_limit(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="unit1",
+            source_entity_type="insight",
+            title="Unit",
+            content="Content",
+            content_type=ContentType.INSIGHT,
+            metadata={"key1": "a", "key2": "b", "key3": "c"},
+        )
+    )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(mcp_server.call_tool("metadata_key_frequency", {"limit": 2}))
+    payload = json.loads(response[0].text)
+
+    assert len(payload) == 2
+
+
+def test_metadata_key_frequency_tool_filters_by_source_project(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+
+    # Insert units from different projects with shared metadata keys
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="unit1",
+            source_entity_type="insight",
+            title="Max Unit",
+            content="Content",
+            content_type=ContentType.INSIGHT,
+            metadata={"author": "Alice", "project_specific": "max_value"},
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="unit2",
+            source_entity_type="insight",
+            title="42 Unit",
+            content="Content",
+            content_type=ContentType.INSIGHT,
+            metadata={"author": "Bob", "other_key": "value"},
+        )
+    )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(
+        mcp_server.call_tool("metadata_key_frequency", {"source_project": "max"})
+    )
+    payload = json.loads(response[0].text)
+
+    # Should only include keys from MAX project
+    assert len(payload) == 2
+    author_item = next(item for item in payload if item["path"] == "author")
+    # Total count includes all units, but source_projects is filtered
+    assert author_item["count"] == 2  # Total across both projects
+    assert author_item["source_projects"] == ["max"]  # Only showing MAX
+
+    # project_specific should only appear in MAX
+    project_item = next(item for item in payload if item["path"] == "project_specific")
+    assert project_item["count"] == 1
+    assert project_item["source_projects"] == ["max"]
+
+
+def test_metadata_key_frequency_tool_handles_units_without_metadata(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+
+    # Mix of units with and without metadata
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="unit1",
+            source_entity_type="insight",
+            title="With Metadata",
+            content="Content",
+            content_type=ContentType.INSIGHT,
+            metadata={"author": "Alice"},
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="unit2",
+            source_entity_type="insight",
+            title="Without Metadata",
+            content="Content",
+            content_type=ContentType.INSIGHT,
+            metadata={},
+        )
+    )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(mcp_server.call_tool("metadata_key_frequency", {}))
+    payload = json.loads(response[0].text)
+
+    # Should only count the unit with metadata
+    assert len(payload) == 1
+    assert payload[0]["path"] == "author"
+    assert payload[0]["count"] == 1
+
+
+def test_edge_relation_distribution_tool_returns_empty_for_graph_without_edges(
+    tmp_path, monkeypatch
+):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+
+    # Create units but no edges
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="unit1",
+            source_entity_type="insight",
+            title="Unit 1",
+            content="Content",
+            content_type=ContentType.INSIGHT,
+        )
+    )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(mcp_server.call_tool("edge_relation_distribution", {}))
+    payload = json.loads(response[0].text)
+
+    assert payload == []
+
+
+def test_edge_relation_distribution_tool_counts_relations(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+
+    # Create units
+    unit1 = KnowledgeUnit(
+        source_project=SourceProject.MAX,
+        source_id="unit1",
+        source_entity_type="insight",
+        title="Unit 1",
+        content="Content",
+        content_type=ContentType.INSIGHT,
+    )
+    unit2 = KnowledgeUnit(
+        source_project=SourceProject.MAX,
+        source_id="unit2",
+        source_entity_type="insight",
+        title="Unit 2",
+        content="Content",
+        content_type=ContentType.INSIGHT,
+    )
+    unit3 = KnowledgeUnit(
+        source_project=SourceProject.MAX,
+        source_id="unit3",
+        source_entity_type="insight",
+        title="Unit 3",
+        content="Content",
+        content_type=ContentType.INSIGHT,
+    )
+    store.insert_unit(unit1)
+    store.insert_unit(unit2)
+    store.insert_unit(unit3)
+
+    # Create edges with different relations
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=unit1.id,
+            to_unit_id=unit2.id,
+            relation=EdgeRelation.RELATES_TO,
+            source=EdgeSource.MANUAL,
+        )
+    )
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=unit1.id,
+            to_unit_id=unit3.id,
+            relation=EdgeRelation.RELATES_TO,
+            source=EdgeSource.MANUAL,
+        )
+    )
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=unit2.id,
+            to_unit_id=unit3.id,
+            relation=EdgeRelation.REFERENCES,
+            source=EdgeSource.MANUAL,
+        )
+    )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(mcp_server.call_tool("edge_relation_distribution", {}))
+    payload = json.loads(response[0].text)
+
+    # Should return counts grouped by relation, sorted by count desc then relation
+    assert len(payload) == 2
+    assert payload[0]["relation"] == EdgeRelation.RELATES_TO.value
+    assert payload[0]["count"] == 2
+    assert payload[1]["relation"] == EdgeRelation.REFERENCES.value
+    assert payload[1]["count"] == 1
+
+
+def test_edge_relation_distribution_tool_handles_single_relation(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+
+    # Create units
+    units = []
+    for i in range(4):
+        unit = KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id=f"unit{i}",
+            source_entity_type="insight",
+            title=f"Unit {i}",
+            content="Content",
+            content_type=ContentType.INSIGHT,
+        )
+        store.insert_unit(unit)
+        units.append(unit)
+
+    # Create edges with same relation but different unit pairs
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=units[0].id,
+            to_unit_id=units[1].id,
+            relation=EdgeRelation.REFERENCES,
+            source=EdgeSource.MANUAL,
+        )
+    )
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=units[1].id,
+            to_unit_id=units[2].id,
+            relation=EdgeRelation.REFERENCES,
+            source=EdgeSource.MANUAL,
+        )
+    )
+    store.insert_edge(
+        KnowledgeEdge(
+            from_unit_id=units[2].id,
+            to_unit_id=units[3].id,
+            relation=EdgeRelation.REFERENCES,
+            source=EdgeSource.MANUAL,
+        )
+    )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(mcp_server.call_tool("edge_relation_distribution", {}))
+    payload = json.loads(response[0].text)
+
+    assert len(payload) == 1
+    assert payload[0]["relation"] == EdgeRelation.REFERENCES.value
+    assert payload[0]["count"] == 3
+
+
+def test_edge_relation_distribution_tool_handles_mixed_relations(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+
+    # Create units
+    units = []
+    for i in range(5):
+        unit = KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id=f"unit{i}",
+            source_entity_type="insight",
+            title=f"Unit {i}",
+            content="Content",
+            content_type=ContentType.INSIGHT,
+        )
+        store.insert_unit(unit)
+        units.append(unit)
+
+    # Create edges with various relations
+    relations = [
+        EdgeRelation.RELATES_TO,
+        EdgeRelation.RELATES_TO,
+        EdgeRelation.RELATES_TO,
+        EdgeRelation.REFERENCES,
+        EdgeRelation.REFERENCES,
+        EdgeRelation.CHALLENGES,
+    ]
+
+    for i, relation in enumerate(relations):
+        store.insert_edge(
+            KnowledgeEdge(
+                from_unit_id=units[i % len(units)].id,
+                to_unit_id=units[(i + 1) % len(units)].id,
+                relation=relation,
+                source=EdgeSource.MANUAL,
+            )
+        )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(mcp_server.call_tool("edge_relation_distribution", {}))
+    payload = json.loads(response[0].text)
+
+    assert len(payload) == 3
+    # Sorted by count desc, then relation
+    assert payload[0]["relation"] == EdgeRelation.RELATES_TO.value
+    assert payload[0]["count"] == 3
+    assert payload[1]["relation"] == EdgeRelation.REFERENCES.value
+    assert payload[1]["count"] == 2
+    assert payload[2]["relation"] == EdgeRelation.CHALLENGES.value
+    assert payload[2]["count"] == 1
+
+
+def test_unit_creation_rate_tool_returns_empty_for_empty_graph(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(mcp_server.call_tool("unit_creation_rate", {}))
+    payload = json.loads(response[0].text)
+
+    assert payload == []
+
+
+def test_unit_creation_rate_tool_buckets_by_month(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+
+    # Create units across different months
+    base_time = datetime(2026, 1, 15, 10, 0, tzinfo=timezone.utc)
+
+    # January: 2 units
+    for i in range(2):
+        store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id=f"jan-{i}",
+                source_entity_type="insight",
+                title=f"January Unit {i}",
+                content="Content",
+                content_type=ContentType.INSIGHT,
+                created_at=base_time + timedelta(days=i),
+            )
+        )
+
+    # February: 3 units
+    feb_time = datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc)
+    for i in range(3):
+        store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id=f"feb-{i}",
+                source_entity_type="insight",
+                title=f"February Unit {i}",
+                content="Content",
+                content_type=ContentType.INSIGHT,
+                created_at=feb_time + timedelta(days=i),
+            )
+        )
+
+    # March: 1 unit
+    mar_time = datetime(2026, 3, 5, 10, 0, tzinfo=timezone.utc)
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="mar-0",
+            source_entity_type="insight",
+            title="March Unit",
+            content="Content",
+            content_type=ContentType.INSIGHT,
+            created_at=mar_time,
+        )
+    )
+
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(mcp_server.call_tool("unit_creation_rate", {"bucket": "monthly"}))
+    payload = json.loads(response[0].text)
+
+    # Should return months sorted descending (newest first)
+    assert len(payload) == 3
+    assert payload[0]["period"] == "2026-03"
+    assert payload[0]["count"] == 1
+    assert payload[1]["period"] == "2026-02"
+    assert payload[1]["count"] == 3
+    assert payload[2]["period"] == "2026-01"
+    assert payload[2]["count"] == 2
+
+
+def test_unit_creation_rate_tool_buckets_by_day(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+
+    # Create units across different days
+    base_time = datetime(2026, 5, 1, 10, 0, tzinfo=timezone.utc)
+
+    for i in range(3):
+        for j in range(i + 1):  # Day 1: 1 unit, Day 2: 2 units, Day 3: 3 units
+            store.insert_unit(
+                KnowledgeUnit(
+                    source_project=SourceProject.MAX,
+                    source_id=f"day{i}-unit{j}",
+                    source_entity_type="insight",
+                    title=f"Day {i} Unit {j}",
+                    content="Content",
+                    content_type=ContentType.INSIGHT,
+                    created_at=base_time + timedelta(days=i, hours=j),
+                )
+            )
+
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(mcp_server.call_tool("unit_creation_rate", {"bucket": "daily"}))
+    payload = json.loads(response[0].text)
+
+    assert len(payload) == 3
+    assert payload[0]["period"] == "2026-05-03"
+    assert payload[0]["count"] == 3
+    assert payload[1]["period"] == "2026-05-02"
+    assert payload[1]["count"] == 2
+    assert payload[2]["period"] == "2026-05-01"
+    assert payload[2]["count"] == 1
+
+
+def test_unit_creation_rate_tool_filters_by_source_project(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+
+    base_time = datetime(2026, 5, 1, 10, 0, tzinfo=timezone.utc)
+
+    # MAX project units
+    for i in range(2):
+        store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id=f"max-{i}",
+                source_entity_type="insight",
+                title=f"MAX Unit {i}",
+                content="Content",
+                content_type=ContentType.INSIGHT,
+                created_at=base_time + timedelta(days=i),
+            )
+        )
+
+    # FORTY_TWO project units
+    for i in range(3):
+        store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id=f"42-{i}",
+                source_entity_type="insight",
+                title=f"42 Unit {i}",
+                content="Content",
+                content_type=ContentType.INSIGHT,
+                created_at=base_time + timedelta(days=i),
+            )
+        )
+
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(
+        mcp_server.call_tool("unit_creation_rate", {"bucket": "monthly", "source_project": "max"})
+    )
+    payload = json.loads(response[0].text)
+
+    # Should only count MAX units
+    assert len(payload) == 1
+    assert payload[0]["period"] == "2026-05"
+    assert payload[0]["count"] == 2
+
+
+def test_unit_creation_rate_tool_filters_by_date_range(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+
+    # Create units across several months
+    for month in [1, 2, 3, 4, 5]:
+        store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id=f"month-{month}",
+                source_entity_type="insight",
+                title=f"Month {month} Unit",
+                content="Content",
+                content_type=ContentType.INSIGHT,
+                created_at=datetime(2026, month, 15, 10, 0, tzinfo=timezone.utc),
+            )
+        )
+
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    # Filter to only February through April
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "unit_creation_rate",
+            {
+                "bucket": "monthly",
+                "created_after": "2026-02-01T00:00:00+00:00",
+                "created_before": "2026-05-01T00:00:00+00:00",
+            },
+        )
+    )
+    payload = json.loads(response[0].text)
+
+    assert len(payload) == 3
+    assert payload[0]["period"] == "2026-04"
+    assert payload[1]["period"] == "2026-03"
+    assert payload[2]["period"] == "2026-02"
+
+
+def test_unit_creation_rate_tool_respects_limit(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+
+    # Create units across 5 months
+    for month in [1, 2, 3, 4, 5]:
+        store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id=f"month-{month}",
+                source_entity_type="insight",
+                title=f"Month {month} Unit",
+                content="Content",
+                content_type=ContentType.INSIGHT,
+                created_at=datetime(2026, month, 15, 10, 0, tzinfo=timezone.utc),
+            )
+        )
+
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(
+        mcp_server.call_tool("unit_creation_rate", {"bucket": "monthly", "limit": 3})
+    )
+    payload = json.loads(response[0].text)
+
+    # Should return only 3 most recent months
+    assert len(payload) == 3
+    assert payload[0]["period"] == "2026-05"
+    assert payload[1]["period"] == "2026-04"
+    assert payload[2]["period"] == "2026-03"
+
+
+def test_unit_creation_rate_tool_handles_sparse_data(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+
+    # Create units with gaps (January and March, skip February)
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="jan",
+            source_entity_type="insight",
+            title="January Unit",
+            content="Content",
+            content_type=ContentType.INSIGHT,
+            created_at=datetime(2026, 1, 15, 10, 0, tzinfo=timezone.utc),
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="mar",
+            source_entity_type="insight",
+            title="March Unit",
+            content="Content",
+            content_type=ContentType.INSIGHT,
+            created_at=datetime(2026, 3, 15, 10, 0, tzinfo=timezone.utc),
+        )
+    )
+
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    response = asyncio.run(mcp_server.call_tool("unit_creation_rate", {"bucket": "monthly"}))
+    payload = json.loads(response[0].text)
+
+    # Should only return months with data (no February)
+    assert len(payload) == 2
+    assert payload[0]["period"] == "2026-03"
+    assert payload[1]["period"] == "2026-01"
