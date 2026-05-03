@@ -2454,6 +2454,123 @@ class GraphService:
             representative_limit=representative_limit,
         )
 
+    def analyze_weakly_connected_components(self, limit: int = 20) -> dict:
+        """Return weakly connected component summaries for the directed graph."""
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+            raise ValueError("limit must be a positive integer.")
+
+        units_by_id = {
+            unit.id: unit for unit in self.store.get_all_units(limit=1000000000)
+        }
+        graph = nx.DiGraph()
+        for unit_id, unit in sorted(units_by_id.items()):
+            graph.add_node(
+                unit_id,
+                title=unit.title,
+                source_project=str(unit.source_project or "unknown"),
+                content_type=str(unit.content_type or "unknown"),
+            )
+        graph.add_edges_from(
+            sorted(
+                (edge.from_unit_id, edge.to_unit_id)
+                for edge in self.store.get_all_edges()
+                if edge.from_unit_id in units_by_id and edge.to_unit_id in units_by_id
+            )
+        )
+
+        if graph.number_of_nodes() == 0:
+            return {
+                "node_count": 0,
+                "edge_count": 0,
+                "component_count": 0,
+                "largest_component_size": 0,
+                "isolated_component_count": 0,
+                "components": [],
+            }
+
+        undirected = graph.to_undirected()
+        records = []
+        representative_limit = 5
+        for component_ids in nx.connected_components(undirected):
+            unit_ids = sorted(str(unit_id) for unit_id in component_ids)
+            subgraph = graph.subgraph(unit_ids).copy()
+            edge_count = int(subgraph.number_of_edges())
+            representative_unit_ids = sorted(
+                unit_ids,
+                key=lambda unit_id: (
+                    -int(undirected.degree(unit_id)),
+                    str(graph.nodes[unit_id].get("title", "") or unit_id).lower(),
+                    unit_id,
+                ),
+            )[:representative_limit]
+            first_title = str(graph.nodes[unit_ids[0]].get("title", "") or unit_ids[0])
+            records.append(
+                {
+                    "size": len(unit_ids),
+                    "unit_ids": unit_ids,
+                    "source_project_counts": dict(
+                        sorted(
+                            Counter(
+                                str(
+                                    graph.nodes[unit_id].get("source_project")
+                                    or "unknown"
+                                )
+                                for unit_id in unit_ids
+                            ).items(),
+                            key=lambda item: (-item[1], item[0]),
+                        )
+                    ),
+                    "content_type_counts": dict(
+                        sorted(
+                            Counter(
+                                str(
+                                    graph.nodes[unit_id].get("content_type")
+                                    or "unknown"
+                                )
+                                for unit_id in unit_ids
+                            ).items(),
+                            key=lambda item: (-item[1], item[0]),
+                        )
+                    ),
+                    "edge_count": edge_count,
+                    "representative_units": [
+                        self._unit_summary_data(units_by_id[unit_id])
+                        for unit_id in representative_unit_ids
+                    ],
+                    "isolated": len(unit_ids) == 1 and edge_count == 0,
+                    "_sort_id": unit_ids[0],
+                    "_sort_title": first_title.lower(),
+                }
+            )
+
+        records.sort(
+            key=lambda record: (
+                -record["size"],
+                record["_sort_id"],
+                record["_sort_title"],
+            )
+        )
+
+        components = []
+        for index, record in enumerate(records, start=1):
+            component = dict(record)
+            del component["_sort_id"]
+            del component["_sort_title"]
+            components.append({"component_id": f"component-{index:03d}", **component})
+
+        return {
+            "node_count": int(graph.number_of_nodes()),
+            "edge_count": int(graph.number_of_edges()),
+            "component_count": len(components),
+            "largest_component_size": max(
+                (component["size"] for component in components), default=0
+            ),
+            "isolated_component_count": sum(
+                1 for component in components if component["isolated"]
+            ),
+            "components": components[:limit],
+        }
+
     def summarize_weak_components(
         self,
         *,
