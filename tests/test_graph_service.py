@@ -2737,3 +2737,11 @@ def test_component_summary_is_available_on_graph_service(populated_store: Store)
     assert result["component_count"] == 2
     assert result["isolated_component_count"] == 1
     assert result["components"][0]["size"] == 3
+
+
+def test_analyze_relation_mix_is_available_on_graph_service(populated_store: Store):
+    result = GraphService(populated_store).analyze_relation_mix()
+
+    assert result["total_edge_count"] == 2
+    assert result["relation_mix"]
+    assert result["edge_source_mix"]
