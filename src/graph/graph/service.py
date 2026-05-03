@@ -3600,7 +3600,9 @@ class GraphService:
         if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
             raise ValueError("limit must be a positive integer.")
 
-        units_by_id = {unit.id: unit for unit in self.store.get_all_units(limit=1000000000)}
+        units_by_id = {
+            unit.id: unit for unit in self.store.get_all_units(limit=1000000000)
+        }
         graph = nx.DiGraph()
         graph.add_nodes_from(sorted(units_by_id))
         graph.add_edges_from(
@@ -4813,6 +4815,142 @@ class GraphService:
             result["by_content_type"] = _breakdown("content_type")
 
         return result
+
+    def component_summary(self, *, min_size: int = 1, limit: int = 20) -> dict:
+        """Return concise weakly connected component summaries."""
+        if not isinstance(min_size, int) or isinstance(min_size, bool) or min_size < 1:
+            raise ValueError("min_size must be a positive integer.")
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
+            raise ValueError("limit must be a non-negative integer.")
+
+        representative_limit = 5
+        tag_limit = 5
+
+        units_by_id = {unit.id: unit for unit in self.store.get_all_units(limit=1000000000)}
+        graph = nx.DiGraph()
+        for unit_id, unit in sorted(units_by_id.items()):
+            graph.add_node(
+                unit_id,
+                title=unit.title,
+                source_project=str(unit.source_project or "unknown"),
+                tags=list(unit.tags or []),
+            )
+        graph.add_edges_from(
+            sorted(
+                (edge.from_unit_id, edge.to_unit_id)
+                for edge in self.store.get_all_edges()
+                if edge.from_unit_id in units_by_id and edge.to_unit_id in units_by_id
+            )
+        )
+
+        if graph.number_of_nodes() == 0:
+            return {
+                "node_count": 0,
+                "edge_count": 0,
+                "component_count": 0,
+                "isolated_component_count": 0,
+                "components": [],
+            }
+
+        undirected = graph.to_undirected()
+        records = []
+        for component_ids in nx.connected_components(undirected):
+            unit_ids = sorted(str(unit_id) for unit_id in component_ids)
+            if len(unit_ids) < min_size:
+                continue
+
+            subgraph = graph.subgraph(unit_ids).copy()
+            edge_count = int(subgraph.number_of_edges())
+            ranked_representative_ids = sorted(
+                unit_ids,
+                key=lambda unit_id: (
+                    -int(undirected.degree(unit_id)),
+                    str(graph.nodes[unit_id].get("title", "") or unit_id).lower(),
+                    unit_id,
+                ),
+            )
+            representative_unit_ids = ranked_representative_ids[:representative_limit]
+            source_project_counts = dict(
+                sorted(
+                    Counter(
+                        str(graph.nodes[unit_id].get("source_project") or "unknown")
+                        for unit_id in unit_ids
+                    ).items(),
+                    key=lambda item: (-item[1], item[0]),
+                )
+            )
+            tag_counts: Counter[str] = Counter()
+            first_seen_tags: dict[str, str] = {}
+            for unit_id in unit_ids:
+                for raw_tag in graph.nodes[unit_id].get("tags") or []:
+                    tag = str(raw_tag).strip()
+                    if not tag:
+                        continue
+                    tag_key = tag.lower()
+                    tag_counts[tag_key] += 1
+                    first_seen_tags.setdefault(tag_key, tag)
+            top_tags = [
+                {"tag": first_seen_tags[tag_key], "count": count}
+                for tag_key, count in sorted(
+                    tag_counts.items(),
+                    key=lambda item: (
+                        -item[1],
+                        first_seen_tags[item[0]].lower(),
+                        first_seen_tags[item[0]],
+                    ),
+                )[:tag_limit]
+            ]
+
+            representative_sort_id = (
+                representative_unit_ids[0] if representative_unit_ids else unit_ids[0]
+            )
+            representative_sort_title = str(
+                graph.nodes[representative_sort_id].get("title", "")
+                or representative_sort_id
+            ).lower()
+            records.append(
+                {
+                    "size": len(unit_ids),
+                    "edge_count": edge_count,
+                    "density": round(float(nx.density(subgraph)), 6),
+                    "representative_unit_ids": representative_unit_ids,
+                    "representative_titles": [
+                        str(graph.nodes[unit_id].get("title", "") or unit_id)
+                        for unit_id in representative_unit_ids
+                    ],
+                    "top_tags": top_tags,
+                    "source_project_counts": source_project_counts,
+                    "isolated": len(unit_ids) == 1 and edge_count == 0,
+                    "_sort_title": representative_sort_title,
+                    "_sort_id": representative_sort_id,
+                }
+            )
+
+        records.sort(
+            key=lambda record: (
+                -record["size"],
+                -record["edge_count"],
+                record["_sort_title"],
+                record["_sort_id"],
+            )
+        )
+
+        components = []
+        for index, record in enumerate(records, start=1):
+            component = dict(record)
+            del component["_sort_title"]
+            del component["_sort_id"]
+            components.append({"component_id": f"component-{index:03d}", **component})
+
+        return {
+            "node_count": int(graph.number_of_nodes()),
+            "edge_count": int(graph.number_of_edges()),
+            "component_count": len(components),
+            "isolated_component_count": sum(
+                1 for component in components if component["isolated"]
+            ),
+            "components": components[:limit],
+        }
 
     def analyze_triangles(
         self,

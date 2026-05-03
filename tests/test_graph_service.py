@@ -2729,3 +2729,11 @@ def test_analyze_edge_lag_validates_arguments(
 ):
     with pytest.raises(ValueError, match=message):
         GraphService(store).analyze_edge_lag(**kwargs)
+
+
+def test_component_summary_is_available_on_graph_service(populated_store: Store):
+    result = GraphService(populated_store).component_summary()
+
+    assert result["component_count"] == 2
+    assert result["isolated_component_count"] == 1
+    assert result["components"][0]["size"] == 3
