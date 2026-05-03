@@ -21,6 +21,7 @@ from graph.export.org import export_units_to_org
 from graph.export.relation_evidence import export_relation_evidence_markdown
 from graph.export.schema_inventory import export_unit_schema_inventory
 from graph.export.source_coverage import export_source_coverage_markdown
+from graph.export.source_timeline_csv import export_source_timeline_csv
 from graph.export.sqlite_snapshot import export_graph_sqlite
 from graph.export.tag_cooccurrence_csv import export_tag_cooccurrence_csv
 from graph.export.tag_glossary import export_tag_glossary_markdown
@@ -43,6 +44,7 @@ __all__ = [
     "export_metadata_completeness_markdown",
     "export_relation_evidence_markdown",
     "export_source_coverage_markdown",
+    "export_source_timeline_csv",
     "render_search_html_report",
     "render_graph_overview_html",
     "export_tag_cooccurrence_csv",
