@@ -164,6 +164,21 @@ class EmailAdapter(SourceAdapter):
         source_id = self._source_id(root, path)
         title = str(message.get("Subject") or "").strip() or path.stem
         created_at = self._created_at(str(message.get("Date") or ""), created_timestamp)
+        attachment_count, attachments = self._extract_attachments(message)
+
+        metadata: dict[str, str | int | list[dict[str, str | int]]] = {
+            "from": str(message.get("From") or ""),
+            "to": str(message.get("To") or ""),
+            "cc": str(message.get("Cc") or ""),
+            "date": str(message.get("Date") or ""),
+            "message_id": str(message.get("Message-ID") or ""),
+            "path": source_id,
+            "file_size": file_size,
+            "attachment_count": attachment_count,
+        }
+
+        if attachments:
+            metadata["attachments"] = attachments
 
         return KnowledgeUnit(
             source_project=self.source_project,
@@ -172,15 +187,7 @@ class EmailAdapter(SourceAdapter):
             title=title,
             content=content,
             content_type=ContentType.ARTIFACT,
-            metadata={
-                "from": str(message.get("From") or ""),
-                "to": str(message.get("To") or ""),
-                "cc": str(message.get("Cc") or ""),
-                "date": str(message.get("Date") or ""),
-                "message_id": str(message.get("Message-ID") or ""),
-                "path": source_id,
-                "file_size": file_size,
-            },
+            metadata=metadata,
             created_at=created_at,
         )
 
@@ -211,6 +218,46 @@ class EmailAdapter(SourceAdapter):
         if body:
             return body
         return "\n\n".join(part for part in html_parts if part)
+
+    def _extract_attachments(self, message) -> tuple[int, list[dict[str, str | int]]]:
+        attachments: list[dict[str, str | int]] = []
+
+        for part in message.walk():
+            if part.is_multipart():
+                continue
+
+            disposition = part.get_content_disposition()
+            filename = part.get_filename()
+
+            # Identify attachments by disposition or presence of filename
+            is_attachment = disposition == "attachment" or (
+                filename is not None and disposition != "inline"
+            )
+
+            if not is_attachment:
+                continue
+
+            attachment_info: dict[str, str | int] = {
+                "content_type": part.get_content_type(),
+            }
+
+            if filename:
+                attachment_info["filename"] = filename
+
+            if disposition:
+                attachment_info["content_disposition"] = disposition
+
+            # Calculate size from payload
+            try:
+                payload = part.get_payload(decode=True)
+                if payload:
+                    attachment_info["size_bytes"] = len(payload)
+            except (LookupError, UnicodeDecodeError, TypeError):
+                pass
+
+            attachments.append(attachment_info)
+
+        return len(attachments), attachments
 
     def _decoded_payload(self, part) -> str:
         data = part.get_payload(decode=True)
