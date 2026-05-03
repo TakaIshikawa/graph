@@ -5065,6 +5065,14 @@ def test_find_orphan_units_tool_returns_counts_filters_and_units(tmp_path, monke
     assert [unit["id"] for unit in payload["units"]] == [max_orphan.id]
 
 
+def test_weak_component_summary_tool_is_registered():
+    tools = asyncio.run(mcp_server.list_tools())
+    tool = next(tool for tool in tools if tool.name == "weak_component_summary")
+
+    assert tool.inputSchema["properties"]["limit"]["default"] == 20
+    assert tool.inputSchema["properties"]["representative_limit"]["default"] == 3
+
+
 def test_infer_edges_tool_returns_counts_and_inserts_edges(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))

@@ -2289,6 +2289,33 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="weak_component_summary",
+            description=(
+                "Summarize disconnected weak components with representative knowledge units."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": ["integer", "null"],
+                        "default": 20,
+                        "minimum": 0,
+                        "description": (
+                            "Maximum components to return; null returns all components."
+                        ),
+                    },
+                    "representative_limit": {
+                        "type": "integer",
+                        "default": 3,
+                        "minimum": 0,
+                        "description": (
+                            "Maximum representative unit ids and titles per component."
+                        ),
+                    },
+                },
+            },
+        ),
+        Tool(
             name="find_orphan_units",
             description="Find knowledge units with no incoming or outgoing edges.",
             inputSchema={
@@ -4512,6 +4539,22 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 limit=arguments.get("limit", 20),
             )
             return [TextContent(type="text", text=json.dumps(result))]
+
+        elif name == "weak_component_summary":
+            component_arguments = {
+                "limit": arguments.get("limit", 20),
+                "representative_limit": arguments.get("representative_limit", 3),
+            }
+            try:
+                gs = GraphService(store)
+                result = gs.weak_component_summary(**component_arguments)
+            except ValueError as exc:
+                result = {
+                    "error": "invalid_weak_component_summary_request",
+                    "message": str(exc),
+                    "arguments": component_arguments,
+                }
+            return [TextContent(type="text", text=json.dumps(result, default=str))]
 
         elif name == "analyze_orphan_units":
             gs = GraphService(store)
