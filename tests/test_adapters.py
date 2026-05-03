@@ -1055,6 +1055,7 @@ class TestEmailAdapter:
             "message_id": "<hello@example.com>",
             "path": "archive/hello.eml",
             "file_size": message.stat().st_size,
+            "attachment_count": 0,
         }
         assert unit.created_at.isoformat() == "2024-04-01T10:30:00+00:00"
         assert result.edges == []
@@ -1132,6 +1133,102 @@ Content-Type: text/html; charset=utf-8
         assert filtered.units == []
         assert [unit.source_id for unit in synced.units] == ["untitled.eml"]
         assert missing.units == []
+
+    def test_multipart_with_attachments_extracts_metadata(self, tmp_path):
+        email_path = tmp_path / "attachments.eml"
+        email_path.write_text(
+            """From: sender@example.com
+To: receiver@example.com
+Subject: Files Attached
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="MIXED"
+
+--MIXED
+Content-Type: text/plain; charset=utf-8
+
+Email body with attachments.
+--MIXED
+Content-Type: application/pdf; name="document.pdf"
+Content-Disposition: attachment; filename="document.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4K
+ZW5kb2JqCjIgMCBvYmoKPDwKL1R5cGUgL1BhZ2VzCi9LaWRzIFsgXQovQ291bnQgMAo+PgplbmRv
+YmoKeHJlZgowIDMKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDE1IDAwMDAwIG4gCjAwMDAw
+MDAwNjQgMDAwMDAgbiAKdHJhaWxlcgo8PAovU2l6ZSAzCi9Sb290IDEgMCBSCj4+CnN0YXJ0eHJl
+ZgoxMTMKJSVFT0YK
+--MIXED
+Content-Type: image/png
+Content-Disposition: attachment; filename="chart.png"
+Content-Transfer-Encoding: base64
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9
+awAAAABJRU5ErkJggg==
+--MIXED
+Content-Type: application/octet-stream
+Content-Disposition: attachment
+Content-Transfer-Encoding: base64
+
+AQIDBA==
+--MIXED--
+""",
+            encoding="utf-8",
+        )
+
+        result = EmailAdapter(path=str(email_path)).ingest()
+
+        assert len(result.units) == 1
+        unit = result.units[0]
+        assert unit.content == "Email body with attachments."
+        assert "JVBERi" not in unit.content
+        assert "iVBORw0K" not in unit.content
+
+        metadata = unit.metadata
+        assert metadata["attachment_count"] == 3
+        assert "attachments" in metadata
+        attachments = metadata["attachments"]
+        assert len(attachments) == 3
+
+        # First attachment: document.pdf
+        pdf_attachment = attachments[0]
+        assert pdf_attachment["filename"] == "document.pdf"
+        assert pdf_attachment["content_type"] == "application/pdf"
+        assert pdf_attachment["content_disposition"] == "attachment"
+        assert pdf_attachment["size_bytes"] == 240
+
+        # Second attachment: chart.png
+        png_attachment = attachments[1]
+        assert png_attachment["filename"] == "chart.png"
+        assert png_attachment["content_type"] == "image/png"
+        assert png_attachment["content_disposition"] == "attachment"
+        assert png_attachment["size_bytes"] == 70
+
+        # Third attachment: no filename
+        octet_attachment = attachments[2]
+        assert "filename" not in octet_attachment
+        assert octet_attachment["content_type"] == "application/octet-stream"
+        assert octet_attachment["content_disposition"] == "attachment"
+        assert octet_attachment["size_bytes"] == 4
+
+    def test_email_without_attachments_has_zero_count(self, tmp_path):
+        email_path = tmp_path / "no-attachments.eml"
+        email_path.write_text(
+            """From: sender@example.com
+To: receiver@example.com
+Subject: Plain Email
+Content-Type: text/plain; charset=utf-8
+
+Just a plain email with no attachments.
+""",
+            encoding="utf-8",
+        )
+
+        result = EmailAdapter(path=str(email_path)).ingest()
+
+        assert len(result.units) == 1
+        unit = result.units[0]
+        assert unit.metadata["attachment_count"] == 0
+        assert "attachments" not in unit.metadata
 
 
 class TestEnexAdapter:
