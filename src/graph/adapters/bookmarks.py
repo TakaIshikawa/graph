@@ -20,6 +20,7 @@ class _Bookmark:
     folder_path: tuple[str, ...]
     add_date: str
     last_modified: str
+    description: str = ""
 
 
 class _BookmarksParser(HTMLParser):
@@ -32,6 +33,9 @@ class _BookmarksParser(HTMLParser):
         self._folder_parts: list[str] = []
         self._current_link: dict[str, str] | None = None
         self._link_parts: list[str] = []
+        self._pending_bookmark: _Bookmark | None = None
+        self._capturing_description = False
+        self._description_parts: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         tag = tag.lower()
@@ -48,9 +52,25 @@ class _BookmarksParser(HTMLParser):
                 self._pending_folder = None
             return
 
+        if tag == "dt":
+            # DT starts a new definition term, finalize any description capture
+            self._finalize_description()
+            return
+
         if tag == "a":
+            # Finalize any pending bookmark before starting a new one
+            if self._pending_bookmark is not None:
+                self.bookmarks.append(self._pending_bookmark)
+                self._pending_bookmark = None
             self._current_link = attrs_dict
             self._link_parts = []
+            return
+
+        if tag == "dd":
+            # DD following an A tag is a description for that bookmark
+            if self._pending_bookmark is not None:
+                self._capturing_description = True
+                self._description_parts = []
 
     def handle_endtag(self, tag: str) -> None:
         tag = tag.lower()
@@ -67,30 +87,54 @@ class _BookmarksParser(HTMLParser):
             url = self._current_link.get("href", "").strip()
             if url:
                 title = self._clean_text(" ".join(self._link_parts)) or url
-                self.bookmarks.append(
-                    _Bookmark(
-                        title=title,
-                        url=url,
-                        folder_path=tuple(self._folders),
-                        add_date=self._current_link.get("add_date", "").strip(),
-                        last_modified=self._current_link.get("last_modified", "").strip(),
-                    )
+                # Create bookmark but keep it pending to potentially receive description
+                self._pending_bookmark = _Bookmark(
+                    title=title,
+                    url=url,
+                    folder_path=tuple(self._folders),
+                    add_date=self._current_link.get("add_date", "").strip(),
+                    last_modified=self._current_link.get("last_modified", "").strip(),
                 )
             self._current_link = None
             self._link_parts = []
             return
 
-        if tag == "dl" and self._folders:
-            self._folders.pop()
+        if tag == "dd" and self._capturing_description:
+            description = self._clean_text(" ".join(self._description_parts))
+            if self._pending_bookmark is not None:
+                self._pending_bookmark.description = description
+            self._capturing_description = False
+            self._description_parts = []
+            return
+
+        if tag == "dl":
+            # Finalize description and any pending bookmark when closing a DL
+            self._finalize_description()
+            if self._pending_bookmark is not None:
+                self.bookmarks.append(self._pending_bookmark)
+                self._pending_bookmark = None
+            if self._folders:
+                self._folders.pop()
 
     def handle_data(self, data: str) -> None:
         if self._current_link is not None:
             self._link_parts.append(data)
         elif self._capturing_folder:
             self._folder_parts.append(data)
+        elif self._capturing_description:
+            self._description_parts.append(data)
 
     def _clean_text(self, value: str) -> str:
         return re.sub(r"\s+", " ", value).strip()
+
+    def _finalize_description(self) -> None:
+        """Finalize any description being captured and attach to pending bookmark."""
+        if self._capturing_description:
+            description = self._clean_text(" ".join(self._description_parts))
+            if self._pending_bookmark is not None and description:
+                self._pending_bookmark.description = description
+            self._capturing_description = False
+            self._description_parts = []
 
 
 class BookmarksAdapter(SourceAdapter):
@@ -133,6 +177,14 @@ class BookmarksAdapter(SourceAdapter):
                 continue
 
             folder_path = "/".join(bookmark.folder_path)
+            metadata = {
+                "url": bookmark.url,
+                "folder_path": folder_path,
+                "add_date": bookmark.add_date,
+                "last_modified": bookmark.last_modified,
+            }
+            if bookmark.description:
+                metadata["description"] = bookmark.description
             result.units.append(
                 KnowledgeUnit(
                     source_project=self.source_project,
@@ -141,12 +193,7 @@ class BookmarksAdapter(SourceAdapter):
                     title=bookmark.title,
                     content=self._content(bookmark, folder_path),
                     content_type=ContentType.ARTIFACT,
-                    metadata={
-                        "url": bookmark.url,
-                        "folder_path": folder_path,
-                        "add_date": bookmark.add_date,
-                        "last_modified": bookmark.last_modified,
-                    },
+                    metadata=metadata,
                     tags=self._folder_tags(bookmark.folder_path),
                     created_at=created_at or datetime.now(timezone.utc),
                     updated_at=modified_at or created_at or datetime.now(timezone.utc),
@@ -159,6 +206,8 @@ class BookmarksAdapter(SourceAdapter):
         lines = [bookmark.title, bookmark.url]
         if folder_path:
             lines.append(folder_path)
+        if bookmark.description:
+            lines.append(bookmark.description)
         return "\n".join(lines)
 
     def _folder_tags(self, folder_path: tuple[str, ...]) -> list[str]:
