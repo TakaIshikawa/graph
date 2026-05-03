@@ -14,6 +14,7 @@ from graph.export.graph_overview_html import render_graph_overview_html
 from graph.export.html_report import render_search_html_report
 from graph.export.ical import DATE_METADATA_KEYS, export_units_to_ics, unit_event_datetime
 from graph.export.llms_txt import export_units_to_llms_txt
+from graph.export.metadata_completeness import export_metadata_completeness_markdown
 from graph.export.mermaid_mindmap import export_units_to_mermaid_mindmap
 from graph.export.opml import export_units_to_opml
 from graph.export.org import export_units_to_org
@@ -39,6 +40,7 @@ __all__ = [
     "export_graph_dot",
     "export_graphson",
     "export_graph_sqlite",
+    "export_metadata_completeness_markdown",
     "export_relation_evidence_markdown",
     "export_source_coverage_markdown",
     "render_search_html_report",
