@@ -1003,8 +1003,8 @@ class Store:
     def source_freshness_histogram(
         self,
         *,
-        fresh_days: int = 30,
-        stale_days: int = 90,
+        fresh_days: object = 30,
+        stale_days: object = 90,
     ) -> list[dict]:
         """Bucket unit updated_at freshness counts by source project."""
         if (
