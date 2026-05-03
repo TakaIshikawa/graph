@@ -80,6 +80,7 @@ from graph.cli.main import (
 )
 from graph.graph.service import GraphService
 from graph.rag import (
+    analyze_citation_coverage,
     build_reading_queue,
     build_source_timeline,
     detect_context_gaps,
@@ -369,6 +370,51 @@ def _source_agreement_payload(store: Store, arguments: dict) -> dict:
             "min_source_count": min_source_count,
             "missing_unit_ids": missing_unit_ids,
             "limit": limit,
+        },
+    }
+
+
+def _citation_key_config(value, *, name: str) -> list[str] | str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        if not value.strip():
+            raise ValueError(f"{name} must contain non-empty strings")
+        return value
+    if not isinstance(value, list) or any(
+        not isinstance(item, str) or not item.strip() for item in value
+    ):
+        raise ValueError(f"{name} must be a string or an array of non-empty strings")
+    return value
+
+
+def _citation_coverage_payload(arguments: dict) -> dict:
+    if not isinstance(arguments, dict):
+        raise ValueError("arguments must be an object")
+    records = arguments.get("results", [])
+    if records is None:
+        records = []
+    if not isinstance(records, list):
+        raise ValueError("results must be an array of result-like objects")
+    for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            raise ValueError(f"results[{index}] must be an object")
+
+    citation_keys = _citation_key_config(
+        arguments.get("citation_keys"),
+        name="citation_keys",
+    )
+    url_keys = _citation_key_config(arguments.get("url_keys"), name="url_keys")
+    coverage = analyze_citation_coverage(
+        records,
+        citation_keys=citation_keys,
+        url_keys=url_keys,
+    )
+    return {
+        **coverage,
+        "options": {
+            "citation_keys": citation_keys,
+            "url_keys": url_keys,
         },
     }
 
@@ -1923,6 +1969,44 @@ async def list_tools() -> list[Tool]:
                         "default": 3,
                         "minimum": 1,
                         "description": "Minimum token length for extracted term evidence",
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="rag_citation_coverage",
+            description=(
+                "Analyze citation metadata coverage for inline RAG/search result "
+                "records and list results missing citation evidence."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "results": {
+                        "type": "array",
+                        "default": [],
+                        "description": (
+                            "Result-like records with fields such as id, title, source, "
+                            "url, doi, citation, metadata, or nested unit."
+                        ),
+                        "items": {"type": "object"},
+                    },
+                    "citation_keys": {
+                        "type": ["array", "string", "null"],
+                        "default": None,
+                        "description": (
+                            "Additional citation field names to treat as explicit "
+                            "citation evidence."
+                        ),
+                        "items": {"type": "string"},
+                    },
+                    "url_keys": {
+                        "type": ["array", "string", "null"],
+                        "default": None,
+                        "description": (
+                            "Additional URL field names to treat as citation URL evidence."
+                        ),
+                        "items": {"type": "string"},
                     },
                 },
             },
@@ -4022,6 +4106,25 @@ async def list_tools() -> list[Tool]:
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     if name == "adapter_catalog":
         return [TextContent(type="text", text=json.dumps(_adapter_catalog_payload()))]
+    if name == "rag_citation_coverage":
+        try:
+            payload = _citation_coverage_payload(arguments)
+        except ValueError as exc:
+            results = arguments.get("results", []) if isinstance(arguments, dict) else []
+            payload = {
+                "error": "invalid_citation_coverage_request",
+                "message": str(exc),
+                "arguments": {
+                    "result_count": len(results) if isinstance(results, list) else None,
+                    "citation_keys": arguments.get("citation_keys")
+                    if isinstance(arguments, dict)
+                    else None,
+                    "url_keys": arguments.get("url_keys")
+                    if isinstance(arguments, dict)
+                    else None,
+                },
+            }
+        return [TextContent(type="text", text=json.dumps(payload, default=str))]
 
     store = _get_store()
 
