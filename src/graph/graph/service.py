@@ -108,6 +108,13 @@ _REFERENCE_URL_METADATA_FIELDS = {"url", "link", "canonical_url", "source_url", 
 _DUPLICATE_URL_METADATA_FIELDS = {"canonical_url", "link"}
 
 
+def _json_sort_key(value: object) -> str:
+    try:
+        return json.dumps(value, sort_keys=True, default=str)
+    except TypeError:
+        return str(value)
+
+
 def _object_value(value: object, *keys: str, default: object = None) -> object:
     for key in keys:
         if isinstance(value, dict) and key in value:
@@ -354,6 +361,187 @@ def _external_url_domain(url: str) -> str | None:
 
 def _json_value(value: object) -> object:
     return value.isoformat() if hasattr(value, "isoformat") else value
+
+
+def _metadata_path_value(metadata: Mapping, path: str) -> tuple[bool, object]:
+    current: object = metadata
+    for part in path.split("."):
+        if not isinstance(current, Mapping) or part not in current:
+            return False, None
+        current = current[part]
+    return True, current
+
+
+def _metadata_similarity_values(value: object) -> dict[str, object]:
+    if value is None or isinstance(value, Mapping):
+        return {}
+    if isinstance(value, (list, tuple, set)):
+        values = {}
+        for item in value:
+            if item is None or isinstance(item, (Mapping, list, tuple, set)):
+                continue
+            values[_json_sort_key(_json_value(item))] = _json_value(item)
+        return values
+    return {_json_sort_key(_json_value(value)): _json_value(value)}
+
+
+def _validate_metadata_similarity_int(value: int, name: str, *, minimum: int) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be an integer >= {minimum}.")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer >= {minimum}.") from exc
+    if parsed < minimum:
+        raise ValueError(f"{name} must be an integer >= {minimum}.")
+    return parsed
+
+
+def _normalize_metadata_similarity_keys(
+    units: list[object],
+    metadata_keys: Iterable[str] | None,
+) -> list[str]:
+    if metadata_keys is not None:
+        if isinstance(metadata_keys, str):
+            raise ValueError("metadata_keys must be a sequence of strings.")
+        try:
+            keys = [str(key) for key in metadata_keys]
+        except TypeError as exc:
+            raise ValueError("metadata_keys must be a sequence of strings.") from exc
+        if any(not key.strip() for key in keys):
+            raise ValueError("metadata_keys must contain non-empty strings.")
+        return list(dict.fromkeys(key.strip() for key in keys))
+
+    discovered: set[str] = set()
+    for unit in units:
+        metadata = _object_value(unit, "metadata", default={})
+        if isinstance(metadata, Mapping):
+            discovered.update(str(key) for key in metadata)
+    return sorted(discovered)
+
+
+def suggest_metadata_similarity_edges(
+    units,
+    edges,
+    *,
+    metadata_keys: Iterable[str] | None = None,
+    min_overlap: int = 2,
+    top_n: int = 20,
+) -> dict:
+    """Suggest missing edges between units with strong metadata value overlap."""
+    overlap_threshold = _validate_metadata_similarity_int(
+        min_overlap,
+        "min_overlap",
+        minimum=1,
+    )
+    capped_top_n = _validate_metadata_similarity_int(top_n, "top_n", minimum=0)
+
+    unit_list = list(units)
+    units_by_id: dict[str, object] = {}
+    for unit in unit_list:
+        raw_id = unit if isinstance(unit, str) else _object_value(unit, "id")
+        if raw_id is None:
+            continue
+        units_by_id[str(raw_id)] = unit
+
+    selected_keys = _normalize_metadata_similarity_keys(
+        list(units_by_id.values()),
+        metadata_keys,
+    )
+    existing_pairs: set[tuple[str, str]] = set()
+    for edge in edges:
+        from_id = _object_value(edge, "from_unit_id", "source", "from_id", "from")
+        to_id = _object_value(edge, "to_unit_id", "target", "to_id", "to")
+        if from_id is None or to_id is None:
+            continue
+        left_id = str(from_id)
+        right_id = str(to_id)
+        if left_id == right_id:
+            continue
+        if left_id in units_by_id and right_id in units_by_id:
+            existing_pairs.add(tuple(sorted((left_id, right_id))))
+
+    indexed_metadata: dict[str, dict[str, dict[str, object]]] = {}
+    for unit_id, unit in units_by_id.items():
+        metadata = _object_value(unit, "metadata", default={})
+        key_values: dict[str, dict[str, object]] = {}
+        if isinstance(metadata, Mapping):
+            for key in selected_keys:
+                found, value = _metadata_path_value(metadata, key)
+                if found:
+                    values = _metadata_similarity_values(value)
+                    if values:
+                        key_values[key] = values
+        indexed_metadata[unit_id] = key_values
+
+    candidates = []
+    for left_id, right_id in combinations(sorted(units_by_id), 2):
+        if (left_id, right_id) in existing_pairs:
+            continue
+
+        shared_metadata = []
+        overlap_count = 0
+        for key in selected_keys:
+            left_values = indexed_metadata[left_id].get(key, {})
+            right_values = indexed_metadata[right_id].get(key, {})
+            shared_keys = sorted(set(left_values) & set(right_values))
+            if not shared_keys:
+                continue
+            values = [left_values[value_key] for value_key in shared_keys]
+            values.sort(key=_json_sort_key)
+            overlap_count += len(values)
+            shared_metadata.append({"key": key, "values": values})
+
+        if overlap_count < overlap_threshold:
+            continue
+
+        left = units_by_id[left_id]
+        right = units_by_id[right_id]
+        left_title = _object_value(left, "title", default=None)
+        right_title = _object_value(right, "title", default=None)
+        score = float(overlap_count)
+        record = {
+            "unit_ids": [left_id, right_id],
+            "from_unit_id": left_id,
+            "to_unit_id": right_id,
+            "score": score,
+            "overlap_count": overlap_count,
+            "shared_metadata": shared_metadata,
+            "suggested_edge": {
+                "relation": EdgeRelation.RELATES_TO.value,
+                "source": EdgeSource.INFERRED.value,
+                "metadata": {
+                    "suggestion_reason": "metadata_similarity",
+                    "score": score,
+                    "overlap_count": overlap_count,
+                    "shared_metadata": shared_metadata,
+                },
+            },
+        }
+        if left_title is not None:
+            record["from_title"] = str(left_title)
+        if right_title is not None:
+            record["to_title"] = str(right_title)
+        candidates.append(record)
+
+    candidates.sort(
+        key=lambda candidate: (
+            -candidate["score"],
+            -candidate["overlap_count"],
+            candidate["unit_ids"][0],
+            candidate["unit_ids"][1],
+        )
+    )
+
+    return {
+        "metadata_keys": selected_keys,
+        "min_overlap": overlap_threshold,
+        "top_n": capped_top_n,
+        "unit_count": len(units_by_id),
+        "edge_count": len(existing_pairs),
+        "candidate_count": len(candidates),
+        "candidates": candidates[:capped_top_n],
+    }
 
 
 def _markdown_filename_stem(title: str) -> str:
@@ -4815,6 +5003,22 @@ class GraphService:
             )
         )
         return candidates[:limit]
+
+    def suggest_metadata_similarity_edges(
+        self,
+        *,
+        metadata_keys: Iterable[str] | None = None,
+        min_overlap: int = 2,
+        top_n: int = 20,
+    ) -> dict:
+        """Suggest missing edges between units with overlapping metadata values."""
+        return suggest_metadata_similarity_edges(
+            self.store.get_all_units(limit=1000000000),
+            self.store.get_all_edges(),
+            metadata_keys=metadata_keys,
+            min_overlap=min_overlap,
+            top_n=top_n,
+        )
 
     def get_bridges(self, limit: int = 10) -> list[tuple[str, float]]:
         """Find bridge nodes (betweenness centrality)."""
