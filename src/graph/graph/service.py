@@ -253,6 +253,151 @@ def analyze_hub_authority(
     }
 
 
+def analyze_leaf_cluster_summary(
+    units,
+    edges,
+    *,
+    parent_limit: int = 20,
+    sample_leaf_limit: int = 5,
+) -> dict:
+    """Summarize isolated leaves and degree-one leaves grouped by parent."""
+    if (
+        not isinstance(parent_limit, int)
+        or isinstance(parent_limit, bool)
+        or parent_limit < 0
+    ):
+        raise ValueError("parent_limit must be a non-negative integer.")
+    if (
+        not isinstance(sample_leaf_limit, int)
+        or isinstance(sample_leaf_limit, bool)
+        or sample_leaf_limit < 0
+    ):
+        raise ValueError("sample_leaf_limit must be a non-negative integer.")
+
+    graph = nx.Graph()
+    unit_data: dict[str, dict] = {}
+    for unit in units:
+        raw_id = unit if isinstance(unit, str) else _object_value(unit, "id")
+        if raw_id is None:
+            continue
+        unit_id = str(raw_id)
+        title = _object_value(unit, "title", default=None)
+        payload = {"unit_id": unit_id}
+        if title is not None:
+            payload["title"] = str(title)
+        unit_data[unit_id] = payload
+        graph.add_node(unit_id)
+
+    for edge in edges:
+        from_id = _object_value(edge, "from_unit_id", "source", "from_id", "from")
+        to_id = _object_value(edge, "to_unit_id", "target", "to_id", "to")
+        if from_id is None or to_id is None:
+            continue
+        from_unit_id = str(from_id)
+        to_unit_id = str(to_id)
+        if from_unit_id == to_unit_id:
+            continue
+        if from_unit_id not in graph or to_unit_id not in graph:
+            continue
+        graph.add_edge(from_unit_id, to_unit_id)
+
+    def _unit_record(unit_id: str) -> dict:
+        record = dict(unit_data.get(unit_id, {"unit_id": unit_id}))
+        record["degree"] = int(graph.degree(unit_id))
+        return record
+
+    isolated_leaf_ids = sorted(
+        unit_id for unit_id in graph.nodes if int(graph.degree(unit_id)) == 0
+    )
+    attached_leaf_ids = sorted(
+        unit_id for unit_id in graph.nodes if int(graph.degree(unit_id)) == 1
+    )
+
+    leaves_by_parent: dict[str, list[str]] = {}
+    component_leaf_ids: set[str] = set()
+    for leaf_id in attached_leaf_ids:
+        neighbor_id = next(iter(graph.neighbors(leaf_id)))
+        if int(graph.degree(neighbor_id)) > 1:
+            leaves_by_parent.setdefault(str(neighbor_id), []).append(str(leaf_id))
+        else:
+            component_leaf_ids.add(str(leaf_id))
+
+    parent_records = []
+    for parent_id, leaf_ids in leaves_by_parent.items():
+        sorted_leaf_ids = sorted(
+            leaf_ids,
+            key=lambda unit_id: (
+                str(unit_data.get(unit_id, {}).get("title", "") or unit_id).lower(),
+                unit_id,
+            ),
+        )
+        parent = dict(unit_data.get(parent_id, {"unit_id": parent_id}))
+        parent["leaf_count"] = len(sorted_leaf_ids)
+        parent["sample_leaves"] = [
+            _unit_record(leaf_id) for leaf_id in sorted_leaf_ids[:sample_leaf_limit]
+        ]
+        parent_records.append(parent)
+
+    parent_records.sort(
+        key=lambda record: (
+            -int(record["leaf_count"]),
+            str(record.get("title", "") or record["unit_id"]).lower(),
+            str(record["unit_id"]),
+        )
+    )
+
+    component_records = []
+    for component_ids in nx.connected_components(graph):
+        sorted_component_ids = sorted(str(unit_id) for unit_id in component_ids)
+        leaf_ids = [
+            unit_id for unit_id in sorted_component_ids if unit_id in component_leaf_ids
+        ]
+        if not leaf_ids:
+            continue
+        component_records.append(
+            {
+                "leaf_count": len(leaf_ids),
+                "sample_leaves": [
+                    _unit_record(leaf_id) for leaf_id in leaf_ids[:sample_leaf_limit]
+                ],
+                "_sort_id": leaf_ids[0],
+            }
+        )
+
+    component_records.sort(
+        key=lambda record: (
+            -int(record["leaf_count"]),
+            str(record["_sort_id"]),
+        )
+    )
+    leaf_components = []
+    for index, record in enumerate(component_records, start=1):
+        component = dict(record)
+        del component["_sort_id"]
+        leaf_components.append(
+            {"component_id": f"leaf-component-{index:03d}", **component}
+        )
+
+    isolated_leaf_records = [_unit_record(unit_id) for unit_id in isolated_leaf_ids]
+    returned_parents = parent_records[:parent_limit]
+    return {
+        "node_count": int(graph.number_of_nodes()),
+        "edge_count": int(graph.number_of_edges()),
+        "total_leaf_count": len(isolated_leaf_ids) + len(attached_leaf_ids),
+        "isolated_leaf_count": len(isolated_leaf_ids),
+        "attached_leaf_count": len(attached_leaf_ids),
+        "parent_count": len(parent_records),
+        "component_leaf_count": len(component_leaf_ids),
+        "parents": returned_parents,
+        "isolated_leaves": isolated_leaf_records[:sample_leaf_limit],
+        "leaf_components": leaf_components,
+        "filters": {
+            "parent_limit": parent_limit,
+            "sample_leaf_limit": sample_leaf_limit,
+        },
+    }
+
+
 def _normalize_text(value: str) -> str:
     return _NORMALIZED_TEXT_RE.sub(" ", value.lower()).strip()
 
@@ -5068,6 +5213,22 @@ class GraphService:
             ),
             "components": components[:limit],
         }
+
+    def leaf_cluster_summary(
+        self,
+        *,
+        parent_limit: int = 20,
+        sample_leaf_limit: int = 5,
+    ) -> dict:
+        """Return leaf-node clusters grouped by their non-leaf neighbor."""
+        units = self.store.get_all_units(limit=1000000000)
+        edges = self.store.get_all_edges()
+        return analyze_leaf_cluster_summary(
+            units,
+            edges,
+            parent_limit=parent_limit,
+            sample_leaf_limit=sample_leaf_limit,
+        )
 
     def analyze_relation_mix(
         self,
