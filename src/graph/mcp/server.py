@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -517,7 +517,206 @@ def _validate_non_negative_integer(value, *, name: str) -> int:
     return value
 
 
+_MCP_TIMELINE_DATE_KEY = "_timeline_date"
+_MCP_TIMELINE_SOURCE_KEY = "_timeline_source"
+
+
+def _timeline_field_value(record, key: str):
+    if isinstance(record, dict):
+        return record.get(key)
+    return getattr(record, key, None)
+
+
+def _timeline_nested_value(record, key: str):
+    if not isinstance(key, str) or not key.strip():
+        raise ValueError("date_key and source_key must be non-empty strings")
+
+    value = _timeline_field_value(record, key)
+    if value is not None:
+        return value
+
+    current = record
+    for part in key.split("."):
+        if not part:
+            return None
+        current = _timeline_field_value(current, part)
+        if current is None:
+            break
+    if current is not None:
+        return current
+
+    metadata = _timeline_field_value(record, "metadata")
+    if metadata is not None:
+        value = _timeline_field_value(metadata, key)
+        if value is not None:
+            return value
+
+        current = metadata
+        for part in key.split("."):
+            if not part:
+                return None
+            current = _timeline_field_value(current, part)
+            if current is None:
+                break
+        if current is not None:
+            return current
+
+    unit = _timeline_field_value(record, "unit")
+    if unit is not None:
+        return _timeline_nested_value(unit, key)
+    return None
+
+
+def _timeline_date_iso(value, *, label: str, date_key: str) -> str:
+    if value is None or (isinstance(value, str) and not value.strip()):
+        raise ValueError(f"{label} missing date field: {date_key}")
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if not isinstance(value, str):
+        raise ValueError(f"{label} has invalid date field {date_key}: {value!r}")
+
+    text = value.strip()
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        return datetime.fromisoformat(text).date().isoformat()
+    except ValueError:
+        try:
+            return date.fromisoformat(text).isoformat()
+        except ValueError as exc:
+            raise ValueError(
+                f"{label} has invalid date field {date_key}: {value!r}"
+            ) from exc
+
+
+def _timeline_source_value(value) -> str:
+    if value is None:
+        return "unknown"
+    label = " ".join(str(value).strip().split())
+    return label or "unknown"
+
+
+def _source_timeline_direct_payload(store: Store, arguments: dict) -> dict:
+    records = arguments.get("results", [])
+    unit_ids = arguments.get("unit_ids", [])
+    bucket = arguments.get("bucket", "month")
+    bucket_limit = arguments.get("limit")
+    date_key = arguments.get("date_key", "created_at")
+    source_key = arguments.get("source_key", "source_project")
+
+    if records is None:
+        records = []
+    if unit_ids is None:
+        unit_ids = []
+    if not isinstance(records, list):
+        raise ValueError("results must be an array of result-like objects")
+    if not isinstance(unit_ids, list) or any(not isinstance(item, str) for item in unit_ids):
+        raise ValueError("unit_ids must be an array of strings")
+    if not isinstance(date_key, str) or not date_key.strip():
+        raise ValueError("date_key must be a non-empty string")
+    if not isinstance(source_key, str) or not source_key.strip():
+        raise ValueError("source_key must be a non-empty string")
+    if "result_limit" in arguments:
+        _validate_non_negative_integer(arguments["result_limit"], name="result_limit")
+    if bucket_limit is not None:
+        bucket_limit = _validate_non_negative_integer(bucket_limit, name="limit")
+
+    resolved_records: list[dict] = []
+    missing_unit_ids: list[str] = []
+    for unit_id in unit_ids:
+        unit = store.get_unit(unit_id)
+        if unit is None:
+            missing_unit_ids.append(unit_id)
+            continue
+        resolved_records.append(_unit_to_json(unit, include_content=False))
+
+    for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            raise ValueError(f"results[{index}] must be an object")
+        resolved_records.append(record)
+
+    timeline_records: list[dict] = []
+    events: list[dict] = []
+    for index, record in enumerate(resolved_records):
+        label = f"results[{index}]"
+        event_date = _timeline_date_iso(
+            _timeline_nested_value(record, date_key),
+            label=label,
+            date_key=date_key,
+        )
+        source = _timeline_source_value(_timeline_nested_value(record, source_key))
+        unit_id = _timeline_nested_value(record, "id") or _timeline_nested_value(
+            record, "unit_id"
+        )
+        title = _timeline_nested_value(record, "title")
+
+        normalized = dict(record)
+        normalized[_MCP_TIMELINE_DATE_KEY] = event_date
+        normalized[_MCP_TIMELINE_SOURCE_KEY] = source
+        timeline_records.append(normalized)
+        events.append(
+            {
+                "date": event_date,
+                "source": source,
+                "unit_id": str(unit_id) if unit_id is not None else None,
+                "title": str(title) if title is not None else None,
+            }
+        )
+
+    timeline = build_source_timeline(
+        timeline_records,
+        date_key=_MCP_TIMELINE_DATE_KEY,
+        source_key=_MCP_TIMELINE_SOURCE_KEY,
+        bucket=bucket,
+        limit=bucket_limit,
+    )
+    events.sort(key=lambda event: (event["date"], event["source"], event["title"] or ""))
+    timeline["events"] = events
+    timeline["selection"] = {
+        "source": "inputs",
+        "result_count": len(resolved_records),
+        "missing_unit_ids": missing_unit_ids,
+        "result_ids": [
+            event["unit_id"] for event in events if event["unit_id"] is not None
+        ],
+    }
+    timeline["options"] = {
+        "bucket": timeline["stats"]["bucket"],
+        "limit": bucket_limit,
+        "date_key": date_key,
+        "source_key": source_key,
+    }
+    return timeline
+
+
 def _source_timeline_payload(store: Store, arguments: dict) -> dict:
+    direct_keys = {"results", "unit_ids", "date_key", "source_key"}
+    has_search_or_filters = any(
+        key in arguments
+        for key in (
+            "query",
+            "source_project",
+            "content_type",
+            "review_state",
+            "tag",
+            "exclude_tag",
+            "metadata_key",
+            "metadata_value",
+            "created_after",
+            "created_before",
+            "updated_after",
+            "updated_before",
+            "min_utility",
+            "max_utility",
+            "min_confidence",
+            "max_confidence",
+        )
+    )
+    if direct_keys.intersection(arguments) or not has_search_or_filters:
+        return _source_timeline_direct_payload(store, arguments)
+
     query = arguments.get("query")
     mode = arguments.get("mode", "fulltext")
     sort = arguments.get("sort", "relevance")
@@ -1601,11 +1800,42 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="source_timeline",
             description=(
-                "Build a source-by-time timeline from search results or filtered graph units."
+                "Build a source-by-time timeline from result-like inputs, graph unit IDs, "
+                "or filtered graph units."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
+                    "results": {
+                        "type": "array",
+                        "default": [],
+                        "description": (
+                            "Result-like or unit-like objects to bucket directly. "
+                            "Flat fields override nested unit fields."
+                        ),
+                        "items": {"type": "object"},
+                    },
+                    "unit_ids": {
+                        "type": "array",
+                        "default": [],
+                        "description": "Graph unit IDs to resolve and include directly",
+                        "items": {"type": "string"},
+                    },
+                    "date_key": {
+                        "type": "string",
+                        "default": "created_at",
+                        "description": (
+                            "Date field or metadata path to bucket by, e.g. created_at "
+                            "or metadata.published_at"
+                        ),
+                    },
+                    "source_key": {
+                        "type": "string",
+                        "default": "source_project",
+                        "description": (
+                            "Source field or metadata path used for per-source counts"
+                        ),
+                    },
                     "query": {
                         "type": "string",
                         "description": "Optional search query used to select timeline units",
@@ -3943,6 +4173,12 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     "error": "invalid_source_timeline_request",
                     "message": str(exc),
                     "arguments": {
+                        "result_count": len(arguments.get("results") or [])
+                        if isinstance(arguments.get("results") or [], list)
+                        else None,
+                        "unit_ids": arguments.get("unit_ids", []),
+                        "date_key": arguments.get("date_key", "created_at"),
+                        "source_key": arguments.get("source_key", "source_project"),
                         "query": arguments.get("query"),
                         "mode": arguments.get("mode", "fulltext"),
                         "sort": arguments.get("sort", "relevance"),

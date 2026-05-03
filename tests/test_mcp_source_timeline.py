@@ -99,12 +99,163 @@ def test_source_timeline_tool_is_registered_with_schema():
         "tag",
         "created_after",
         "created_before",
+        "results",
+        "unit_ids",
+        "date_key",
+        "source_key",
     }
     assert properties["bucket"]["enum"] == ["day", "week", "month", "year"]
     assert properties["bucket"]["default"] == "month"
     assert properties["result_limit"]["default"] == 100
     assert properties["result_limit"]["minimum"] == 0
     assert properties["mode"]["enum"] == ["hybrid", "semantic", "fulltext"]
+    assert properties["date_key"]["default"] == "created_at"
+    assert properties["source_key"]["default"] == "source_project"
+
+
+def test_source_timeline_builds_from_result_inputs(source_timeline_store):
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "source_timeline",
+            {
+                "results": [
+                    {
+                        "id": "unit-like-jan",
+                        "title": "Unit-like result",
+                        "metadata": {
+                            "published_at": "2026-01-15T10:00:00+00:00",
+                            "origin": "max",
+                        },
+                    },
+                    {
+                        "id": "search-feb",
+                        "title": "Search result",
+                        "metadata": {
+                            "published_at": "2026-02-08T09:00:00+00:00",
+                            "origin": "feed",
+                        },
+                    },
+                    {
+                        "id": "nested-mar",
+                        "unit": {
+                            "title": "Nested result",
+                            "metadata": {
+                                "published_at": "2026-03-02",
+                                "origin": "notes",
+                            },
+                        },
+                    },
+                ],
+                "date_key": "published_at",
+                "source_key": "origin",
+                "bucket": "month",
+            },
+        )
+    )
+    payload = json.loads(response[0].text)
+
+    assert payload["buckets"] == [
+        {
+            "bucket": "2026-01",
+            "start": "2026-01-01",
+            "sources": {"max": 1},
+            "total": 1,
+        },
+        {
+            "bucket": "2026-02",
+            "start": "2026-02-01",
+            "sources": {"feed": 1},
+            "total": 1,
+        },
+        {
+            "bucket": "2026-03",
+            "start": "2026-03-01",
+            "sources": {"notes": 1},
+            "total": 1,
+        },
+    ]
+    assert payload["events"] == [
+        {
+            "date": "2026-01-15",
+            "source": "max",
+            "unit_id": "unit-like-jan",
+            "title": "Unit-like result",
+        },
+        {
+            "date": "2026-02-08",
+            "source": "feed",
+            "unit_id": "search-feb",
+            "title": "Search result",
+        },
+        {
+            "date": "2026-03-02",
+            "source": "notes",
+            "unit_id": "nested-mar",
+            "title": "Nested result",
+        },
+    ]
+    assert payload["stats"]["date_key"] == "_timeline_date"
+    assert payload["stats"]["source_key"] == "_timeline_source"
+    assert payload["options"] == {
+        "bucket": "month",
+        "limit": None,
+        "date_key": "published_at",
+        "source_key": "origin",
+    }
+    assert payload["selection"]["source"] == "inputs"
+    assert payload["selection"]["result_count"] == 3
+    assert payload["selection"]["missing_unit_ids"] == []
+
+
+def test_source_timeline_empty_inputs_return_empty_timeline(source_timeline_store):
+    response = asyncio.run(mcp_server.call_tool("source_timeline", {}))
+    payload = json.loads(response[0].text)
+
+    assert payload["buckets"] == []
+    assert payload["events"] == []
+    assert payload["sources"] == []
+    assert payload["stats"]["result_count"] == 0
+    assert payload["stats"]["included_count"] == 0
+    assert payload["selection"]["source"] == "inputs"
+
+
+def test_source_timeline_rejects_invalid_date_metadata(source_timeline_store):
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "source_timeline",
+            {
+                "results": [
+                    {
+                        "id": "bad-date",
+                        "metadata": {"published_at": "not-a-date"},
+                    }
+                ],
+                "date_key": "published_at",
+            },
+        )
+    )
+    payload = json.loads(response[0].text)
+
+    assert payload["error"] == "invalid_source_timeline_request"
+    assert (
+        payload["message"]
+        == "results[0] has invalid date field published_at: 'not-a-date'"
+    )
+    assert payload["arguments"]["date_key"] == "published_at"
+
+
+def test_source_timeline_rejects_missing_date_metadata(source_timeline_store):
+    response = asyncio.run(
+        mcp_server.call_tool(
+            "source_timeline",
+            {"results": [{"id": "missing-date"}], "date_key": "published_at"},
+        )
+    )
+    payload = json.loads(response[0].text)
+
+    assert payload["error"] == "invalid_source_timeline_request"
+    assert payload["message"] == "results[0] missing date field: published_at"
+    assert payload["arguments"]["result_count"] == 1
 
 
 def test_source_timeline_returns_filtered_store_units(source_timeline_store):
