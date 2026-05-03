@@ -11,6 +11,7 @@ from graph.export.edge_adjacency_markdown import export_edge_adjacency_markdown
 from graph.export.flashcards_markdown import export_units_to_flashcards_markdown
 from graph.export.graphson import export_graphson
 from graph.export.graph_overview_html import render_graph_overview_html
+from graph.export.html_report import render_search_html_report
 from graph.export.ical import DATE_METADATA_KEYS, export_units_to_ics, unit_event_datetime
 from graph.export.llms_txt import export_units_to_llms_txt
 from graph.export.mermaid_mindmap import export_units_to_mermaid_mindmap
@@ -40,6 +41,7 @@ __all__ = [
     "export_graph_sqlite",
     "export_relation_evidence_markdown",
     "export_source_coverage_markdown",
+    "render_search_html_report",
     "render_graph_overview_html",
     "export_tag_cooccurrence_csv",
     "export_tag_glossary_markdown",
