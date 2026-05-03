@@ -7,7 +7,7 @@ import pytest
 
 from graph.graph.service import GraphService
 from graph.store.db import Store
-from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.enums import EdgeRelation, EdgeSource, SourceProject
 from graph.types.models import KnowledgeEdge, KnowledgeUnit
 
 
@@ -21,21 +21,14 @@ def store():
     os.unlink(path)
 
 
-def _unit(
-    unit_id: str,
-    title: str,
-    *,
-    source_project: SourceProject = SourceProject.MAX,
-    content_type: ContentType = ContentType.INSIGHT,
-) -> KnowledgeUnit:
+def _unit(unit_id: str, title: str) -> KnowledgeUnit:
     return KnowledgeUnit(
         id=unit_id,
-        source_project=source_project,
+        source_project=SourceProject.MAX,
         source_id=f"source-{unit_id}",
         source_entity_type="insight",
         title=title,
         content=f"{title} note",
-        content_type=content_type,
     )
 
 
@@ -49,172 +42,108 @@ def _edge(edge_id: str, from_unit_id: str, to_unit_id: str) -> KnowledgeEdge:
     )
 
 
-def _populate_density_graph(store: Store) -> None:
-    for unit in [
-        _unit("unit-a", "Alpha"),
-        _unit("unit-b", "Beta"),
-        _unit("unit-c", "Gamma"),
-        _unit(
-            "unit-d",
-            "Delta",
-            source_project=SourceProject.PRESENCE,
-            content_type=ContentType.ARTIFACT,
-        ),
-        _unit(
-            "unit-e",
-            "Epsilon",
-            source_project=SourceProject.PRESENCE,
-            content_type=ContentType.ARTIFACT,
-        ),
-        _unit(
-            "unit-f",
-            "Finding",
-            source_project=SourceProject.FORTY_TWO,
-            content_type=ContentType.FINDING,
-        ),
-    ]:
-        store.insert_unit(unit)
-
-    for index, (from_unit_id, to_unit_id) in enumerate(
-        [
-            ("unit-a", "unit-b"),
-            ("unit-b", "unit-c"),
-            ("unit-c", "unit-a"),
-            ("unit-a", "unit-d"),
-            ("unit-d", "unit-e"),
-        ]
-    ):
-        store.insert_edge(_edge(f"edge-{index}", from_unit_id, to_unit_id))
-
-
-def test_analyze_density_returns_top_level_density_degree_and_sparsity_metrics(
-    store: Store,
-):
-    _populate_density_graph(store)
-
-    result = GraphService(store).analyze_density()
-
-    assert result == {
-        "node_count": 6,
-        "edge_count": 5,
-        "density": 0.166667,
-        "weak_component_count": 2,
-        "isolated_node_count": 1,
-        "average_in_degree": 0.833333,
-        "average_out_degree": 0.833333,
-    }
-
-
-def test_analyze_density_breakdowns_use_induced_subgraphs_with_sorted_keys(
-    store: Store,
-):
-    _populate_density_graph(store)
-
-    result = GraphService(store).analyze_density(
-        by_source_project=True,
-        by_content_type=True,
-    )
-
-    assert list(result["by_source_project"]) == ["forty_two", "max", "presence"]
-    assert result["by_source_project"] == {
-        "forty_two": {
-            "node_count": 1,
-            "edge_count": 0,
-            "density": 0,
-            "weak_component_count": 1,
-            "isolated_node_count": 1,
-            "average_in_degree": 0.0,
-            "average_out_degree": 0.0,
-        },
-        "max": {
-            "node_count": 3,
-            "edge_count": 3,
-            "density": 0.5,
-            "weak_component_count": 1,
-            "isolated_node_count": 0,
-            "average_in_degree": 1.0,
-            "average_out_degree": 1.0,
-        },
-        "presence": {
-            "node_count": 2,
-            "edge_count": 1,
-            "density": 0.5,
-            "weak_component_count": 1,
-            "isolated_node_count": 0,
-            "average_in_degree": 0.5,
-            "average_out_degree": 0.5,
-        },
-    }
-    assert list(result["by_content_type"]) == ["artifact", "finding", "insight"]
-    assert result["by_content_type"] == {
-        "artifact": {
-            "node_count": 2,
-            "edge_count": 1,
-            "density": 0.5,
-            "weak_component_count": 1,
-            "isolated_node_count": 0,
-            "average_in_degree": 0.5,
-            "average_out_degree": 0.5,
-        },
-        "finding": {
-            "node_count": 1,
-            "edge_count": 0,
-            "density": 0,
-            "weak_component_count": 1,
-            "isolated_node_count": 1,
-            "average_in_degree": 0.0,
-            "average_out_degree": 0.0,
-        },
-        "insight": {
-            "node_count": 3,
-            "edge_count": 3,
-            "density": 0.5,
-            "weak_component_count": 1,
-            "isolated_node_count": 0,
-            "average_in_degree": 1.0,
-            "average_out_degree": 1.0,
-        },
-    }
+def _insert_units(store: Store, *unit_ids: str) -> None:
+    for unit_id in unit_ids:
+        store.insert_unit(_unit(unit_id, unit_id.title()))
 
 
 def test_analyze_density_handles_empty_graph_without_division_errors(store: Store):
-    assert GraphService(store).analyze_density(
-        by_source_project=True,
-        by_content_type=True,
-    ) == {
+    assert GraphService(store).analyze_density() == {
         "node_count": 0,
         "edge_count": 0,
-        "density": 0,
-        "weak_component_count": 0,
-        "isolated_node_count": 0,
-        "average_in_degree": 0.0,
-        "average_out_degree": 0.0,
-        "by_source_project": {},
-        "by_content_type": {},
+        "directed_density": 0,
+        "undirected_density": 0,
+        "self_loop_count": 0,
+        "reciprocal_pair_count": 0,
+        "sink_count": 0,
+        "source_count": 0,
+        "isolated_count": 0,
     }
 
 
 def test_analyze_density_handles_single_node_without_division_errors(store: Store):
-    store.insert_unit(_unit("unit-alpha", "Alpha"))
+    _insert_units(store, "unit-a")
 
     assert GraphService(store).analyze_density() == {
         "node_count": 1,
         "edge_count": 0,
-        "density": 0,
-        "weak_component_count": 1,
-        "isolated_node_count": 1,
-        "average_in_degree": 0.0,
-        "average_out_degree": 0.0,
+        "directed_density": 0,
+        "undirected_density": 0,
+        "self_loop_count": 0,
+        "reciprocal_pair_count": 0,
+        "sink_count": 1,
+        "source_count": 1,
+        "isolated_count": 1,
     }
 
 
-@pytest.mark.parametrize(
-    ("kwargs", "message"),
-    [
-        ({"by_source_project": "yes"}, "by_source_project must be a boolean"),
-        ({"by_content_type": "yes"}, "by_content_type must be a boolean"),
-    ],
-)
-def test_analyze_density_validates_breakdown_flags(store: Store, kwargs, message):
-    with pytest.raises(ValueError, match=message):
-        GraphService(store).analyze_density(**kwargs)
+def test_analyze_density_counts_directed_edges_and_densities(store: Store):
+    _insert_units(store, "unit-a", "unit-b", "unit-c")
+    store.insert_edge(_edge("edge-ab", "unit-a", "unit-b"))
+    store.insert_edge(_edge("edge-bc", "unit-b", "unit-c"))
+
+    assert GraphService(store).analyze_density() == {
+        "node_count": 3,
+        "edge_count": 2,
+        "directed_density": 0.333333,
+        "undirected_density": 0.666667,
+        "self_loop_count": 0,
+        "reciprocal_pair_count": 0,
+        "sink_count": 1,
+        "source_count": 1,
+        "isolated_count": 0,
+    }
+
+
+def test_analyze_density_counts_reciprocal_pairs_once(store: Store):
+    _insert_units(store, "unit-a", "unit-b")
+    store.insert_edge(_edge("edge-ab", "unit-a", "unit-b"))
+    store.insert_edge(_edge("edge-ba", "unit-b", "unit-a"))
+
+    assert GraphService(store).analyze_density() == {
+        "node_count": 2,
+        "edge_count": 2,
+        "directed_density": 1.0,
+        "undirected_density": 1.0,
+        "self_loop_count": 0,
+        "reciprocal_pair_count": 1,
+        "sink_count": 0,
+        "source_count": 0,
+        "isolated_count": 0,
+    }
+
+
+def test_analyze_density_counts_self_loops_without_inflating_density(store: Store):
+    _insert_units(store, "unit-a", "unit-b")
+    store.insert_edge(_edge("edge-aa", "unit-a", "unit-a"))
+    store.insert_edge(_edge("edge-ab", "unit-a", "unit-b"))
+
+    assert GraphService(store).analyze_density() == {
+        "node_count": 2,
+        "edge_count": 2,
+        "directed_density": 0.5,
+        "undirected_density": 1.0,
+        "self_loop_count": 1,
+        "reciprocal_pair_count": 0,
+        "sink_count": 1,
+        "source_count": 0,
+        "isolated_count": 0,
+    }
+
+
+def test_analyze_density_counts_sources_sinks_and_isolates(store: Store):
+    _insert_units(store, "unit-a", "unit-b", "unit-c", "unit-d")
+    store.insert_edge(_edge("edge-ab", "unit-a", "unit-b"))
+    store.insert_edge(_edge("edge-ac", "unit-a", "unit-c"))
+
+    assert GraphService(store).analyze_density() == {
+        "node_count": 4,
+        "edge_count": 2,
+        "directed_density": 0.166667,
+        "undirected_density": 0.333333,
+        "self_loop_count": 0,
+        "reciprocal_pair_count": 0,
+        "sink_count": 3,
+        "source_count": 2,
+        "isolated_count": 1,
+    }
