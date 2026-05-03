@@ -48,6 +48,7 @@ from graph.adapters.pocket import PocketAdapter
 from graph.adapters.pocket_csv import PocketCsvAdapter
 from graph.adapters.presence import PresenceAdapter
 from graph.adapters.raindrop import RaindropAdapter
+from graph.adapters.raindrop_csv import RaindropCsvAdapter
 from graph.adapters.raindrop_json import RaindropJsonAdapter
 from graph.adapters.readwise import ReadwiseAdapter
 from graph.adapters.readwise_csv import ReadwiseCsvAdapter
@@ -119,6 +120,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "pocket_csv": PocketCsvAdapter,
     "pinboard": PinboardAdapter,
     "raindrop": RaindropAdapter,
+    "raindrop_csv": RaindropCsvAdapter,
     "raindrop_json": RaindropJsonAdapter,
     "safari_bookmarks": SafariBookmarksAdapter,
     "zotero_rdf": ZoteroRdfAdapter,
