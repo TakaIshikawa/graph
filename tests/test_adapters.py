@@ -25,6 +25,7 @@ from graph.adapters.csv_adapter import CsvAdapter
 from graph.adapters.csv_rows import CsvRowsAdapter
 from graph.adapters.crossref import CrossrefAdapter
 from graph.adapters.csl_json import CslJsonAdapter
+from graph.adapters.daily_journal import DailyJournalAdapter
 from graph.adapters.discord_json import DiscordJsonAdapter
 from graph.adapters.email import EmailAdapter
 from graph.adapters.enex import EnexAdapter
@@ -2678,6 +2679,7 @@ class TestRegistry:
             "csv_rows",
             "jsonl",
             "jsonl_notes",
+            "daily_journal",
             "yaml",
             "notion_markdown",
             "opml",
@@ -2734,6 +2736,10 @@ class TestRegistry:
         jsonl_notes_adapter = get_adapter("jsonl_notes", path="/tmp/notes.jsonl")
         assert isinstance(jsonl_notes_adapter, JsonlNotesAdapter)
         assert jsonl_notes_adapter.name == "jsonl_notes"
+
+        daily_journal_adapter = get_adapter("daily_journal", path="/tmp/journal")
+        assert isinstance(daily_journal_adapter, DailyJournalAdapter)
+        assert daily_journal_adapter.name == "daily_journal"
 
         csv_rows_adapter = get_adapter("csv_rows", path="/tmp/rows.csv")
         assert isinstance(csv_rows_adapter, CsvRowsAdapter)
