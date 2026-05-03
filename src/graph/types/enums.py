@@ -9,6 +9,7 @@ class SourceProject(StrEnum):
     MEDIAWIKI = "mediawiki"
     MARKDOWN_CALLOUTS = "markdown_callouts"
     MARKDOWN_DEFINITIONS = "markdown_definitions"
+    MARKDOWN_FRONTMATTER = "markdown_frontmatter"
     MARKDOWN_LINKS = "markdown_links"
     MARKDOWN_NOTES = "markdown_notes"
     MARKDOWN_TASKS = "markdown_tasks"
