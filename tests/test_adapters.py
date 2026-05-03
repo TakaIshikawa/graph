@@ -56,6 +56,7 @@ from graph.adapters.pinboard import PinboardAdapter
 from graph.adapters.pocket_csv import PocketCsvAdapter
 from graph.adapters.presence import PresenceAdapter
 from graph.adapters.raindrop import RaindropAdapter
+from graph.adapters.raindrop_json import RaindropJsonAdapter
 from graph.adapters.readwise import ReadwiseAdapter
 from graph.adapters.readwise_csv import ReadwiseCsvAdapter
 from graph.adapters.registry import get_adapter, list_adapters
@@ -2700,6 +2701,7 @@ class TestRegistry:
             "pocket_csv",
             "pinboard",
             "raindrop",
+            "raindrop_json",
             "zotero_rdf",
             "hypothesis",
             "readwise",
@@ -2844,6 +2846,10 @@ class TestRegistry:
         raindrop_adapter = get_adapter("raindrop", path="/tmp/raindrop.json")
         assert isinstance(raindrop_adapter, RaindropAdapter)
         assert raindrop_adapter.name == "raindrop"
+
+        raindrop_json_adapter = get_adapter("raindrop_json", path="/tmp/raindrop.json")
+        assert isinstance(raindrop_json_adapter, RaindropJsonAdapter)
+        assert raindrop_json_adapter.name == "raindrop_json"
 
         zotero_rdf_adapter = get_adapter("zotero_rdf", path="/tmp/library.rdf")
         assert zotero_rdf_adapter.name == "zotero_rdf"
