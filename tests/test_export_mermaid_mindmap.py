@@ -7,16 +7,25 @@ from graph.types.enums import ContentType, SourceProject
 from graph.types.models import KnowledgeUnit
 
 
-def unit(unit_id: str, title: str, *, tags: list[str] | None = None) -> KnowledgeUnit:
+def unit(
+    unit_id: str,
+    title: str,
+    *,
+    tags: list[str] | None = None,
+    source_project: SourceProject | str = SourceProject.MAX,
+    source_entity_type: str = "note",
+    source_id: str | None = None,
+    metadata: dict | None = None,
+) -> KnowledgeUnit:
     return KnowledgeUnit(
         id=unit_id,
-        source_project=SourceProject.MAX,
-        source_id=f"source-{unit_id}",
-        source_entity_type="note",
+        source_project=source_project,
+        source_id=source_id or f"source-{unit_id}",
+        source_entity_type=source_entity_type,
         title=title,
         content=f"{title} content",
         content_type=ContentType.INSIGHT,
-        metadata={},
+        metadata=metadata or {},
         tags=tags or [],
     )
 
@@ -102,6 +111,89 @@ def test_mermaid_mindmap_escapes_special_characters_in_labels():
     )
 
 
+def test_mermaid_mindmap_handles_empty_input():
+    assert export_units_to_mermaid_mindmap([]) == (
+        "mindmap\n"
+        '  root["Knowledge Units"]\n'
+    )
+
+
+def test_mermaid_mindmap_can_group_by_source_collection_metadata():
+    text = export_units_to_mermaid_mindmap(
+        [
+            unit(
+                "beta",
+                "Beta",
+                metadata={"collection": {"name": "Research"}},
+            ),
+            unit(
+                "alpha",
+                "Alpha",
+                metadata={"collections": ["Archive", {"name": "Research"}]},
+            ),
+        ],
+        group_by="source_collection",
+    )
+
+    assert text == (
+        "mindmap\n"
+        '  root["Knowledge Units"]\n'
+        '    source_0["Archive"]\n'
+        '      source_0_unit_0["Alpha"]\n'
+        '    source_1["Research"]\n'
+        '      source_1_unit_0["Alpha"]\n'
+        '      source_1_unit_1["Beta"]\n'
+    )
+
+
+def test_mermaid_mindmap_source_collection_grouping_falls_back_to_source_type():
+    text = export_units_to_mermaid_mindmap(
+        [
+            unit(
+                "alpha",
+                "Alpha",
+                source_project="obsidian",
+                source_entity_type="markdown",
+            )
+        ],
+        group_by="source",
+    )
+
+    assert text == (
+        "mindmap\n"
+        '  root["Knowledge Units"]\n'
+        '    source_0["obsidian/markdown"]\n'
+        '      source_0_unit_0["Alpha"]\n'
+    )
+
+
+def test_mermaid_mindmap_can_include_source_link_click_directives():
+    text = export_units_to_mermaid_mindmap(
+        [
+            unit(
+                "alpha",
+                "Alpha",
+                tags=["topic"],
+                metadata={"source_url": 'https://example.com/a?quote="yes"'},
+            ),
+            unit("beta", "Beta", tags=["topic"], source_id="url:https://example.com/b"),
+            unit("gamma", "Gamma", tags=["topic"]),
+        ],
+        include_source_links=True,
+    )
+
+    assert text == (
+        "mindmap\n"
+        '  root["Knowledge Units"]\n'
+        '    tag_0["topic"]\n'
+        '      tag_0_unit_0["Alpha"]\n'
+        '      tag_0_unit_1["Beta"]\n'
+        '      tag_0_unit_2["Gamma"]\n'
+        'click tag_0_unit_0 "https://example.com/a?quote=%22yes%22" "Open source"\n'
+        'click tag_0_unit_1 "https://example.com/b" "Open source"\n'
+    )
+
+
 def test_mermaid_mindmap_output_is_deterministic():
     units = [
         unit("beta", "Same", tags=["zeta", "alpha"]),
@@ -132,3 +224,13 @@ def test_mermaid_mindmap_validates_max_units_per_tag(max_units_per_tag):
 def test_mermaid_mindmap_validates_include_untagged():
     with pytest.raises(ValueError, match="include_untagged must be a boolean"):
         export_units_to_mermaid_mindmap([], include_untagged="yes")
+
+
+def test_mermaid_mindmap_validates_group_by():
+    with pytest.raises(ValueError, match="group_by must be 'tag' or 'source_collection'"):
+        export_units_to_mermaid_mindmap([], group_by="topic")
+
+
+def test_mermaid_mindmap_validates_include_source_links():
+    with pytest.raises(ValueError, match="include_source_links must be a boolean"):
+        export_units_to_mermaid_mindmap([], include_source_links="yes")
