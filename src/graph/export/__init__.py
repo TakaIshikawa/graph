@@ -3,6 +3,7 @@
 from graph.export.adjacency_markdown import export_graph_adjacency_markdown
 from graph.export.anki import export_units_to_anki_tsv
 from graph.export.backlinks import export_unit_backlinks_markdown
+from graph.export.bibtex import export_units_to_bibtex
 from graph.export.concept_map import export_concept_map_markdown
 from graph.export.context_pack import export_context_pack
 from graph.export.cypher import export_graph_cypher
@@ -37,6 +38,7 @@ from graph.export.units_jsonl import export_units_to_jsonl
 
 __all__ = [
     "DATE_METADATA_KEYS",
+    "export_units_to_bibtex",
     "export_concept_map_markdown",
     "export_context_pack",
     "export_duplicate_candidates_markdown",
