@@ -29,6 +29,7 @@ class SourceProject(StrEnum):
     YAML = "yaml"
     FEED = "feed"
     OPML = "opml"
+    MBOX = "mbox"
     ORG = "org"
     PDF = "pdf"
     PLAIN_TEXT = "plain_text"
@@ -88,6 +89,7 @@ class EdgeRelation(StrEnum):
     RELATES_TO = "relates_to"
     CONTAINS = "contains"
     REFERENCES = "references"
+    REPLIES_TO = "replies_to"
 
 
 class EdgeSource(StrEnum):
