@@ -293,7 +293,11 @@ class MboxAdapter(SourceAdapter):
         if not data:
             return ""
         charset = part.get_content_charset() or "utf-8"
-        return data.decode(charset, errors="replace")
+        try:
+            return data.decode(charset, errors="replace")
+        except LookupError:
+            # Unknown or invalid charset, fall back to UTF-8 with replacement
+            return data.decode("utf-8", errors="replace")
 
     def _strip_html(self, html: str) -> str:
         parser = _MboxHTMLTextParser()
