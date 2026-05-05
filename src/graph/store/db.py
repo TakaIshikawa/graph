@@ -3383,6 +3383,97 @@ class Store:
 
         return result
 
+    def get_content_length_distribution_stats(
+        self,
+        *,
+        source_project: SourceProject | None = None,
+        tags: list[str] | None = None,
+    ) -> dict[str, float]:
+        """Compute distribution statistics for unit content length (character count).
+
+        Args:
+            source_project: Optional SourceProject to filter by
+            tags: Optional list of tags - units must have ALL specified tags
+
+        Returns:
+            Dictionary with keys: p50, p75, p90, p95, p99, mean, median, max
+        """
+        where_parts: list[str] = []
+        params: list[object] = []
+
+        # Source project filter
+        if source_project is not None:
+            if not isinstance(source_project, SourceProject):
+                raise TypeError("source_project must be a SourceProject enum")
+            where_parts.append("source_project = ?")
+            params.append(source_project.value)
+
+        # Tags filter
+        if tags is not None:
+            if not isinstance(tags, list) or not all(isinstance(tag, str) for tag in tags):
+                raise ValueError("tags must be a list of strings")
+            for tag in tags:
+                where_parts.append("EXISTS (SELECT 1 FROM json_each(tags) WHERE value = ?)")
+                params.append(tag)
+
+        # Build query to get content lengths
+        query = "SELECT LENGTH(content) as content_length FROM knowledge_units"
+        if where_parts:
+            query += " WHERE " + " AND ".join(where_parts)
+        query += " ORDER BY content_length"
+
+        rows = self.conn.execute(query, params).fetchall()
+
+        if not rows:
+            # Return zeros for empty result
+            return {
+                "p50": 0.0,
+                "p75": 0.0,
+                "p90": 0.0,
+                "p95": 0.0,
+                "p99": 0.0,
+                "mean": 0.0,
+                "median": 0.0,
+                "max": 0.0,
+            }
+
+        lengths = [row["content_length"] for row in rows]
+        count = len(lengths)
+
+        # Calculate statistics
+        total = sum(lengths)
+        mean = total / count
+        max_length = max(lengths)
+
+        # Calculate percentiles
+        def percentile(p: float) -> float:
+            """Calculate the p-th percentile (0 <= p <= 1)."""
+            if count == 1:
+                return float(lengths[0])
+            index = p * (count - 1)
+            lower = int(index)
+            upper = min(lower + 1, count - 1)
+            weight = index - lower
+            return lengths[lower] * (1 - weight) + lengths[upper] * weight
+
+        p50 = percentile(0.50)
+        p75 = percentile(0.75)
+        p90 = percentile(0.90)
+        p95 = percentile(0.95)
+        p99 = percentile(0.99)
+        median = p50
+
+        return {
+            "p50": p50,
+            "p75": p75,
+            "p90": p90,
+            "p95": p95,
+            "p99": p99,
+            "mean": mean,
+            "median": median,
+            "max": float(max_length),
+        }
+
     def count_units_ingested_since(
         self,
         since: datetime,
