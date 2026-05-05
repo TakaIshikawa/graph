@@ -728,6 +728,56 @@ class Store:
         ).fetchall()
         return [_row_to_unit(r) for r in rows]
 
+    def get_units_by_metadata_range(
+        self,
+        field_name: str,
+        min_value: object,
+        max_value: object,
+    ) -> list[KnowledgeUnit]:
+        """Query units where a metadata field value falls within a specified range.
+
+        Supports numeric (int, float) and ISO date string comparisons.
+
+        Args:
+            field_name: Dotted path to the metadata field (e.g., "score" or "metrics.rating")
+            min_value: Minimum value (inclusive)
+            max_value: Maximum value (inclusive)
+
+        Returns:
+            List of units where metadata[field_name] is between min_value and max_value
+
+        Raises:
+            ValueError: If min_value > max_value
+        """
+        if not isinstance(field_name, str) or not field_name:
+            raise ValueError("field_name must be a non-empty string")
+
+        # Validate that min_value <= max_value
+        try:
+            if min_value > max_value:
+                raise ValueError("min_value must be less than or equal to max_value")
+        except TypeError as exc:
+            raise ValueError(
+                f"min_value and max_value must be comparable types: {type(min_value).__name__} "
+                f"and {type(max_value).__name__}"
+            ) from exc
+
+        # Build JSON path
+        json_path = _metadata_json_path(field_name)
+
+        # Query units where the metadata field is within range
+        query = """
+            SELECT * FROM knowledge_units
+            WHERE json_extract(metadata, ?) >= ?
+              AND json_extract(metadata, ?) <= ?
+            ORDER BY created_at DESC
+        """
+        rows = self.conn.execute(
+            query,
+            (json_path, min_value, json_path, max_value),
+        ).fetchall()
+        return [_row_to_unit(r) for r in rows]
+
     def metadata_key_inventory(
         self,
         prefix: str | None = None,
