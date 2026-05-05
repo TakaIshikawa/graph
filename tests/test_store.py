@@ -3159,3 +3159,468 @@ class TestTransactionRollback:
 
         assert edge.id is not None
         assert len(store.get_all_edges()) == 1
+
+
+class TestConnectionPoolExhaustionAndRecovery:
+    """Test connection exhaustion, timeout, and recovery scenarios."""
+
+    def test_connection_recovery_after_database_locked_error(self):
+        """Test recovery when database is locked by another connection."""
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        db_path = Path(path)
+
+        try:
+            store1 = Store(str(db_path))
+            store2 = Store(str(db_path))
+
+            # Insert unit with store1
+            unit1 = store1.insert_unit(
+                KnowledgeUnit(
+                    source_project=SourceProject.MAX,
+                    source_id="lock-test-1",
+                    source_entity_type="insight",
+                    title="Lock Test Unit",
+                    content="Testing database locking",
+                    content_type=ContentType.INSIGHT,
+                )
+            )
+
+            # Start a transaction in store1 without committing
+            store1.conn.execute("BEGIN IMMEDIATE")
+            store1.conn.execute(
+                """INSERT INTO knowledge_units
+                   (id, source_project, source_id, source_entity_type,
+                    title, content, content_type, metadata, tags,
+                    created_at, ingested_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    "unit-locked",
+                    "max",
+                    "locked-unit",
+                    "insight",
+                    "Locked Unit",
+                    "Content",
+                    "insight",
+                    "{}",
+                    "[]",
+                    "2024-01-01T00:00:00Z",
+                    "2024-01-01T00:00:00Z",
+                    "2024-01-01T00:00:00Z",
+                ),
+            )
+
+            # Try to write from store2 - should timeout due to lock
+            # Set a short timeout to make the test faster
+            store2.conn.execute("PRAGMA busy_timeout = 100")
+
+            with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+                store2.conn.execute("BEGIN IMMEDIATE")
+                store2.conn.execute(
+                    """INSERT INTO knowledge_units
+                       (id, source_project, source_id, source_entity_type,
+                        title, content, content_type, metadata, tags,
+                        created_at, ingested_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        "unit-blocked",
+                        "max",
+                        "blocked-unit",
+                        "insight",
+                        "Blocked Unit",
+                        "Content",
+                        "insight",
+                        "{}",
+                        "[]",
+                        "2024-01-01T00:00:00Z",
+                        "2024-01-01T00:00:00Z",
+                        "2024-01-01T00:00:00Z",
+                    ),
+                )
+                store2.conn.commit()
+
+            # Rollback store1's transaction
+            store1.conn.rollback()
+
+            # Now store2 should be able to write
+            unit2 = store2.insert_unit(
+                KnowledgeUnit(
+                    source_project=SourceProject.MAX,
+                    source_id="recovery-unit",
+                    source_entity_type="insight",
+                    title="Recovery Unit",
+                    content="Written after lock release",
+                    content_type=ContentType.INSIGHT,
+                )
+            )
+
+            assert unit2.id is not None
+            fetched = store2.get_unit(unit2.id)
+            assert fetched is not None
+            assert fetched.title == "Recovery Unit"
+
+        finally:
+            store1.close()
+            store2.close()
+            db_path.unlink(missing_ok=True)
+
+    def test_connection_timeout_during_long_running_transaction(self):
+        """Test connection timeout behavior with busy_timeout pragma."""
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        db_path = Path(path)
+
+        try:
+            store1 = Store(str(db_path))
+            store2 = Store(str(db_path))
+
+            # Set a very short timeout
+            store2.conn.execute("PRAGMA busy_timeout = 50")
+
+            # Start exclusive transaction in store1
+            store1.conn.execute("BEGIN EXCLUSIVE")
+
+            # Measure that store2 respects the timeout
+            import time
+
+            start = time.time()
+            with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+                store2.conn.execute("BEGIN EXCLUSIVE")
+
+            elapsed = time.time() - start
+
+            # Should timeout around 50ms (allowing some overhead)
+            assert elapsed < 0.5  # Should be much less than 500ms
+
+            # Clean up
+            store1.conn.rollback()
+
+        finally:
+            store1.close()
+            store2.close()
+            db_path.unlink(missing_ok=True)
+
+    def test_multiple_concurrent_readers_in_wal_mode(self):
+        """Test that WAL mode allows multiple concurrent readers."""
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        db_path = Path(path)
+
+        try:
+            # Create initial store and insert data
+            store_writer = Store(str(db_path))
+            unit1 = store_writer.insert_unit(
+                KnowledgeUnit(
+                    source_project=SourceProject.MAX,
+                    source_id="concurrent-read-1",
+                    source_entity_type="insight",
+                    title="Concurrent Read Test",
+                    content="Testing concurrent reads",
+                    content_type=ContentType.INSIGHT,
+                )
+            )
+
+            # Open multiple reader connections
+            store_reader1 = Store(str(db_path))
+            store_reader2 = Store(str(db_path))
+            store_reader3 = Store(str(db_path))
+
+            # All readers should be able to read simultaneously
+            fetched1 = store_reader1.get_unit(unit1.id)
+            fetched2 = store_reader2.get_unit(unit1.id)
+            fetched3 = store_reader3.get_unit(unit1.id)
+
+            assert fetched1 is not None
+            assert fetched2 is not None
+            assert fetched3 is not None
+            assert fetched1.title == "Concurrent Read Test"
+            assert fetched2.title == "Concurrent Read Test"
+            assert fetched3.title == "Concurrent Read Test"
+
+            # Writer can write while readers are active (WAL mode)
+            unit2 = store_writer.insert_unit(
+                KnowledgeUnit(
+                    source_project=SourceProject.MAX,
+                    source_id="concurrent-write",
+                    source_entity_type="insight",
+                    title="Written During Reads",
+                    content="New data",
+                    content_type=ContentType.INSIGHT,
+                )
+            )
+
+            assert unit2.id is not None
+
+        finally:
+            store_writer.close()
+            store_reader1.close()
+            store_reader2.close()
+            store_reader3.close()
+            _close_and_unlink(Store(str(db_path)), db_path)
+
+    def test_connection_recovery_after_close_and_reopen(self):
+        """Test that store can be closed and reopened successfully."""
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        db_path = Path(path)
+
+        try:
+            # Create store and insert data
+            store = Store(str(db_path))
+            unit1 = store.insert_unit(
+                KnowledgeUnit(
+                    source_project=SourceProject.MAX,
+                    source_id="reopen-test",
+                    source_entity_type="insight",
+                    title="Reopen Test",
+                    content="Testing close and reopen",
+                    content_type=ContentType.INSIGHT,
+                )
+            )
+            unit_id = unit1.id
+
+            # Close the store
+            store.close()
+
+            # Verify connection is closed
+            with pytest.raises(sqlite3.ProgrammingError, match="Cannot operate on a closed database"):
+                store.get_unit(unit_id)
+
+            # Reopen the store
+            store_reopened = Store(str(db_path))
+
+            # Verify data persisted
+            fetched = store_reopened.get_unit(unit_id)
+            assert fetched is not None
+            assert fetched.title == "Reopen Test"
+
+            # Verify we can perform operations
+            unit2 = store_reopened.insert_unit(
+                KnowledgeUnit(
+                    source_project=SourceProject.MAX,
+                    source_id="after-reopen",
+                    source_entity_type="insight",
+                    title="After Reopen",
+                    content="New unit after reopen",
+                    content_type=ContentType.INSIGHT,
+                )
+            )
+            assert unit2.id is not None
+
+        finally:
+            store_reopened.close()
+            db_path.unlink(missing_ok=True)
+
+    def test_connection_handles_corrupted_transaction_recovery(self):
+        """Test recovery from interrupted transaction state."""
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        db_path = Path(path)
+
+        try:
+            store = Store(str(db_path))
+
+            # Insert initial data
+            unit1 = store.insert_unit(
+                KnowledgeUnit(
+                    source_project=SourceProject.MAX,
+                    source_id="corrupt-test",
+                    source_entity_type="insight",
+                    title="Initial Unit",
+                    content="Before corruption",
+                    content_type=ContentType.INSIGHT,
+                )
+            )
+
+            # Simulate interrupted transaction
+            try:
+                store.conn.execute("BEGIN")
+                store.conn.execute(
+                    """INSERT INTO knowledge_units
+                       (id, source_project, source_id, source_entity_type,
+                        title, content, content_type, metadata, tags,
+                        created_at, ingested_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        "unit-interrupted",
+                        "max",
+                        "interrupted",
+                        "insight",
+                        "Interrupted",
+                        "Content",
+                        "insight",
+                        "{}",
+                        "[]",
+                        "2024-01-01T00:00:00Z",
+                        "2024-01-01T00:00:00Z",
+                        "2024-01-01T00:00:00Z",
+                    ),
+                )
+                # Don't commit - simulate crash/interruption
+                # Force an error to trigger rollback
+                raise RuntimeError("Simulated interruption")
+            except RuntimeError:
+                store.conn.rollback()
+
+            # Verify original data is intact
+            fetched = store.get_unit(unit1.id)
+            assert fetched is not None
+
+            # Verify interrupted unit was not saved
+            assert store.get_unit("unit-interrupted") is None
+
+            # Verify store can continue normal operations
+            unit2 = store.insert_unit(
+                KnowledgeUnit(
+                    source_project=SourceProject.MAX,
+                    source_id="after-recovery",
+                    source_entity_type="insight",
+                    title="After Recovery",
+                    content="Normal operation resumed",
+                    content_type=ContentType.INSIGHT,
+                )
+            )
+            assert unit2.id is not None
+
+        finally:
+            store.close()
+            db_path.unlink(missing_ok=True)
+
+    def test_connection_cleanup_with_wal_checkpoint(self):
+        """Test that WAL checkpoint works and cleans up properly."""
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        db_path = Path(path)
+
+        try:
+            store = Store(str(db_path))
+
+            # Insert multiple units to generate WAL activity
+            for i in range(10):
+                store.insert_unit(
+                    KnowledgeUnit(
+                        source_project=SourceProject.MAX,
+                        source_id=f"wal-test-{i}",
+                        source_entity_type="insight",
+                        title=f"WAL Test Unit {i}",
+                        content=f"Content {i}",
+                        content_type=ContentType.INSIGHT,
+                    )
+                )
+
+            # Check that WAL file exists
+            wal_path = db_path.with_name(db_path.name + "-wal")
+            # WAL file may or may not exist depending on write volume
+            # but checkpoint should work either way
+
+            # Perform checkpoint
+            result = store.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            # Result is (busy, log, checkpointed)
+            assert result is not None
+
+            # Verify data is intact after checkpoint
+            assert store.count_units() == 10
+
+            # Verify we can still perform operations
+            unit = store.insert_unit(
+                KnowledgeUnit(
+                    source_project=SourceProject.MAX,
+                    source_id="post-checkpoint",
+                    source_entity_type="insight",
+                    title="Post Checkpoint",
+                    content="After checkpoint",
+                    content_type=ContentType.INSIGHT,
+                )
+            )
+            assert unit.id is not None
+
+        finally:
+            store.close()
+            _close_and_unlink(store, db_path)
+
+    def test_connection_max_simultaneous_writes_blocking(self):
+        """Test that multiple simultaneous write attempts are properly serialized."""
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        db_path = Path(path)
+
+        try:
+            store1 = Store(str(db_path))
+            store2 = Store(str(db_path))
+
+            # Set reasonable timeout
+            store2.conn.execute("PRAGMA busy_timeout = 5000")
+
+            # Start write transaction in store1
+            store1.conn.execute("BEGIN IMMEDIATE")
+            store1.conn.execute(
+                """INSERT INTO knowledge_units
+                   (id, source_project, source_id, source_entity_type,
+                    title, content, content_type, metadata, tags,
+                    created_at, ingested_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    "unit-write1",
+                    "max",
+                    "write1",
+                    "insight",
+                    "Write 1",
+                    "Content",
+                    "insight",
+                    "{}",
+                    "[]",
+                    "2024-01-01T00:00:00Z",
+                    "2024-01-01T00:00:00Z",
+                    "2024-01-01T00:00:00Z",
+                ),
+            )
+
+            # Try to start another write transaction - should block
+            # We'll use a short timeout to avoid actually waiting
+            store2.conn.execute("PRAGMA busy_timeout = 100")
+
+            with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+                store2.conn.execute("BEGIN IMMEDIATE")
+                store2.conn.execute(
+                    """INSERT INTO knowledge_units
+                       (id, source_project, source_id, source_entity_type,
+                        title, content, content_type, metadata, tags,
+                        created_at, ingested_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        "unit-write2",
+                        "max",
+                        "write2",
+                        "insight",
+                        "Write 2",
+                        "Content",
+                        "insight",
+                        "{}",
+                        "[]",
+                        "2024-01-01T00:00:00Z",
+                        "2024-01-01T00:00:00Z",
+                        "2024-01-01T00:00:00Z",
+                    ),
+                )
+                store2.conn.commit()
+
+            # Commit first transaction
+            store1.conn.commit()
+
+            # Now second write should succeed
+            unit2 = store2.insert_unit(
+                KnowledgeUnit(
+                    source_project=SourceProject.MAX,
+                    source_id="write2-success",
+                    source_entity_type="insight",
+                    title="Write 2 Success",
+                    content="After first write completed",
+                    content_type=ContentType.INSIGHT,
+                )
+            )
+            assert unit2.id is not None
+
+        finally:
+            store1.close()
+            store2.close()
+            db_path.unlink(missing_ok=True)
