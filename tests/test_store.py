@@ -682,7 +682,9 @@ class TestUnitCRUD:
         )
         for unit in [first, second, skipped]:
             store.fts_index_unit(unit)
-        original_updated_at = str(store.get_unit(first.id).updated_at)  # type: ignore[union-attr]
+        unit = store.get_unit(first.id)
+        assert unit is not None
+        original_updated_at = str(unit.updated_at)
 
         dry_run = store.rename_tag(
             "ai_agent",
@@ -698,8 +700,10 @@ class TestUnitCRUD:
         assert dry_run["changed_count"] == 2
         assert set(dry_run["affected_unit_ids"]) == {first.id, second.id}
         assert {unit["id"] for unit in dry_run["changed_units"]} == {first.id, second.id}
-        assert store.get_unit(first.id).tags == ["ai_agent", "workflow"]  # type: ignore[union-attr]
-        assert str(store.get_unit(first.id).updated_at) == original_updated_at  # type: ignore[union-attr]
+        unit_first = store.get_unit(first.id)
+        assert unit_first is not None
+        assert unit_first.tags == ["ai_agent", "workflow"]
+        assert str(unit_first.updated_at) == original_updated_at
 
         result = store.rename_tag(
             "ai_agent",
@@ -713,10 +717,16 @@ class TestUnitCRUD:
         assert result["updated_count"] == 2
         assert result["changed_count"] == 2
         assert set(result["affected_unit_ids"]) == {first.id, second.id}
-        assert store.get_unit(first.id).tags == ["ai-agent", "workflow"]  # type: ignore[union-attr]
-        assert store.get_unit(second.id).tags == ["ai-agent", "review"]  # type: ignore[union-attr]
-        assert store.get_unit(skipped.id).tags == ["ai_agent"]  # type: ignore[union-attr]
-        assert str(store.get_unit(first.id).updated_at) != original_updated_at  # type: ignore[union-attr]
+        unit_first = store.get_unit(first.id)
+        assert unit_first is not None
+        assert unit_first.tags == ["ai-agent", "workflow"]
+        unit_second = store.get_unit(second.id)
+        assert unit_second is not None
+        assert unit_second.tags == ["ai-agent", "review"]
+        unit_skipped = store.get_unit(skipped.id)
+        assert unit_skipped is not None
+        assert unit_skipped.tags == ["ai_agent"]
+        assert str(unit_first.updated_at) != original_updated_at
         assert {row["unit_id"] for row in store.fts_search("ai-agent")} >= {first.id, second.id}
         assert {row["unit_id"] for row in store.fts_search("ai_agent")} == {skipped.id}
 
@@ -758,7 +768,9 @@ class TestUnitCRUD:
         )
         for unit in [first, second, skipped]:
             store.fts_index_unit(unit)
-        original_updated_at = str(store.get_unit(second.id).updated_at)  # type: ignore[union-attr]
+        unit_second = store.get_unit(second.id)
+        assert unit_second is not None
+        original_updated_at = str(unit_second.updated_at)
 
         dry_run = store.remove_tag(
             "retire_tag",
@@ -776,8 +788,10 @@ class TestUnitCRUD:
         assert dry_run["representative_units"] == dry_run["changed_units"]
         assert dry_run["changed_units"][0]["old_tags"] == ["obsolete", "retire_tag", "keep"]
         assert dry_run["changed_units"][0]["new_tags"] == ["obsolete", "keep"]
-        assert store.get_unit(second.id).tags == ["obsolete", "retire_tag", "keep"]  # type: ignore[union-attr]
-        assert str(store.get_unit(second.id).updated_at) == original_updated_at  # type: ignore[union-attr]
+        unit_second_check = store.get_unit(second.id)
+        assert unit_second_check is not None
+        assert unit_second_check.tags == ["obsolete", "retire_tag", "keep"]
+        assert str(unit_second_check.updated_at) == original_updated_at
         assert second.id in {row["unit_id"] for row in store.fts_search("retire_tag")}
 
         result = store.remove_tag(
@@ -791,10 +805,16 @@ class TestUnitCRUD:
         assert result["matched_count"] == dry_run["matched_count"]
         assert result["removed_count"] == dry_run["removed_count"]
         assert result["affected_unit_ids"] == dry_run["affected_unit_ids"]
-        assert store.get_unit(second.id).tags == ["obsolete", "keep"]  # type: ignore[union-attr]
-        assert store.get_unit(first.id).tags == ["retire_tag", "keep"]  # type: ignore[union-attr]
-        assert store.get_unit(skipped.id).tags == ["retire_tag", "keep"]  # type: ignore[union-attr]
-        assert str(store.get_unit(second.id).updated_at) != original_updated_at  # type: ignore[union-attr]
+        unit_second_after = store.get_unit(second.id)
+        assert unit_second_after is not None
+        assert unit_second_after.tags == ["obsolete", "keep"]
+        unit_first_after = store.get_unit(first.id)
+        assert unit_first_after is not None
+        assert unit_first_after.tags == ["retire_tag", "keep"]
+        unit_skipped_after = store.get_unit(skipped.id)
+        assert unit_skipped_after is not None
+        assert unit_skipped_after.tags == ["retire_tag", "keep"]
+        assert str(unit_second_after.updated_at) != original_updated_at
         assert second.id not in {row["unit_id"] for row in store.fts_search("retire_tag")}
         assert second.id in {row["unit_id"] for row in store.fts_search("obsolete")}
 
