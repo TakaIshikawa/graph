@@ -2329,7 +2329,9 @@ class TestGraphService:
         assert dry_run["matched_count"] == 1
         assert dry_run["changed_count"] == 1
         assert dry_run["sample_units"] == dry_run["changed_units"]
-        assert store.get_unit(unit.id).tags == ["retire_tag", "keep"]  # type: ignore[union-attr]
+        unit_check = store.get_unit(unit.id)
+        assert unit_check is not None
+        assert unit_check.tags == ["retire_tag", "keep"]
 
         result = gs.remove_tag(
             "retire_tag",
@@ -2343,8 +2345,12 @@ class TestGraphService:
         assert result["changed_count"] == dry_run["changed_count"]
         assert result["sample_units"][0]["old_tags"] == ["retire_tag", "keep"]
         assert result["sample_units"][0]["new_tags"] == ["keep"]
-        assert store.get_unit(unit.id).tags == ["keep"]  # type: ignore[union-attr]
-        assert store.get_unit(filtered.id).tags == ["retire_tag"]  # type: ignore[union-attr]
+        unit_after = store.get_unit(unit.id)
+        assert unit_after is not None
+        assert unit_after.tags == ["keep"]
+        filtered_unit = store.get_unit(filtered.id)
+        assert filtered_unit is not None
+        assert filtered_unit.tags == ["retire_tag"]
         assert unit.id not in {row["unit_id"] for row in store.fts_search("retire_tag")}
 
     def test_analyze_duplicates_reports_candidate_groups_and_remains_read_only(
