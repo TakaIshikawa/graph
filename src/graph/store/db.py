@@ -3310,6 +3310,79 @@ class Store:
         row = self.conn.execute(f"SELECT COUNT(*) FROM knowledge_units{where}", params).fetchone()
         return row[0]
 
+    def count_units_by_source(
+        self,
+        *,
+        time_range: tuple[datetime, datetime] | None = None,
+        tags: list[str] | None = None,
+        metadata_key: str | None = None,
+    ) -> dict[SourceProject, int]:
+        """Return unit counts grouped by source project type with optional filters.
+
+        Args:
+            time_range: Optional tuple of (start, end) datetime to filter by created_at
+            tags: Optional list of tags - units must have ALL specified tags
+            metadata_key: Optional metadata key that must be present
+
+        Returns:
+            Dictionary mapping SourceProject to count
+        """
+        where_parts: list[str] = []
+        params: list[object] = []
+
+        # Time range filter
+        if time_range is not None:
+            if (
+                not isinstance(time_range, tuple)
+                or len(time_range) != 2
+                or not all(isinstance(dt, datetime) for dt in time_range)
+            ):
+                raise ValueError("time_range must be a tuple of two datetime objects")
+            start, end = time_range
+            if start > end:
+                raise ValueError("time_range start must be before or equal to end")
+            where_parts.append("created_at >= ?")
+            params.append(start.isoformat())
+            where_parts.append("created_at <= ?")
+            params.append(end.isoformat())
+
+        # Tags filter - units must have ALL specified tags
+        if tags is not None:
+            if not isinstance(tags, list) or not all(isinstance(tag, str) for tag in tags):
+                raise ValueError("tags must be a list of strings")
+            for tag in tags:
+                # Use JSON functions to check if tag is in the tags array
+                where_parts.append("EXISTS (SELECT 1 FROM json_each(tags) WHERE value = ?)")
+                params.append(tag)
+
+        # Metadata key filter
+        if metadata_key is not None:
+            if not isinstance(metadata_key, str):
+                raise ValueError("metadata_key must be a string")
+            json_path = _metadata_json_path(metadata_key)
+            where_parts.append("json_extract(metadata, ?) IS NOT NULL")
+            params.append(json_path)
+
+        # Build query
+        query = "SELECT source_project, COUNT(*) as count FROM knowledge_units"
+        if where_parts:
+            query += " WHERE " + " AND ".join(where_parts)
+        query += " GROUP BY source_project"
+
+        rows = self.conn.execute(query, params).fetchall()
+
+        # Convert to dict with SourceProject enum keys
+        result: dict[SourceProject, int] = {}
+        for row in rows:
+            try:
+                source_project = SourceProject(row["source_project"])
+                result[source_project] = row["count"]
+            except ValueError:
+                # Skip unknown source projects
+                continue
+
+        return result
+
     def count_units_ingested_since(
         self,
         since: datetime,
