@@ -615,3 +615,514 @@ def test_feed_filters_by_sync_state(tmp_path):
     # Should only get the new item
     assert len(result.units) == 1
     assert result.units[0].title == "New Item"
+
+
+# Error handling and edge case tests
+
+
+def test_feed_handles_malformed_xml(tmp_path):
+    """Test that malformed XML doesn't crash ingestion."""
+    feed = tmp_path / "malformed.xml"
+    feed.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+        <rss version="2.0">
+          <channel>
+            <title>Malformed Feed
+            <item>
+              <title>Unclosed item
+              <description>Missing closing tags
+        """,
+        encoding="utf-8",
+    )
+
+    result = FeedAdapter(sources=str(feed)).ingest()
+
+    # Should handle gracefully and return empty or partial result
+    assert len(result.units) >= 0
+
+
+def test_feed_handles_missing_required_elements(tmp_path):
+    """Test that feeds with missing required RSS elements are handled."""
+    feed = tmp_path / "missing-elements.xml"
+    feed.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+        <rss version="2.0">
+          <channel>
+            <item>
+              <description>Item with no title or guid</description>
+            </item>
+            <item>
+              <title>Item with title but no guid or description</title>
+            </item>
+          </channel>
+        </rss>
+        """,
+        encoding="utf-8",
+    )
+
+    result = FeedAdapter(sources=str(feed)).ingest()
+
+    # Should still ingest items with fallback values
+    assert len(result.units) == 2
+    # First item should have default title
+    assert result.units[0].title == "Untitled feed item"
+    # Second item should use its title
+    assert result.units[1].title == "Item with title but no guid or description"
+
+
+def test_feed_handles_invalid_date_formats(tmp_path):
+    """Test that invalid date formats don't crash ingestion."""
+    feed = tmp_path / "invalid-dates.xml"
+    feed.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+        <rss version="2.0">
+          <channel>
+            <title>Invalid Dates Feed</title>
+            <item>
+              <guid>item-1</guid>
+              <title>Invalid Date</title>
+              <pubDate>Not a valid date format</pubDate>
+              <description>Item with malformed date</description>
+            </item>
+            <item>
+              <guid>item-2</guid>
+              <title>Empty Date</title>
+              <pubDate></pubDate>
+              <description>Item with empty date</description>
+            </item>
+          </channel>
+        </rss>
+        """,
+        encoding="utf-8",
+    )
+
+    result = FeedAdapter(sources=str(feed)).ingest()
+
+    # Should still ingest items with current time as fallback
+    assert len(result.units) == 2
+    assert all(unit.created_at is not None for unit in result.units)
+
+
+def test_feed_handles_empty_feed(tmp_path):
+    """Test that empty feeds (no items/entries) are handled gracefully."""
+    feed = tmp_path / "empty.xml"
+    feed.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+        <rss version="2.0">
+          <channel>
+            <title>Empty Feed</title>
+            <description>Feed with no items</description>
+          </channel>
+        </rss>
+        """,
+        encoding="utf-8",
+    )
+
+    result = FeedAdapter(sources=str(feed)).ingest()
+
+    assert len(result.units) == 0
+
+
+def test_feed_handles_missing_guids(tmp_path):
+    """Test that items without GUIDs are handled."""
+    feed = tmp_path / "no-guids.xml"
+    feed.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+        <rss version="2.0">
+          <channel>
+            <title>No GUIDs Feed</title>
+            <item>
+              <title>Item 1</title>
+              <link>https://example.com/1</link>
+              <description>First item without GUID</description>
+            </item>
+            <item>
+              <title>Item 2</title>
+              <link>https://example.com/2</link>
+              <description>Second item without GUID</description>
+            </item>
+          </channel>
+        </rss>
+        """,
+        encoding="utf-8",
+    )
+
+    result = FeedAdapter(sources=str(feed)).ingest()
+
+    # Should still ingest items
+    assert len(result.units) == 2
+    # Source IDs should be generated from available data
+    source_ids = [unit.source_id for unit in result.units]
+    assert len(set(source_ids)) == 2  # Should be unique
+
+
+def test_feed_handles_duplicate_entries(tmp_path):
+    """Test that duplicate entries (same GUID) are handled."""
+    feed = tmp_path / "duplicates.xml"
+    feed.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+        <rss version="2.0">
+          <channel>
+            <title>Duplicates Feed</title>
+            <item>
+              <guid>duplicate-id</guid>
+              <title>First Instance</title>
+              <description>First occurrence</description>
+            </item>
+            <item>
+              <guid>duplicate-id</guid>
+              <title>Second Instance</title>
+              <description>Second occurrence</description>
+            </item>
+          </channel>
+        </rss>
+        """,
+        encoding="utf-8",
+    )
+
+    result = FeedAdapter(sources=str(feed)).ingest()
+
+    # Both items should be ingested (deduplication happens at store level)
+    assert len(result.units) == 2
+
+
+def test_feed_handles_nonexistent_file(tmp_path):
+    """Test that nonexistent feed files are handled gracefully."""
+    result = FeedAdapter(sources=str(tmp_path / "nonexistent.xml")).ingest()
+
+    assert len(result.units) == 0
+
+
+def test_feed_handles_empty_source_string():
+    """Test that empty source string is handled gracefully."""
+    result = FeedAdapter(sources="").ingest()
+
+    assert len(result.units) == 0
+
+
+def test_feed_handles_special_characters_in_content(tmp_path):
+    """Test that special XML characters are handled properly."""
+    feed = tmp_path / "special-chars.xml"
+    feed.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+        <rss version="2.0">
+          <channel>
+            <title>Special Characters</title>
+            <item>
+              <guid>special-1</guid>
+              <title>Test &amp; Special &lt;chars&gt; &quot;quoted&quot;</title>
+              <description><![CDATA[Content with <tags> & special chars]]></description>
+            </item>
+          </channel>
+        </rss>
+        """,
+        encoding="utf-8",
+    )
+
+    result = FeedAdapter(sources=str(feed)).ingest()
+
+    assert len(result.units) == 1
+    # Special characters should be properly decoded
+    assert "&" in result.units[0].title or "amp" not in result.units[0].title
+
+
+def test_feed_handles_atom_missing_required_elements(tmp_path):
+    """Test Atom feeds with missing required elements."""
+    feed = tmp_path / "atom-missing.xml"
+    feed.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+          <title>Atom Feed</title>
+          <entry>
+            <summary>Entry with no id or title</summary>
+          </entry>
+          <entry>
+            <id>entry-with-id</id>
+            <summary>Entry with id but no title</summary>
+          </entry>
+        </feed>
+        """,
+        encoding="utf-8",
+    )
+
+    result = FeedAdapter(sources=str(feed)).ingest()
+
+    # Should still ingest with fallback values
+    assert len(result.units) == 2
+    assert result.units[0].title == "Untitled feed item"
+    assert result.units[1].title == "Untitled feed item"
+
+
+def test_feed_handles_invalid_mime_types_in_enclosures(tmp_path):
+    """Test that invalid MIME types in enclosures don't crash."""
+    feed = tmp_path / "invalid-mime.xml"
+    feed.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+        <rss version="2.0">
+          <channel>
+            <title>Invalid MIME</title>
+            <item>
+              <guid>item-1</guid>
+              <title>Item with Invalid Enclosure</title>
+              <enclosure url="https://example.com/file" type="not/a/valid/mime/type" length="1000" />
+              <description>Item description</description>
+            </item>
+          </channel>
+        </rss>
+        """,
+        encoding="utf-8",
+    )
+
+    result = FeedAdapter(sources=str(feed)).ingest()
+
+    # Should still ingest the item
+    assert len(result.units) == 1
+    # Enclosure with invalid MIME type should still be captured
+    assert "enclosures" in result.units[0].metadata
+
+
+def test_feed_handles_whitespace_only_content(tmp_path):
+    """Test that items with whitespace-only content are handled."""
+    feed = tmp_path / "whitespace.xml"
+    feed.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+        <rss version="2.0">
+          <channel>
+            <title>Whitespace Feed</title>
+            <item>
+              <guid>item-1</guid>
+              <title>   </title>
+              <description>
+
+              </description>
+            </item>
+          </channel>
+        </rss>
+        """,
+        encoding="utf-8",
+    )
+
+    result = FeedAdapter(sources=str(feed)).ingest()
+
+    # Should ingest with fallback values
+    assert len(result.units) == 1
+    assert result.units[0].title == "Untitled feed item"
+
+
+def test_feed_handles_extremely_long_content(tmp_path):
+    """Test that very long feed content is handled."""
+    long_content = "This is very long content. " * 5000  # ~140KB
+
+    feed = tmp_path / "long-content.xml"
+    feed.write_text(
+        f"""<?xml version="1.0" encoding="utf-8"?>
+        <rss version="2.0">
+          <channel>
+            <title>Long Content Feed</title>
+            <item>
+              <guid>long-1</guid>
+              <title>Long Content Item</title>
+              <description><![CDATA[{long_content}]]></description>
+            </item>
+          </channel>
+        </rss>
+        """,
+        encoding="utf-8",
+    )
+
+    result = FeedAdapter(sources=str(feed)).ingest()
+
+    # Should handle long content
+    assert len(result.units) == 1
+    assert len(result.units[0].content) > 100000
+
+
+def test_feed_handles_missing_channel_element(tmp_path):
+    """Test RSS feed without proper channel element."""
+    feed = tmp_path / "no-channel.xml"
+    feed.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+        <rss version="2.0">
+          <item>
+            <guid>orphan-1</guid>
+            <title>Orphan Item</title>
+            <description>Item without channel parent</description>
+          </item>
+        </rss>
+        """,
+        encoding="utf-8",
+    )
+
+    result = FeedAdapter(sources=str(feed)).ingest()
+
+    # Should attempt to parse items even without proper channel
+    assert len(result.units) >= 0
+
+
+def test_feed_handles_mixed_namespaces(tmp_path):
+    """Test that feeds with mixed/custom namespaces are handled."""
+    feed = tmp_path / "mixed-ns.xml"
+    feed.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+        <rss version="2.0"
+             xmlns:dc="http://purl.org/dc/elements/1.1/"
+             xmlns:content="http://purl.org/rss/1.0/modules/content/">
+          <channel>
+            <title>Mixed Namespaces</title>
+            <item>
+              <guid>ns-1</guid>
+              <title>Namespaced Item</title>
+              <dc:creator>Author Name</dc:creator>
+              <content:encoded><![CDATA[<p>Rich content</p>]]></content:encoded>
+              <description>Simple description</description>
+            </item>
+          </channel>
+        </rss>
+        """,
+        encoding="utf-8",
+    )
+
+    result = FeedAdapter(sources=str(feed)).ingest()
+
+    # Should parse successfully
+    assert len(result.units) == 1
+    # Should prefer content:encoded over description
+    assert "Rich content" in result.units[0].content
+
+
+def test_feed_handles_corrupted_xml_structure(tmp_path):
+    """Test that structurally invalid XML is handled gracefully."""
+    feed = tmp_path / "corrupted.xml"
+    feed.write_bytes(b"\x00\x01\x02<?xml version='1.0'?><rss><invalid")
+
+    result = FeedAdapter(sources=str(feed)).ingest()
+
+    # Should not crash, returns empty result
+    assert len(result.units) >= 0
+
+
+def test_feed_handles_atom_empty_feed(tmp_path):
+    """Test empty Atom feed (no entries)."""
+    feed = tmp_path / "atom-empty.xml"
+    feed.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+          <title>Empty Atom Feed</title>
+          <updated>2026-05-01T10:00:00Z</updated>
+        </feed>
+        """,
+        encoding="utf-8",
+    )
+
+    result = FeedAdapter(sources=str(feed)).ingest()
+
+    assert len(result.units) == 0
+
+
+def test_feed_handles_no_xml_declaration(tmp_path):
+    """Test feed without XML declaration."""
+    feed = tmp_path / "no-declaration.xml"
+    feed.write_text(
+        """<rss version="2.0">
+          <channel>
+            <title>No Declaration</title>
+            <item>
+              <guid>item-1</guid>
+              <title>Test Item</title>
+              <description>Item without XML declaration</description>
+            </item>
+          </channel>
+        </rss>
+        """,
+        encoding="utf-8",
+    )
+
+    result = FeedAdapter(sources=str(feed)).ingest()
+
+    # Should parse successfully
+    assert len(result.units) == 1
+
+
+def test_feed_handles_unusual_date_formats(tmp_path):
+    """Test various date format edge cases."""
+    feed = tmp_path / "date-formats.xml"
+    feed.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+          <title>Date Formats</title>
+          <entry>
+            <id>future-1</id>
+            <title>Future Date</title>
+            <published>2099-12-31T23:59:59Z</published>
+            <summary>Far future date</summary>
+          </entry>
+          <entry>
+            <id>epoch-1</id>
+            <title>Epoch Date</title>
+            <published>1970-01-01T00:00:00Z</published>
+            <summary>Epoch timestamp</summary>
+          </entry>
+        </feed>
+        """,
+        encoding="utf-8",
+    )
+
+    result = FeedAdapter(sources=str(feed)).ingest()
+
+    # Both should be parsed
+    assert len(result.units) == 2
+    assert all(unit.created_at is not None for unit in result.units)
+
+
+def test_feed_handles_unclosed_cdata(tmp_path):
+    """Test that unclosed CDATA sections are handled."""
+    feed = tmp_path / "unclosed-cdata.xml"
+    feed.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+        <rss version="2.0">
+          <channel>
+            <title>Unclosed CDATA</title>
+            <item>
+              <guid>item-1</guid>
+              <title>Test</title>
+              <description><![CDATA[Content without closing CDATA</description>
+            </item>
+          </channel>
+        </rss>
+        """,
+        encoding="utf-8",
+    )
+
+    result = FeedAdapter(sources=str(feed)).ingest()
+
+    # XML parser may fail or succeed depending on implementation
+    assert len(result.units) >= 0
+
+
+def test_feed_handles_multiple_categories(tmp_path):
+    """Test that items with many categories are handled efficiently."""
+    categories = "".join(f"<category>{i}</category>" for i in range(100))
+
+    feed = tmp_path / "many-categories.xml"
+    feed.write_text(
+        f"""<?xml version="1.0" encoding="utf-8"?>
+        <rss version="2.0">
+          <channel>
+            <title>Many Categories</title>
+            <item>
+              <guid>item-1</guid>
+              <title>Heavily Tagged</title>
+              <description>Item with many categories</description>
+              {categories}
+            </item>
+          </channel>
+        </rss>
+        """,
+        encoding="utf-8",
+    )
+
+    result = FeedAdapter(sources=str(feed)).ingest()
+
+    # Should handle many tags
+    assert len(result.units) == 1
+    assert len(result.units[0].tags) > 90

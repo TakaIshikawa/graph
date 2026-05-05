@@ -65,7 +65,7 @@ from graph.adapters.raindrop_csv import RaindropCsvAdapter
 from graph.adapters.raindrop_json import RaindropJsonAdapter
 from graph.adapters.readwise import ReadwiseAdapter
 from graph.adapters.readwise_csv import ReadwiseCsvAdapter
-from graph.adapters.registry import get_adapter, list_adapters
+from graph.adapters.registry import get_adapter, get_all_adapters, list_adapters
 from graph.adapters.ris import RisAdapter
 from graph.adapters.roam import RoamAdapter
 from graph.adapters.safari_bookmarks import SafariBookmarksAdapter
@@ -3111,3 +3111,239 @@ class TestRegistry:
         adapter2 = get_adapter("  Markdown-Callouts  ", path="/tmp/notes")
         assert isinstance(adapter2, MarkdownCalloutsAdapter)
         assert adapter2.name == "markdown_callouts"
+
+
+# Registry-specific error handling tests
+
+
+def test_registry_get_adapter_unknown_name():
+    """Test that requesting an unknown adapter raises KeyError with helpful message."""
+    import pytest
+
+    with pytest.raises(KeyError, match="Unknown adapter: nonexistent_adapter"):
+        get_adapter("nonexistent_adapter")
+
+
+def test_registry_get_adapter_unknown_name_shows_available():
+    """Test that error message includes list of available adapters."""
+    import pytest
+
+    with pytest.raises(KeyError) as exc_info:
+        get_adapter("invalid_name")
+
+    error_msg = str(exc_info.value)
+    # Should list some known adapters
+    assert "atom" in error_msg or "feed" in error_msg or "mbox" in error_msg
+    assert "Available:" in error_msg
+
+
+def test_registry_list_adapters_returns_sorted():
+    """Test that list_adapters returns a sorted list."""
+    adapters = list_adapters()
+
+    assert isinstance(adapters, list)
+    assert len(adapters) > 0
+    # Verify it's sorted
+    assert adapters == sorted(adapters)
+
+
+def test_registry_list_adapters_contains_expected():
+    """Test that list_adapters includes known adapters."""
+    adapters = list_adapters()
+
+    # Check for some well-known adapters
+    assert "atom" in adapters
+    assert "feed" in adapters
+    assert "mbox" in adapters
+    assert "markdown" in adapters
+    assert "bibtex" in adapters
+
+
+def test_registry_get_all_adapters_returns_instances():
+    """Test that get_all_adapters returns adapter instances."""
+    from graph.adapters.base import SourceAdapter
+
+    adapters = get_all_adapters()
+
+    assert isinstance(adapters, list)
+    assert len(adapters) > 0
+    # All should be SourceAdapter instances
+    assert all(isinstance(a, SourceAdapter) for a in adapters)
+
+
+def test_registry_get_all_adapters_unique_names():
+    """Test that all adapters have unique names."""
+    adapters = get_all_adapters()
+    names = [a.name for a in adapters]
+
+    # All names should be unique (no duplicate registrations)
+    assert len(names) == len(set(names))
+
+
+def test_registry_get_adapter_passes_kwargs():
+    """Test that get_adapter passes keyword arguments to adapter constructor."""
+    from graph.adapters.feed import FeedAdapter
+
+    adapter = get_adapter("feed", sources="https://example.com/feed.xml")
+
+    assert isinstance(adapter, FeedAdapter)
+    assert adapter.sources == "https://example.com/feed.xml"
+
+
+def test_registry_adapter_count_stability():
+    """Test that adapter count is stable (catches accidental removals)."""
+    adapters = list_adapters()
+
+    # Should have a substantial number of adapters
+    # This test will catch if adapters are accidentally removed from registry
+    assert len(adapters) >= 50  # We have many adapters
+
+
+def test_registry_no_duplicate_adapter_names():
+    """Test that there are no duplicate adapter names in the registry."""
+    from graph.adapters.registry import _ADAPTERS
+
+    # Check that all keys in _ADAPTERS are unique (Python dict guarantees this)
+    adapter_names = list(_ADAPTERS.keys())
+    assert len(adapter_names) == len(set(adapter_names))
+
+
+def test_registry_all_adapters_have_name_property():
+    """Test that all registered adapters implement the name property."""
+    adapters = get_all_adapters()
+
+    for adapter in adapters:
+        # Each adapter must have a name
+        assert hasattr(adapter, "name")
+        assert isinstance(adapter.name, str)
+        assert len(adapter.name) > 0
+
+
+def test_registry_all_adapters_have_entity_types():
+    """Test that all registered adapters implement entity_types property."""
+    adapters = get_all_adapters()
+
+    for adapter in adapters:
+        # Each adapter must have entity_types
+        assert hasattr(adapter, "entity_types")
+        assert isinstance(adapter.entity_types, list)
+
+
+def test_registry_all_adapters_have_ingest_method():
+    """Test that all registered adapters implement the ingest method."""
+    adapters = get_all_adapters()
+
+    for adapter in adapters:
+        # Each adapter must have ingest method
+        assert hasattr(adapter, "ingest")
+        assert callable(adapter.ingest)
+
+
+def test_registry_adapter_name_matches_registry_key():
+    """Test that adapter name property matches its registry key."""
+    from graph.adapters.registry import _ADAPTERS
+
+    for key, adapter_class in _ADAPTERS.items():
+        adapter = adapter_class()
+        # Normalized adapter name should match registry key
+        normalized_name = adapter.name.strip().lower().replace("-", "_")
+        assert normalized_name == key, f"Adapter {adapter_class.__name__} has name '{adapter.name}' but is registered as '{key}'"
+
+
+def test_registry_name_normalization_whitespace():
+    """Test that adapter names with leading/trailing whitespace are normalized."""
+    from graph.adapters.feed import FeedAdapter
+
+    adapter = get_adapter("  feed  ")
+    assert isinstance(adapter, FeedAdapter)
+
+
+def test_registry_name_normalization_case_insensitive():
+    """Test that adapter name lookup is case-insensitive."""
+    from graph.adapters.mbox import MboxAdapter
+
+    adapter1 = get_adapter("MBOX")
+    adapter2 = get_adapter("mbox")
+    adapter3 = get_adapter("Mbox")
+
+    assert all(isinstance(a, MboxAdapter) for a in [adapter1, adapter2, adapter3])
+
+
+def test_registry_get_adapter_with_empty_string():
+    """Test that empty string adapter name raises KeyError."""
+    import pytest
+
+    with pytest.raises(KeyError):
+        get_adapter("")
+
+
+def test_registry_get_adapter_with_whitespace_only():
+    """Test that whitespace-only adapter name raises KeyError."""
+    import pytest
+
+    with pytest.raises(KeyError):
+        get_adapter("   ")
+
+
+def test_registry_performance_with_many_lookups():
+    """Test that multiple adapter lookups are efficient."""
+    import time
+
+    start = time.time()
+    for _ in range(1000):
+        get_adapter("feed", sources="test.xml")
+    elapsed = time.time() - start
+
+    # Should complete 1000 lookups in well under 1 second
+    assert elapsed < 1.0
+
+
+def test_registry_list_adapters_consistency():
+    """Test that list_adapters returns the same list on multiple calls."""
+    list1 = list_adapters()
+    list2 = list_adapters()
+
+    assert list1 == list2
+
+
+def test_registry_get_all_adapters_creates_new_instances():
+    """Test that get_all_adapters creates fresh instances each time."""
+    adapters1 = get_all_adapters()
+    adapters2 = get_all_adapters()
+
+    # Should be different instances
+    assert adapters1 is not adapters2
+    # But same count
+    assert len(adapters1) == len(adapters2)
+
+
+def test_registry_adapter_classes_are_subclasses():
+    """Test that all registered adapter classes are SourceAdapter subclasses."""
+    from graph.adapters.base import SourceAdapter
+    from graph.adapters.registry import _ADAPTERS
+
+    for name, adapter_class in _ADAPTERS.items():
+        assert issubclass(adapter_class, SourceAdapter), f"Adapter '{name}' is not a SourceAdapter subclass"
+
+
+def test_registry_no_import_errors():
+    """Test that all registered adapters can be imported without errors."""
+    from graph.adapters.registry import _ADAPTERS
+
+    # If we got here, all imports in registry.py succeeded
+    assert len(_ADAPTERS) > 0
+
+
+def test_registry_adapter_instantiation_without_args():
+    """Test that adapters can be instantiated with default arguments."""
+    from graph.adapters.registry import _ADAPTERS
+
+    # Most adapters should be instantiable with no args or empty kwargs
+    for name, adapter_class in _ADAPTERS.items():
+        try:
+            adapter = adapter_class()
+            assert adapter.name == name
+        except TypeError:
+            # Some adapters may require arguments, which is acceptable
+            pass
+

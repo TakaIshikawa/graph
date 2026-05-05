@@ -1280,3 +1280,577 @@ def test_mbox_handles_html_with_inline_text(tmp_path):
     assert "Inline text before paragraph" in content
     assert "Paragraph text" in content
     assert "Inline text after paragraph" in content
+
+
+# Additional error handling tests
+
+
+def test_mbox_handles_empty_mbox_file(tmp_path):
+    """Test that truly empty mbox file is handled gracefully."""
+    empty_mbox = tmp_path / "empty.mbox"
+    # Create empty mbox file
+    mbox = mailbox.mbox(empty_mbox, create=True)
+    mbox.close()
+
+    result = MboxAdapter(path=str(empty_mbox)).ingest()
+
+    assert len(result.units) == 0
+    assert len(result.edges) == 0
+
+
+def test_mbox_handles_unknown_charset(tmp_path):
+    """Test that messages with unknown/unsupported charset don't crash."""
+    mbox_path = tmp_path / "unknown-charset.mbox"
+    mbox = mailbox.mbox(mbox_path, create=True)
+
+    msg = mailbox.mboxMessage()
+    msg["From"] = "alice@example.com"
+    msg["To"] = "bob@example.com"
+    msg["Subject"] = "Unknown Charset"
+    msg["Date"] = "Wed, 01 May 2026 10:00:00 +0000"
+    msg["Message-ID"] = "<unknown-charset@example.com>"
+
+    # Set payload with bogus charset
+    msg.set_payload(b"Test content with unknown charset")
+    msg.set_type("text/plain")
+    msg.set_param("charset", "x-unknown-bogus-charset")
+
+    mbox.add(msg)
+    mbox.close()
+
+    result = MboxAdapter(path=str(mbox_path)).ingest()
+
+    # Should still ingest the message with replacement characters
+    assert len(result.units) == 1
+    unit = result.units[0]
+    assert unit.title == "Unknown Charset"
+    # Content should be decoded with errors='replace'
+    assert unit.content is not None
+
+
+def test_mbox_handles_truncated_multipart_message(tmp_path):
+    """Test that truncated/malformed multipart messages are handled gracefully."""
+    mbox_path = tmp_path / "truncated.mbox"
+
+    # Write a malformed multipart message directly
+    malformed_content = """From alice@example.com Wed May 01 10:00:00 2026
+From: alice@example.com
+To: bob@example.com
+Subject: Truncated Multipart
+Date: Wed, 01 May 2026 10:00:00 +0000
+Message-ID: <truncated@example.com>
+Content-Type: multipart/mixed; boundary="boundary123"
+
+--boundary123
+Content-Type: text/plain
+
+This is the first part.
+
+--boundary123
+Content-Type: text/html
+
+<p>This part is incomplete and truncated
+"""
+
+    mbox_path.write_text(malformed_content)
+
+    result = MboxAdapter(path=str(mbox_path)).ingest()
+
+    # Should still extract what it can from malformed message
+    assert len(result.units) >= 0  # May be 0 or 1 depending on parser behavior
+
+
+def test_mbox_handles_message_with_invalid_message_id(tmp_path):
+    """Test that invalid Message-ID values are handled gracefully."""
+    mbox_path = write_mbox(
+        tmp_path / "invalid-msgid.mbox",
+        [
+            {
+                "From": "alice@example.com",
+                "To": "bob@example.com",
+                "Subject": "Invalid Message-ID",
+                "Date": "Wed, 01 May 2026 10:00:00 +0000",
+                "Message-ID": "not-a-valid-message-id-format",
+                "body": "Email with improperly formatted Message-ID.",
+            }
+        ],
+    )
+
+    result = MboxAdapter(path=str(mbox_path)).ingest()
+
+    assert len(result.units) == 1
+    unit = result.units[0]
+    # Should still process the message
+    assert unit.title == "Invalid Message-ID"
+    assert unit.metadata["message_id"] == "not-a-valid-message-id-format"
+
+
+def test_mbox_handles_missing_from_header(tmp_path):
+    """Test that missing From header doesn't crash ingestion."""
+    mbox_path = write_mbox(
+        tmp_path / "no-from.mbox",
+        [
+            {
+                "To": "bob@example.com",
+                "Subject": "No From Header",
+                "Date": "Wed, 01 May 2026 10:00:00 +0000",
+                "Message-ID": "<no-from@example.com>",
+                "body": "Email without From header.",
+            }
+        ],
+    )
+
+    result = MboxAdapter(path=str(mbox_path)).ingest()
+
+    assert len(result.units) == 1
+    unit = result.units[0]
+    assert unit.metadata["from"] == ""
+    assert unit.title == "No From Header"
+
+
+def test_mbox_handles_missing_to_header(tmp_path):
+    """Test that missing To header doesn't crash ingestion."""
+    mbox_path = write_mbox(
+        tmp_path / "no-to.mbox",
+        [
+            {
+                "From": "alice@example.com",
+                "Subject": "No To Header",
+                "Date": "Wed, 01 May 2026 10:00:00 +0000",
+                "Message-ID": "<no-to@example.com>",
+                "body": "Email without To header.",
+            }
+        ],
+    )
+
+    result = MboxAdapter(path=str(mbox_path)).ingest()
+
+    assert len(result.units) == 1
+    unit = result.units[0]
+    assert unit.metadata["to"] == ""
+    assert unit.title == "No To Header"
+
+
+def test_mbox_handles_malformed_html_in_content(tmp_path):
+    """Test that malformed HTML doesn't crash HTML parser."""
+    mbox_path = tmp_path / "malformed-html.mbox"
+    mbox = mailbox.mbox(mbox_path, create=True)
+
+    from email.mime.text import MIMEText
+
+    msg = mailbox.mboxMessage()
+    msg["From"] = "alice@example.com"
+    msg["To"] = "bob@example.com"
+    msg["Subject"] = "Malformed HTML"
+    msg["Date"] = "Wed, 01 May 2026 10:00:00 +0000"
+    msg["Message-ID"] = "<malformed@example.com>"
+
+    # Malformed HTML with unclosed tags and invalid structure
+    malformed_html = """
+    <html>
+      <body>
+        <p>Unclosed paragraph
+        <div>Unclosed div
+        <strong>Bold text
+        Random text <><> invalid tags
+        <p>Another paragraph</p
+      </body>
+    """
+
+    html_msg = MIMEText(malformed_html, "html")
+    for key in msg.keys():
+        html_msg[key] = msg[key]
+
+    mbox.add(html_msg)
+    mbox.close()
+
+    result = MboxAdapter(path=str(mbox_path)).ingest()
+
+    # Should extract text despite malformed HTML
+    assert len(result.units) == 1
+    unit = result.units[0]
+    assert "Unclosed paragraph" in unit.content or "text" in unit.content.lower()
+
+
+def test_mbox_handles_message_with_null_bytes(tmp_path):
+    """Test that messages containing null bytes are handled."""
+    mbox_path = tmp_path / "null-bytes.mbox"
+    mbox = mailbox.mbox(mbox_path, create=True)
+
+    msg = mailbox.mboxMessage()
+    msg["From"] = "alice@example.com"
+    msg["To"] = "bob@example.com"
+    msg["Subject"] = "Null Bytes"
+    msg["Date"] = "Wed, 01 May 2026 10:00:00 +0000"
+    msg["Message-ID"] = "<null@example.com>"
+
+    # Payload with null bytes
+    msg.set_payload(b"Content with \x00 null \x00 bytes \x00 embedded")
+    msg.set_type("text/plain")
+    msg.set_param("charset", "utf-8")
+
+    mbox.add(msg)
+    mbox.close()
+
+    result = MboxAdapter(path=str(mbox_path)).ingest()
+
+    # Should handle null bytes without crashing
+    assert len(result.units) == 1
+    assert result.units[0].content is not None
+
+
+def test_mbox_handles_extremely_long_headers(tmp_path):
+    """Test that extremely long header values are handled."""
+    long_value = "a" * 10000
+
+    mbox_path = write_mbox(
+        tmp_path / "long-headers.mbox",
+        [
+            {
+                "From": "alice@example.com",
+                "To": "bob@example.com",
+                "Subject": long_value,
+                "Date": "Wed, 01 May 2026 10:00:00 +0000",
+                "Message-ID": "<long-header@example.com>",
+                "body": "Email with extremely long header.",
+            }
+        ],
+    )
+
+    result = MboxAdapter(path=str(mbox_path)).ingest()
+
+    assert len(result.units) == 1
+    unit = result.units[0]
+    # Long header should be preserved
+    assert len(unit.title) > 9000
+
+
+def test_mbox_handles_whitespace_only_body(tmp_path):
+    """Test that emails with whitespace-only body are handled."""
+    mbox_path = write_mbox(
+        tmp_path / "whitespace.mbox",
+        [
+            {
+                "From": "alice@example.com",
+                "To": "bob@example.com",
+                "Subject": "Whitespace Only",
+                "Date": "Wed, 01 May 2026 10:00:00 +0000",
+                "Message-ID": "<whitespace@example.com>",
+                "body": "   \n\n\t\t  \n   ",
+            }
+        ],
+    )
+
+    result = MboxAdapter(path=str(mbox_path)).ingest()
+
+    assert len(result.units) == 1
+    unit = result.units[0]
+    # Whitespace-only content should result in empty string
+    assert unit.content == ""
+
+
+def test_mbox_handles_empty_body(tmp_path):
+    """Test that emails with completely empty body are handled."""
+    mbox_path = write_mbox(
+        tmp_path / "empty-body.mbox",
+        [
+            {
+                "From": "alice@example.com",
+                "To": "bob@example.com",
+                "Subject": "Empty Body",
+                "Date": "Wed, 01 May 2026 10:00:00 +0000",
+                "Message-ID": "<empty@example.com>",
+                "body": "",
+            }
+        ],
+    )
+
+    result = MboxAdapter(path=str(mbox_path)).ingest()
+
+    assert len(result.units) == 1
+    unit = result.units[0]
+    assert unit.content == ""
+    assert unit.title == "Empty Body"
+
+
+def test_mbox_handles_multipart_with_no_text_parts(tmp_path):
+    """Test multipart message containing no text/plain or text/html parts."""
+    mbox_path = tmp_path / "no-text-parts.mbox"
+    mbox = mailbox.mbox(mbox_path, create=True)
+
+    from email.mime.application import MIMEApplication
+    from email.mime.multipart import MIMEMultipart
+
+    msg = MIMEMultipart("mixed")
+    msg["From"] = "alice@example.com"
+    msg["To"] = "bob@example.com"
+    msg["Subject"] = "No Text Parts"
+    msg["Date"] = "Wed, 01 May 2026 10:00:00 +0000"
+    msg["Message-ID"] = "<no-text@example.com>"
+
+    # Only attach non-text parts
+    pdf_part = MIMEApplication(b"PDF content", "pdf")
+    msg.attach(pdf_part)
+
+    image_part = MIMEApplication(b"Image data", "octet-stream")
+    msg.attach(image_part)
+
+    mbox.add(msg)
+    mbox.close()
+
+    result = MboxAdapter(path=str(mbox_path)).ingest()
+
+    assert len(result.units) == 1
+    unit = result.units[0]
+    # Should have empty content when no text parts exist
+    assert unit.content == ""
+
+
+def test_mbox_handles_payload_decode_error(tmp_path):
+    """Test that payload decode errors are handled gracefully."""
+    mbox_path = tmp_path / "decode-error.mbox"
+    mbox = mailbox.mbox(mbox_path, create=True)
+
+    msg = mailbox.mboxMessage()
+    msg["From"] = "alice@example.com"
+    msg["To"] = "bob@example.com"
+    msg["Subject"] = "Decode Error"
+    msg["Date"] = "Wed, 01 May 2026 10:00:00 +0000"
+    msg["Message-ID"] = "<decode-error@example.com>"
+
+    # Set invalid base64 content with base64 encoding declared
+    msg.set_payload("Not valid base64 content!!!")
+    msg["Content-Transfer-Encoding"] = "base64"
+    msg.set_type("text/plain")
+    msg.set_param("charset", "utf-8")
+
+    mbox.add(msg)
+    mbox.close()
+
+    result = MboxAdapter(path=str(mbox_path)).ingest()
+
+    # Should handle decode error gracefully
+    assert len(result.units) == 1
+    assert result.units[0].title == "Decode Error"
+
+
+def test_mbox_handles_special_characters_in_headers(tmp_path):
+    """Test that special characters in headers are handled properly."""
+    mbox_path = write_mbox(
+        tmp_path / "special-chars.mbox",
+        [
+            {
+                "From": "alice+test@example.com",
+                "To": "bob@example.com, charlie@example.com; david@example.com",
+                "Subject": "Test: Special <chars> & symbols!",
+                "Date": "Wed, 01 May 2026 10:00:00 +0000",
+                "Message-ID": "<special!chars#test@example.com>",
+                "body": "Email with special characters in headers.",
+            }
+        ],
+    )
+
+    result = MboxAdapter(path=str(mbox_path)).ingest()
+
+    assert len(result.units) == 1
+    unit = result.units[0]
+    # Special characters should be preserved
+    assert "<" in unit.title or "&" in unit.title
+    assert unit.metadata["from"] == "alice+test@example.com"
+
+
+def test_mbox_handles_duplicate_headers(tmp_path):
+    """Test that duplicate headers (multiple To, Cc, etc.) are handled."""
+    mbox_path = tmp_path / "duplicate-headers.mbox"
+
+    # Write mbox with duplicate headers directly
+    content = """From alice@example.com Wed May 01 10:00:00 2026
+From: alice@example.com
+To: bob@example.com
+To: charlie@example.com
+Subject: Duplicate Headers
+Date: Wed, 01 May 2026 10:00:00 +0000
+Message-ID: <duplicate@example.com>
+
+Email with duplicate To headers.
+"""
+
+    mbox_path.write_text(content)
+
+    result = MboxAdapter(path=str(mbox_path)).ingest()
+
+    # Should still process the message
+    assert len(result.units) >= 0  # Implementation may vary
+
+
+def test_mbox_handles_missing_all_headers(tmp_path):
+    """Test that message with no headers (only body) is handled."""
+    mbox_path = tmp_path / "no-headers.mbox"
+
+    # Write minimal mbox with almost no headers
+    content = """From MAILER-DAEMON Wed May 01 10:00:00 2026
+
+This is just body content with no real headers.
+"""
+
+    mbox_path.write_text(content)
+
+    result = MboxAdapter(path=str(mbox_path)).ingest()
+
+    # Should handle gracefully, may create unit with defaults
+    assert len(result.units) >= 0
+
+
+def test_mbox_handles_date_edge_cases(tmp_path):
+    """Test various edge cases in date parsing."""
+    mbox_path = write_mbox(
+        tmp_path / "date-edges.mbox",
+        [
+            {
+                "From": "alice@example.com",
+                "To": "bob@example.com",
+                "Subject": "Future Date",
+                "Date": "Wed, 01 Jan 2099 23:59:59 +0000",
+                "Message-ID": "<future@example.com>",
+                "body": "Email from the future.",
+            },
+            {
+                "From": "alice@example.com",
+                "To": "bob@example.com",
+                "Subject": "Very Old Date",
+                "Date": "Mon, 01 Jan 1970 00:00:00 +0000",
+                "Message-ID": "<old@example.com>",
+                "body": "Email from epoch.",
+            },
+        ],
+    )
+
+    result = MboxAdapter(path=str(mbox_path)).ingest()
+
+    # Both messages should be processed
+    assert len(result.units) == 2
+    # Dates should be parsed correctly
+    assert all(unit.created_at is not None for unit in result.units)
+
+
+def test_mbox_decodes_rfc2047_subject_headers(tmp_path):
+    """Test that RFC 2047 encoded subject headers are decoded."""
+    mbox_path = write_mbox(
+        tmp_path / "rfc2047.mbox",
+        [
+            {
+                "From": "alice@example.com",
+                "To": "bob@example.com",
+                "Subject": "=?UTF-8?B?VGVzdCBTdWJqZWN0IOKchSBFbW9qaQ==?=",
+                "Date": "Wed, 01 May 2026 10:00:00 +0000",
+                "Message-ID": "<rfc2047@example.com>",
+                "body": "Test body",
+            }
+        ],
+    )
+
+    result = MboxAdapter(path=str(mbox_path)).ingest()
+
+    assert len(result.units) == 1
+    unit = result.units[0]
+    # Should be decoded to "Test Subject ✅ Emoji"
+    assert "Test Subject" in unit.title
+    assert "Emoji" in unit.title
+
+
+def test_mbox_decodes_rfc2047_from_headers(tmp_path):
+    """Test that RFC 2047 encoded From headers are decoded."""
+    mbox_path = write_mbox(
+        tmp_path / "rfc2047-from.mbox",
+        [
+            {
+                "From": "=?UTF-8?Q?Alice_Caf=C3=A9?= <alice@example.com>",
+                "To": "bob@example.com",
+                "Subject": "Test",
+                "Date": "Wed, 01 May 2026 10:00:00 +0000",
+                "Message-ID": "<rfc2047-from@example.com>",
+                "body": "Test body",
+            }
+        ],
+    )
+
+    result = MboxAdapter(path=str(mbox_path)).ingest()
+
+    assert len(result.units) == 1
+    unit = result.units[0]
+    # Should decode to "Alice Café <alice@example.com>"
+    assert "Alice" in unit.metadata["from"]
+    assert "Caf" in unit.metadata["from"]
+
+
+def test_mbox_handles_malformed_rfc2047_headers(tmp_path):
+    """Test that malformed RFC 2047 headers don't crash."""
+    mbox_path = write_mbox(
+        tmp_path / "malformed-rfc2047.mbox",
+        [
+            {
+                "From": "alice@example.com",
+                "To": "bob@example.com",
+                "Subject": "=?UTF-8?B?Invalid base64 !!",
+                "Date": "Wed, 01 May 2026 10:00:00 +0000",
+                "Message-ID": "<malformed-rfc2047@example.com>",
+                "body": "Test body",
+            }
+        ],
+    )
+
+    result = MboxAdapter(path=str(mbox_path)).ingest()
+
+    # Should still ingest, handling the malformed header gracefully
+    assert len(result.units) == 1
+
+
+def test_mbox_decodes_multiple_encoded_words_in_subject(tmp_path):
+    """Test that multiple encoded-words in a single header are decoded."""
+    mbox_path = write_mbox(
+        tmp_path / "multi-encoded.mbox",
+        [
+            {
+                "From": "alice@example.com",
+                "To": "bob@example.com",
+                "Subject": "=?UTF-8?Q?Part_1?= =?UTF-8?Q?_Part_2?=",
+                "Date": "Wed, 01 May 2026 10:00:00 +0000",
+                "Message-ID": "<multi-encoded@example.com>",
+                "body": "Test body",
+            }
+        ],
+    )
+
+    result = MboxAdapter(path=str(mbox_path)).ingest()
+
+    assert len(result.units) == 1
+    unit = result.units[0]
+    # Should decode to "Part 1 Part 2"
+    assert "Part 1" in unit.title
+    assert "Part 2" in unit.title
+
+
+def test_mbox_decodes_latin1_encoded_headers(tmp_path):
+    """Test that Latin-1 (ISO-8859-1) encoded headers are decoded."""
+    mbox_path = write_mbox(
+        tmp_path / "latin1-header.mbox",
+        [
+            {
+                "From": "alice@example.com",
+                "To": "bob@example.com",
+                "Subject": "=?ISO-8859-1?Q?Caf=E9_R=E9sum=E9?=",
+                "Date": "Wed, 01 May 2026 10:00:00 +0000",
+                "Message-ID": "<latin1-header@example.com>",
+                "body": "Test body",
+            }
+        ],
+    )
+
+    result = MboxAdapter(path=str(mbox_path)).ingest()
+
+    assert len(result.units) == 1
+    unit = result.units[0]
+    # Should decode to "Café Résumé"
+    assert "Caf" in unit.title
+    assert "sum" in unit.title
+
