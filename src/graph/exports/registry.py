@@ -76,7 +76,11 @@ def export_units(
 
 # Auto-register built-in exporters
 from graph.exports.html import export_units_to_html
+from graph.exports.ical import export_units_to_ical
 from graph.exports.json_units import export_units_to_json
+from graph.exports.markdown import export_units_to_markdown
 
 register_exporter("html", export_units_to_html)
+register_exporter("ical", export_units_to_ical)
 register_exporter("json", export_units_to_json)
+register_exporter("markdown", export_units_to_markdown)
