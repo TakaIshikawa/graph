@@ -149,7 +149,7 @@ def test_suggest_metadata_similarity_edges_validates_min_overlap(
 ):
     with pytest.raises(ValueError, match="min_overlap must be an integer >= 1"):
         GraphService(store).suggest_metadata_similarity_edges(
-            min_overlap=min_overlap,  # type: ignore[arg-type]
+            min_overlap=min_overlap,
         )
 
 
@@ -160,13 +160,13 @@ def test_suggest_metadata_similarity_edges_validates_top_n(
 ):
     with pytest.raises(ValueError, match="top_n must be an integer >= 0"):
         GraphService(store).suggest_metadata_similarity_edges(
-            top_n=top_n,  # type: ignore[arg-type]
+            top_n=top_n,
         )
 
 
 def test_suggest_metadata_similarity_edges_validates_metadata_keys(store: Store):
     with pytest.raises(ValueError, match="metadata_keys must be a sequence of strings"):
-        GraphService(store).suggest_metadata_similarity_edges(metadata_keys="topics")  # type: ignore[arg-type]
+        GraphService(store).suggest_metadata_similarity_edges(metadata_keys="topics")
 
 
 def test_suggest_metadata_similarity_edges_top_n_keeps_candidate_count(

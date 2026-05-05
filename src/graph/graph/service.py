@@ -532,11 +532,11 @@ def _metadata_similarity_values(value: object) -> dict[str, object]:
     return {_json_sort_key(_json_value(value)): _json_value(value)}
 
 
-def _validate_metadata_similarity_int(value: int, name: str, *, minimum: int) -> int:
+def _validate_metadata_similarity_int(value: object, name: str, *, minimum: int) -> int:
     if isinstance(value, bool):
         raise ValueError(f"{name} must be an integer >= {minimum}.")
     try:
-        parsed = int(value)
+        parsed = int(value)  # type: ignore[arg-type]
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{name} must be an integer >= {minimum}.") from exc
     if parsed < minimum:
@@ -572,8 +572,8 @@ def suggest_metadata_similarity_edges(
     edges,
     *,
     metadata_keys: Iterable[str] | None = None,
-    min_overlap: int = 2,
-    top_n: int = 20,
+    min_overlap: object = 2,
+    top_n: object = 20,
 ) -> dict:
     """Suggest missing edges between units with strong metadata value overlap."""
     overlap_threshold = _validate_metadata_similarity_int(
@@ -5916,8 +5916,8 @@ class GraphService:
         self,
         *,
         metadata_keys: Iterable[str] | None = None,
-        min_overlap: int = 2,
-        top_n: int = 20,
+        min_overlap: object = 2,
+        top_n: object = 20,
     ) -> dict:
         """Suggest missing edges between units with overlapping metadata values."""
         return suggest_metadata_similarity_edges(
