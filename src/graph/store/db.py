@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import urlsplit, urlunsplit
 
 from graph.store.migrations import SCHEMA_VERSION, ensure_schema
-from graph.types.enums import EdgeRelation, EdgeSource
+from graph.types.enums import EdgeRelation, EdgeSource, SourceProject
 from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 SAVED_QUERIES_SCHEMA_VERSION = 2
@@ -1539,6 +1539,54 @@ class Store:
         if limit is not None:
             query += " LIMIT ?"
             params.append(max(0, limit))
+        rows = self.conn.execute(query, params).fetchall()
+        return [_row_to_unit(r) for r in rows]
+
+    def get_units_by_source_project(
+        self,
+        source_project: SourceProject,
+        *,
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> list[KnowledgeUnit]:
+        """Query units filtered by SourceProject enum value.
+
+        Args:
+            source_project: SourceProject enum value to filter by
+            limit: Maximum number of units to return (optional)
+            offset: Number of units to skip (optional)
+
+        Returns:
+            List of units matching the source project, ordered by created_at DESC
+        """
+        if not isinstance(source_project, SourceProject):
+            raise TypeError(
+                f"source_project must be a SourceProject enum, got {type(source_project).__name__}"
+            )
+
+        query = "SELECT * FROM knowledge_units WHERE source_project = ? ORDER BY created_at DESC"
+        params: list[object] = [source_project.value]
+
+        # Validate parameters
+        if limit is not None and (not isinstance(limit, int) or isinstance(limit, bool) or limit < 0):
+            raise ValueError("limit must be a non-negative integer")
+
+        if offset is not None and (not isinstance(offset, int) or isinstance(offset, bool) or offset < 0):
+            raise ValueError("offset must be a non-negative integer")
+
+        # SQL requires LIMIT before OFFSET
+        # If offset is provided without limit, we need to use a large default limit
+        if offset is not None and limit is None:
+            query += " LIMIT -1 OFFSET ?"
+            params.append(offset)
+        elif limit is not None and offset is None:
+            query += " LIMIT ?"
+            params.append(limit)
+        elif limit is not None and offset is not None:
+            query += " LIMIT ? OFFSET ?"
+            params.append(limit)
+            params.append(offset)
+
         rows = self.conn.execute(query, params).fetchall()
         return [_row_to_unit(r) for r in rows]
 

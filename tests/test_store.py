@@ -3624,3 +3624,238 @@ class TestConnectionPoolExhaustionAndRecovery:
             store1.close()
             store2.close()
             db_path.unlink(missing_ok=True)
+
+
+class TestGetUnitsBySourceProject:
+    """Test get_units_by_source_project method."""
+
+    def test_get_units_by_source_project_basic(self, store: Store):
+        """Test basic filtering by source project."""
+        # Insert units from different source projects
+        max_unit1 = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="max-1",
+                source_entity_type="insight",
+                title="MAX Unit 1",
+                content="From MAX",
+                content_type=ContentType.INSIGHT,
+            )
+        )
+        max_unit2 = store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="max-2",
+                source_entity_type="insight",
+                title="MAX Unit 2",
+                content="Also from MAX",
+                content_type=ContentType.INSIGHT,
+            )
+        )
+        store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="42-1",
+                source_entity_type="insight",
+                title="42 Unit",
+                content="From FORTY_TWO",
+                content_type=ContentType.INSIGHT,
+            )
+        )
+
+        # Query for MAX units
+        results = store.get_units_by_source_project(SourceProject.MAX)
+
+        assert len(results) == 2
+        result_ids = {unit.id for unit in results}
+        assert result_ids == {max_unit1.id, max_unit2.id}
+        assert all(unit.source_project == SourceProject.MAX for unit in results)
+
+    def test_get_units_by_source_project_with_limit(self, store: Store):
+        """Test pagination with limit parameter."""
+        # Insert multiple units
+        for i in range(5):
+            store.insert_unit(
+                KnowledgeUnit(
+                    source_project=SourceProject.MAX,
+                    source_id=f"unit-{i}",
+                    source_entity_type="insight",
+                    title=f"Unit {i}",
+                    content=f"Content {i}",
+                    content_type=ContentType.INSIGHT,
+                )
+            )
+
+        # Query with limit
+        results = store.get_units_by_source_project(SourceProject.MAX, limit=3)
+
+        assert len(results) == 3
+
+    def test_get_units_by_source_project_with_offset(self, store: Store):
+        """Test pagination with offset parameter."""
+        # Insert units
+        units = []
+        for i in range(5):
+            unit = store.insert_unit(
+                KnowledgeUnit(
+                    source_project=SourceProject.MAX,
+                    source_id=f"unit-{i}",
+                    source_entity_type="insight",
+                    title=f"Unit {i}",
+                    content=f"Content {i}",
+                    content_type=ContentType.INSIGHT,
+                )
+            )
+            units.append(unit)
+
+        # Query with offset
+        results = store.get_units_by_source_project(SourceProject.MAX, offset=2)
+
+        assert len(results) == 3
+        # Should get the first 3 units (excluding last 2 due to DESC order and offset)
+        result_ids = {unit.id for unit in results}
+        assert units[0].id in result_ids
+        assert units[1].id in result_ids
+        assert units[2].id in result_ids
+
+    def test_get_units_by_source_project_with_limit_and_offset(self, store: Store):
+        """Test pagination with both limit and offset."""
+        # Insert units
+        for i in range(10):
+            store.insert_unit(
+                KnowledgeUnit(
+                    source_project=SourceProject.MAX,
+                    source_id=f"unit-{i}",
+                    source_entity_type="insight",
+                    title=f"Unit {i}",
+                    content=f"Content {i}",
+                    content_type=ContentType.INSIGHT,
+                )
+            )
+
+        # Query with both limit and offset
+        results = store.get_units_by_source_project(SourceProject.MAX, limit=3, offset=2)
+
+        assert len(results) == 3
+
+    def test_get_units_by_source_project_empty_result(self, store: Store):
+        """Test that empty list is returned when no units match."""
+        # Insert units from other projects
+        store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="42-1",
+                source_entity_type="insight",
+                title="42 Unit",
+                content="From FORTY_TWO",
+                content_type=ContentType.INSIGHT,
+            )
+        )
+
+        # Query for different project
+        results = store.get_units_by_source_project(SourceProject.MAX)
+
+        assert len(results) == 0
+
+    def test_get_units_by_source_project_ordered_by_created_at_desc(self, store: Store):
+        """Test that results are ordered by created_at descending."""
+        import time
+
+        units = []
+        for i in range(3):
+            unit = store.insert_unit(
+                KnowledgeUnit(
+                    source_project=SourceProject.MAX,
+                    source_id=f"unit-{i}",
+                    source_entity_type="insight",
+                    title=f"Unit {i}",
+                    content=f"Content {i}",
+                    content_type=ContentType.INSIGHT,
+                )
+            )
+            units.append(unit)
+            time.sleep(0.01)
+
+        results = store.get_units_by_source_project(SourceProject.MAX)
+
+        # Should be in reverse order (newest first)
+        assert len(results) == 3
+        assert results[0].id == units[2].id
+        assert results[1].id == units[1].id
+        assert results[2].id == units[0].id
+
+    def test_get_units_by_source_project_validates_source_project_type(self, store: Store):
+        """Test that non-SourceProject values raise TypeError."""
+        with pytest.raises(TypeError, match="source_project must be a SourceProject enum"):
+            store.get_units_by_source_project("max")  # type: ignore
+
+        with pytest.raises(TypeError, match="source_project must be a SourceProject enum"):
+            store.get_units_by_source_project(123)  # type: ignore
+
+    def test_get_units_by_source_project_validates_limit(self, store: Store):
+        """Test that invalid limit values raise ValueError."""
+        with pytest.raises(ValueError, match="limit must be a non-negative integer"):
+            store.get_units_by_source_project(SourceProject.MAX, limit=-1)
+
+        with pytest.raises(ValueError, match="limit must be a non-negative integer"):
+            store.get_units_by_source_project(SourceProject.MAX, limit="invalid")  # type: ignore
+
+        with pytest.raises(ValueError, match="limit must be a non-negative integer"):
+            store.get_units_by_source_project(SourceProject.MAX, limit=True)  # type: ignore
+
+    def test_get_units_by_source_project_validates_offset(self, store: Store):
+        """Test that invalid offset values raise ValueError."""
+        with pytest.raises(ValueError, match="offset must be a non-negative integer"):
+            store.get_units_by_source_project(SourceProject.MAX, offset=-1)
+
+        with pytest.raises(ValueError, match="offset must be a non-negative integer"):
+            store.get_units_by_source_project(SourceProject.MAX, offset="invalid")  # type: ignore
+
+        with pytest.raises(ValueError, match="offset must be a non-negative integer"):
+            store.get_units_by_source_project(SourceProject.MAX, offset=True)  # type: ignore
+
+    def test_get_units_by_source_project_different_source_projects(self, store: Store):
+        """Test querying different source projects."""
+        # Insert units from multiple projects
+        store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.MAX,
+                source_id="max-1",
+                source_entity_type="insight",
+                title="MAX Unit",
+                content="From MAX",
+                content_type=ContentType.INSIGHT,
+            )
+        )
+        store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.FORTY_TWO,
+                source_id="42-1",
+                source_entity_type="insight",
+                title="42 Unit",
+                content="From FORTY_TWO",
+                content_type=ContentType.INSIGHT,
+            )
+        )
+        store.insert_unit(
+            KnowledgeUnit(
+                source_project=SourceProject.PRESENCE,
+                source_id="presence-1",
+                source_entity_type="insight",
+                title="Presence Unit",
+                content="From PRESENCE",
+                content_type=ContentType.INSIGHT,
+            )
+        )
+
+        # Query each project
+        max_results = store.get_units_by_source_project(SourceProject.MAX)
+        forty_two_results = store.get_units_by_source_project(SourceProject.FORTY_TWO)
+        presence_results = store.get_units_by_source_project(SourceProject.PRESENCE)
+
+        assert len(max_results) == 1
+        assert len(forty_two_results) == 1
+        assert len(presence_results) == 1
+        assert max_results[0].source_project == SourceProject.MAX
+        assert forty_two_results[0].source_project == SourceProject.FORTY_TWO
+        assert presence_results[0].source_project == SourceProject.PRESENCE
