@@ -1731,3 +1731,126 @@ def test_mbox_handles_date_edge_cases(tmp_path):
     assert len(result.units) == 2
     # Dates should be parsed correctly
     assert all(unit.created_at is not None for unit in result.units)
+
+
+def test_mbox_decodes_rfc2047_subject_headers(tmp_path):
+    """Test that RFC 2047 encoded subject headers are decoded."""
+    mbox_path = write_mbox(
+        tmp_path / "rfc2047.mbox",
+        [
+            {
+                "From": "alice@example.com",
+                "To": "bob@example.com",
+                "Subject": "=?UTF-8?B?VGVzdCBTdWJqZWN0IOKchSBFbW9qaQ==?=",
+                "Date": "Wed, 01 May 2026 10:00:00 +0000",
+                "Message-ID": "<rfc2047@example.com>",
+                "body": "Test body",
+            }
+        ],
+    )
+
+    result = MboxAdapter(path=str(mbox_path)).ingest()
+
+    assert len(result.units) == 1
+    unit = result.units[0]
+    # Should be decoded to "Test Subject ✅ Emoji"
+    assert "Test Subject" in unit.title
+    assert "Emoji" in unit.title
+
+
+def test_mbox_decodes_rfc2047_from_headers(tmp_path):
+    """Test that RFC 2047 encoded From headers are decoded."""
+    mbox_path = write_mbox(
+        tmp_path / "rfc2047-from.mbox",
+        [
+            {
+                "From": "=?UTF-8?Q?Alice_Caf=C3=A9?= <alice@example.com>",
+                "To": "bob@example.com",
+                "Subject": "Test",
+                "Date": "Wed, 01 May 2026 10:00:00 +0000",
+                "Message-ID": "<rfc2047-from@example.com>",
+                "body": "Test body",
+            }
+        ],
+    )
+
+    result = MboxAdapter(path=str(mbox_path)).ingest()
+
+    assert len(result.units) == 1
+    unit = result.units[0]
+    # Should decode to "Alice Café <alice@example.com>"
+    assert "Alice" in unit.metadata["from"]
+    assert "Caf" in unit.metadata["from"]
+
+
+def test_mbox_handles_malformed_rfc2047_headers(tmp_path):
+    """Test that malformed RFC 2047 headers don't crash."""
+    mbox_path = write_mbox(
+        tmp_path / "malformed-rfc2047.mbox",
+        [
+            {
+                "From": "alice@example.com",
+                "To": "bob@example.com",
+                "Subject": "=?UTF-8?B?Invalid base64 !!",
+                "Date": "Wed, 01 May 2026 10:00:00 +0000",
+                "Message-ID": "<malformed-rfc2047@example.com>",
+                "body": "Test body",
+            }
+        ],
+    )
+
+    result = MboxAdapter(path=str(mbox_path)).ingest()
+
+    # Should still ingest, handling the malformed header gracefully
+    assert len(result.units) == 1
+
+
+def test_mbox_decodes_multiple_encoded_words_in_subject(tmp_path):
+    """Test that multiple encoded-words in a single header are decoded."""
+    mbox_path = write_mbox(
+        tmp_path / "multi-encoded.mbox",
+        [
+            {
+                "From": "alice@example.com",
+                "To": "bob@example.com",
+                "Subject": "=?UTF-8?Q?Part_1?= =?UTF-8?Q?_Part_2?=",
+                "Date": "Wed, 01 May 2026 10:00:00 +0000",
+                "Message-ID": "<multi-encoded@example.com>",
+                "body": "Test body",
+            }
+        ],
+    )
+
+    result = MboxAdapter(path=str(mbox_path)).ingest()
+
+    assert len(result.units) == 1
+    unit = result.units[0]
+    # Should decode to "Part 1 Part 2"
+    assert "Part 1" in unit.title
+    assert "Part 2" in unit.title
+
+
+def test_mbox_decodes_latin1_encoded_headers(tmp_path):
+    """Test that Latin-1 (ISO-8859-1) encoded headers are decoded."""
+    mbox_path = write_mbox(
+        tmp_path / "latin1-header.mbox",
+        [
+            {
+                "From": "alice@example.com",
+                "To": "bob@example.com",
+                "Subject": "=?ISO-8859-1?Q?Caf=E9_R=E9sum=E9?=",
+                "Date": "Wed, 01 May 2026 10:00:00 +0000",
+                "Message-ID": "<latin1-header@example.com>",
+                "body": "Test body",
+            }
+        ],
+    )
+
+    result = MboxAdapter(path=str(mbox_path)).ingest()
+
+    assert len(result.units) == 1
+    unit = result.units[0]
+    # Should decode to "Café Résumé"
+    assert "Caf" in unit.title
+    assert "sum" in unit.title
+

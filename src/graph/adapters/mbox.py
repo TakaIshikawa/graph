@@ -6,6 +6,7 @@ import hashlib
 import mailbox
 import re
 from datetime import datetime, timezone
+from email.header import decode_header
 from email.utils import parsedate_to_datetime
 from html import unescape
 from html.parser import HTMLParser
@@ -306,7 +307,35 @@ class MboxAdapter(SourceAdapter):
         return parser.text()
 
     def _clean_header(self, value: str) -> str:
-        return value.strip() if value else ""
+        """Clean and decode RFC 2047 encoded email headers."""
+        if not value:
+            return ""
+
+        try:
+            # decode_header returns a list of (decoded_bytes, charset) tuples
+            decoded_parts = decode_header(value)
+            result_parts = []
+
+            for decoded_bytes, charset in decoded_parts:
+                if isinstance(decoded_bytes, bytes):
+                    # Decode bytes to string using specified charset or UTF-8 fallback
+                    try:
+                        if charset:
+                            text = decoded_bytes.decode(charset, errors="replace")
+                        else:
+                            text = decoded_bytes.decode("utf-8", errors="replace")
+                    except (LookupError, UnicodeDecodeError):
+                        # Unknown charset or decode error, fallback to UTF-8
+                        text = decoded_bytes.decode("utf-8", errors="replace")
+                    result_parts.append(text)
+                else:
+                    # Already a string
+                    result_parts.append(str(decoded_bytes))
+
+            return " ".join(result_parts).strip()
+        except (ValueError, TypeError):
+            # Malformed header, return as-is
+            return value.strip()
 
     def _parse_references(self, references_header: str) -> list[str]:
         """Parse References header into list of message IDs."""
