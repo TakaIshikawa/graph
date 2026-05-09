@@ -1,0 +1,279 @@
+{
+  "batch": 21,
+  "tasks": [
+    {
+      "title": "Add fuzzy search and faceted filtering to Store",
+      "prompt": "Implement advanced search capabilities in Store class with fuzzy matching, faceted filtering, and search highlighting. Add search_fuzzy() method supporting Levenshtein distance matching for text queries, search_faceted() for multi-dimensional filtering with aggregation results, and get_search_highlights() for snippet generation with matched terms highlighted. Support search parameters: fuzzy_threshold (0-1), facet_fields (list of metadata keys), aggregation_functions (count, unique, range), highlight_format (html, markdown, plain), max_results, offset for pagination. Return SearchResult objects containing matched units, relevance scores, facet aggregations, and highlighted snippets. Include query explanation for debugging.",
+      "category": "store-method",
+      "priority": 2,
+      "rationale": "Advanced search is essential for large knowledge graphs. Fuzzy matching handles typos and variations, faceted search enables exploratory filtering, and highlighting improves UX. These features are standard in modern search systems (Elasticsearch, Solr) and significantly improve discoverability.",
+      "estimatedScope": "medium",
+      "dependsOn": [],
+      "expectedFiles": [
+        "src/graph/store/db.py",
+        "src/graph/store/search.py",
+        "src/graph/types.py",
+        "tests/test_store_search_advanced.py"
+      ],
+      "acceptanceCriteria": [
+        "search_fuzzy() matches text with configurable Levenshtein distance",
+        "search_faceted() returns aggregated facet counts and filtered results",
+        "get_search_highlights() generates snippets with highlighted matches",
+        "Supports pagination with offset and max_results",
+        "Returns relevance scores for ranking",
+        "Query explanation available for debugging",
+        "Performance acceptable for 10k+ unit graphs",
+        "Tests cover fuzzy threshold variations and facet combinations"
+      ],
+      "testCommand": "pytest tests/test_store_search_advanced.py -v",
+      "riskLevel": "medium",
+      "executionPack": "search-features"
+    },
+    {
+      "title": "Add graph versioning with history tracking and rollback",
+      "prompt": "Implement version control for the graph Store with commit-style snapshots, history tracking, and rollback capabilities. Add commit_snapshot(message, author, metadata) to save current graph state with metadata, get_history(limit, offset, author_filter) to retrieve commit history, rollback_to_version(version_id) to restore graph to previous state, diff_versions(v1, v2) to compare two snapshots, and branch_graph(branch_name) to create named branches for experimentation. Store snapshots efficiently using delta compression for large graphs. Support tags for important versions and merge operations for combining branches. Include version metadata: timestamp, author, message, parent_version_id, affected_units_count.",
+      "category": "store-method",
+      "priority": 2,
+      "rationale": "Version control is critical for knowledge graphs that evolve over time. Users need to experiment safely, track changes, understand how the graph developed, and recover from mistakes. This mirrors Git's value for code—essential for production systems and collaborative workflows.",
+      "estimatedScope": "large",
+      "dependsOn": [],
+      "expectedFiles": [
+        "src/graph/store/db.py",
+        "src/graph/store/versioning.py",
+        "src/graph/store/delta.py",
+        "tests/test_store_versioning.py"
+      ],
+      "acceptanceCriteria": [
+        "commit_snapshot() creates recoverable snapshots with metadata",
+        "get_history() returns chronological commit history",
+        "rollback_to_version() restores graph to previous state",
+        "diff_versions() shows added/removed/modified units and edges",
+        "branch_graph() creates independent experimental branches",
+        "Delta compression keeps storage overhead under 20% for typical graphs",
+        "Supports tags for marking important versions",
+        "Tests cover branching, merging, and rollback scenarios"
+      ],
+      "testCommand": "pytest tests/test_store_versioning.py -v",
+      "riskLevel": "high",
+      "executionPack": "versioning-collaboration"
+    },
+    {
+      "title": "Add real-time collaboration with conflict resolution",
+      "prompt": "Implement real-time multi-user collaboration for the graph Store with operational transformation (OT) or CRDT-based conflict resolution. Add register_client(client_id, metadata) to join collaborative session, broadcast_operation(op_type, data) to propagate changes, receive_operations(client_id) to fetch remote changes, resolve_conflicts(operations) to handle concurrent edits using OT or CRDT algorithms, and get_active_clients() to list connected users. Support operation types: add_unit, remove_unit, update_unit, add_edge, remove_edge. Include presence awareness showing who's viewing/editing which parts of the graph. Emit events for remote changes to enable real-time UI updates.",
+      "category": "store-method",
+      "priority": 3,
+      "rationale": "Collaborative knowledge building is powerful but requires conflict resolution. Multiple users editing the same graph concurrently creates race conditions and merge conflicts. OT/CRDT algorithms solve this, enabling Google Docs-style real-time collaboration for knowledge graphs.",
+      "estimatedScope": "large",
+      "dependsOn": [],
+      "expectedFiles": [
+        "src/graph/store/db.py",
+        "src/graph/store/collaboration.py",
+        "src/graph/store/ot.py",
+        "tests/test_store_collaboration.py"
+      ],
+      "acceptanceCriteria": [
+        "Multiple clients can edit graph concurrently without data loss",
+        "Conflicts automatically resolved using OT or CRDT",
+        "broadcast_operation() propagates changes to all clients",
+        "receive_operations() fetches and applies remote changes",
+        "Presence awareness shows active users and their focus",
+        "Operations causally ordered for consistency",
+        "Handles network partitions gracefully",
+        "Tests cover concurrent edits and conflict scenarios"
+      ],
+      "testCommand": "pytest tests/test_store_collaboration.py -v",
+      "riskLevel": "high",
+      "executionPack": "versioning-collaboration"
+    },
+    {
+      "title": "Add browser extension for web content clipping",
+      "prompt": "Create browser extension (Chrome/Firefox/Safari) for clipping web content into the graph. Extension features: 1) Highlight text on any webpage and add as unit with automatic metadata (URL, title, author, timestamp, selection context), 2) Clip entire articles with reader mode extraction (main content, images, metadata), 3) Create edges between clipped units directly in browser, 4) Search existing graph and link new clips to related units, 5) Offline queue for when graph server is unreachable. UI: sidebar panel for search and recent clips, context menu for quick clipping, popup for settings and sync status. Communicate with graph API via REST/GraphQL. Support custom templates for different site types (Twitter, Reddit, GitHub, Medium).",
+      "category": "integration",
+      "priority": 2,
+      "rationale": "Web browsing generates massive amounts of valuable information that's currently siloed in browser bookmarks or lost. A clipping extension makes knowledge capture frictionless at the point of discovery, dramatically increasing graph utility. This is how tools like Notion, Obsidian, and Roam grow user engagement.",
+      "estimatedScope": "large",
+      "dependsOn": [],
+      "expectedFiles": [
+        "browser-extension/manifest.json",
+        "browser-extension/src/content.js",
+        "browser-extension/src/background.js",
+        "browser-extension/src/popup.html",
+        "browser-extension/src/sidebar.js",
+        "browser-extension/src/api-client.js",
+        "tests/test_extension.js"
+      ],
+      "acceptanceCriteria": [
+        "Text selection creates unit with webpage metadata",
+        "Article clipping extracts main content using reader mode",
+        "Sidebar shows existing units and search results",
+        "Context menu provides quick clip actions",
+        "Offline queue syncs when connection restored",
+        "Custom templates for Twitter, Reddit, GitHub, Medium",
+        "Works on Chrome, Firefox, and Safari",
+        "Extension settings persist across sessions"
+      ],
+      "testCommand": "npm test --prefix browser-extension",
+      "riskLevel": "medium",
+      "executionPack": "search-features"
+    },
+    {
+      "title": "Add email newsletter adapter supporting Substack and Buttondown",
+      "prompt": "Implement newsletter import adapter supporting Substack and Buttondown APIs. For each platform: authenticate via API key, fetch all newsletters user is subscribed to, import individual posts as units with metadata (title, author, publication, publish_date, content, tags, subscriber_count, like_count), create edges between posts and publications, handle embedded images and links, respect rate limits. Support incremental sync for new posts only. Map newsletter-specific metadata: author_bio, publication_description, category, is_paid, archive_url. Handle HTML content conversion to clean text/markdown. Provide CLI commands: graph import newsletter --platform substack --api-key KEY and graph import newsletter --platform buttondown --token TOKEN.",
+      "category": "import-adapter",
+      "priority": 2,
+      "rationale": "Email newsletters are a major source of curated knowledge (especially technical newsletters, industry insights, research summaries). Substack and Buttondown are the leading platforms. Importing newsletters makes this valuable content searchable, linkable, and integrable with other knowledge sources.",
+      "estimatedScope": "medium",
+      "dependsOn": [],
+      "expectedFiles": [
+        "src/graph/adapters/newsletter.py",
+        "src/graph/adapters/substack.py",
+        "src/graph/adapters/buttondown.py",
+        "tests/test_newsletter_adapter.py"
+      ],
+      "acceptanceCriteria": [
+        "Substack adapter fetches all subscribed newsletters and posts",
+        "Buttondown adapter imports newsletters via API",
+        "Units include full content and metadata",
+        "Edges connect posts to publications",
+        "Incremental sync fetches only new posts",
+        "HTML content cleaned to markdown",
+        "Rate limiting respected",
+        "CLI commands work for both platforms"
+      ],
+      "testCommand": "pytest tests/test_newsletter_adapter.py -v",
+      "riskLevel": "low",
+      "executionPack": "search-features"
+    },
+    {
+      "title": "Add sensor data adapter for IoT time-series ingestion",
+      "prompt": "Implement adapter for ingesting IoT sensor data streams in common time-series formats: InfluxDB line protocol, Prometheus metrics, MQTT messages, and CSV time-series. Parse sensor readings into units with metadata: sensor_id, sensor_type, timestamp, value, unit_of_measurement, location, device_id. Create temporal edges between consecutive readings from same sensor. Support aggregation: downsample high-frequency data (e.g., 1-second readings to 1-minute averages) to prevent graph bloat. Handle multiple value types: numeric, boolean, string, JSON. Support batch ingestion from files and streaming ingestion from MQTT brokers or HTTP endpoints. Include data quality checks: detect out-of-range values, gaps, duplicates.",
+      "category": "import-adapter",
+      "priority": 3,
+      "rationale": "IoT and sensor data is increasingly important for personal tracking (smart homes, wearables, environmental monitoring) and industrial applications. Time-series data in knowledge graphs enables correlation analysis (e.g., 'how does room temperature correlate with my productivity?'). Unique challenge is handling high-volume streaming data.",
+      "estimatedScope": "medium",
+      "dependsOn": [],
+      "expectedFiles": [
+        "src/graph/adapters/sensor.py",
+        "src/graph/adapters/influxdb_adapter.py",
+        "src/graph/adapters/mqtt_adapter.py",
+        "tests/test_sensor_adapter.py"
+      ],
+      "acceptanceCriteria": [
+        "Parses InfluxDB line protocol, Prometheus, MQTT, CSV formats",
+        "Units include sensor metadata and readings",
+        "Temporal edges connect consecutive readings",
+        "Downsampling reduces high-frequency data",
+        "Streaming ingestion from MQTT brokers works",
+        "Data quality checks flag anomalies",
+        "Supports multiple value types",
+        "Batch and streaming modes both functional"
+      ],
+      "testCommand": "pytest tests/test_sensor_adapter.py -v",
+      "riskLevel": "medium",
+      "executionPack": "search-features"
+    },
+    {
+      "title": "Add interactive graph visualization export to Cytoscape.js",
+      "prompt": "Implement export adapter generating interactive web-based graph visualizations using Cytoscape.js library. Export produces standalone HTML file with embedded graph data and interactive controls: pan, zoom, node selection, edge filtering, layout switching (force-directed, hierarchical, circular, grid), search/highlight, node clustering, path highlighting. Support styling: map node metadata to size/color/shape, edge metadata to width/color/style. Include UI controls: filter panel (by metadata), layout selector, export screenshot (PNG/SVG), permalink for sharing. Optimize for graphs up to 1000 nodes (warn for larger graphs). Generate self-contained HTML with CDN-loaded libraries or optionally bundle dependencies.",
+      "category": "export-adapter",
+      "priority": 2,
+      "rationale": "Static graph exports (GraphML, DOT) require specialized software. Interactive web visualizations are shareable, accessible, and explorable without installing anything. Cytoscape.js is the leading web graph visualization library. This makes graphs instantly accessible to non-technical stakeholders and enables easy sharing/embedding.",
+      "estimatedScope": "medium",
+      "dependsOn": [],
+      "expectedFiles": [
+        "src/graph/exports/cytoscape.py",
+        "src/graph/exports/templates/cytoscape.html",
+        "tests/test_cytoscape_export.py"
+      ],
+      "acceptanceCriteria": [
+        "Exports standalone HTML with embedded graph data",
+        "Interactive controls: pan, zoom, select, filter",
+        "Multiple layout algorithms available",
+        "Metadata mapped to visual properties",
+        "Search and highlight functionality",
+        "Screenshot export to PNG/SVG",
+        "Works for graphs up to 1000 nodes",
+        "Self-contained HTML requires no external files"
+      ],
+      "testCommand": "pytest tests/test_cytoscape_export.py -v",
+      "riskLevel": "low",
+      "executionPack": "search-features"
+    },
+    {
+      "title": "Add performance optimization with caching and query planning",
+      "prompt": "Implement comprehensive caching and query optimization layer in Store class. Add query_cache with LRU eviction for frequently-run queries (search, get_neighbors, get_subgraph), result_cache for expensive computations (centrality, clustering, embeddings), and metadata_index for fast filtering by metadata fields. Implement query planner that analyzes graph queries and chooses optimal execution strategy: indexed lookup vs. full scan, early filtering, join order optimization. Add cache warming on startup for common queries, cache invalidation on graph mutations, and cache statistics (hit rate, eviction count). Support configuration: cache_size_mb, cache_ttl_seconds, enable_query_planning. Include performance monitoring: query execution time, cache hit rates, index usage.",
+      "category": "store-method",
+      "priority": 1,
+      "rationale": "Performance becomes critical as graphs grow beyond 10k units. Naive graph traversal is O(n) or O(n²), but caching and indexing can reduce to O(1) or O(log n) for common operations. Query planning prevents pathological cases. These optimizations make the difference between unusable and production-ready for large graphs.",
+      "estimatedScope": "large",
+      "dependsOn": [],
+      "expectedFiles": [
+        "src/graph/store/db.py",
+        "src/graph/store/cache.py",
+        "src/graph/store/query_planner.py",
+        "src/graph/store/indexing.py",
+        "tests/test_store_performance.py"
+      ],
+      "acceptanceCriteria": [
+        "Query cache speeds up repeated searches by 10x+",
+        "Result cache eliminates redundant expensive computations",
+        "Metadata indexes enable fast filtering without full scans",
+        "Query planner chooses indexed lookup over full scan when beneficial",
+        "Cache automatically invalidates on graph mutations",
+        "Performance monitoring shows query times and cache hit rates",
+        "Configuration allows tuning cache size and TTL",
+        "Benchmarks show 5-10x improvement on typical workloads"
+      ],
+      "testCommand": "pytest tests/test_store_performance.py -v",
+      "riskLevel": "high",
+      "executionPack": "search-features"
+    }
+  ],
+  "executionPacks": [
+    {
+      "name": "search-features",
+      "tasks": [1, 4, 5, 6, 7, 8],
+      "description": "Advanced search, browser extension, newsletter/sensor import, Cytoscape export, and performance optimization",
+      "estimatedTotalEffort": "large",
+      "batchabilityScore": 0.85,
+      "rationale": "These features enhance discoverability, data capture, and performance. All are independent and can be developed in parallel. Mix of store methods, imports, exports, and integrations provides variety while maintaining focus on search/discovery/performance theme."
+    },
+    {
+      "name": "versioning-collaboration",
+      "tasks": [2, 3],
+      "description": "Graph versioning with history tracking and real-time collaboration with conflict resolution",
+      "estimatedTotalEffort": "large",
+      "batchabilityScore": 0.90,
+      "rationale": "Both features address multi-user scenarios and require sophisticated state management. Versioning is prerequisite for safe collaboration (users need rollback when collaboration conflicts can't auto-resolve). High technical complexity but clearly scoped. Can be developed sequentially: versioning first, then collaboration."
+    }
+  ],
+  "metadata": {
+    "totalTasks": 8,
+    "totalPacks": 2,
+    "categories": {
+      "store-method": 4,
+      "import-adapter": 2,
+      "export-adapter": 1,
+      "integration": 1
+    },
+    "priorities": {
+      "1": 1,
+      "2": 5,
+      "3": 2
+    },
+    "estimatedScopes": {
+      "medium": 5,
+      "large": 3
+    },
+    "newCapabilities": [
+      "Fuzzy search and faceted filtering",
+      "Graph version control with rollback",
+      "Real-time collaboration with conflict resolution",
+      "Browser extension for web clipping",
+      "Newsletter import (Substack, Buttondown)",
+      "IoT sensor data ingestion",
+      "Interactive Cytoscape.js visualization",
+      "Performance optimization with caching"
+    ]
+  }
+}
