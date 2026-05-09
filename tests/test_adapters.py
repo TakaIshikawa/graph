@@ -2106,7 +2106,7 @@ class TestFeedAdapter:
 
         assert len(first.units) == 1
         unit = first.units[0]
-        assert unit.source_project == "me"
+        assert unit.source_project == "feed"
         assert unit.source_entity_type == "feed_item"
         assert unit.content_type == "artifact"
         assert unit.title == "Solar storage update"
