@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import sqlite3
+import struct
 import uuid
 import csv
 from collections import Counter, defaultdict
@@ -4783,3 +4785,367 @@ class Store:
         if source_project == "forty_two" or edge.source == EdgeSource.SOURCE:
             return "knowledge_node"
         return "knowledge_node"
+
+    # --- Analytics: Knowledge Gaps ---
+
+    @staticmethod
+    def _decode_embedding(blob: bytes) -> list[float]:
+        """Decode a BLOB embedding into a list of floats."""
+        n = len(blob) // 4
+        return list(struct.unpack(f"{n}f", blob))
+
+    @staticmethod
+    def _cosine_similarity(a: list[float], b: list[float]) -> float:
+        """Compute cosine similarity between two vectors."""
+        dot = sum(x * y for x, y in zip(a, b))
+        norm_a = math.sqrt(sum(x * x for x in a))
+        norm_b = math.sqrt(sum(x * x for x in b))
+        if norm_a == 0.0 or norm_b == 0.0:
+            return 0.0
+        return dot / (norm_a * norm_b)
+
+    def identify_knowledge_gaps(
+        self,
+        min_similarity: float = 0.3,
+        max_connections: int = 2,
+        cluster_threshold: int = 5,
+        source_filter: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Identify knowledge gaps by finding under-connected topics and sparse regions.
+
+        Analyzes the knowledge graph to find isolated or under-connected units,
+        uses semantic similarity (embeddings) to identify units that should be
+        related but aren't, and detects sparse regions in the semantic space.
+
+        Args:
+            min_similarity: minimum cosine similarity to consider units semantically related
+            max_connections: maximum existing edge count for a unit to qualify as a gap
+            cluster_threshold: minimum units in a cluster to not be considered sparse
+            source_filter: optional source_project filter
+
+        Returns:
+            List of gap pattern dicts with keys: gap_type, unit_ids,
+            suggested_connections, semantic_cluster, coverage_score
+        """
+        # Fetch units with embeddings
+        query = "SELECT id, source_project, embedding FROM knowledge_units WHERE embedding IS NOT NULL"
+        params: list[object] = []
+        if source_filter:
+            query += " AND source_project = ?"
+            params.append(source_filter)
+
+        rows = self.conn.execute(query, params).fetchall()
+
+        if not rows:
+            return []
+
+        # Decode embeddings and build lookup
+        unit_ids: list[str] = []
+        embeddings: list[list[float]] = []
+        for row in rows:
+            unit_ids.append(row["id"])
+            embeddings.append(self._decode_embedding(row["embedding"]))
+
+        # Build edge count map for these units
+        placeholders = ",".join("?" for _ in unit_ids)
+        edge_rows = self.conn.execute(
+            f"""SELECT from_unit_id, to_unit_id FROM edges
+                WHERE from_unit_id IN ({placeholders})
+                   OR to_unit_id IN ({placeholders})""",
+            unit_ids + unit_ids,
+        ).fetchall()
+
+        edge_count: dict[str, int] = defaultdict(int)
+        edge_neighbors: dict[str, set[str]] = defaultdict(set)
+        for er in edge_rows:
+            fid, tid = er["from_unit_id"], er["to_unit_id"]
+            edge_count[fid] += 1
+            edge_count[tid] += 1
+            edge_neighbors[fid].add(tid)
+            edge_neighbors[tid].add(fid)
+
+        # Compute pairwise similarities
+        n = len(unit_ids)
+        sim_matrix: list[list[float]] = [[0.0] * n for _ in range(n)]
+        for i in range(n):
+            sim_matrix[i][i] = 1.0
+            for j in range(i + 1, n):
+                s = self._cosine_similarity(embeddings[i], embeddings[j])
+                sim_matrix[i][j] = s
+                sim_matrix[j][i] = s
+
+        # Index mapping
+        id_to_idx = {uid: idx for idx, uid in enumerate(unit_ids)}
+
+        gaps: list[dict[str, Any]] = []
+
+        # --- 1. Isolated units (zero connections) ---
+        for idx, uid in enumerate(unit_ids):
+            if edge_count.get(uid, 0) == 0:
+                # Find semantically similar units to suggest connections
+                similar = [
+                    (unit_ids[j], sim_matrix[idx][j])
+                    for j in range(n)
+                    if j != idx and sim_matrix[idx][j] >= min_similarity
+                ]
+                similar.sort(key=lambda x: x[1], reverse=True)
+                suggested = [
+                    {"from_unit_id": uid, "to_unit_id": sid, "similarity": round(score, 4)}
+                    for sid, score in similar[:5]
+                ]
+                # Coverage: 0 since fully isolated
+                gaps.append({
+                    "gap_type": "isolated_unit",
+                    "unit_ids": [uid],
+                    "suggested_connections": suggested,
+                    "semantic_cluster": None,
+                    "coverage_score": 0.0,
+                })
+
+        # --- 2. Under-connected topics (few edges despite semantic relevance) ---
+        for idx, uid in enumerate(unit_ids):
+            conn_count = edge_count.get(uid, 0)
+            if conn_count == 0:
+                continue  # already captured as isolated
+            if conn_count > max_connections:
+                continue
+
+            # Find semantically related but unconnected units
+            neighbors = edge_neighbors.get(uid, set())
+            missing = []
+            for j in range(n):
+                other_id = unit_ids[j]
+                if other_id == uid or other_id in neighbors:
+                    continue
+                if sim_matrix[idx][j] >= min_similarity:
+                    missing.append((other_id, sim_matrix[idx][j]))
+
+            if not missing:
+                continue
+
+            missing.sort(key=lambda x: x[1], reverse=True)
+            suggested = [
+                {"from_unit_id": uid, "to_unit_id": sid, "similarity": round(score, 4)}
+                for sid, score in missing[:5]
+            ]
+            # Coverage: ratio of actual connections to potential semantic connections
+            potential = len(missing) + len(neighbors)
+            coverage = len(neighbors) / potential if potential > 0 else 1.0
+            gaps.append({
+                "gap_type": "under_connected_topic",
+                "unit_ids": [uid],
+                "suggested_connections": suggested,
+                "semantic_cluster": None,
+                "coverage_score": round(coverage, 4),
+            })
+
+        # --- 3. Sparse regions (clusters with few units) ---
+        # Simple greedy clustering: assign each unit to a cluster based on similarity
+        cluster_assignments: list[int] = [-1] * n
+        cluster_id = 0
+        for i in range(n):
+            if cluster_assignments[i] >= 0:
+                continue
+            # Start a new cluster with this unit
+            cluster_members = [i]
+            cluster_assignments[i] = cluster_id
+            for j in range(i + 1, n):
+                if cluster_assignments[j] >= 0:
+                    continue
+                # Check if j is similar to any member of the current cluster
+                if any(sim_matrix[j][m] >= min_similarity for m in cluster_members):
+                    cluster_assignments[j] = cluster_id
+                    cluster_members.append(j)
+            cluster_id += 1
+
+        # Group clusters
+        clusters: dict[int, list[int]] = defaultdict(list)
+        for idx_val, cid in enumerate(cluster_assignments):
+            clusters[cid].append(idx_val)
+
+        for cid, members in clusters.items():
+            if len(members) >= cluster_threshold:
+                continue
+            member_ids = [unit_ids[m] for m in members]
+            # Calculate intra-cluster coverage
+            total_edges_in_cluster = 0
+            for m in members:
+                uid = unit_ids[m]
+                for neighbor in edge_neighbors.get(uid, set()):
+                    if neighbor in set(member_ids):
+                        total_edges_in_cluster += 1
+            # Each edge counted twice (from both ends)
+            total_edges_in_cluster //= 2
+            max_possible = len(members) * (len(members) - 1) // 2
+            coverage = total_edges_in_cluster / max_possible if max_possible > 0 else 0.0
+
+            # Suggest connections within sparse cluster
+            suggested = []
+            for a_idx, mi in enumerate(members):
+                for mj in members[a_idx + 1:]:
+                    uid_a, uid_b = unit_ids[mi], unit_ids[mj]
+                    if uid_b not in edge_neighbors.get(uid_a, set()):
+                        sim = sim_matrix[mi][mj]
+                        if sim >= min_similarity:
+                            suggested.append({
+                                "from_unit_id": uid_a,
+                                "to_unit_id": uid_b,
+                                "similarity": round(sim, 4),
+                            })
+            suggested.sort(key=lambda x: x["similarity"], reverse=True)
+
+            gaps.append({
+                "gap_type": "sparse_region",
+                "unit_ids": member_ids,
+                "suggested_connections": suggested[:10],
+                "semantic_cluster": cid,
+                "coverage_score": round(coverage, 4),
+            })
+
+        return gaps
+
+    # --- Analytics: Concept Drift ---
+
+    @staticmethod
+    def _tokenize(text: str) -> list[str]:
+        """Split text into lowercase alpha-numeric tokens."""
+        return re.findall(r"[a-zA-Z0-9]+", text.lower())
+
+    def detect_concept_drift(
+        self,
+        time_window: timedelta,
+        min_drift_score: float = 0.3,
+        top_n_terms: int = 50,
+        source_filter: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Detect concept drift by analyzing changes in term distributions over time.
+
+        Divides units into time windows based on created_at, extracts top terms
+        per window using TF-IDF-like frequency analysis, and compares consecutive
+        windows to identify significant drift.
+
+        Args:
+            time_window: duration of each time period to analyze
+            min_drift_score: minimum drift magnitude to report (0-1 scale)
+            top_n_terms: number of top terms to track per window
+            source_filter: optional source_project filter
+
+        Returns:
+            List of drift event dicts with keys: window_start, window_end,
+            drift_score, emerging_terms, declining_terms,
+            top_terms_before, top_terms_after, unit_count_before, unit_count_after
+        """
+        query = "SELECT id, title, content, created_at FROM knowledge_units"
+        params: list[object] = []
+        if source_filter:
+            query += " WHERE source_project = ?"
+            params.append(source_filter)
+        query += " ORDER BY created_at ASC"
+
+        rows = self.conn.execute(query, params).fetchall()
+        if not rows:
+            return []
+
+        # Parse timestamps and find the time range
+        units_data: list[tuple[str, str, datetime]] = []
+        for row in rows:
+            text = f"{row['title']} {row['content']}"
+            created = _parse_datetime(row["created_at"])
+            if created is None:
+                continue
+            units_data.append((row["id"], text, created))
+
+        if not units_data:
+            return []
+
+        # Determine window boundaries
+        min_time = units_data[0][2]
+        max_time = units_data[-1][2]
+
+        if time_window.total_seconds() <= 0:
+            return []
+
+        windows: list[tuple[datetime, datetime, list[str]]] = []
+        window_start = min_time
+        while window_start <= max_time:
+            window_end = window_start + time_window
+            # Collect texts in this window
+            texts = [
+                text for _, text, created in units_data
+                if window_start <= created < window_end
+            ]
+            if texts:
+                windows.append((window_start, window_end, texts))
+            window_start = window_end
+
+        if len(windows) < 2:
+            return []
+
+        # Compute term frequencies per window
+        def _term_frequencies(texts: list[str]) -> Counter[str]:
+            freq: Counter[str] = Counter()
+            for text in texts:
+                tokens = self._tokenize(text)
+                freq.update(tokens)
+            return freq
+
+        def _top_terms(freq: Counter[str], n: int) -> dict[str, float]:
+            """Return top n terms with normalized frequencies."""
+            total = sum(freq.values())
+            if total == 0:
+                return {}
+            top = freq.most_common(n)
+            return {term: count / total for term, count in top}
+
+        def _distribution_cosine_similarity(
+            dist_a: dict[str, float], dist_b: dict[str, float]
+        ) -> float:
+            """Cosine similarity between two term distributions."""
+            all_terms = set(dist_a) | set(dist_b)
+            if not all_terms:
+                return 1.0
+            dot = sum(dist_a.get(t, 0.0) * dist_b.get(t, 0.0) for t in all_terms)
+            norm_a = math.sqrt(sum(v * v for v in dist_a.values()))
+            norm_b = math.sqrt(sum(v * v for v in dist_b.values()))
+            if norm_a == 0.0 or norm_b == 0.0:
+                return 0.0
+            return dot / (norm_a * norm_b)
+
+        # Compute per-window distributions
+        window_dists: list[dict[str, float]] = []
+        window_counts: list[int] = []
+        for _, _, texts in windows:
+            freq = _term_frequencies(texts)
+            window_dists.append(_top_terms(freq, top_n_terms))
+            window_counts.append(len(texts))
+
+        # Compare consecutive windows
+        drift_events: list[dict[str, Any]] = []
+        for i in range(1, len(windows)):
+            dist_before = window_dists[i - 1]
+            dist_after = window_dists[i]
+
+            sim = _distribution_cosine_similarity(dist_before, dist_after)
+            drift_score = round(1.0 - sim, 4)
+
+            if drift_score < min_drift_score:
+                continue
+
+            before_terms = set(dist_before)
+            after_terms = set(dist_after)
+            emerging = sorted(after_terms - before_terms)
+            declining = sorted(before_terms - after_terms)
+
+            drift_events.append({
+                "window_start": windows[i - 1][0].isoformat(),
+                "window_end": windows[i][1].isoformat(),
+                "drift_score": drift_score,
+                "emerging_terms": emerging,
+                "declining_terms": declining,
+                "top_terms_before": sorted(dist_before, key=dist_before.get, reverse=True),  # type: ignore[arg-type]
+                "top_terms_after": sorted(dist_after, key=dist_after.get, reverse=True),  # type: ignore[arg-type]
+                "unit_count_before": window_counts[i - 1],
+                "unit_count_after": window_counts[i],
+            })
+
+        return drift_events
