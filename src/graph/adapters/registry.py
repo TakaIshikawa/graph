@@ -47,6 +47,12 @@ from graph.adapters.mbox import MboxAdapter
 from graph.adapters.me import MeAdapter
 from graph.adapters.mediawiki import MediaWikiAdapter
 from graph.adapters.notion_markdown import NotionMarkdownAdapter
+from graph.adapters.notion_export import NotionExportAdapter
+from graph.adapters.evernote_export import EvernoteExportAdapter
+from graph.adapters.bear_export import BearExportAdapter
+from graph.adapters.apple_notes_export import AppleNotesExportAdapter
+from graph.adapters.simplenote_export import SimplenoteExportAdapter
+from graph.adapters.google_keep_export import GoogleKeepExportAdapter
 from graph.adapters.opml import OpmlAdapter
 from graph.adapters.obsidian_canvas import ObsidianCanvasAdapter
 from graph.adapters.org import OrgAdapter
@@ -118,6 +124,12 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "daily_journal": DailyJournalAdapter,
     "yaml": YamlAdapter,
     "notion_markdown": NotionMarkdownAdapter,
+    "notion_export": NotionExportAdapter,
+    "evernote_export": EvernoteExportAdapter,
+    "bear_export": BearExportAdapter,
+    "apple_notes_export": AppleNotesExportAdapter,
+    "simplenote_export": SimplenoteExportAdapter,
+    "google_keep_export": GoogleKeepExportAdapter,
     "opml": OpmlAdapter,
     "obsidian_canvas": ObsidianCanvasAdapter,
     "org": OrgAdapter,

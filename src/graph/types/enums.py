@@ -79,6 +79,12 @@ class SourceProject(StrEnum):
     SLACK_JSON = "slack_json"
     VCARD = "vcard"
     YAML_FRONTMATTER = "yaml_frontmatter"
+    NOTION_EXPORT = "notion_export"
+    EVERNOTE_EXPORT = "evernote_export"
+    BEAR_EXPORT = "bear_export"
+    APPLE_NOTES_EXPORT = "apple_notes_export"
+    SIMPLENOTE_EXPORT = "simplenote_export"
+    GOOGLE_KEEP_EXPORT = "google_keep_export"
 
 
 class ContentType(StrEnum):
