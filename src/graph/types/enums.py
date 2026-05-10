@@ -62,6 +62,7 @@ class SourceProject(StrEnum):
     HYPOTHESIS = "hypothesis"
     READWISE = "readwise"
     READWISE_CSV = "readwise_csv"
+    GOODREADS = "goodreads"
     ROAM = "roam"
     LOGSEQ = "logseq"
     SQLITE_QUERY_LOG = "sqlite_query_log"
