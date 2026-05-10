@@ -52,6 +52,7 @@ from graph.adapters.evernote_export import EvernoteExportAdapter
 from graph.adapters.bear_export import BearExportAdapter
 from graph.adapters.apple_notes_export import AppleNotesExportAdapter
 from graph.adapters.simplenote_export import SimplenoteExportAdapter
+from graph.adapters.foam import FoamWorkspaceAdapter
 from graph.adapters.google_keep_export import GoogleKeepExportAdapter
 from graph.adapters.opml import OpmlAdapter
 from graph.adapters.obsidian_canvas import ObsidianCanvasAdapter
@@ -183,6 +184,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "slack_json": SlackJsonAdapter,
     "vcard": VCardAdapter,
     "yaml_frontmatter": YamlFrontmatterAdapter,
+    "foam_workspace": FoamWorkspaceAdapter,
 }
 
 

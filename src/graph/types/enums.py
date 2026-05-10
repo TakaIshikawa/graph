@@ -85,6 +85,7 @@ class SourceProject(StrEnum):
     APPLE_NOTES_EXPORT = "apple_notes_export"
     SIMPLENOTE_EXPORT = "simplenote_export"
     GOOGLE_KEEP_EXPORT = "google_keep_export"
+    FOAM_WORKSPACE = "foam_workspace"
 
 
 class ContentType(StrEnum):
