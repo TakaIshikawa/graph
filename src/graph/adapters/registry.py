@@ -15,6 +15,7 @@ from graph.adapters.csv_rows import CsvRowsAdapter
 from graph.adapters.crossref import CrossrefAdapter
 from graph.adapters.csl_json import CslJsonAdapter
 from graph.adapters.daily_journal import DailyJournalAdapter
+from graph.adapters.diigo import DiigoAdapter
 from graph.adapters.discord_json import DiscordJsonAdapter
 from graph.adapters.email import EmailAdapter
 from graph.adapters.enex import EnexAdapter
@@ -40,6 +41,7 @@ from graph.adapters.markdown_links import MarkdownLinksAdapter
 from graph.adapters.markdown_notes import MarkdownNotesAdapter
 from graph.adapters.markdown_tasks import MarkdownTasksAdapter
 from graph.adapters.mastodon import MastodonAdapter
+from graph.adapters.matter import MatterAdapter
 from graph.adapters.max_adapter import MaxAdapter
 from graph.adapters.mbox import MboxAdapter
 from graph.adapters.me import MeAdapter
@@ -79,6 +81,7 @@ from graph.adapters.facebook_archive import FacebookArchiveAdapter
 from graph.adapters.instagram_archive import InstagramArchiveAdapter
 from graph.adapters.linkedin_archive import LinkedInArchiveAdapter
 from graph.adapters.vcard import VCardAdapter
+from graph.adapters.wallabag import WallabagAdapter
 from graph.adapters.webvtt import WebVttAdapter
 from graph.adapters.yaml_adapter import YamlAdapter
 from graph.adapters.yaml_frontmatter import YamlFrontmatterAdapter
@@ -149,11 +152,14 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "raindrop": RaindropAdapter,
     "raindrop_csv": RaindropCsvAdapter,
     "raindrop_json": RaindropJsonAdapter,
+    "diigo": DiigoAdapter,
+    "wallabag": WallabagAdapter,
     "safari_bookmarks": SafariBookmarksAdapter,
     "zotero_rdf": ZoteroRdfAdapter,
     "hypothesis": HypothesisAdapter,
     "readwise": ReadwiseAdapter,
     "readwise_csv": ReadwiseCsvAdapter,
+    "matter": MatterAdapter,
     "goodreads": GoodreadsAdapter,
     "letterboxd": LetterboxdAdapter,
     "rescuetime": RescueTimeAdapter,
