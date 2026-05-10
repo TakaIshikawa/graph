@@ -59,6 +59,11 @@ from graph.adapters.raindrop_csv import RaindropCsvAdapter
 from graph.adapters.raindrop_json import RaindropJsonAdapter
 from graph.adapters.readwise import ReadwiseAdapter
 from graph.adapters.readwise_csv import ReadwiseCsvAdapter
+from graph.adapters.goodreads import GoodreadsAdapter
+from graph.adapters.letterboxd import LetterboxdAdapter
+from graph.adapters.rescuetime import RescueTimeAdapter
+from graph.adapters.toggl import TogglAdapter
+from graph.adapters.wakatime import WakaTimeAdapter
 from graph.adapters.roam import RoamAdapter
 from graph.adapters.safari_bookmarks import SafariBookmarksAdapter
 from graph.adapters.slack_json import SlackJsonAdapter
@@ -149,6 +154,11 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "hypothesis": HypothesisAdapter,
     "readwise": ReadwiseAdapter,
     "readwise_csv": ReadwiseCsvAdapter,
+    "goodreads": GoodreadsAdapter,
+    "letterboxd": LetterboxdAdapter,
+    "rescuetime": RescueTimeAdapter,
+    "toggl": TogglAdapter,
+    "wakatime": WakaTimeAdapter,
     "roam": RoamAdapter,
     "logseq": LogseqAdapter,
     "sqlite_query_log": SqliteQueryLogAdapter,
