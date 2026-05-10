@@ -72,6 +72,7 @@ from graph.adapters.transcript import TranscriptAdapter
 from graph.adapters.twitter_archive import TwitterArchiveAdapter
 from graph.adapters.facebook_archive import FacebookArchiveAdapter
 from graph.adapters.instagram_archive import InstagramArchiveAdapter
+from graph.adapters.linkedin_archive import LinkedInArchiveAdapter
 from graph.adapters.vcard import VCardAdapter
 from graph.adapters.webvtt import WebVttAdapter
 from graph.adapters.yaml_adapter import YamlAdapter
@@ -134,6 +135,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "twitter_archive": TwitterArchiveAdapter,
     "facebook_archive": FacebookArchiveAdapter,
     "instagram_archive": InstagramArchiveAdapter,
+    "linkedin_archive": LinkedInArchiveAdapter,
     "webvtt": WebVttAdapter,
     "pocket": PocketAdapter,
     "pocket_csv": PocketCsvAdapter,
