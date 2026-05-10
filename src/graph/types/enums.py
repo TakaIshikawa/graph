@@ -50,6 +50,7 @@ class SourceProject(StrEnum):
     TRANSCRIPT = "transcript"
     TWITTER_ARCHIVE = "twitter_archive"
     FACEBOOK_ARCHIVE = "facebook_archive"
+    INSTAGRAM_ARCHIVE = "instagram_archive"
     WEBVTT = "webvtt"
     POCKET = "pocket"
     POCKET_CSV = "pocket_csv"

@@ -71,6 +71,7 @@ from graph.adapters.tana_paste import TanaPasteAdapter
 from graph.adapters.transcript import TranscriptAdapter
 from graph.adapters.twitter_archive import TwitterArchiveAdapter
 from graph.adapters.facebook_archive import FacebookArchiveAdapter
+from graph.adapters.instagram_archive import InstagramArchiveAdapter
 from graph.adapters.vcard import VCardAdapter
 from graph.adapters.webvtt import WebVttAdapter
 from graph.adapters.yaml_adapter import YamlAdapter
@@ -132,6 +133,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "transcript": TranscriptAdapter,
     "twitter_archive": TwitterArchiveAdapter,
     "facebook_archive": FacebookArchiveAdapter,
+    "instagram_archive": InstagramArchiveAdapter,
     "webvtt": WebVttAdapter,
     "pocket": PocketAdapter,
     "pocket_csv": PocketCsvAdapter,
