@@ -87,6 +87,10 @@ class SourceProject(StrEnum):
     GOOGLE_KEEP_EXPORT = "google_keep_export"
     FOAM_WORKSPACE = "foam_workspace"
     TANA = "tana"
+    TODOIST = "todoist"
+    ARE_NA = "are_na"
+    ZOTERO_CSV = "zotero_csv"
+    GOOGLE_TASKS = "google_tasks"
 
 
 class ContentType(StrEnum):

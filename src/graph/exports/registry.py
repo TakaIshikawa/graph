@@ -88,3 +88,7 @@ register_exporter("json", export_units_to_json)
 register_exporter("logseq", export_units_to_logseq)
 register_exporter("markdown", export_units_to_markdown)
 register_exporter("roam", export_units_to_roam)
+
+from graph.exports.activitypub import export_units_to_activitypub
+
+register_exporter("activitypub", export_units_to_activitypub)

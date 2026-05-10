@@ -54,6 +54,10 @@ from graph.adapters.apple_notes_export import AppleNotesExportAdapter
 from graph.adapters.simplenote_export import SimplenoteExportAdapter
 from graph.adapters.foam import FoamWorkspaceAdapter
 from graph.adapters.tana import TanaAdapter
+from graph.adapters.todoist import TodoistAdapter
+from graph.adapters.are_na import AreNaAdapter
+from graph.adapters.zotero_csv import ZoteroCsvAdapter
+from graph.adapters.google_tasks import GoogleTasksAdapter
 from graph.adapters.google_keep_export import GoogleKeepExportAdapter
 from graph.adapters.opml import OpmlAdapter
 from graph.adapters.obsidian_canvas import ObsidianCanvasAdapter
@@ -187,6 +191,10 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "yaml_frontmatter": YamlFrontmatterAdapter,
     "foam_workspace": FoamWorkspaceAdapter,
     "tana": TanaAdapter,
+    "todoist": TodoistAdapter,
+    "are_na": AreNaAdapter,
+    "zotero_csv": ZoteroCsvAdapter,
+    "google_tasks": GoogleTasksAdapter,
 }
 
 

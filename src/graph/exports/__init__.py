@@ -11,9 +11,11 @@ from graph.exports.registry import (
     list_exporters,
     register_exporter,
 )
+from graph.exports.activitypub import export_units_to_activitypub
 from graph.exports.roam import export_units_to_roam, export_units_to_roam_pages
 
 __all__ = [
+    "export_units_to_activitypub",
     "export_units_to_html",
     "export_units_to_ical",
     "export_units_to_json",

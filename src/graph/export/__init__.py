@@ -2,6 +2,7 @@
 
 from graph.export.adjacency_markdown import export_graph_adjacency_markdown
 from graph.export.anki import export_units_to_anki_tsv
+from graph.export.atom import export_units_to_atom
 from graph.export.backlinks import export_unit_backlinks_markdown
 from graph.export.bibtex import export_units_to_bibtex
 from graph.export.concept_map import export_concept_map_markdown
@@ -65,6 +66,7 @@ __all__ = [
     "export_unit_backlinks_markdown",
     "export_unit_schema_inventory",
     "export_units_to_anki_tsv",
+    "export_units_to_atom",
     "export_units_to_csv",
     "export_units_to_json",
     "export_units_to_jsonl",
