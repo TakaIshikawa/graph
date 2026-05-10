@@ -64,6 +64,7 @@ from graph.adapters.obsidian_canvas import ObsidianCanvasAdapter
 from graph.adapters.org import OrgAdapter
 from graph.adapters.pdf import PdfAdapter
 from graph.adapters.pinboard import PinboardAdapter
+from graph.adapters.pinboard_html_export import PinboardHtmlExportAdapter
 from graph.adapters.plain_text import PlainTextAdapter
 from graph.adapters.pocket import PocketAdapter
 from graph.adapters.pocket_csv import PocketCsvAdapter
@@ -167,6 +168,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "pocket_csv": PocketCsvAdapter,
     "instapaper": InstapaperAdapter,
     "pinboard": PinboardAdapter,
+    "pinboard_html_export": PinboardHtmlExportAdapter,
     "raindrop": RaindropAdapter,
     "raindrop_csv": RaindropCsvAdapter,
     "raindrop_json": RaindropJsonAdapter,
