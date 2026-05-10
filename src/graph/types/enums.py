@@ -52,6 +52,7 @@ class SourceProject(StrEnum):
     WEBVTT = "webvtt"
     POCKET = "pocket"
     POCKET_CSV = "pocket_csv"
+    INSTAPAPER = "instapaper"
     PINBOARD = "pinboard"
     RAINDROP = "raindrop"
     RAINDROP_CSV = "raindrop_csv"

@@ -25,6 +25,7 @@ from graph.adapters.google_keep import GoogleKeepAdapter
 from graph.adapters.html import HtmlAdapter
 from graph.adapters.hypothesis import HypothesisAdapter
 from graph.adapters.ical import ICalAdapter
+from graph.adapters.instapaper import InstapaperAdapter
 from graph.adapters.ipynb import IpynbAdapter
 from graph.adapters.jats import JatsAdapter
 from graph.adapters.jsonl_adapter import JsonlAdapter
@@ -132,6 +133,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "webvtt": WebVttAdapter,
     "pocket": PocketAdapter,
     "pocket_csv": PocketCsvAdapter,
+    "instapaper": InstapaperAdapter,
     "pinboard": PinboardAdapter,
     "raindrop": RaindropAdapter,
     "raindrop_csv": RaindropCsvAdapter,
