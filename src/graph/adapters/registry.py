@@ -62,6 +62,7 @@ from graph.adapters.readwise_csv import ReadwiseCsvAdapter
 from graph.adapters.goodreads import GoodreadsAdapter
 from graph.adapters.letterboxd import LetterboxdAdapter
 from graph.adapters.rescuetime import RescueTimeAdapter
+from graph.adapters.toggl import TogglAdapter
 from graph.adapters.roam import RoamAdapter
 from graph.adapters.safari_bookmarks import SafariBookmarksAdapter
 from graph.adapters.slack_json import SlackJsonAdapter
@@ -149,6 +150,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "goodreads": GoodreadsAdapter,
     "letterboxd": LetterboxdAdapter,
     "rescuetime": RescueTimeAdapter,
+    "toggl": TogglAdapter,
     "roam": RoamAdapter,
     "logseq": LogseqAdapter,
     "sqlite_query_log": SqliteQueryLogAdapter,
