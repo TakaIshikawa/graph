@@ -63,6 +63,7 @@ class SourceProject(StrEnum):
     READWISE = "readwise"
     READWISE_CSV = "readwise_csv"
     GOODREADS = "goodreads"
+    LETTERBOXD = "letterboxd"
     ROAM = "roam"
     LOGSEQ = "logseq"
     SQLITE_QUERY_LOG = "sqlite_query_log"
