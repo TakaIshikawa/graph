@@ -66,6 +66,7 @@ class SourceProject(StrEnum):
     LETTERBOXD = "letterboxd"
     RESCUETIME = "rescuetime"
     TOGGL = "toggl"
+    WAKATIME = "wakatime"
     ROAM = "roam"
     LOGSEQ = "logseq"
     SQLITE_QUERY_LOG = "sqlite_query_log"
