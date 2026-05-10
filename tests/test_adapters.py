@@ -2821,6 +2821,9 @@ class TestRegistry:
             "logseq",
             "sqlite_query_log",
             "slack_json",
+            "mbox",
+            "vcard",
+            "yaml_frontmatter",
         }
         assert set(adapters) == expected
         # Verify sorted order
