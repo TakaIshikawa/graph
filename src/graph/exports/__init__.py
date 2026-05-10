@@ -11,6 +11,7 @@ from graph.exports.registry import (
     list_exporters,
     register_exporter,
 )
+from graph.exports.roam import export_units_to_roam, export_units_to_roam_pages
 
 __all__ = [
     "export_units_to_html",
@@ -19,6 +20,8 @@ __all__ = [
     "export_units_to_logseq",
     "export_units_to_logseq_files",
     "export_units_to_markdown",
+    "export_units_to_roam",
+    "export_units_to_roam_pages",
     "export_units",
     "get_exporter",
     "list_exporters",
