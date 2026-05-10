@@ -49,6 +49,7 @@ class SourceProject(StrEnum):
     NOTION_MARKDOWN = "notion_markdown"
     TRANSCRIPT = "transcript"
     TWITTER_ARCHIVE = "twitter_archive"
+    FACEBOOK_ARCHIVE = "facebook_archive"
     WEBVTT = "webvtt"
     POCKET = "pocket"
     POCKET_CSV = "pocket_csv"
