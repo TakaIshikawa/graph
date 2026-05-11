@@ -8,6 +8,7 @@ from graph.export.bibtex import export_units_to_bibtex
 from graph.export.concept_map import export_concept_map_markdown
 from graph.export.context_pack import export_context_pack
 from graph.export.csl_json import export_units_to_csl_json
+from graph.export.cytoscape import export_graph_cytoscape
 from graph.export.cypher import export_graph_cypher
 from graph.export.dot import export_graph_dot
 from graph.export.duplicate_candidates import export_duplicate_candidates_markdown
@@ -48,6 +49,7 @@ __all__ = [
     "export_concept_map_markdown",
     "export_context_pack",
     "export_units_to_csl_json",
+    "export_graph_cytoscape",
     "export_duplicate_candidates_markdown",
     "export_edge_adjacency_markdown",
     "export_edges_to_csv",
