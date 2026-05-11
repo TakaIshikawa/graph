@@ -2,6 +2,7 @@
 
 from graph.export.adjacency_markdown import export_graph_adjacency_markdown
 from graph.export.adjacency_csv import export_graph_adjacency_csv
+from graph.export.activity_heatmap_csv import export_units_to_activity_heatmap_csv
 from graph.export.anki import export_units_to_anki_tsv
 from graph.export.atom import export_units_to_atom
 from graph.export.backlinks import export_unit_backlinks_markdown
@@ -36,6 +37,7 @@ from graph.export.markdown_timeline import export_units_to_markdown_timeline
 from graph.export.metadata_completeness import export_metadata_completeness_markdown
 from graph.export.mermaid_mindmap import export_units_to_mermaid_mindmap
 from graph.export.ndjson import export_graph_ndjson, export_units_to_ndjson
+from graph.export.node_edge_csv import export_graph_node_edge_csv
 from graph.export.opml import export_units_to_opml
 from graph.export.org import export_units_to_org
 from graph.export.relation_evidence import export_relation_evidence_markdown
@@ -50,6 +52,7 @@ from graph.export.sqlite_snapshot import export_graph_sqlite
 from graph.export.tag_cooccurrence_csv import export_tag_cooccurrence_csv
 from graph.export.tag_glossary import export_tag_glossary_markdown
 from graph.export.tag_source_matrix_csv import export_tag_source_matrix_csv
+from graph.export.tag_timeline_csv import export_tag_timeline_csv
 from graph.export.task_board_markdown import export_task_board_markdown
 from graph.export.timelinejs import export_units_to_timelinejs
 from graph.export.tiddlywiki_json import export_units_to_tiddlywiki_json
@@ -99,6 +102,7 @@ __all__ = [
     "export_edges_to_csv",
     "export_graph_adjacency_csv",
     "export_graph_adjacency_markdown",
+    "export_units_to_activity_heatmap_csv",
     "export_graph_cypher",
     "export_units_to_flashcards_markdown",
     "export_graph_dot",
@@ -113,6 +117,7 @@ __all__ = [
     "export_units_to_hugo_bundle",
     "export_metadata_completeness_markdown",
     "export_graph_ndjson",
+    "export_graph_node_edge_csv",
     "export_relation_evidence_markdown",
     "export_units_to_ris",
     "export_units_to_rss",
@@ -126,6 +131,7 @@ __all__ = [
     "export_tag_cooccurrence_csv",
     "export_tag_glossary_markdown",
     "export_tag_source_matrix_csv",
+    "export_tag_timeline_csv",
     "export_task_board_markdown",
     "export_unit_backlinks_markdown",
     "export_unit_schema_inventory",
