@@ -6471,6 +6471,124 @@ class GraphService:
             "source_pairs": source_pairs,
         }
 
+    def analyze_source_bridge_matrix(
+        self,
+        *,
+        limit: int = 20,
+        include_intra_source: bool = False,
+    ) -> dict:
+        """Group graph edges by source-project pair and relation type."""
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
+            raise ValueError("limit must be a non-negative integer.")
+        if not isinstance(include_intra_source, bool):
+            raise ValueError("include_intra_source must be a boolean.")
+
+        units_by_id = {unit.id: unit for unit in self.store.get_all_units(limit=1000000000)}
+
+        def _source_project(unit_id: str) -> str:
+            unit = units_by_id.get(unit_id)
+            if unit is None:
+                return "unknown"
+            source_project = str(unit.source_project or "").strip()
+            return source_project or "unknown"
+
+        pair_records: dict[tuple[str, str], dict] = {}
+        relation_breakdown: Counter[str] = Counter()
+        inter_source_edge_count = 0
+        intra_source_edge_count = 0
+
+        edges = sorted(
+            (
+                edge
+                for edge in self.store.get_all_edges()
+                if edge.from_unit_id in units_by_id and edge.to_unit_id in units_by_id
+            ),
+            key=lambda edge: (
+                edge.id,
+                edge.from_unit_id,
+                edge.to_unit_id,
+                str(edge.relation),
+            ),
+        )
+        for edge in edges:
+            from_source = _source_project(edge.from_unit_id)
+            to_source = _source_project(edge.to_unit_id)
+            is_inter_source = from_source != to_source
+            if is_inter_source:
+                inter_source_edge_count += 1
+            else:
+                intra_source_edge_count += 1
+            if not include_intra_source and not is_inter_source:
+                continue
+
+            relation = str(edge.relation)
+            relation_breakdown[relation] += 1
+            key = (from_source, to_source)
+            record = pair_records.setdefault(
+                key,
+                {
+                    "from_source": from_source,
+                    "to_source": to_source,
+                    "edge_count": 0,
+                    "relation_breakdown": Counter(),
+                    "edge_ids": [],
+                    "representative_units": {},
+                },
+            )
+            record["edge_count"] += 1
+            record["relation_breakdown"][relation] += 1
+            record["edge_ids"].append(edge.id)
+            for unit_id in (edge.from_unit_id, edge.to_unit_id):
+                record["representative_units"].setdefault(
+                    unit_id,
+                    self._unit_summary_data(units_by_id[unit_id]),
+                )
+
+        source_pairs = []
+        for record in pair_records.values():
+            representatives = sorted(
+                record["representative_units"].values(),
+                key=lambda unit: (
+                    str(unit.get("source_project", "")),
+                    str(unit.get("title", "")).casefold(),
+                    str(unit.get("id", "")),
+                ),
+            )[:limit]
+            source_pairs.append(
+                {
+                    "from_source": record["from_source"],
+                    "to_source": record["to_source"],
+                    "edge_count": record["edge_count"],
+                    "relation_breakdown": dict(
+                        sorted(record["relation_breakdown"].items())
+                    ),
+                    "edge_ids": record["edge_ids"][:limit],
+                    "representative_units": representatives,
+                }
+            )
+        source_pairs.sort(
+            key=lambda record: (
+                -record["edge_count"],
+                record["from_source"],
+                record["to_source"],
+            )
+        )
+        total_edge_count = inter_source_edge_count + intra_source_edge_count
+
+        return {
+            "source_pairs": source_pairs,
+            "relation_breakdown": dict(sorted(relation_breakdown.items())),
+            "inter_source_edge_count": inter_source_edge_count,
+            "intra_source_edge_count": intra_source_edge_count,
+            "inter_source_ratio": (
+                inter_source_edge_count / total_edge_count if total_edge_count else 0.0
+            ),
+            "options": {
+                "limit": limit,
+                "include_intra_source": include_intra_source,
+            },
+        }
+
     def analyze_source_authority(
         self, *, limit: int = 20, top_units_per_source: int = 3
     ) -> dict:
@@ -7025,6 +7143,137 @@ class GraphService:
                 "untagged_unit_count": len(units) - len(tagged_unit_ids),
                 "unique_tags": len(tag_records),
                 "returned_tags": len(tags),
+            },
+        }
+
+    def analyze_tag_emergence(
+        self,
+        *,
+        bucket: str = "month",
+        field: str = "created_at",
+        recent_buckets: int = 2,
+        limit: int = 20,
+    ) -> dict:
+        """Identify tags with recent growth or fading across time buckets."""
+        if bucket not in _TIMELINE_BUCKETS:
+            raise ValueError(
+                f"Unsupported tag emergence bucket: {bucket}. Use day, week, month, or year."
+            )
+        if field not in _TIMELINE_FIELDS:
+            raise ValueError(
+                f"Unsupported tag emergence field: {field}. Use created_at, ingested_at, or updated_at."
+            )
+        if (
+            not isinstance(recent_buckets, int)
+            or isinstance(recent_buckets, bool)
+            or recent_buckets < 1
+        ):
+            raise ValueError("recent_buckets must be a positive integer.")
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
+            raise ValueError("limit must be a non-negative integer.")
+
+        units = sorted(
+            self.store.get_all_units(limit=1000000000),
+            key=lambda unit: unit.id,
+        )
+        bucket_starts: dict[datetime, str] = {}
+        tag_bucket_counts: dict[str, Counter[str]] = {}
+        tag_units_by_bucket: dict[str, dict[str, list]] = {}
+        first_seen: dict[str, str] = {}
+        last_seen: dict[str, str] = {}
+
+        for unit in units:
+            timestamp = _parse_optional_datetime(getattr(unit, field, None))
+            if timestamp is None:
+                continue
+            start = _timeline_bucket_start(timestamp, bucket)
+            label = _timeline_bucket_label(start, bucket)
+            bucket_starts[start] = label
+            tags = sorted({str(tag).strip() for tag in unit.tags if str(tag).strip()})
+            for tag in tags:
+                tag_bucket_counts.setdefault(tag, Counter())[label] += 1
+                tag_units_by_bucket.setdefault(tag, {}).setdefault(label, []).append(unit)
+                first_seen[tag] = min(first_seen.get(tag, label), label)
+                last_seen[tag] = max(last_seen.get(tag, label), label)
+
+        bucket_labels = [label for _start, label in sorted(bucket_starts.items())]
+        recent_labels = bucket_labels[-recent_buckets:]
+        previous_labels = bucket_labels[-recent_buckets * 2 : -recent_buckets]
+
+        def _tag_record(tag: str) -> dict:
+            counts = tag_bucket_counts[tag]
+            recent_count = sum(counts[label] for label in recent_labels)
+            previous_count = sum(counts[label] for label in previous_labels)
+            growth_ratio = (
+                float(recent_count)
+                if previous_count == 0 and recent_count
+                else (recent_count - previous_count) / previous_count
+                if previous_count
+                else 0.0
+            )
+            representative_units = []
+            for label in reversed(recent_labels):
+                representative_units.extend(
+                    self._unit_summary_data(unit)
+                    for unit in sorted(
+                        tag_units_by_bucket.get(tag, {}).get(label, []),
+                        key=lambda item: item.id,
+                    )
+                )
+                if len(representative_units) >= 3:
+                    break
+            return {
+                "tag": tag,
+                "bucket_counts": {
+                    label: counts[label] for label in bucket_labels if counts[label]
+                },
+                "first_seen": first_seen[tag],
+                "last_seen": last_seen[tag],
+                "recent_count": recent_count,
+                "previous_count": previous_count,
+                "recent_growth_ratio": round(growth_ratio, 6),
+                "representative_units": representative_units[:3],
+            }
+
+        records = [_tag_record(tag) for tag in sorted(tag_bucket_counts)]
+        emerging = [
+            record
+            for record in records
+            if record["recent_count"] > 0
+            and record["recent_count"] >= record["previous_count"]
+        ]
+        emerging.sort(
+            key=lambda record: (
+                -record["recent_growth_ratio"],
+                -record["recent_count"],
+                record["tag"],
+            )
+        )
+        fading = [
+            record
+            for record in records
+            if record["previous_count"] > 0
+            and record["recent_count"] < record["previous_count"]
+        ]
+        fading.sort(
+            key=lambda record: (
+                record["recent_growth_ratio"],
+                -record["previous_count"],
+                record["tag"],
+            )
+        )
+
+        return {
+            "emerging_tags": emerging[:limit],
+            "fading_tags": fading[:limit],
+            "bucket_count": len(bucket_labels),
+            "tag_count": len(records),
+            "buckets": bucket_labels,
+            "options": {
+                "bucket": bucket,
+                "field": field,
+                "recent_buckets": recent_buckets,
+                "limit": limit,
             },
         }
 
