@@ -25,6 +25,7 @@ from graph.export.ical import DATE_METADATA_KEYS, export_units_to_ics, unit_even
 from graph.export.json import export_units_to_json
 from graph.export.json_ld import export_units_to_json_ld
 from graph.export.llms_txt import export_units_to_llms_txt
+from graph.export.markdown_timeline import export_units_to_markdown_timeline
 from graph.export.metadata_completeness import export_metadata_completeness_markdown
 from graph.export.mermaid_mindmap import export_units_to_mermaid_mindmap
 from graph.export.ndjson import export_graph_ndjson, export_units_to_ndjson
@@ -45,6 +46,7 @@ from graph.export.unit_csv import export_units_to_csv
 from graph.export.unit_markdown_table import export_units_to_markdown_table
 from graph.export.unit_yaml import export_units_to_yaml
 from graph.export.units_jsonl import export_units_to_jsonl
+from graph.export.vegalite_timeline import export_units_to_vegalite_timeline
 
 __all__ = [
     "DATE_METADATA_KEYS",
@@ -87,6 +89,7 @@ __all__ = [
     "export_units_to_json_ld",
     "export_units_to_jsonl",
     "export_units_to_llms_txt",
+    "export_units_to_markdown_timeline",
     "export_units_to_markdown_table",
     "export_units_to_mermaid_mindmap",
     "export_units_to_ndjson",
@@ -94,5 +97,6 @@ __all__ = [
     "export_units_to_org",
     "export_units_to_yaml",
     "export_units_to_ics",
+    "export_units_to_vegalite_timeline",
     "unit_event_datetime",
 ]
