@@ -17,6 +17,7 @@ import yaml
 from graph.adapters.atom import AtomAdapter
 from graph.adapters.bibdesk import BibDeskAdapter
 from graph.adapters.bibtex import BibtexAdapter
+from graph.adapters.bluesky_archive import BlueskyArchiveAdapter
 from graph.adapters.bookmarks import BookmarksAdapter
 from graph.adapters.bookmarks_html import BookmarksHtmlAdapter
 from graph.adapters.browser_history_csv import BrowserHistoryCsvAdapter
@@ -66,6 +67,7 @@ from graph.adapters.raindrop_csv import RaindropCsvAdapter
 from graph.adapters.raindrop_json import RaindropJsonAdapter
 from graph.adapters.readwise import ReadwiseAdapter
 from graph.adapters.readwise_csv import ReadwiseCsvAdapter
+from graph.adapters.reddit_saved_csv import RedditSavedCsvAdapter
 from graph.adapters.registry import get_adapter, get_all_adapters, list_adapters
 from graph.adapters.ris import RisAdapter
 from graph.adapters.roam import RoamAdapter
@@ -2771,6 +2773,7 @@ class TestRegistry:
             "bear_export",
             "bibdesk",
             "bibtex",
+            "bluesky_archive",
             "bookmarks",
             "bookmarks_html",
             "browser_history_csv",
@@ -2815,6 +2818,7 @@ class TestRegistry:
             "jsonl",
             "jsonl_notes",
             "kindle",
+            "kindle_clippings",
             "letterboxd",
             "linkedin_archive",
             "logseq",
@@ -2850,6 +2854,7 @@ class TestRegistry:
             "raindrop_json",
             "readwise",
             "readwise_csv",
+            "reddit_saved_csv",
             "reddit_saved_json",
             "rescuetime",
             "ris",
@@ -2968,6 +2973,10 @@ class TestRegistry:
         assert isinstance(bibdesk_adapter, BibDeskAdapter)
         assert bibdesk_adapter.name == "bibdesk"
 
+        bluesky_adapter = get_adapter("bluesky_archive", path="/tmp/bluesky")
+        assert isinstance(bluesky_adapter, BlueskyArchiveAdapter)
+        assert bluesky_adapter.name == "bluesky_archive"
+
         csl_json_adapter = get_adapter("csl_json", path="/tmp/refs.json")
         assert csl_json_adapter.name == "csl_json"
 
@@ -3064,6 +3073,10 @@ class TestRegistry:
         readwise_csv_adapter = get_adapter("readwise_csv", path="/tmp/readwise.csv")
         assert isinstance(readwise_csv_adapter, ReadwiseCsvAdapter)
         assert readwise_csv_adapter.name == "readwise_csv"
+
+        reddit_saved_csv_adapter = get_adapter("reddit_saved_csv", path="/tmp/reddit")
+        assert isinstance(reddit_saved_csv_adapter, RedditSavedCsvAdapter)
+        assert reddit_saved_csv_adapter.name == "reddit_saved_csv"
 
         roam_adapter = get_adapter("roam", file_path="/tmp/roam.json")
         assert isinstance(roam_adapter, RoamAdapter)
