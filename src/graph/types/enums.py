@@ -97,6 +97,10 @@ class SourceProject(StrEnum):
     ARE_NA = "are_na"
     ZOTERO_CSV = "zotero_csv"
     GOOGLE_TASKS = "google_tasks"
+    HACKER_NEWS_SAVED = "hacker_news_saved"
+    GITHUB_STARS_CSV = "github_stars_csv"
+    AIRTABLE_CSV = "airtable_csv"
+    GOOGLE_CALENDAR_JSON = "google_calendar_json"
     SPOTIFY_STREAMING_HISTORY = "spotify_streaming_history"
     SPOTIFY_TAKEOUT = "spotify_takeout"
 

@@ -23,8 +23,11 @@ from graph.adapters.enex import EnexAdapter
 from graph.adapters.feed import FeedAdapter
 from graph.adapters.forty_two import FortyTwoAdapter
 from graph.adapters.git_adapter import GitAdapter
+from graph.adapters.github_stars_csv import GithubStarsCsvAdapter
+from graph.adapters.google_calendar_json import GoogleCalendarJsonAdapter
 from graph.adapters.google_keep import GoogleKeepAdapter
 from graph.adapters.html import HtmlAdapter
+from graph.adapters.hacker_news_saved import HackerNewsSavedAdapter
 from graph.adapters.hypothesis import HypothesisAdapter
 from graph.adapters.ical import ICalAdapter
 from graph.adapters.instapaper import InstapaperAdapter
@@ -63,6 +66,7 @@ from graph.adapters.todoist import TodoistAdapter
 from graph.adapters.are_na import AreNaAdapter
 from graph.adapters.zotero_csv import ZoteroCsvAdapter
 from graph.adapters.google_tasks import GoogleTasksAdapter
+from graph.adapters.airtable_csv import AirtableCsvAdapter
 from graph.adapters.google_keep_export import GoogleKeepExportAdapter
 from graph.adapters.opml import OpmlAdapter
 from graph.adapters.obsidian_canvas import ObsidianCanvasAdapter
@@ -211,6 +215,10 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "are_na": AreNaAdapter,
     "zotero_csv": ZoteroCsvAdapter,
     "google_tasks": GoogleTasksAdapter,
+    "hacker_news_saved": HackerNewsSavedAdapter,
+    "github_stars_csv": GithubStarsCsvAdapter,
+    "airtable_csv": AirtableCsvAdapter,
+    "google_calendar_json": GoogleCalendarJsonAdapter,
     "spotify_streaming_history": SpotifyStreamingHistoryAdapter,
     "spotify_takeout": SpotifyTakeoutAdapter,
 }
