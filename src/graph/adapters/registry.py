@@ -91,6 +91,7 @@ from graph.adapters.toggl import TogglAdapter
 from graph.adapters.wakatime import WakaTimeAdapter
 from graph.adapters.roam import RoamAdapter
 from graph.adapters.safari_bookmarks import SafariBookmarksAdapter
+from graph.adapters.safari_history import SafariHistoryAdapter
 from graph.adapters.slack_json import SlackJsonAdapter
 from graph.adapters.sota import SOTAAdapter
 from graph.adapters.spotify_streaming_history import SpotifyStreamingHistoryAdapter
@@ -193,6 +194,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "diigo": DiigoAdapter,
     "wallabag": WallabagAdapter,
     "safari_bookmarks": SafariBookmarksAdapter,
+    "safari_history": SafariHistoryAdapter,
     "zotero_rdf": ZoteroRdfAdapter,
     "hypothesis": HypothesisAdapter,
     "readwise": ReadwiseAdapter,

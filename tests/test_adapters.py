@@ -2755,6 +2755,7 @@ class TestRegistry:
     def test_list_adapters(self):
         adapters = list_adapters()
         expected = {
+            "airtable_csv",
             "apple_health_workouts",
             "apple_notes_export",
             "are_na",
@@ -2788,7 +2789,10 @@ class TestRegistry:
             "google_keep",
             "google_keep_export",
             "google_tasks",
+            "github_stars_csv",
+            "google_calendar_json",
             "html",
+            "hacker_news_saved",
             "hypothesis",
             "ical",
             "instagram_archive",
@@ -2836,6 +2840,7 @@ class TestRegistry:
             "ris",
             "roam",
             "safari_bookmarks",
+            "safari_history",
             "simplenote_export",
             "slack_json",
             "sota",
