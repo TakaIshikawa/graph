@@ -17,9 +17,7 @@ from graph.export.duplicate_candidates import export_duplicate_candidates_markdo
 from graph.export.edge_csv import export_edges_to_csv
 from graph.export.edge_adjacency_markdown import export_edge_adjacency_markdown
 from graph.export.flashcards_markdown import export_units_to_flashcards_markdown
-from graph.export.gexf import export_graph_gexf
 from graph.export.geojson import export_units_to_geojson
-from graph.export.graphml import export_graph_graphml
 from graph.export.graphson import export_graphson
 from graph.export.graph_overview_html import render_graph_overview_html
 from graph.export.html_report import render_search_html_report
@@ -43,12 +41,37 @@ from graph.export.source_timeline_csv import export_source_timeline_csv
 from graph.export.sqlite_snapshot import export_graph_sqlite
 from graph.export.tag_cooccurrence_csv import export_tag_cooccurrence_csv
 from graph.export.tag_glossary import export_tag_glossary_markdown
+from graph.export.tag_source_matrix_csv import export_tag_source_matrix_csv
+from graph.export.task_board_markdown import export_task_board_markdown
 from graph.export.timelinejs import export_units_to_timelinejs
 from graph.export.unit_csv import export_units_to_csv
 from graph.export.unit_markdown_table import export_units_to_markdown_table
 from graph.export.unit_yaml import export_units_to_yaml
 from graph.export.units_jsonl import export_units_to_jsonl
 from graph.export.vegalite_timeline import export_units_to_vegalite_timeline
+
+try:
+    from graph.export.gexf import export_graph_gexf
+except ModuleNotFoundError as exc:
+    if exc.name != "networkx":
+        raise
+
+    def export_graph_gexf(*args, **kwargs):
+        from graph.export.gexf import export_graph_gexf as _export_graph_gexf
+
+        return _export_graph_gexf(*args, **kwargs)
+
+
+try:
+    from graph.export.graphml import export_graph_graphml
+except ModuleNotFoundError as exc:
+    if exc.name != "networkx":
+        raise
+
+    def export_graph_graphml(*args, **kwargs):
+        from graph.export.graphml import export_graph_graphml as _export_graph_graphml
+
+        return _export_graph_graphml(*args, **kwargs)
 
 __all__ = [
     "DATE_METADATA_KEYS",
@@ -84,6 +107,8 @@ __all__ = [
     "render_graph_overview_html",
     "export_tag_cooccurrence_csv",
     "export_tag_glossary_markdown",
+    "export_tag_source_matrix_csv",
+    "export_task_board_markdown",
     "export_unit_backlinks_markdown",
     "export_unit_schema_inventory",
     "export_units_to_anki_tsv",
