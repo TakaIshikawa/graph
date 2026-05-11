@@ -65,6 +65,7 @@ class SourceProject(StrEnum):
     DIIGO = "diigo"
     WALLABAG = "wallabag"
     SAFARI_BOOKMARKS = "safari_bookmarks"
+    SAFARI_HISTORY = "safari_history"
     ZOTERO_RDF = "zotero_rdf"
     HYPOTHESIS = "hypothesis"
     READWISE = "readwise"
