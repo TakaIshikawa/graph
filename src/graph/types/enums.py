@@ -116,6 +116,8 @@ class SourceProject(StrEnum):
     TRAKT_WATCH_HISTORY_CSV = "trakt_watch_history_csv"
     REDDIT_SAVED_JSON = "reddit_saved_json"
     ARCHIVEBOX_INDEX_JSON = "archivebox_index_json"
+    BLUESKY_ARCHIVE = "bluesky_archive"
+    REDDIT_SAVED_CSV = "reddit_saved_csv"
 
 
 class ContentType(StrEnum):
