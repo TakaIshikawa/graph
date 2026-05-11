@@ -19,11 +19,14 @@ from graph.export.edge_adjacency_markdown import export_edge_adjacency_markdown
 from graph.export.flashcards_markdown import export_units_to_flashcards_markdown
 from graph.export.geojson import export_units_to_geojson
 from graph.export.graphson import export_graphson
+from graph.export.graphviz_dot import export_graphviz_dot
 from graph.export.graph_overview_html import render_graph_overview_html
 from graph.export.html_report import render_search_html_report
 from graph.export.ical import DATE_METADATA_KEYS, export_units_to_ics, unit_event_datetime
+from graph.export.ical_timeline import export_units_to_ical_timeline
 from graph.export.json import export_units_to_json
 from graph.export.json_ld import export_units_to_json_ld
+from graph.export.json_summary import export_graph_json_summary
 from graph.export.llms_txt import export_units_to_llms_txt
 from graph.export.markdown_timeline import export_units_to_markdown_timeline
 from graph.export.metadata_completeness import export_metadata_completeness_markdown
@@ -92,8 +95,10 @@ __all__ = [
     "export_graph_gexf",
     "export_units_to_geojson",
     "export_graph_graphml",
+    "export_graph_json_summary",
     "export_graph_rdf_turtle",
     "export_graphson",
+    "export_graphviz_dot",
     "export_graph_sqlite",
     "export_metadata_completeness_markdown",
     "export_graph_ndjson",
@@ -126,6 +131,7 @@ __all__ = [
     "export_units_to_org",
     "export_units_to_yaml",
     "export_units_to_ics",
+    "export_units_to_ical_timeline",
     "export_units_to_vegalite_timeline",
     "unit_event_datetime",
 ]
