@@ -10,6 +10,7 @@ from graph.adapters.bookmarks import BookmarksAdapter
 from graph.adapters.bookmarks_html import BookmarksHtmlAdapter
 from graph.adapters.browser_history_csv import BrowserHistoryCsvAdapter
 from graph.adapters.chatgpt_json import ChatGptJsonAdapter
+from graph.adapters.chrome_history import ChromeHistoryAdapter
 from graph.adapters.csv_adapter import CsvAdapter
 from graph.adapters.csv_rows import CsvRowsAdapter
 from graph.adapters.crossref import CrossrefAdapter
@@ -129,6 +130,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "bookmarks": BookmarksAdapter,
     "bookmarks_html": BookmarksHtmlAdapter,
     "browser_history_csv": BrowserHistoryCsvAdapter,
+    "chrome_history": ChromeHistoryAdapter,
     "chatgpt_json": ChatGptJsonAdapter,
     "discord_json": DiscordJsonAdapter,
     "csv": CsvAdapter,
