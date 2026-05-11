@@ -7,6 +7,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 from graph.adapters.base import IngestResult, SourceAdapter
 from graph.types.enums import ContentType, SourceProject
@@ -93,6 +94,7 @@ class ActivityWatchJsonAdapter(SourceAdapter):
         app = self._first(data, "app", "application")
         title_text = self._first(data, "title", "status")
         url = self._first(data, "url")
+        url_metadata = self._url_metadata(url)
         title = self._title(bucket_type, app, title_text, url)
         duration = self._parse_float(event.get("duration"))
         metadata = {
@@ -106,11 +108,17 @@ class ActivityWatchJsonAdapter(SourceAdapter):
             "data": data,
             "source_file": source_file,
         }
+        metadata.update(url_metadata)
         tags = ["activitywatch"]
         if bucket_type:
             tags.append(bucket_type)
         if app:
             tags.append(app)
+        domain = url_metadata.get("domain")
+        if domain:
+            domain_tag = f"domain:{domain}"
+            if domain_tag not in tags:
+                tags.append(domain_tag)
         return KnowledgeUnit(
             source_project=SourceProject.ACTIVITYWATCH_JSON,
             source_id=self._source_id(bucket_id, timestamp, data),
@@ -148,6 +156,43 @@ class ActivityWatchJsonAdapter(SourceAdapter):
         if duration is not None:
             parts.append(f"Duration: {duration}")
         return "\n".join(parts)
+
+    def _url_metadata(self, url: str) -> dict[str, str]:
+        if not url:
+            return {}
+        try:
+            parsed = urlsplit(url)
+        except ValueError:
+            return {}
+        if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+            return {}
+
+        scheme = parsed.scheme.lower()
+        host = parsed.hostname.lower()
+        try:
+            port = parsed.port
+        except ValueError:
+            return {}
+        netloc = host
+        if port and not ((scheme == "http" and port == 80) or (scheme == "https" and port == 443)):
+            netloc = f"{host}:{port}"
+        if parsed.username or parsed.password:
+            userinfo = parsed.username or ""
+            if parsed.password:
+                userinfo = f"{userinfo}:{parsed.password}"
+            netloc = f"{userinfo}@{netloc}"
+
+        normalized = SplitResult(
+            scheme=scheme,
+            netloc=netloc,
+            path=parsed.path,
+            query=parsed.query,
+            fragment="",
+        )
+        return {
+            "domain": host,
+            "normalized_url": urlunsplit(normalized),
+        }
 
     def _first(self, item: dict[str, Any], *keys: str) -> str:
         for key in keys:

@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from graph.adapters.registry import get_adapter, list_adapters
 from graph.adapters.slack_json import SlackJsonAdapter
-from graph.types.enums import ContentType, SourceProject
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
 from graph.types.models import SyncState
 
 
@@ -114,6 +114,58 @@ def test_slack_json_preserves_thread_metadata(tmp_path):
     assert root.metadata["reply_count"] == 1
     assert reply.metadata["thread_ts"] == "1712345000.000100"
     assert reply.metadata["is_thread_reply"] is True
+
+
+def test_slack_json_emits_thread_reply_edges(tmp_path):
+    channel = tmp_path / "design"
+    channel.mkdir()
+    _write_json(
+        channel / "2024-04-05.json",
+        [
+            {
+                "type": "message",
+                "user": "U1",
+                "text": "Root message",
+                "ts": "1712345000.000100",
+                "thread_ts": "1712345000.000100",
+                "reply_count": 2,
+            },
+            {
+                "type": "message",
+                "user": "U2",
+                "text": "First reply",
+                "ts": "1712345100.000200",
+                "thread_ts": "1712345000.000100",
+            },
+            {
+                "type": "message",
+                "user": "U3",
+                "text": "Second reply",
+                "ts": "1712345200.000300",
+                "thread_ts": "1712345000.000100",
+            },
+            {
+                "type": "message",
+                "user": "U4",
+                "text": "Orphan reply",
+                "ts": "1712345300.000400",
+                "thread_ts": "1712340000.000001",
+            },
+        ],
+    )
+
+    first = SlackJsonAdapter(path=str(channel)).ingest()
+    second = SlackJsonAdapter(path=str(channel)).ingest()
+
+    root_id = "slack_json:design:1712345000.000100"
+    assert [(edge.from_unit_id, edge.to_unit_id, edge.relation, edge.source) for edge in first.edges] == [
+        ("slack_json:design:1712345100.000200", root_id, EdgeRelation.REPLIES_TO, EdgeSource.SOURCE),
+        ("slack_json:design:1712345200.000300", root_id, EdgeRelation.REPLIES_TO, EdgeSource.SOURCE),
+    ]
+    assert [edge.id for edge in first.edges] == [edge.id for edge in second.edges]
+    assert [edge.created_at for edge in first.edges] == [edge.created_at for edge in second.edges]
+    assert all(edge.from_unit_id != edge.to_unit_id for edge in first.edges)
+    assert first.edges[0].metadata["thread_ts"] == "1712345000.000100"
 
 
 def test_slack_json_skips_deleted_and_empty_messages(tmp_path):

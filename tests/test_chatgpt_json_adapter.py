@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 from graph.adapters.chatgpt_json import ChatGptJsonAdapter
 from graph.adapters.registry import get_adapter
-from graph.types.enums import SourceProject
+from graph.types.enums import EdgeRelation, EdgeSource, SourceProject
 from graph.types.models import SyncState
 
 
@@ -104,7 +104,31 @@ def test_ingests_conversations_json_with_readable_transcript_and_metadata(tmp_pa
     assert unit.metadata["source_path"] == "conversations.json"
     assert unit.created_at == datetime.fromtimestamp(1_700_000_000.0, tz=timezone.utc)
     assert unit.updated_at == datetime.fromtimestamp(1_700_000_300.0, tz=timezone.utc)
-    assert result.edges == []
+    assert len(result.edges) == 2
+
+
+def test_chatgpt_json_emits_message_reply_edges_without_message_units(tmp_path):
+    export = tmp_path / "conversations.json"
+    export.write_text(json.dumps([_conversation()]), encoding="utf-8")
+
+    first = ChatGptJsonAdapter(path=str(export)).ingest()
+    second = ChatGptJsonAdapter(path=str(export)).ingest()
+
+    assert [unit.source_id for unit in first.units] == ["chatgpt_json:conv-1"]
+    assert [(edge.relation, edge.source) for edge in first.edges] == [
+        (EdgeRelation.REPLIES_TO, EdgeSource.SOURCE),
+        (EdgeRelation.REPLIES_TO, EdgeSource.SOURCE),
+    ]
+    assert [edge.id for edge in first.edges] == [edge.id for edge in second.edges]
+    assert [edge.created_at for edge in first.edges] == [edge.created_at for edge in second.edges]
+    assert [(edge.metadata["child_node_id"], edge.metadata["parent_node_id"]) for edge in first.edges] == [
+        ("assistant-1", "user-1"),
+        ("user-2", "assistant-1"),
+    ]
+    assert first.edges[0].metadata["conversation_id"] == "conv-1"
+    assert first.edges[0].metadata["child_role"] == "assistant"
+    assert first.edges[0].metadata["parent_role"] == "user"
+    assert all("tool-1" not in {edge.metadata["child_node_id"], edge.metadata["parent_node_id"]} for edge in first.edges)
 
 
 def test_skips_malformed_and_empty_conversations_without_crashing(tmp_path):

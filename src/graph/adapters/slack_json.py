@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from datetime import datetime, timezone
@@ -9,8 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 SLACK_LINK_RE = re.compile(r"<(?P<url>https?://[^>|]+)(?:\|(?P<label>[^>]+))?>")
@@ -54,6 +55,8 @@ class SlackJsonAdapter(SourceAdapter):
                     continue
                 result.units.append(unit)
 
+        result.edges.extend(self._thread_edges(result.units))
+        result.edges.sort(key=lambda edge: (edge.from_unit_id, edge.to_unit_id, edge.id))
         return result
 
     def _json_files(self, root: Path) -> list[Path]:
@@ -186,6 +189,54 @@ class SlackJsonAdapter(SourceAdapter):
     def _append_link(self, links: list[str], url: str) -> None:
         if url and url not in links:
             links.append(url)
+
+    def _thread_edges(self, units: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        source_by_message: dict[tuple[str, str], KnowledgeUnit] = {}
+        for unit in units:
+            channel = self._string(unit.metadata.get("channel"))
+            ts = self._string(unit.metadata.get("ts"))
+            if channel and ts:
+                source_by_message[(channel, ts)] = unit
+
+        edges: list[KnowledgeEdge] = []
+        emitted: set[tuple[str, str]] = set()
+        for unit in units:
+            channel = self._string(unit.metadata.get("channel"))
+            ts = self._string(unit.metadata.get("ts"))
+            thread_ts = self._string(unit.metadata.get("thread_ts"))
+            if not channel or not ts or not thread_ts or thread_ts == ts:
+                continue
+            root = source_by_message.get((channel, thread_ts))
+            if root is None or root.source_id == unit.source_id:
+                continue
+            edge_key = (unit.source_id, root.source_id)
+            if edge_key in emitted:
+                continue
+            emitted.add(edge_key)
+            edges.append(
+                KnowledgeEdge(
+                    id=self._edge_id(unit.source_id, root.source_id),
+                    from_unit_id=unit.source_id,
+                    to_unit_id=root.source_id,
+                    relation=EdgeRelation.REPLIES_TO,
+                    source=EdgeSource.SOURCE,
+                    metadata={
+                        "source_project": SourceProject.SLACK_JSON.value,
+                        "from_entity_type": "slack_message",
+                        "to_entity_type": "slack_message",
+                        "channel": channel,
+                        "ts": ts,
+                        "thread_ts": thread_ts,
+                    },
+                    created_at=unit.created_at,
+                )
+            )
+        return edges
+
+    def _edge_id(self, from_id: str, to_id: str) -> str:
+        raw = "|".join([SourceProject.SLACK_JSON.value, EdgeRelation.REPLIES_TO.value, from_id, to_id])
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        return f"slack-json-replies-{digest[:16]}"
 
     def _parse_slack_timestamp(self, value: str) -> datetime | None:
         if not value:

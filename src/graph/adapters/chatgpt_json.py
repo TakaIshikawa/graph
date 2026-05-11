@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 @dataclass(frozen=True)
@@ -54,15 +54,18 @@ class ChatGptJsonAdapter(SourceAdapter):
 
         for path in self._json_files(root):
             for conversation in self._read_conversations(path):
-                unit = self._unit_from_conversation(conversation, path, root)
+                messages = self._messages(conversation)
+                unit = self._unit_from_conversation(conversation, path, root, messages)
                 if unit is None:
                     continue
                 comparable_at = unit.updated_at or unit.created_at
                 if sync_at and comparable_at <= sync_at:
                     continue
                 result.units.append(unit)
+                result.edges.extend(self._message_edges(conversation, unit, messages))
 
         result.units.sort(key=lambda unit: unit.source_id)
+        result.edges.sort(key=lambda edge: (edge.created_at, edge.id))
         return result
 
     def _json_files(self, root: Path) -> list[Path]:
@@ -101,8 +104,9 @@ class ChatGptJsonAdapter(SourceAdapter):
         conversation: dict[str, Any],
         path: Path,
         root: Path,
+        messages: list[_ChatMessage] | None = None,
     ) -> KnowledgeUnit | None:
-        messages = self._messages(conversation)
+        messages = messages if messages is not None else self._messages(conversation)
         if not messages:
             return None
 
@@ -147,6 +151,70 @@ class ChatGptJsonAdapter(SourceAdapter):
             created_at=created_at,
             updated_at=updated_at,
         )
+
+    def _message_edges(
+        self,
+        conversation: dict[str, Any],
+        unit: KnowledgeUnit,
+        messages: list[_ChatMessage],
+    ) -> list[KnowledgeEdge]:
+        mapping = conversation.get("mapping")
+        if not isinstance(mapping, dict):
+            return []
+
+        conversation_id = self._string(unit.metadata.get("conversation_id"))
+        by_node = {message.node_id: message for message in messages}
+        edges: list[KnowledgeEdge] = []
+        emitted: set[tuple[str, str]] = set()
+        for child in sorted(messages, key=lambda message: (message.order, message.node_id)):
+            node = mapping.get(child.node_id)
+            if not isinstance(node, dict):
+                continue
+            parent_node_id = self._string(node.get("parent"))
+            if not parent_node_id or parent_node_id == child.node_id:
+                continue
+            parent = by_node.get(parent_node_id)
+            if parent is None:
+                continue
+
+            from_id = self._message_source_id(conversation_id, child)
+            to_id = self._message_source_id(conversation_id, parent)
+            edge_key = (from_id, to_id)
+            if edge_key in emitted:
+                continue
+            emitted.add(edge_key)
+            edges.append(
+                KnowledgeEdge(
+                    id=self._edge_id(from_id, to_id),
+                    from_unit_id=from_id,
+                    to_unit_id=to_id,
+                    relation=EdgeRelation.REPLIES_TO,
+                    source=EdgeSource.SOURCE,
+                    metadata={
+                        "source_project": SourceProject.CHATGPT_JSON.value,
+                        "conversation_id": conversation_id,
+                        "conversation_source_id": unit.source_id,
+                        "parent_node_id": parent.node_id,
+                        "child_node_id": child.node_id,
+                        "parent_message_id": parent.message_id,
+                        "child_message_id": child.message_id,
+                        "parent_role": parent.role,
+                        "child_role": child.role,
+                    },
+                    created_at=child.created_at or unit.created_at,
+                )
+            )
+        return edges
+
+    def _message_source_id(self, conversation_id: str, message: _ChatMessage) -> str:
+        raw = f"{conversation_id}|{message.node_id}|{message.message_id}"
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        return f"chatgpt_json:{conversation_id}:message:{digest[:16]}"
+
+    def _edge_id(self, from_id: str, to_id: str) -> str:
+        raw = "|".join([SourceProject.CHATGPT_JSON.value, EdgeRelation.REPLIES_TO.value, from_id, to_id])
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        return f"chatgpt-json-replies-{digest[:16]}"
 
     def _messages(self, conversation: dict[str, Any]) -> list[_ChatMessage]:
         mapping = conversation.get("mapping")
