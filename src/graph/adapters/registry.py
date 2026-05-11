@@ -72,6 +72,7 @@ from graph.adapters.google_contacts_csv import GoogleContactsCsvAdapter
 from graph.adapters.fitbit_sleep_csv import FitbitSleepCsvAdapter
 from graph.adapters.airtable_csv import AirtableCsvAdapter
 from graph.adapters.google_keep_export import GoogleKeepExportAdapter
+from graph.adapters.archivebox_index_json import ArchiveBoxIndexJsonAdapter
 from graph.adapters.opml import OpmlAdapter
 from graph.adapters.obsidian_canvas import ObsidianCanvasAdapter
 from graph.adapters.omnivore_json import OmnivoreJsonAdapter
@@ -100,6 +101,8 @@ from graph.adapters.slack_json import SlackJsonAdapter
 from graph.adapters.sota import SOTAAdapter
 from graph.adapters.spotify_streaming_history import SpotifyStreamingHistoryAdapter
 from graph.adapters.spotify_takeout import SpotifyTakeoutAdapter
+from graph.adapters.trakt_watch_history_csv import TraktWatchHistoryCsvAdapter
+from graph.adapters.reddit_saved_json import RedditSavedJsonAdapter
 from graph.adapters.sqlite_query_log import SqliteQueryLogAdapter
 from graph.adapters.ris import RisAdapter
 from graph.adapters.text import TextAdapter
@@ -231,6 +234,9 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "fitbit_sleep_csv": FitbitSleepCsvAdapter,
     "spotify_streaming_history": SpotifyStreamingHistoryAdapter,
     "spotify_takeout": SpotifyTakeoutAdapter,
+    "trakt_watch_history_csv": TraktWatchHistoryCsvAdapter,
+    "reddit_saved_json": RedditSavedJsonAdapter,
+    "archivebox_index_json": ArchiveBoxIndexJsonAdapter,
 }
 
 

@@ -104,10 +104,14 @@ class SourceProject(StrEnum):
     GITHUB_STARS_CSV = "github_stars_csv"
     AIRTABLE_CSV = "airtable_csv"
     GOOGLE_CALENDAR_JSON = "google_calendar_json"
+    CALENDAR = "calendar"
     ACTIVITYWATCH_JSON = "activitywatch_json"
     FITBIT_SLEEP_CSV = "fitbit_sleep_csv"
     SPOTIFY_STREAMING_HISTORY = "spotify_streaming_history"
     SPOTIFY_TAKEOUT = "spotify_takeout"
+    TRAKT_WATCH_HISTORY_CSV = "trakt_watch_history_csv"
+    REDDIT_SAVED_JSON = "reddit_saved_json"
+    ARCHIVEBOX_INDEX_JSON = "archivebox_index_json"
 
 
 class ContentType(StrEnum):

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from graph.adapters.ical import ICalAdapter
+from graph.types.enums import SourceProject
 from graph.types.models import SyncState
 
 
@@ -342,4 +343,77 @@ END:VCALENDAR
     assert unit.metadata["attendees"] == [
         "Bob <bob@example.com>",
         "Carol <carol@example.com>",
+    ]
+
+
+def test_ical_uses_calendar_source_project(tmp_path):
+    cal = tmp_path / "calendar.ics"
+    cal.write_text(
+        """BEGIN:VCALENDAR
+BEGIN:VEVENT
+UID:calendar-source@example.com
+SUMMARY:Calendar source
+DTSTART:20250101T090000Z
+END:VEVENT
+END:VCALENDAR
+""",
+        encoding="utf-8",
+    )
+
+    unit = ICalAdapter(path=str(cal)).ingest().units[0]
+
+    assert unit.source_project == SourceProject.CALENDAR
+
+
+def test_ical_parses_vtodo_tasks(tmp_path):
+    cal = tmp_path / "tasks.ics"
+    cal.write_text(
+        """BEGIN:VCALENDAR
+BEGIN:VTODO
+UID:task-1@example.com
+SUMMARY:Send notes
+DESCRIPTION:Follow up with the team
+DUE:20250103T170000Z
+CATEGORIES:Work,Followup
+END:VTODO
+END:VCALENDAR
+""",
+        encoding="utf-8",
+    )
+
+    result = ICalAdapter(path=str(cal)).ingest()
+
+    assert len(result.units) == 1
+    unit = result.units[0]
+    assert unit.source_entity_type == "calendar_task"
+    assert unit.title == "Send notes"
+    assert unit.metadata["due"] == "2025-01-03T17:00:00+00:00"
+    assert unit.metadata["categories"] == ["Work", "Followup"]
+    assert unit.tags == ["Work", "Followup"]
+
+
+def test_ical_expands_daily_rrule_count(tmp_path):
+    cal = tmp_path / "recurring.ics"
+    cal.write_text(
+        """BEGIN:VCALENDAR
+BEGIN:VEVENT
+UID:daily-1@example.com
+SUMMARY:Daily standup
+DTSTART:20250101T090000Z
+DTEND:20250101T091500Z
+RRULE:FREQ=DAILY;COUNT=3
+END:VEVENT
+END:VCALENDAR
+""",
+        encoding="utf-8",
+    )
+
+    result = ICalAdapter(path=str(cal)).ingest()
+
+    assert len(result.units) == 3
+    assert [unit.metadata["recurrence_index"] for unit in result.units] == [1, 2, 3]
+    assert [unit.metadata["start"] for unit in result.units] == [
+        "2025-01-01T09:00:00+00:00",
+        "2025-01-02T09:00:00+00:00",
+        "2025-01-03T09:00:00+00:00",
     ]
