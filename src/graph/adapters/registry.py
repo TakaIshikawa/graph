@@ -25,6 +25,7 @@ from graph.adapters.feed import FeedAdapter
 from graph.adapters.forty_two import FortyTwoAdapter
 from graph.adapters.git_adapter import GitAdapter
 from graph.adapters.github_stars_csv import GithubStarsCsvAdapter
+from graph.adapters.goodreads_library import GoodreadsLibraryAdapter
 from graph.adapters.google_calendar_json import GoogleCalendarJsonAdapter
 from graph.adapters.google_keep import GoogleKeepAdapter
 from graph.adapters.html import HtmlAdapter
@@ -83,6 +84,7 @@ from graph.adapters.pinboard_html_export import PinboardHtmlExportAdapter
 from graph.adapters.plain_text import PlainTextAdapter
 from graph.adapters.pocket import PocketAdapter
 from graph.adapters.pocket_csv import PocketCsvAdapter
+from graph.adapters.pocket_export import PocketExportAdapter
 from graph.adapters.presence import PresenceAdapter
 from graph.adapters.raindrop import RaindropAdapter
 from graph.adapters.raindrop_csv import RaindropCsvAdapter
@@ -193,6 +195,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "webvtt": WebVttAdapter,
     "pocket": PocketAdapter,
     "pocket_csv": PocketCsvAdapter,
+    "pocket_export": PocketExportAdapter,
     "instapaper": InstapaperAdapter,
     "pinboard": PinboardAdapter,
     "pinboard_html_export": PinboardHtmlExportAdapter,
@@ -209,6 +212,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "readwise_csv": ReadwiseCsvAdapter,
     "matter": MatterAdapter,
     "goodreads": GoodreadsAdapter,
+    "goodreads_library": GoodreadsLibraryAdapter,
     "letterboxd": LetterboxdAdapter,
     "rescuetime": RescueTimeAdapter,
     "toggl": TogglAdapter,

@@ -7,6 +7,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from graph.adapters.base import IngestResult, SourceAdapter
 from graph.types.enums import ContentType, SourceProject
@@ -56,29 +57,53 @@ class FirefoxPlacesAdapter(SourceAdapter):
         return result
 
     def _read_rows(self, path: Path) -> list[sqlite3.Row]:
-        uri = f"file:{path}?mode=ro"
+        uri = f"file:{quote(str(path), safe='/')}?mode=ro&immutable=1"
         with sqlite3.connect(uri, uri=True) as conn:
             conn.row_factory = sqlite3.Row
+            if not self._table_exists(conn, "moz_places"):
+                return []
             has_bookmarks = self._table_exists(conn, "moz_bookmarks")
+            place_columns = self._columns(conn, "moz_places")
+            history_columns = self._columns(conn, "moz_historyvisits") if self._table_exists(conn, "moz_historyvisits") else set()
+            bookmark_columns = self._columns(conn, "moz_bookmarks") if has_bookmarks else set()
+            visit_count_expr = "p.visit_count" if "visit_count" in place_columns else "NULL"
+            frecency_expr = "p.frecency" if "frecency" in place_columns else "NULL"
+            typed_expr = "p.typed" if "typed" in place_columns else "0"
+            last_visit_expr = "p.last_visit_date" if "last_visit_date" in place_columns else "NULL"
+            history_visit_expr = "MAX(h.visit_date)" if "visit_date" in history_columns else "NULL"
+            history_count_expr = "COUNT(h.id)" if "id" in history_columns else "0"
+            history_join = "LEFT JOIN moz_historyvisits h ON h.place_id = p.id" if history_columns else ""
             bookmark_select = (
                 "EXISTS(SELECT 1 FROM moz_bookmarks b WHERE b.fk = p.id AND b.type = 1) AS bookmarked"
                 if has_bookmarks
                 else "0 AS bookmarked"
+            )
+            bookmark_date_select = (
+                "MAX(b.dateAdded) AS bookmark_date"
+                if has_bookmarks and "dateAdded" in bookmark_columns
+                else "NULL AS bookmark_date"
+            )
+            bookmark_join = (
+                "LEFT JOIN moz_bookmarks b ON b.fk = p.id AND b.type = 1"
+                if has_bookmarks
+                else ""
             )
             query = f"""
                 SELECT
                     p.id,
                     p.url,
                     p.title,
-                    p.visit_count,
-                    p.frecency,
-                    p.typed,
-                    p.last_visit_date,
-                    MAX(h.visit_date) AS visit_date,
-                    COUNT(h.id) AS history_visit_count,
-                    {bookmark_select}
+                    {visit_count_expr} AS visit_count,
+                    {frecency_expr} AS frecency,
+                    {typed_expr} AS typed,
+                    {last_visit_expr} AS last_visit_date,
+                    {history_visit_expr} AS visit_date,
+                    {history_count_expr} AS history_visit_count,
+                    {bookmark_select},
+                    {bookmark_date_select}
                 FROM moz_places p
-                LEFT JOIN moz_historyvisits h ON h.place_id = p.id
+                {history_join}
+                {bookmark_join}
                 WHERE p.url IS NOT NULL
                 GROUP BY p.id
             """
@@ -88,7 +113,7 @@ class FirefoxPlacesAdapter(SourceAdapter):
         url = str(row["url"] or "").strip()
         if not url:
             return None
-        last_visit_at = self._firefox_datetime(row["visit_date"] or row["last_visit_date"])
+        last_visit_at = self._firefox_datetime(row["visit_date"] or row["last_visit_date"] or row["bookmark_date"])
         if last_visit_at is None:
             return None
         title = str(row["title"] or url).strip()
@@ -101,6 +126,7 @@ class FirefoxPlacesAdapter(SourceAdapter):
             "last_visit_at": last_visit_at.isoformat(),
             "typed": bool(row["typed"]),
             "bookmarked": bool(row["bookmarked"]),
+            "bookmark_date": self._parse_int(row["bookmark_date"]),
             "place_id": row["id"],
         }
         return KnowledgeUnit(
@@ -135,6 +161,15 @@ class FirefoxPlacesAdapter(SourceAdapter):
             (name,),
         ).fetchone()
         return row is not None
+
+    def _columns(self, conn: sqlite3.Connection, table: str) -> set[str]:
+        return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})")}
+
+    def _parse_int(self, value: Any) -> int | None:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
 
     def _ensure_utc(self, value: datetime) -> datetime:
         if value.tzinfo is None:

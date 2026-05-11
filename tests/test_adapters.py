@@ -1972,7 +1972,7 @@ END:VCALENDAR
 
         assert len(result.units) == 1
         unit = result.units[0]
-        assert unit.source_project == "me"
+        assert unit.source_project == "calendar"
         assert unit.source_id == "calendar.ics#event-1@example.com"
         assert unit.source_entity_type == "calendar_event"
         assert unit.title == "Planning Meeting"
@@ -1983,11 +1983,16 @@ END:VCALENDAR
         assert unit.tags == ["work", "planning"]
         assert unit.metadata == {
             "uid": "event-1@example.com",
+            "component": "VEVENT",
             "start": "2026-04-24T09:00:00+00:00",
             "end": "2026-04-24T10:00:00+00:00",
+            "due": "",
+            "completed": "",
             "location": "Conference Room",
             "organizer": "Alice <alice@example.com>",
             "attendees": ["Bob <bob@example.com>"],
+            "categories": ["work", "planning"],
+            "rrule": "",
             "source_path": "calendar.ics",
             "created": "2026-04-20T12:00:00+00:00",
             "updated": "2026-04-23T18:00:00+00:00",
@@ -2755,9 +2760,12 @@ class TestRegistry:
     def test_list_adapters(self):
         adapters = list_adapters()
         expected = {
+            "activitywatch_json",
             "airtable_csv",
             "apple_health_workouts",
             "apple_notes_export",
+            "apple_reminders_csv",
+            "archivebox_index_json",
             "are_na",
             "atom",
             "bear_export",
@@ -2782,13 +2790,16 @@ class TestRegistry:
             "facebook_archive",
             "feed",
             "firefox_places",
+            "fitbit_sleep_csv",
             "foam_workspace",
             "forty_two",
             "git",
             "goodreads",
+            "goodreads_library",
             "google_keep",
             "google_keep_export",
             "google_tasks",
+            "google_contacts_csv",
             "github_stars_csv",
             "google_calendar_json",
             "html",
@@ -2830,12 +2841,14 @@ class TestRegistry:
             "plain_text",
             "pocket",
             "pocket_csv",
+            "pocket_export",
             "presence",
             "raindrop",
             "raindrop_csv",
             "raindrop_json",
             "readwise",
             "readwise_csv",
+            "reddit_saved_json",
             "rescuetime",
             "ris",
             "roam",
@@ -2854,6 +2867,7 @@ class TestRegistry:
             "things_csv",
             "todoist",
             "toggl",
+            "trakt_watch_history_csv",
             "transcript",
             "twitter_archive",
             "vcard",
