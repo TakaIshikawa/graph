@@ -45,6 +45,7 @@ class SlackJsonAdapter(SourceAdapter):
             return result
 
         sync_at = self._sync_datetime(since) if since else None
+        message_units: list[KnowledgeUnit] = []
         for path in self._json_files(root):
             channel = self._channel_name(root, path)
             for message in self._read_messages(path):
@@ -54,8 +55,10 @@ class SlackJsonAdapter(SourceAdapter):
                 if sync_at and unit.updated_at <= sync_at:
                     continue
                 result.units.append(unit)
+                message_units.append(unit)
+                result.units.extend(self._reaction_units(message, unit))
 
-        result.edges.extend(self._thread_edges(result.units))
+        result.edges.extend(self._thread_edges(message_units))
         result.edges.sort(key=lambda edge: (edge.from_unit_id, edge.to_unit_id, edge.id))
         return result
 
@@ -129,6 +132,13 @@ class SlackJsonAdapter(SourceAdapter):
             metadata["is_thread_reply"] = thread_ts != ts
         if message.get("reply_count") is not None:
             metadata["reply_count"] = message.get("reply_count")
+        if isinstance(message.get("reactions"), list):
+            metadata["reactions"] = message.get("reactions")
+            metadata["reaction_count"] = sum(
+                reaction.get("count", 0)
+                for reaction in message["reactions"]
+                if isinstance(reaction, dict) and isinstance(reaction.get("count"), int)
+            )
         if message.get("client_msg_id"):
             metadata["client_msg_id"] = self._string(message.get("client_msg_id"))
 
@@ -145,6 +155,53 @@ class SlackJsonAdapter(SourceAdapter):
             updated_at=updated_at,
         )
 
+    def _reaction_units(self, message: dict[str, Any], parent: KnowledgeUnit) -> list[KnowledgeUnit]:
+        reactions = message.get("reactions")
+        if not isinstance(reactions, list):
+            return []
+
+        channel = self._string(parent.metadata.get("channel"))
+        channel_id = self._string(message.get("channel") or message.get("channel_id"))
+        ts = self._string(parent.metadata.get("ts"))
+        units: list[KnowledgeUnit] = []
+        for reaction in sorted(
+            (item for item in reactions if isinstance(item, dict)),
+            key=lambda item: (self._string(item.get("name")), self._string(item.get("emoji"))),
+        ):
+            name = self._string(reaction.get("name") or reaction.get("emoji"))
+            if not name:
+                continue
+            count = reaction.get("count")
+            if not isinstance(count, int) or isinstance(count, bool):
+                users = reaction.get("users")
+                count = len(users) if isinstance(users, list) else 0
+            users = [self._string(user) for user in reaction.get("users", []) if self._string(user)] if isinstance(reaction.get("users"), list) else []
+            metadata = {
+                "channel_id": channel_id,
+                "channel_name": channel,
+                "channel": channel,
+                "message_ts": ts,
+                "reaction_name": name,
+                "reaction_count": count,
+                "reacting_users": users,
+                "parent_source_id": parent.source_id,
+            }
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.SLACK_JSON,
+                    source_id=self._reaction_source_id(channel, ts, name),
+                    source_entity_type="reaction",
+                    title=f"#{channel} reaction :{name}:",
+                    content=f"Reaction :{name}: on Slack message {ts} ({count})",
+                    content_type=ContentType.METADATA,
+                    metadata=metadata,
+                    tags=["slack", "reaction", f"slack-{channel}"],
+                    created_at=parent.created_at,
+                    updated_at=parent.updated_at,
+                )
+            )
+        return units
+
     def _channel_name(self, root: Path, path: Path) -> str:
         if root.is_file():
             return path.stem
@@ -152,6 +209,9 @@ class SlackJsonAdapter(SourceAdapter):
 
     def _source_id(self, channel: str, ts: str) -> str:
         return f"slack_json:{channel}:{ts}"
+
+    def _reaction_source_id(self, channel: str, ts: str, name: str) -> str:
+        return f"slack_json:{channel}:{ts}:reaction:{name}"
 
     def _title(self, channel: str, created_at: datetime, user: str) -> str:
         speaker = user or "unknown"

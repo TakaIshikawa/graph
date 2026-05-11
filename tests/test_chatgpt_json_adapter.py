@@ -131,6 +131,39 @@ def test_chatgpt_json_emits_message_reply_edges_without_message_units(tmp_path):
     assert all("tool-1" not in {edge.metadata["child_node_id"], edge.metadata["parent_node_id"]} for edge in first.edges)
 
 
+def test_chatgpt_json_emits_attachment_units_with_parent_metadata(tmp_path):
+    conversation = _conversation()
+    conversation["mapping"]["user-1"]["message"]["metadata"] = {
+        "attachments": [
+            {
+                "file_name": "notes.pdf",
+                "mime_type": "application/pdf",
+                "url": "https://files.example/notes.pdf",
+            }
+        ]
+    }
+    conversation["mapping"]["assistant-1"]["message"]["content"]["parts"].append(
+        {"name": "chart.png", "mime_type": "image/png", "asset_pointer": "file-service://chart"}
+    )
+    export = tmp_path / "conversations.json"
+    export.write_text(json.dumps([conversation]), encoding="utf-8")
+
+    result = ChatGptJsonAdapter(path=str(export)).ingest()
+
+    attachments = sorted(
+        [unit for unit in result.units if unit.source_entity_type == "attachment"],
+        key=lambda unit: unit.metadata["attachment_name"],
+    )
+    assert [unit.metadata["attachment_name"] for unit in attachments] == ["chart.png", "notes.pdf"]
+    assert attachments[0].metadata["conversation_id"] == "conv-1"
+    assert attachments[0].metadata["message_id"] == "msg-assistant-1"
+    assert attachments[0].metadata["attachment_type"] == "image/png"
+    assert attachments[0].tags == ["chatgpt", "attachment"]
+    assert [unit.source_id for unit in ChatGptJsonAdapter(path=str(export)).ingest().units if unit.source_entity_type == "attachment"] == [
+        unit.source_id for unit in attachments
+    ]
+
+
 def test_skips_malformed_and_empty_conversations_without_crashing(tmp_path):
     export = tmp_path / "mixed.json"
     malformed = tmp_path / "broken.json"

@@ -1412,6 +1412,73 @@ class Store:
             "tags": tags,
         }
 
+    def tag_freshness_summary(
+        self,
+        limit: int = 50,
+        *,
+        stale_after_days: int = 90,
+    ) -> list[dict]:
+        """Return deterministic freshness rows grouped by tag."""
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
+            raise ValueError("limit must be a non-negative integer.")
+        if not isinstance(stale_after_days, int) or isinstance(stale_after_days, bool) or stale_after_days < 0:
+            raise ValueError("stale_after_days must be a non-negative integer.")
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=stale_after_days)
+        rows = self.conn.execute(
+            """SELECT json_each.value AS tag,
+                      knowledge_units.title AS title,
+                      knowledge_units.source_project AS source_project,
+                      knowledge_units.created_at AS created_at
+               FROM knowledge_units, json_each(knowledge_units.tags)
+               WHERE json_each.type = 'text'
+                 AND TRIM(json_each.value) != ''"""
+        ).fetchall()
+
+        grouped: dict[str, list[sqlite3.Row]] = defaultdict(list)
+        for row in rows:
+            grouped[str(row["tag"])].append(row)
+
+        summaries: list[dict] = []
+        for tag, tag_rows in grouped.items():
+            dated: list[tuple[datetime, sqlite3.Row]] = []
+            stale_count = 0
+            for row in tag_rows:
+                try:
+                    created_at = _parse_datetime(row["created_at"])
+                except ValueError:
+                    created_at = None
+                if created_at is None:
+                    continue
+                dated.append((created_at, row))
+                if created_at < cutoff:
+                    stale_count += 1
+
+            sorted_dated = sorted(dated, key=lambda item: (item[0], str(item[1]["title"])))
+            example_titles = []
+            for _, row in sorted(sorted_dated, key=lambda item: (-item[0].timestamp(), str(item[1]["title"]).casefold(), str(item[1]["title"]))):
+                title = str(row["title"] or "")
+                if title and title not in example_titles:
+                    example_titles.append(title)
+                if len(example_titles) >= 3:
+                    break
+            summaries.append(
+                {
+                    "tag": tag,
+                    "unit_count": len(tag_rows),
+                    "newest_created_at": sorted_dated[-1][0].isoformat() if sorted_dated else None,
+                    "oldest_created_at": sorted_dated[0][0].isoformat() if sorted_dated else None,
+                    "stale_unit_count": stale_count,
+                    "source_projects": sorted({str(row["source_project"]) for row in tag_rows}),
+                    "example_titles": example_titles,
+                }
+            )
+
+        return sorted(
+            summaries,
+            key=lambda row: (-row["stale_unit_count"], -row["unit_count"], row["tag"]),
+        )[:limit]
+
     def add_unit_alias(
         self,
         unit_id: str,
