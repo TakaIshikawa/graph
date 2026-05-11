@@ -8,6 +8,8 @@ from datetime import date, datetime
 from enum import Enum
 from typing import Any
 
+from pydantic import BaseModel
+
 from graph.types.models import KnowledgeUnit
 
 
@@ -56,7 +58,7 @@ def _full_unit_dict(unit: KnowledgeUnit) -> dict[str, Any]:
         "title": unit.title,
         "content": unit.content,
         "content_type": _serialize_value(unit.content_type),
-        "metadata": unit.metadata,
+        "metadata": _serialize_value(unit.metadata),
         "tags": sorted(unit.tags),
         "confidence": unit.confidence,
         "utility_score": unit.utility_score,
@@ -83,6 +85,15 @@ def _serialize_value(value: Any) -> Any:
         return value.isoformat()
     if value is None:
         return None
-    if isinstance(value, str | int | float | bool | dict | list):
+    if isinstance(value, str | int | float | bool):
         return value
+    if isinstance(value, BaseModel):
+        return _serialize_value(value.model_dump())
+    if isinstance(value, dict):
+        return {
+            str(key): _serialize_value(item)
+            for key, item in sorted(value.items(), key=lambda item: str(item[0]))
+        }
+    if isinstance(value, list | tuple):
+        return [_serialize_value(item) for item in value]
     return str(value)

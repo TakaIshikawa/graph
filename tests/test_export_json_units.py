@@ -6,6 +6,7 @@ import json
 from datetime import datetime, timezone
 
 import pytest
+from pydantic import BaseModel
 
 from graph.exports import export_units_to_json, get_exporter, list_exporters
 from graph.types.enums import ContentType, SourceProject
@@ -13,6 +14,11 @@ from graph.types.models import KnowledgeUnit
 
 UNIT_TIME = datetime(2026, 5, 1, 10, 15, 30, tzinfo=timezone.utc)
 UPDATED_TIME = datetime(2026, 5, 2, 8, 30, 45, tzinfo=timezone.utc)
+
+
+class MetadataModel(BaseModel):
+    label: str
+    count: int
 
 
 def _unit(
@@ -443,6 +449,48 @@ def test_export_units_to_json_deeply_nested_metadata():
     assert metadata["level1"]["level2"]["level3"]["level4"]["level5"]["deep_list"] == [1, 2, 3]
     assert metadata["another_top"]["nested_list"][0]["data"]["sub"] == "a"
     assert metadata["another_top"]["nested_list"][1]["data"]["sub"] == "b"
+
+
+def test_export_units_to_json_full_mode_serializes_nested_non_json_metadata():
+    """Test nested non-primitive metadata becomes JSON-safe in full mode."""
+    unit = _unit(
+        "unit-non-json",
+        "Non JSON Metadata",
+        metadata={
+            "when": UNIT_TIME,
+            "kind": ContentType.FINDING,
+            "tuple": ("alpha", datetime(2026, 5, 3, 1, 2, tzinfo=timezone.utc)),
+            "mapping": {1: {"model": MetadataModel(label="nested", count=2)}},
+        },
+    )
+
+    data = json.loads(export_units_to_json([unit], mode="full"))
+
+    assert data[0]["metadata"] == {
+        "kind": "finding",
+        "mapping": {"1": {"model": {"count": 2, "label": "nested"}}},
+        "tuple": ["alpha", "2026-05-03T01:02:00+00:00"],
+        "when": "2026-05-01T10:15:30+00:00",
+    }
+
+
+def test_export_units_to_json_compact_mode_ignores_non_json_metadata():
+    """Test compact mode remains limited to id, title, and content."""
+    unit = _unit(
+        "unit-compact-non-json",
+        "Compact Non JSON",
+        metadata={"when": UNIT_TIME, "tuple": ("alpha", "beta")},
+    )
+
+    data = json.loads(export_units_to_json([unit], mode="compact"))
+
+    assert data == [
+        {
+            "id": "unit-compact-non-json",
+            "title": "Compact Non JSON",
+            "content": "Compact Non JSON content",
+        }
+    ]
 
 
 def test_export_units_to_json_unicode_in_all_fields():

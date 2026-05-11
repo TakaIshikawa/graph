@@ -394,6 +394,21 @@ def test_export_units_to_html_prevents_html_injection_in_doc_title():
     assert "&lt;/title&gt;" in html
 
 
+def test_export_units_to_html_escapes_script_and_ampersand_in_doc_title():
+    """Test that special characters in the document title are escaped."""
+    html = export_units_to_html(
+        [_unit("unit-1", "Test")],
+        title="Report <script>alert('XSS')</script> & notes",
+    )
+
+    expected = (
+        "<title>Report &lt;script&gt;alert(&#x27;XSS&#x27;)&lt;/script&gt; "
+        "&amp; notes</title>"
+    )
+    assert expected in html
+    assert "<script>" not in html
+
+
 def test_export_units_to_html_prevents_style_injection():
     """Test that style tags cannot be injected through content."""
     unit = _unit(

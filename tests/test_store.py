@@ -157,7 +157,7 @@ class TestUnitCRUD:
                 source_entity_type="insight",
                 title="Target",
                 content="Target content",
-                tags=["solar", "draft"],
+                tags=["solar", "draft", "", "   "],
             )
         )
         store.insert_unit(
