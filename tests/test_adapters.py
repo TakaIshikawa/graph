@@ -21,6 +21,7 @@ from graph.adapters.bookmarks import BookmarksAdapter
 from graph.adapters.bookmarks_html import BookmarksHtmlAdapter
 from graph.adapters.browser_history_csv import BrowserHistoryCsvAdapter
 from graph.adapters.chatgpt_json import ChatGptJsonAdapter
+from graph.adapters.chrome_history import ChromeHistoryAdapter
 from graph.adapters.csv_adapter import CsvAdapter
 from graph.adapters.csv_rows import CsvRowsAdapter
 from graph.adapters.crossref import CrossrefAdapter
@@ -2765,6 +2766,7 @@ class TestRegistry:
             "bookmarks_html",
             "browser_history_csv",
             "chatgpt_json",
+            "chrome_history",
             "crossref",
             "csl_json",
             "csv",
@@ -2988,6 +2990,10 @@ class TestRegistry:
         )
         assert isinstance(browser_history_csv_adapter, BrowserHistoryCsvAdapter)
         assert browser_history_csv_adapter.name == "browser_history_csv"
+
+        chrome_history_adapter = get_adapter("chrome_history", path="/tmp/History")
+        assert isinstance(chrome_history_adapter, ChromeHistoryAdapter)
+        assert chrome_history_adapter.name == "chrome_history"
 
         bookmarks_html_adapter = get_adapter("bookmarks_html", path="/tmp/bookmarks.html")
         assert isinstance(bookmarks_html_adapter, BookmarksHtmlAdapter)

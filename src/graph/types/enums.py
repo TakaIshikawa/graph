@@ -19,6 +19,7 @@ class SourceProject(StrEnum):
     BOOKMARKS = "bookmarks"
     BOOKMARKS_HTML = "bookmarks_html"
     BROWSER_HISTORY_CSV = "browser_history_csv"
+    CHROME_HISTORY = "chrome_history"
     CHATGPT_JSON = "chatgpt_json"
     DISCORD_JSON = "discord_json"
     CSV = "csv"
