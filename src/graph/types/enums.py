@@ -97,6 +97,7 @@ class SourceProject(StrEnum):
     ZOTERO_CSV = "zotero_csv"
     GOOGLE_TASKS = "google_tasks"
     SPOTIFY_STREAMING_HISTORY = "spotify_streaming_history"
+    SPOTIFY_TAKEOUT = "spotify_takeout"
 
 
 class ContentType(StrEnum):
