@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class GoodreadsLibraryAdapter(SourceAdapter):
@@ -21,7 +21,7 @@ class GoodreadsLibraryAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["book"]
+        return ["author", "book", "shelf"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -33,10 +33,12 @@ class GoodreadsLibraryAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        if entity_types and "book" not in entity_types:
+        allowed_types = set(entity_types or self.entity_types)
+        if not allowed_types.intersection(self.entity_types):
             return result
 
         sync_at = self._sync_datetime(since) if since else None
+        books: list[KnowledgeUnit] = []
         for path in self._iter_paths():
             try:
                 rows = self._read_rows(path)
@@ -79,7 +81,7 @@ class GoodreadsLibraryAdapter(SourceAdapter):
                     "review": review,
                     "source_file": str(path),
                 }
-                result.units.append(
+                books.append(
                     KnowledgeUnit(
                         source_project=SourceProject.GOODREADS_LIBRARY,
                         source_id=self._source_id(book_id, isbn13 or isbn, title, author),
@@ -94,7 +96,17 @@ class GoodreadsLibraryAdapter(SourceAdapter):
                     )
                 )
 
+        authors = self._author_units(books) if "author" in allowed_types else []
+        shelves = self._shelf_units(books) if "shelf" in allowed_types else []
+        if "author" in allowed_types:
+            result.units.extend(authors)
+        if "book" in allowed_types:
+            result.units.extend(books)
+        if "shelf" in allowed_types:
+            result.units.extend(shelves)
+        result.edges.extend(self._edges(books, authors, shelves, allowed_types))
         result.units.sort(key=lambda unit: (unit.created_at, unit.source_id))
+        result.edges.sort(key=lambda edge: edge.id)
         return result
 
     def _iter_paths(self) -> list[Path]:
@@ -151,6 +163,117 @@ class GoodreadsLibraryAdapter(SourceAdapter):
             if normalized and normalized not in shelves:
                 shelves.append(normalized)
         return shelves
+
+    def _author_units(self, books: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        for book in books:
+            author = str(book.metadata.get("author") or "").strip()
+            if author:
+                grouped.setdefault(author, []).append(book)
+
+        now = datetime.now(timezone.utc)
+        units: list[KnowledgeUnit] = []
+        for author, author_books in grouped.items():
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.GOODREADS_LIBRARY,
+                    source_id=self._author_source_id(author),
+                    source_entity_type="author",
+                    title=author,
+                    content=f"Goodreads author: {author}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "author": author,
+                        "book_count": len(author_books),
+                        "source_file": sorted({str(book.metadata.get("source_file")) for book in author_books}),
+                    },
+                    tags=["author"],
+                    created_at=min((book.created_at for book in author_books), default=now),
+                    updated_at=max((book.updated_at for book in author_books), default=now),
+                )
+            )
+        return units
+
+    def _shelf_units(self, books: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        for book in books:
+            for shelf in book.metadata.get("shelves") or []:
+                grouped.setdefault(str(shelf), []).append(book)
+
+        now = datetime.now(timezone.utc)
+        units: list[KnowledgeUnit] = []
+        for shelf, shelf_books in grouped.items():
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.GOODREADS_LIBRARY,
+                    source_id=self._shelf_source_id(shelf),
+                    source_entity_type="shelf",
+                    title=f"Goodreads shelf: {shelf}",
+                    content=f"Shelf: {shelf}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "shelf": shelf,
+                        "book_count": len(shelf_books),
+                        "source_file": sorted({str(book.metadata.get("source_file")) for book in shelf_books}),
+                    },
+                    tags=["shelf", shelf],
+                    created_at=min((book.created_at for book in shelf_books), default=now),
+                    updated_at=max((book.updated_at for book in shelf_books), default=now),
+                )
+            )
+        return units
+
+    def _edges(
+        self,
+        books: list[KnowledgeUnit],
+        authors: list[KnowledgeUnit],
+        shelves: list[KnowledgeUnit],
+        allowed_types: set[str],
+    ) -> list[KnowledgeEdge]:
+        edges: list[KnowledgeEdge] = []
+        author_ids = {str(author.metadata["author"]): author.source_id for author in authors}
+        shelf_ids = {str(shelf.metadata["shelf"]): shelf.source_id for shelf in shelves}
+        if {"book", "author"}.issubset(allowed_types):
+            for book in books:
+                author_id = author_ids.get(str(book.metadata.get("author") or ""))
+                if author_id:
+                    edges.append(self._edge(book.source_id, author_id, "book_author", EdgeRelation.RELATES_TO))
+        if {"book", "shelf"}.issubset(allowed_types):
+            for book in books:
+                for shelf in book.metadata.get("shelves") or []:
+                    shelf_id = shelf_ids.get(str(shelf))
+                    if shelf_id:
+                        edges.append(self._edge(shelf_id, book.source_id, "shelf_contains_book", EdgeRelation.CONTAINS))
+        return self._dedupe_edges(edges)
+
+    def _edge(self, from_id: str, to_id: str, relation_type: str, relation: EdgeRelation) -> KnowledgeEdge:
+        return KnowledgeEdge(
+            id=self._edge_id(from_id, to_id, relation_type),
+            from_unit_id=from_id,
+            to_unit_id=to_id,
+            relation=relation,
+            source=EdgeSource.SOURCE,
+            metadata={
+                "source_project": SourceProject.GOODREADS_LIBRARY.value,
+                "relation_type": relation_type,
+            },
+        )
+
+    def _dedupe_edges(self, edges: list[KnowledgeEdge]) -> list[KnowledgeEdge]:
+        by_id = {edge.id: edge for edge in edges}
+        return list(by_id.values())
+
+    def _author_source_id(self, author: str) -> str:
+        digest = hashlib.sha256(author.strip().lower().encode("utf-8")).hexdigest()[:24]
+        return f"goodreads_library:author:{digest}"
+
+    def _shelf_source_id(self, shelf: str) -> str:
+        digest = hashlib.sha256(shelf.strip().lower().encode("utf-8")).hexdigest()[:24]
+        return f"goodreads_library:shelf:{digest}"
+
+    def _edge_id(self, from_id: str, to_id: str, relation_type: str) -> str:
+        digest = hashlib.sha256("|".join((from_id, to_id, relation_type)).encode("utf-8")).hexdigest()[:24]
+        return f"goodreads-library-{relation_type}-{digest}"
 
     def _first(self, row: dict[str, Any], *keys: str) -> str:
         for key in keys:

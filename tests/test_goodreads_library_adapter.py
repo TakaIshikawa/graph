@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from graph.adapters.goodreads_library import GoodreadsLibraryAdapter
 from graph.adapters.registry import get_adapter, list_adapters
-from graph.types.enums import SourceProject
+from graph.types.enums import EdgeRelation, SourceProject
 
 
 def test_goodreads_library_imports_shelves_and_optional_fields(tmp_path):
@@ -67,7 +67,7 @@ def test_goodreads_library_imports_shelves_and_optional_fields(tmp_path):
 
     result = GoodreadsLibraryAdapter(path=str(path)).ingest()
 
-    assert len(result.units) == 3
+    assert len([unit for unit in result.units if unit.source_entity_type == "book"]) == 3
     read = next(unit for unit in result.units if unit.metadata["book_id"] == "1")
     assert read.source_project == SourceProject.GOODREADS_LIBRARY
     assert read.source_id == "goodreads_library:1"
@@ -78,12 +78,42 @@ def test_goodreads_library_imports_shelves_and_optional_fields(tmp_path):
     assert read.tags == ["read", "favorites", "ai"]
     assert read.created_at == datetime(2025, 1, 1, tzinfo=timezone.utc)
     assert read.updated_at == datetime(2025, 1, 3, tzinfo=timezone.utc)
-    current = next(unit for unit in result.units if unit.metadata["book_id"] == "2")
+    current = next(unit for unit in result.units if unit.source_entity_type == "book" and unit.metadata["book_id"] == "2")
     assert current.metadata["rating"] is None
     assert current.metadata["review"] == ""
     assert current.tags == ["currently-reading"]
-    future = next(unit for unit in result.units if unit.metadata["book_id"] == "3")
+    future = next(unit for unit in result.units if unit.source_entity_type == "book" and unit.metadata["book_id"] == "3")
     assert future.tags == ["to-read"]
+
+    authors = [unit for unit in result.units if unit.source_entity_type == "author"]
+    shelves = [unit for unit in result.units if unit.source_entity_type == "shelf"]
+    assert {unit.metadata["author"] for unit in authors} == {"Ada", "Grace", "Katherine"}
+    assert {unit.metadata["shelf"] for unit in shelves} == {"read", "favorites", "ai", "currently-reading", "to-read"}
+    shelf_edge = next(edge for edge in result.edges if edge.relation == EdgeRelation.CONTAINS)
+    assert shelf_edge.metadata["relation_type"] == "shelf_contains_book"
+    author_edge = next(edge for edge in result.edges if edge.relation == EdgeRelation.RELATES_TO)
+    assert author_edge.metadata["relation_type"] == "book_author"
+
+
+def test_goodreads_library_entity_filters_for_author_shelf_and_book(tmp_path):
+    path = tmp_path / "goodreads_library_export.csv"
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["Book Id", "Title", "Author", "Exclusive Shelf", "Bookshelves"])
+        writer.writeheader()
+        writer.writerow({"Book Id": "1", "Title": "One", "Author": "Ada", "Exclusive Shelf": "read", "Bookshelves": "favorites"})
+        writer.writerow({"Book Id": "2", "Title": "Two", "Author": "Ada", "Exclusive Shelf": "read", "Bookshelves": ""})
+
+    author_only = GoodreadsLibraryAdapter(path=str(path)).ingest(entity_types=["author"])
+    shelf_and_book = GoodreadsLibraryAdapter(path=str(path)).ingest(entity_types=["shelf", "book"])
+    book_only = GoodreadsLibraryAdapter(path=str(path)).ingest(entity_types=["book"])
+
+    assert [unit.source_entity_type for unit in author_only.units] == ["author"]
+    assert author_only.units[0].metadata["book_count"] == 2
+    assert author_only.edges == []
+    assert {unit.source_entity_type for unit in shelf_and_book.units} == {"book", "shelf"}
+    assert all(edge.relation == EdgeRelation.CONTAINS for edge in shelf_and_book.edges)
+    assert {unit.source_entity_type for unit in book_only.units} == {"book"}
+    assert book_only.edges == []
 
 
 def test_goodreads_library_adapter_is_registered():

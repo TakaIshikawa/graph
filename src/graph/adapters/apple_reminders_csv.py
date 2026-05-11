@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class AppleRemindersCsvAdapter(SourceAdapter):
@@ -20,7 +20,7 @@ class AppleRemindersCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["reminder"]
+        return ["list", "reminder"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -32,7 +32,8 @@ class AppleRemindersCsvAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        if entity_types and "reminder" not in entity_types:
+        allowed_types = set(entity_types or self.entity_types)
+        if not allowed_types.intersection(self.entity_types):
             return result
 
         sync_at = self._ensure_utc(since.last_sync_at) if since else None
@@ -50,7 +51,15 @@ class AppleRemindersCsvAdapter(SourceAdapter):
                     continue
                 units.append(unit)
 
-        result.units.extend(sorted(units, key=lambda unit: (unit.created_at, unit.source_id)))
+        lists = self._list_units(units) if "list" in allowed_types else []
+        if "list" in allowed_types:
+            result.units.extend(lists)
+        if "reminder" in allowed_types:
+            result.units.extend(units)
+        if "list" in allowed_types and "reminder" in allowed_types:
+            result.edges.extend(self._contains_edges(lists, units))
+        result.units.sort(key=lambda unit: (unit.created_at, unit.source_id))
+        result.edges.sort(key=lambda edge: edge.id)
         return result
 
     def _iter_paths(self) -> list[Path]:
@@ -139,6 +148,76 @@ class AppleRemindersCsvAdapter(SourceAdapter):
         )
         digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
         return f"apple_reminders_csv:{digest}"
+
+    def _list_units(self, reminders: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        for reminder in reminders:
+            list_name = str(reminder.metadata.get("list_name") or "").strip()
+            if list_name:
+                grouped.setdefault(list_name, []).append(reminder)
+
+        now = datetime.now(timezone.utc)
+        today = now.date()
+        list_units: list[KnowledgeUnit] = []
+        for list_name, list_reminders in grouped.items():
+            open_count = sum(1 for reminder in list_reminders if reminder.metadata.get("status") == "open")
+            completed_count = sum(1 for reminder in list_reminders if reminder.metadata.get("status") == "completed")
+            overdue_count = 0
+            for reminder in list_reminders:
+                due = self._parse_datetime(reminder.metadata.get("due_date"))
+                if reminder.metadata.get("status") == "open" and due and due.date() < today:
+                    overdue_count += 1
+            list_units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.APPLE_REMINDERS_CSV,
+                    source_id=self._list_source_id(list_name),
+                    source_entity_type="list",
+                    title=list_name,
+                    content=f"Reminder list: {list_name}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "list_name": list_name,
+                        "open_count": open_count,
+                        "completed_count": completed_count,
+                        "overdue_count": overdue_count,
+                        "source_files": sorted({str(reminder.metadata.get("source_file")) for reminder in list_reminders}),
+                    },
+                    tags=["reminder-list", list_name],
+                    created_at=min((reminder.created_at for reminder in list_reminders), default=now),
+                    updated_at=max((reminder.updated_at for reminder in list_reminders), default=now),
+                )
+            )
+        return list_units
+
+    def _contains_edges(self, list_units: list[KnowledgeUnit], reminders: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        list_ids = {str(unit.metadata.get("list_name")): unit.source_id for unit in list_units}
+        edges: list[KnowledgeEdge] = []
+        for reminder in reminders:
+            list_id = list_ids.get(str(reminder.metadata.get("list_name") or ""))
+            if not list_id:
+                continue
+            edges.append(
+                KnowledgeEdge(
+                    id=self._edge_id(list_id, reminder.source_id),
+                    from_unit_id=list_id,
+                    to_unit_id=reminder.source_id,
+                    relation=EdgeRelation.CONTAINS,
+                    source=EdgeSource.SOURCE,
+                    metadata={
+                        "source_project": SourceProject.APPLE_REMINDERS_CSV.value,
+                        "relation_type": "list_contains_reminder",
+                    },
+                )
+            )
+        return list({edge.id: edge for edge in edges}.values())
+
+    def _list_source_id(self, list_name: str) -> str:
+        digest = hashlib.sha256(list_name.strip().lower().encode("utf-8")).hexdigest()[:24]
+        return f"apple_reminders_csv:list:{digest}"
+
+    def _edge_id(self, list_source_id: str, reminder_source_id: str) -> str:
+        digest = hashlib.sha256("|".join((list_source_id, reminder_source_id, "contains")).encode("utf-8")).hexdigest()[:24]
+        return f"apple-reminders-csv-contains-{digest}"
 
     def _content(self, title: str, notes: str, due: datetime | None, url: str) -> str:
         parts = [title]

@@ -5,13 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class SpotifyStreamingHistoryAdapter(SourceAdapter):
@@ -21,10 +21,11 @@ class SpotifyStreamingHistoryAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["play"]
+        return ["play", "session"]
 
-    def __init__(self, path: str = "") -> None:
+    def __init__(self, path: str = "", session_gap_minutes: int = 30) -> None:
         self.path = path
+        self.session_gap = timedelta(minutes=session_gap_minutes)
 
     def ingest(
         self,
@@ -33,7 +34,8 @@ class SpotifyStreamingHistoryAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        if entity_types and "play" not in entity_types:
+        allowed_types = set(entity_types or self.entity_types)
+        if not allowed_types.intersection(self.entity_types):
             return result
 
         sync_at = self._sync_datetime(since) if since else None
@@ -52,7 +54,16 @@ class SpotifyStreamingHistoryAdapter(SourceAdapter):
                     continue
                 units.append(unit)
 
-        result.units.extend(sorted(units, key=lambda unit: (unit.created_at, unit.source_id)))
+        units = sorted(units, key=lambda unit: (unit.created_at, unit.source_id))
+        sessions = self._session_units(units) if "session" in allowed_types else []
+        if "play" in allowed_types:
+            result.units.extend(units)
+        if "session" in allowed_types:
+            result.units.extend(sessions)
+        if "play" in allowed_types and "session" in allowed_types:
+            result.edges.extend(self._contains_edges(sessions))
+        result.units.sort(key=lambda unit: (unit.created_at, unit.source_id))
+        result.edges.sort(key=lambda edge: edge.id)
         return result
 
     def _iter_paths(self) -> list[Path]:
@@ -184,6 +195,78 @@ class SpotifyStreamingHistoryAdapter(SourceAdapter):
         if ms_played is not None:
             parts.append(f"Milliseconds played: {ms_played}")
         return "\n".join(parts)
+
+    def _session_units(self, plays: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        sessions: list[list[KnowledgeUnit]] = []
+        for play in plays:
+            if not sessions:
+                sessions.append([play])
+                continue
+            previous = sessions[-1][-1]
+            if play.created_at - previous.created_at <= self.session_gap:
+                sessions[-1].append(play)
+            else:
+                sessions.append([play])
+
+        return [self._session_unit(session) for session in sessions if session]
+
+    def _session_unit(self, plays: list[KnowledgeUnit]) -> KnowledgeUnit:
+        start = min(play.created_at for play in plays)
+        end = max(play.created_at for play in plays)
+        artists = {str(play.metadata.get("artist_name") or "") for play in plays if play.metadata.get("artist_name")}
+        tracks = {str(play.metadata.get("track_name") or "") for play in plays if play.metadata.get("track_name")}
+        total_ms = sum(int(play.metadata["ms_played"]) for play in plays if isinstance(play.metadata.get("ms_played"), int))
+        source_files = sorted({str(play.metadata.get("source_file")) for play in plays if play.metadata.get("source_file")})
+        source_id = self._session_source_id(plays)
+        return KnowledgeUnit(
+            source_project=SourceProject.SPOTIFY_STREAMING_HISTORY,
+            source_id=source_id,
+            source_entity_type="session",
+            title=f"Spotify session {start.isoformat()}",
+            content=f"{len(plays)} Spotify plays from {start.isoformat()} to {end.isoformat()}",
+            content_type=ContentType.METADATA,
+            metadata={
+                "start_at": start.isoformat(),
+                "end_at": end.isoformat(),
+                "play_count": len(plays),
+                "total_ms_played": total_ms,
+                "artist_count": len(artists),
+                "track_count": len(tracks),
+                "source_files": source_files,
+                "play_source_ids": [play.source_id for play in plays],
+            },
+            tags=["spotify", "music", "listening-session"],
+            created_at=start,
+            updated_at=end,
+        )
+
+    def _contains_edges(self, sessions: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        edges: list[KnowledgeEdge] = []
+        for session in sessions:
+            for play_source_id in session.metadata.get("play_source_ids") or []:
+                edges.append(
+                    KnowledgeEdge(
+                        id=self._edge_id(session.source_id, str(play_source_id)),
+                        from_unit_id=session.source_id,
+                        to_unit_id=str(play_source_id),
+                        relation=EdgeRelation.CONTAINS,
+                        source=EdgeSource.SOURCE,
+                        metadata={
+                            "source_project": SourceProject.SPOTIFY_STREAMING_HISTORY.value,
+                            "relation_type": "session_contains_play",
+                        },
+                    )
+                )
+        return edges
+
+    def _session_source_id(self, plays: list[KnowledgeUnit]) -> str:
+        payload = "|".join(play.source_id for play in plays)
+        digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
+        return f"spotify_streaming_history:session:{digest}"
+
+    def _edge_id(self, session_source_id: str, play_source_id: str) -> str:
+        digest = hashlib.sha256("|".join((session_source_id, play_source_id, "contains")).encode("utf-8")).hexdigest()[:24]
+        return f"spotify-streaming-history-contains-{digest}"
 
     def _first(self, item: dict[str, Any], *keys: str) -> str:
         value = self._value(item, *keys)

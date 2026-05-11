@@ -8,8 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class KindleClippingsAdapter(SourceAdapter):
@@ -19,7 +19,7 @@ class KindleClippingsAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["clipping"]
+        return ["book", "clipping"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -31,10 +31,12 @@ class KindleClippingsAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        if entity_types and "clipping" not in entity_types:
+        allowed_types = set(entity_types or self.entity_types)
+        if not allowed_types.intersection(self.entity_types):
             return result
 
         sync_at = self._sync_datetime(since) if since else None
+        clippings: list[KnowledgeUnit] = []
         for path in self._iter_paths():
             try:
                 blocks = self._read_blocks(path)
@@ -46,9 +48,17 @@ class KindleClippingsAdapter(SourceAdapter):
                     continue
                 if sync_at and unit.updated_at <= sync_at:
                     continue
-                result.units.append(unit)
+                clippings.append(unit)
 
+        books = self._book_units(clippings) if "book" in allowed_types else []
+        if "book" in allowed_types:
+            result.units.extend(books)
+        if "clipping" in allowed_types:
+            result.units.extend(clippings)
+        if "book" in allowed_types and "clipping" in allowed_types:
+            result.edges.extend(self._contains_edges(books, clippings))
         result.units.sort(key=lambda unit: unit.source_id)
+        result.edges.sort(key=lambda edge: edge.id)
         return result
 
     def _iter_paths(self) -> list[Path]:
@@ -151,6 +161,77 @@ class KindleClippingsAdapter(SourceAdapter):
         position = " - ".join(part for part in (f"Page {page}" if page else "", f"Location {location}" if location else "") if part)
         label = clipping_type.title() if clipping_type else "Clipping"
         return f"{book_title}: {label} ({position})" if position else f"{book_title}: {label}"
+
+    def _book_units(self, clippings: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[tuple[str, str], list[KnowledgeUnit]] = {}
+        for clipping in clippings:
+            key = (str(clipping.metadata.get("book_title", "")), str(clipping.metadata.get("author", "")))
+            if key[0]:
+                grouped.setdefault(key, []).append(clipping)
+
+        units: list[KnowledgeUnit] = []
+        for (title, author), book_clippings in grouped.items():
+            source_files = sorted({str(unit.metadata.get("source_file", "")) for unit in book_clippings if unit.metadata.get("source_file")})
+            created_at = min(unit.created_at for unit in book_clippings)
+            updated_at = max(unit.updated_at for unit in book_clippings)
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.KINDLE,
+                    source_id=self._book_source_id(title, author),
+                    source_entity_type="book",
+                    title=title if not author else f"{title} by {author}",
+                    content=title if not author else f"{title}\nAuthor: {author}",
+                    content_type=ContentType.ARTIFACT,
+                    metadata={
+                        "book_title": title,
+                        "author": author,
+                        "clipping_count": len(book_clippings),
+                        "source_file": source_files,
+                    },
+                    tags=[author] if author else [],
+                    created_at=created_at,
+                    updated_at=updated_at,
+                )
+            )
+        return units
+
+    def _contains_edges(self, books: list[KnowledgeUnit], clippings: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        book_ids = {
+            (str(book.metadata.get("book_title", "")), str(book.metadata.get("author", ""))): book.source_id
+            for book in books
+        }
+        edges: list[KnowledgeEdge] = []
+        seen: set[str] = set()
+        for clipping in clippings:
+            key = (str(clipping.metadata.get("book_title", "")), str(clipping.metadata.get("author", "")))
+            book_source_id = book_ids.get(key)
+            if not book_source_id:
+                continue
+            edge_id = self._edge_id(book_source_id, clipping.source_id)
+            if edge_id in seen:
+                continue
+            seen.add(edge_id)
+            edges.append(
+                KnowledgeEdge(
+                    id=edge_id,
+                    from_unit_id=book_source_id,
+                    to_unit_id=clipping.source_id,
+                    relation=EdgeRelation.CONTAINS,
+                    source=EdgeSource.SOURCE,
+                    metadata={
+                        "source_project": SourceProject.KINDLE.value,
+                        "relation_type": "book_contains_clipping",
+                    },
+                )
+            )
+        return edges
+
+    def _book_source_id(self, title: str, author: str) -> str:
+        return f"kindle_clippings:book:{self._digest(title, author, '', '')}"
+
+    def _edge_id(self, book_source_id: str, clipping_source_id: str) -> str:
+        digest = self._digest(book_source_id, clipping_source_id, "contains", "")
+        return f"kindle-clippings-contains-{digest}"
 
     def _digest(self, title: str, author: str, details: str, text: str) -> str:
         payload = "\n".join((title, author, details, text))
