@@ -89,6 +89,7 @@ from graph.adapters.safari_bookmarks import SafariBookmarksAdapter
 from graph.adapters.slack_json import SlackJsonAdapter
 from graph.adapters.sota import SOTAAdapter
 from graph.adapters.spotify_streaming_history import SpotifyStreamingHistoryAdapter
+from graph.adapters.spotify_takeout import SpotifyTakeoutAdapter
 from graph.adapters.sqlite_query_log import SqliteQueryLogAdapter
 from graph.adapters.ris import RisAdapter
 from graph.adapters.text import TextAdapter
@@ -209,6 +210,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "zotero_csv": ZoteroCsvAdapter,
     "google_tasks": GoogleTasksAdapter,
     "spotify_streaming_history": SpotifyStreamingHistoryAdapter,
+    "spotify_takeout": SpotifyTakeoutAdapter,
 }
 
 
