@@ -50,7 +50,9 @@ class TraktWatchHistoryCsvAdapter(SourceAdapter):
                     continue
                 units.append(unit)
 
-        result.units.extend(sorted(units, key=lambda unit: (unit.created_at, unit.source_id)))
+        units = sorted(units, key=lambda unit: (unit.created_at, unit.source_id))
+        self._add_rewatch_metadata(units)
+        result.units.extend(units)
         return result
 
     def _iter_paths(self) -> list[Path]:
@@ -125,6 +127,37 @@ class TraktWatchHistoryCsvAdapter(SourceAdapter):
         )
         digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
         return f"trakt_watch_history_csv:{digest}"
+
+    def _add_rewatch_metadata(self, units: list[KnowledgeUnit]) -> None:
+        previous_by_identity: dict[tuple[Any, ...], datetime] = {}
+        sequence_by_identity: dict[tuple[Any, ...], int] = {}
+        for unit in units:
+            identity = self._watch_identity(unit.metadata)
+            sequence = sequence_by_identity.get(identity, 0) + 1
+            sequence_by_identity[identity] = sequence
+            unit.metadata["watch_sequence"] = sequence
+            unit.metadata["is_rewatch"] = sequence > 1
+            previous_watch_at = previous_by_identity.get(identity)
+            if previous_watch_at is not None:
+                unit.metadata["previous_watch_at"] = previous_watch_at.isoformat()
+            previous_by_identity[identity] = unit.created_at
+
+    def _watch_identity(self, metadata: dict[str, Any]) -> tuple[Any, ...]:
+        for key in ("trakt_id", "imdb_id", "tmdb_id"):
+            value = str(metadata.get(key) or "").strip()
+            if value:
+                return (key, value.lower())
+        return (
+            "fallback",
+            self._normalize_identity_text(metadata.get("title")),
+            self._normalize_identity_text(metadata.get("year")),
+            self._normalize_identity_text(metadata.get("type")),
+            metadata.get("season"),
+            metadata.get("episode"),
+        )
+
+    def _normalize_identity_text(self, value: Any) -> str:
+        return " ".join(str(value or "").strip().casefold().split())
 
     def _title(self, title: str, year: str, media_type: str, season: int | None, episode: int | None) -> str:
         formatted = f"{title} ({year})" if year else title
