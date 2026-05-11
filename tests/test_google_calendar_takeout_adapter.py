@@ -6,7 +6,7 @@ from pathlib import Path
 
 from graph.adapters.google_calendar_takeout import GoogleCalendarTakeoutAdapter
 from graph.adapters.registry import get_adapter
-from graph.types.enums import SourceProject
+from graph.types.enums import EdgeRelation, EdgeSource, SourceProject
 from graph.types.models import SyncState
 
 
@@ -170,6 +170,138 @@ def test_google_calendar_takeout_filters_entity_types_and_since(tmp_path):
     )
 
     assert [unit.title for unit in result.units] == ["New"]
+
+
+def test_google_calendar_takeout_reports_event_and_attendee_entity_types():
+    assert GoogleCalendarTakeoutAdapter().entity_types == ["event", "attendee"]
+
+
+def test_google_calendar_takeout_imports_attendees_and_event_edges_when_requested(tmp_path):
+    export = _write_json(
+        tmp_path / "Work.json",
+        {
+            "summary": "Work Calendar",
+            "items": [
+                {
+                    "id": "event-1",
+                    "summary": "Design review",
+                    "start": {"dateTime": "2026-05-01T10:00:00Z"},
+                    "updated": "2026-05-01T11:00:00Z",
+                    "attendees": [
+                        {
+                            "email": "Ada@Example.com ",
+                            "displayName": "Ada Lovelace",
+                            "responseStatus": "accepted",
+                            "organizer": True,
+                        },
+                        {
+                            "displayName": "Grace Hopper",
+                            "responseStatus": "needsAction",
+                        },
+                    ],
+                }
+            ],
+        },
+    )
+
+    result = GoogleCalendarTakeoutAdapter(path=str(export)).ingest(entity_types=["event", "attendee"])
+
+    assert [unit.source_entity_type for unit in result.units] == ["event", "attendee", "attendee"]
+    event_unit = next(unit for unit in result.units if unit.source_entity_type == "event")
+    attendees = {unit.title: unit for unit in result.units if unit.source_entity_type == "attendee"}
+    ada = attendees["Ada Lovelace"]
+    grace = attendees["Grace Hopper"]
+    assert ada.source_id.startswith("google_calendar_takeout:attendee:")
+    assert ada.metadata == {
+        "email": "ada@example.com",
+        "display_name": "Ada Lovelace",
+        "source": "google_calendar_attendee",
+    }
+    assert grace.metadata["email"] == ""
+
+    assert len(result.edges) == 2
+    assert {(edge.from_unit_id, edge.to_unit_id) for edge in result.edges} == {
+        (event_unit.source_id, ada.source_id),
+        (event_unit.source_id, grace.source_id),
+    }
+    assert {edge.relation for edge in result.edges} == {EdgeRelation.REFERENCES}
+    assert {edge.source for edge in result.edges} == {EdgeSource.SOURCE}
+    edge_by_attendee = {edge.to_unit_id: edge for edge in result.edges}
+    assert edge_by_attendee[ada.source_id].metadata["response_status"] == "accepted"
+    assert edge_by_attendee[ada.source_id].metadata["attendee_email"] == "ada@example.com"
+    assert edge_by_attendee[grace.source_id].metadata["response_status"] == "needsAction"
+
+
+def test_google_calendar_takeout_attendee_source_ids_are_stable(tmp_path):
+    export = _write_json(
+        tmp_path / "calendar.json",
+        {
+            "items": [
+                {
+                    "id": "one",
+                    "summary": "One",
+                    "start": {"dateTime": "2026-05-01T10:00:00Z"},
+                    "attendees": [
+                        {"email": "ADA@EXAMPLE.COM", "displayName": "Ada"},
+                        {"displayName": "  Grace   Hopper  "},
+                    ],
+                },
+                {
+                    "id": "two",
+                    "summary": "Two",
+                    "start": {"dateTime": "2026-05-02T10:00:00Z"},
+                    "attendees": [
+                        {"email": "ada@example.com", "displayName": "A. Lovelace"},
+                        {"displayName": "grace hopper"},
+                    ],
+                },
+            ]
+        },
+    )
+
+    result = GoogleCalendarTakeoutAdapter(path=str(export)).ingest(entity_types=["attendee"])
+
+    attendees = sorted(result.units, key=lambda unit: unit.metadata["display_name"])
+    assert len(attendees) == 2
+    assert {unit.metadata["email"] for unit in attendees} == {"", "ada@example.com"}
+    first_ids = {unit.source_id for unit in attendees}
+    second_ids = {
+        unit.source_id
+        for unit in GoogleCalendarTakeoutAdapter(path=str(export)).ingest(entity_types=["attendee"]).units
+    }
+    assert first_ids == second_ids
+    assert result.edges == []
+
+
+def test_google_calendar_takeout_entity_type_filters_preserve_valid_edges(tmp_path):
+    export = _write_json(
+        tmp_path / "calendar.json",
+        {
+            "items": [
+                {
+                    "id": "event-1",
+                    "summary": "Design review",
+                    "start": {"dateTime": "2026-05-01T10:00:00Z"},
+                    "attendees": [{"email": "ada@example.com", "displayName": "Ada"}],
+                }
+            ]
+        },
+    )
+    adapter = GoogleCalendarTakeoutAdapter(path=str(export))
+
+    default_result = adapter.ingest()
+    event_result = adapter.ingest(entity_types=["event"])
+    attendee_result = adapter.ingest(entity_types=["attendee"])
+    combined_result = adapter.ingest(entity_types=["event", "attendee"])
+
+    assert [unit.source_entity_type for unit in default_result.units] == ["event"]
+    assert default_result.edges == []
+    assert [unit.source_entity_type for unit in event_result.units] == ["event"]
+    assert event_result.edges == []
+    assert [unit.source_entity_type for unit in attendee_result.units] == ["attendee"]
+    assert attendee_result.edges == []
+    assert sorted(unit.source_entity_type for unit in combined_result.units) == ["attendee", "event"]
+    assert len(combined_result.edges) == 1
 
 
 def test_google_calendar_takeout_uses_stable_source_ids_without_event_ids(tmp_path):

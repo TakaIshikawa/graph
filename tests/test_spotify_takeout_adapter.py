@@ -146,6 +146,91 @@ def test_spotify_takeout_entity_type_filtering_does_not_load_plays(tmp_path):
     assert result.edges == []
 
 
+def test_spotify_takeout_ingests_podcast_episode_plays_when_requested(tmp_path):
+    export = tmp_path / "Streaming_History_Audio_2024-2025_0.json"
+    export.write_text(
+        json.dumps(
+            [
+                {
+                    "ts": "2025-03-01T08:15:00Z",
+                    "episode_name": "Future of imports",
+                    "episode_show_name": "Graph Notes",
+                    "spotify_episode_uri": "spotify:episode:abc123",
+                    "ms_played": 98765,
+                    "platform": "android",
+                    "conn_country": "JP",
+                    "reason_start": "clickrow",
+                    "reason_end": "endplay",
+                    "skipped": True,
+                    "offline": False,
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = SpotifyTakeoutAdapter(path=str(export)).ingest(entity_types=["podcast_play"])
+
+    assert len(result.units) == 1
+    unit = result.units[0]
+    assert unit.source_project == SourceProject.SPOTIFY_TAKEOUT
+    assert unit.source_entity_type == "podcast_play"
+    assert unit.source_id.startswith("spotify_takeout:podcast_play:")
+    assert unit.title == "Graph Notes - Future of imports"
+    assert unit.tags == ["spotify", "podcast"]
+    assert unit.created_at == datetime(2025, 3, 1, 8, 15, tzinfo=timezone.utc)
+    assert unit.metadata["show_name"] == "Graph Notes"
+    assert unit.metadata["episode_name"] == "Future of imports"
+    assert unit.metadata["spotify_uri"] == "spotify:episode:abc123"
+    assert unit.metadata["played_at"] == "2025-03-01T08:15:00+00:00"
+    assert unit.metadata["ms_played"] == 98765
+    assert unit.metadata["platform"] == "android"
+    assert unit.metadata["country"] == "JP"
+    assert unit.metadata["skipped"] is True
+    assert unit.metadata["offline"] is False
+    assert "Episode: Graph Notes - Future of imports" in unit.content
+
+
+def test_spotify_takeout_entity_type_filtering_separates_music_and_podcast(tmp_path):
+    export = tmp_path / "endsong_0.json"
+    export.write_text(
+        json.dumps(
+            [
+                {
+                    "ts": "2025-03-01T08:00:00Z",
+                    "master_metadata_track_name": "Track",
+                    "master_metadata_album_artist_name": "Artist",
+                    "spotify_track_uri": "spotify:track:abc",
+                },
+                {
+                    "ts": "2025-03-01T08:15:00Z",
+                    "master_metadata_episode_name": "Episode",
+                    "master_metadata_show_name": "Show",
+                    "spotify_episode_uri": "spotify:episode:def",
+                    "offline": "true",
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    adapter = SpotifyTakeoutAdapter(path=str(export))
+
+    default_result = adapter.ingest()
+    music_result = adapter.ingest(entity_types=["play"])
+    podcast_result = adapter.ingest(entity_types=["podcast_play"])
+    combined_result = adapter.ingest(entity_types=["play", "podcast_play"])
+
+    assert [unit.source_entity_type for unit in default_result.units] == ["play"]
+    assert [unit.source_entity_type for unit in music_result.units] == ["play"]
+    assert [unit.source_entity_type for unit in podcast_result.units] == ["podcast_play"]
+    assert [unit.source_entity_type for unit in combined_result.units] == ["play", "podcast_play"]
+    assert podcast_result.units[0].metadata["offline"] is True
+
+
+def test_spotify_takeout_reports_music_and_podcast_entity_types():
+    assert SpotifyTakeoutAdapter().entity_types == ["play", "podcast_play"]
+
+
 def test_spotify_takeout_source_id_is_stable(tmp_path):
     export = tmp_path / "Streaming_History_Audio_2024-2025_0.json"
     event = {

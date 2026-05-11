@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class GoogleCalendarTakeoutAdapter(SourceAdapter):
@@ -20,7 +20,7 @@ class GoogleCalendarTakeoutAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["event"]
+        return ["event", "attendee"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -32,11 +32,14 @@ class GoogleCalendarTakeoutAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        if entity_types and "event" not in entity_types:
+        allowed_types = set(entity_types or ["event"])
+        if not allowed_types.intersection(self.entity_types):
             return result
 
         sync_at = self._ensure_utc(since.last_sync_at) if since else None
         units: list[KnowledgeUnit] = []
+        attendee_units: dict[str, KnowledgeUnit] = {}
+        edge_candidates: list[KnowledgeEdge] = []
         for path in self._iter_paths():
             try:
                 events = self._read_events(path)
@@ -48,9 +51,20 @@ class GoogleCalendarTakeoutAdapter(SourceAdapter):
                     continue
                 if sync_at and unit.updated_at <= sync_at:
                     continue
-                units.append(unit)
+                if "event" in allowed_types:
+                    units.append(unit)
+                if "attendee" in allowed_types:
+                    for attendee in self._attendees(event.get("attendees")):
+                        attendee_unit = self._unit_from_attendee(attendee, unit.updated_at)
+                        if attendee_unit is None:
+                            continue
+                        attendee_units.setdefault(attendee_unit.source_id, attendee_unit)
+                        if "event" in allowed_types:
+                            edge_candidates.append(self._edge_from_event_attendee(unit, attendee_unit, attendee))
 
+        units.extend(attendee_units.values())
         result.units.extend(sorted(units, key=lambda unit: (unit.created_at, unit.source_id)))
+        result.edges.extend(sorted(edge_candidates, key=lambda edge: (edge.from_unit_id, edge.to_unit_id, edge.id)))
         return result
 
     def _iter_paths(self) -> list[Path]:
@@ -194,6 +208,84 @@ class GoogleCalendarTakeoutAdapter(SourceAdapter):
             )
         return attendees
 
+    def _unit_from_attendee(
+        self,
+        attendee: dict[str, Any],
+        event_updated_at: datetime,
+    ) -> KnowledgeUnit | None:
+        email = self._normalize_email(attendee.get("email"))
+        display_name = self._string(attendee.get("displayName"))
+        fallback = self._normalize_name(display_name)
+        if not email and not fallback:
+            return None
+
+        title = display_name or email
+        metadata = {
+            "email": email,
+            "display_name": display_name,
+            "source": "google_calendar_attendee",
+        }
+        return KnowledgeUnit(
+            source_project=SourceProject.GOOGLE_CALENDAR_TAKEOUT,
+            source_id=self._attendee_source_id(email, fallback),
+            source_entity_type="attendee",
+            title=title,
+            content=title,
+            content_type=ContentType.METADATA,
+            metadata=metadata,
+            tags=["google_calendar", "person", "attendee"],
+            created_at=event_updated_at,
+            updated_at=event_updated_at,
+        )
+
+    def _edge_from_event_attendee(
+        self,
+        event_unit: KnowledgeUnit,
+        attendee_unit: KnowledgeUnit,
+        attendee: dict[str, Any],
+    ) -> KnowledgeEdge:
+        return KnowledgeEdge(
+            id=self._edge_id(event_unit.source_id, attendee_unit.source_id, attendee),
+            from_unit_id=event_unit.source_id,
+            to_unit_id=attendee_unit.source_id,
+            relation=EdgeRelation.REFERENCES,
+            source=EdgeSource.SOURCE,
+            metadata={
+                "source_project": SourceProject.GOOGLE_CALENDAR_TAKEOUT.value,
+                "from_entity_type": "event",
+                "to_entity_type": "attendee",
+                "response_status": attendee.get("responseStatus"),
+                "organizer": attendee.get("organizer"),
+                "self": attendee.get("self"),
+                "attendee_email": self._normalize_email(attendee.get("email")),
+                "attendee_display_name": self._string(attendee.get("displayName")),
+            },
+            created_at=event_unit.updated_at,
+        )
+
+    def _attendee_source_id(self, email: str, fallback: str) -> str:
+        stable = f"email:{email}" if email else f"display:{fallback}"
+        digest = hashlib.sha256(stable.encode("utf-8")).hexdigest()[:24]
+        return f"google_calendar_takeout:attendee:{digest}"
+
+    def _edge_id(
+        self,
+        event_source_id: str,
+        attendee_source_id: str,
+        attendee: dict[str, Any],
+    ) -> str:
+        raw = "|".join(
+            [
+                SourceProject.GOOGLE_CALENDAR_TAKEOUT.value,
+                EdgeRelation.REFERENCES.value,
+                event_source_id,
+                attendee_source_id,
+                self._string(attendee.get("responseStatus")),
+            ]
+        )
+        digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+        return f"google-calendar-attendee-references-{digest}"
+
     def _content(
         self,
         title: str,
@@ -222,6 +314,17 @@ class GoogleCalendarTakeoutAdapter(SourceAdapter):
             if value is not None and str(value).strip():
                 return str(value).strip()
         return ""
+
+    def _string(self, value: Any) -> str:
+        if value is None or isinstance(value, dict | list):
+            return ""
+        return str(value).strip()
+
+    def _normalize_email(self, value: Any) -> str:
+        return self._string(value).lower()
+
+    def _normalize_name(self, value: Any) -> str:
+        return " ".join(self._string(value).lower().split())
 
     def _parse_datetime(self, value: Any) -> datetime | None:
         if value is None:
