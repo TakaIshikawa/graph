@@ -13,6 +13,7 @@ from graph.export.csl_json import export_units_to_csl_json
 from graph.export.cytoscape import export_graph_cytoscape
 from graph.export.cypher import export_graph_cypher
 from graph.export.dot import export_graph_dot
+from graph.export.dublin_core_xml import export_units_to_dublin_core_xml
 from graph.export.duplicate_candidates import export_duplicate_candidates_markdown
 from graph.export.edge_csv import export_edges_to_csv
 from graph.export.edge_adjacency_markdown import export_edge_adjacency_markdown
@@ -22,6 +23,7 @@ from graph.export.graphson import export_graphson
 from graph.export.graphviz_dot import export_graphviz_dot
 from graph.export.graph_overview_html import render_graph_overview_html
 from graph.export.html_report import render_search_html_report
+from graph.export.hugo_bundle import export_units_to_hugo_bundle
 from graph.export.ical import DATE_METADATA_KEYS, export_units_to_ics, unit_event_datetime
 from graph.export.ical_timeline import export_units_to_ical_timeline
 from graph.export.json import export_units_to_json
@@ -48,11 +50,13 @@ from graph.export.tag_glossary import export_tag_glossary_markdown
 from graph.export.tag_source_matrix_csv import export_tag_source_matrix_csv
 from graph.export.task_board_markdown import export_task_board_markdown
 from graph.export.timelinejs import export_units_to_timelinejs
+from graph.export.tiddlywiki_json import export_units_to_tiddlywiki_json
 from graph.export.unit_csv import export_units_to_csv
 from graph.export.unit_markdown_table import export_units_to_markdown_table
 from graph.export.unit_yaml import export_units_to_yaml
 from graph.export.units_jsonl import export_units_to_jsonl
 from graph.export.vegalite_timeline import export_units_to_vegalite_timeline
+from graph.export.zettelkasten_index import export_zettelkasten_index_markdown
 
 try:
     from graph.export.gexf import export_graph_gexf
@@ -86,6 +90,7 @@ __all__ = [
     "export_context_pack",
     "export_units_to_csl_json",
     "export_graph_cytoscape",
+    "export_units_to_dublin_core_xml",
     "export_duplicate_candidates_markdown",
     "export_edge_adjacency_markdown",
     "export_edges_to_csv",
@@ -101,6 +106,7 @@ __all__ = [
     "export_graphson",
     "export_graphviz_dot",
     "export_graph_sqlite",
+    "export_units_to_hugo_bundle",
     "export_metadata_completeness_markdown",
     "export_graph_ndjson",
     "export_relation_evidence_markdown",
@@ -110,6 +116,7 @@ __all__ = [
     "export_source_inventory_csv",
     "export_source_timeline_csv",
     "export_units_to_timelinejs",
+    "export_units_to_tiddlywiki_json",
     "render_search_html_report",
     "render_graph_overview_html",
     "export_tag_cooccurrence_csv",
@@ -135,5 +142,6 @@ __all__ = [
     "export_units_to_ics",
     "export_units_to_ical_timeline",
     "export_units_to_vegalite_timeline",
+    "export_zettelkasten_index_markdown",
     "unit_event_datetime",
 ]
