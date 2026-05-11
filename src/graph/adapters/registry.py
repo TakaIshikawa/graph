@@ -51,6 +51,10 @@ from graph.adapters.notion_export import NotionExportAdapter
 from graph.adapters.evernote_export import EvernoteExportAdapter
 from graph.adapters.bear_export import BearExportAdapter
 from graph.adapters.apple_notes_export import AppleNotesExportAdapter
+from graph.adapters.apple_health_workouts import AppleHealthWorkoutsAdapter
+from graph.adapters.day_one_json import DayOneJsonAdapter
+from graph.adapters.firefox_places import FirefoxPlacesAdapter
+from graph.adapters.things_csv import ThingsCsvAdapter
 from graph.adapters.simplenote_export import SimplenoteExportAdapter
 from graph.adapters.foam import FoamWorkspaceAdapter
 from graph.adapters.tana import TanaAdapter
@@ -137,6 +141,10 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "evernote_export": EvernoteExportAdapter,
     "bear_export": BearExportAdapter,
     "apple_notes_export": AppleNotesExportAdapter,
+    "apple_health_workouts": AppleHealthWorkoutsAdapter,
+    "day_one_json": DayOneJsonAdapter,
+    "things_csv": ThingsCsvAdapter,
+    "firefox_places": FirefoxPlacesAdapter,
     "simplenote_export": SimplenoteExportAdapter,
     "google_keep_export": GoogleKeepExportAdapter,
     "opml": OpmlAdapter,
