@@ -57,6 +57,7 @@ def test_firefox_places_ingests_history_and_metadata(tmp_path):
     assert unit.metadata["url"] == "https://example.com"
     assert unit.metadata["visit_count"] == 3
     assert unit.metadata["history_visit_count"] == 1
+    assert unit.metadata["first_visit_at"] == "2025-01-01T00:01:40+00:00"
     assert unit.metadata["frecency"] == 120
     assert unit.metadata["typed"] is True
     assert unit.metadata["bookmarked"] is True
@@ -94,6 +95,52 @@ def test_firefox_places_opens_database_read_only(tmp_path):
 
     assert len(result.units) == 1
     assert before == after
+
+
+def test_firefox_places_aggregates_history_visit_dates_and_transitions(tmp_path):
+    db = tmp_path / "places.sqlite"
+    with sqlite3.connect(db) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE moz_places (
+                id INTEGER PRIMARY KEY,
+                url TEXT,
+                title TEXT,
+                visit_count INTEGER,
+                frecency INTEGER,
+                typed INTEGER,
+                last_visit_date INTEGER
+            );
+            CREATE TABLE moz_historyvisits (
+                id INTEGER PRIMARY KEY,
+                place_id INTEGER,
+                visit_date INTEGER,
+                transition INTEGER
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO moz_places VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (1, "https://transitions.test", "Transitions", 5, 80, 0, 1_735_689_600_000_000),
+        )
+        conn.executemany(
+            "INSERT INTO moz_historyvisits VALUES (?, ?, ?, ?)",
+            [
+                (1, 1, 1_735_689_600_000_000, 1),
+                (2, 1, 1_735_693_200_000_000, 2),
+                (3, 1, 1_735_696_800_000_000, 1),
+            ],
+        )
+
+    result = FirefoxPlacesAdapter(path=str(db)).ingest()
+
+    assert len(result.units) == 1
+    unit = result.units[0]
+    assert unit.created_at == datetime(2025, 1, 1, 2, 0, tzinfo=timezone.utc)
+    assert unit.metadata["history_visit_count"] == 3
+    assert unit.metadata["first_visit_at"] == "2025-01-01T00:00:00+00:00"
+    assert unit.metadata["last_visit_at"] == "2025-01-01T02:00:00+00:00"
+    assert unit.metadata["transition_counts"] == {"1": 2, "2": 1}
 
 
 def test_firefox_places_ingests_bookmark_without_visit(tmp_path):

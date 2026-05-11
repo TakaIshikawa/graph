@@ -107,6 +107,7 @@ class SourceProject(StrEnum):
     AIRTABLE_CSV = "airtable_csv"
     GOOGLE_CALENDAR_JSON = "google_calendar_json"
     GOOGLE_CALENDAR_TAKEOUT = "google_calendar_takeout"
+    GOOGLE_PHOTOS_TAKEOUT = "google_photos_takeout"
     CALENDAR = "calendar"
     CALIBRE_SQLITE = "calibre_sqlite"
     ACTIVITYWATCH_JSON = "activitywatch_json"

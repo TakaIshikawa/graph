@@ -12,8 +12,8 @@ from pathlib import Path
 from typing import Any
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 HASHTAG_RE = re.compile(r"(?<![\w/])#([\w][\w-]*)", re.UNICODE)
@@ -51,15 +51,17 @@ class MastodonAdapter(SourceAdapter):
             return result
 
         sync_at = self._sync_datetime(since) if since else None
+        emitted_edges: set[tuple[str, str, EdgeRelation, str]] = set()
         for activity in self._activities(parsed):
             unit = self._unit_from_activity(activity, path.name)
-            if unit is None:
-                continue
-            if sync_at and unit.updated_at <= sync_at:
-                continue
-            result.units.append(unit)
+            include_unit = unit is not None and not (sync_at and unit.updated_at <= sync_at)
+            if include_unit:
+                result.units.append(unit)
+                result.edges.extend(self._edges_from_create(activity, unit.source_id, emitted_edges))
+            result.edges.extend(self._edges_from_announce(activity, emitted_edges))
 
         result.units.sort(key=lambda unit: unit.source_id)
+        result.edges.sort(key=lambda edge: (edge.from_unit_id, edge.to_unit_id, edge.id))
         return result
 
     def _outbox_path(self) -> Path | None:
@@ -143,6 +145,128 @@ class MastodonAdapter(SourceAdapter):
             return source_id
         digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
         return f"mastodon:{digest[:24]}"
+
+    def _edges_from_create(
+        self,
+        activity: dict[str, Any],
+        source_id: str,
+        emitted_edges: set[tuple[str, str, EdgeRelation, str]],
+    ) -> list[KnowledgeEdge]:
+        obj = activity.get("object")
+        if not isinstance(obj, dict) or self._first(obj, "type") != "Note":
+            return []
+
+        edges: list[KnowledgeEdge] = []
+        in_reply_to = self._first(obj, "inReplyTo")
+        if in_reply_to:
+            edges.append(
+                self._edge(
+                    source_id,
+                    in_reply_to,
+                    EdgeRelation.REPLIES_TO,
+                    "mastodon_reply",
+                    emitted_edges,
+                    from_entity_type="note",
+                    to_entity_type="status",
+                )
+            )
+
+        for target in self._mention_targets(obj.get("tag")):
+            edges.append(
+                self._edge(
+                    source_id,
+                    target,
+                    EdgeRelation.REFERENCES,
+                    "mastodon_mention",
+                    emitted_edges,
+                    from_entity_type="note",
+                    to_entity_type="account",
+                )
+            )
+        return [edge for edge in edges if edge is not None]
+
+    def _edges_from_announce(
+        self,
+        activity: dict[str, Any],
+        emitted_edges: set[tuple[str, str, EdgeRelation, str]],
+    ) -> list[KnowledgeEdge]:
+        if self._first(activity, "type") not in {"Announce", "Boost"}:
+            return []
+        target = self._object_target(activity.get("object"))
+        if not target:
+            return []
+        source_id = self._activity_source_id(activity, target)
+        edge = self._edge(
+            source_id,
+            target,
+            EdgeRelation.REFERENCES,
+            "mastodon_boost",
+            emitted_edges,
+            from_entity_type="activity",
+            to_entity_type="status",
+        )
+        return [edge] if edge is not None else []
+
+    def _mention_targets(self, tag_value: Any) -> list[str]:
+        tags = tag_value if isinstance(tag_value, list) else [tag_value]
+        targets: list[str] = []
+        for item in tags:
+            if not isinstance(item, dict) or self._first(item, "type").lower() != "mention":
+                continue
+            target = self._first(item, "href", "id", "url")
+            if target and target not in targets:
+                targets.append(target)
+        return targets
+
+    def _object_target(self, value: Any) -> str:
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, dict):
+            return self._first(value, "id", "url")
+        return ""
+
+    def _activity_source_id(self, activity: dict[str, Any], target: str) -> str:
+        source_id = self._first(activity, "id", "url")
+        if source_id:
+            return source_id
+        actor = self._first(activity, "actor", "attributedTo")
+        published = self._first(activity, "published", "updated")
+        digest = hashlib.sha256(f"{actor}|{target}|{published}".encode("utf-8")).hexdigest()
+        return f"mastodon:activity:{digest[:24]}"
+
+    def _edge(
+        self,
+        from_id: str,
+        to_id: str,
+        relation: EdgeRelation,
+        relation_type: str,
+        emitted_edges: set[tuple[str, str, EdgeRelation, str]],
+        *,
+        from_entity_type: str,
+        to_entity_type: str,
+    ) -> KnowledgeEdge | None:
+        edge_key = (from_id, to_id, relation, relation_type)
+        if edge_key in emitted_edges:
+            return None
+        emitted_edges.add(edge_key)
+        return KnowledgeEdge(
+            id=self._edge_id(from_id, to_id, relation, relation_type),
+            from_unit_id=from_id,
+            to_unit_id=to_id,
+            relation=relation,
+            source=EdgeSource.SOURCE,
+            metadata={
+                "source_project": SourceProject.MASTODON.value,
+                "from_entity_type": from_entity_type,
+                "to_entity_type": to_entity_type,
+                "relation_type": relation_type,
+            },
+        )
+
+    def _edge_id(self, from_id: str, to_id: str, relation: EdgeRelation, relation_type: str) -> str:
+        raw = "|".join([SourceProject.MASTODON.value, relation.value, relation_type, from_id, to_id])
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+        return f"mastodon-edge-{digest}"
 
     def _html_to_text(self, value: str) -> str:
         if not value:
