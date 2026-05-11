@@ -91,6 +91,12 @@ class ActivityWatchJsonAdapter(SourceAdapter):
             return None
         data = event.get("data") if isinstance(event.get("data"), dict) else {}
         bucket_type = str(bucket.get("type") or bucket.get("bucket_type") or "").strip()
+        status = self._normalized_afk_status(data)
+        if self._is_afk_bucket(bucket_id, bucket_type, data):
+            if not status:
+                return None
+            return self._afk_unit(bucket_id, bucket_type, status, data, event, timestamp, source_file)
+
         app = self._first(data, "app", "application")
         title_text = self._first(data, "title", "status")
         url = self._first(data, "url")
@@ -131,6 +137,57 @@ class ActivityWatchJsonAdapter(SourceAdapter):
             created_at=timestamp,
             updated_at=timestamp,
         )
+
+    def _afk_unit(
+        self,
+        bucket_id: str,
+        bucket_type: str,
+        status: str,
+        data: dict[str, Any],
+        event: dict[str, Any],
+        timestamp: datetime,
+        source_file: str,
+    ) -> KnowledgeUnit | None:
+        duration = self._parse_float(event.get("duration"))
+        title = "ActivityWatch AFK" if status == "afk" else "ActivityWatch active"
+        content_status = "away from keyboard" if status == "afk" else "not away from keyboard"
+        content_parts = [
+            f"Status: {content_status}",
+            f"Timestamp: {timestamp.isoformat()}",
+        ]
+        if duration is not None:
+            content_parts.append(f"Duration: {duration}")
+        return KnowledgeUnit(
+            source_project=SourceProject.ACTIVITYWATCH_JSON,
+            source_id=self._source_id(bucket_id, timestamp, {"status": status, "data": data}),
+            source_entity_type="activity",
+            title=title,
+            content="\n".join(content_parts),
+            content_type=ContentType.METADATA,
+            metadata={
+                "bucket_id": bucket_id,
+                "bucket_type": bucket_type,
+                "status": status,
+                "duration": duration,
+                "timestamp": timestamp.isoformat(),
+                "source_file": source_file,
+            },
+            tags=["activitywatch", "afk"] + ([] if status == "afk" else [status]),
+            created_at=timestamp,
+            updated_at=timestamp,
+        )
+
+    def _is_afk_bucket(self, bucket_id: str, bucket_type: str, data: dict[str, Any]) -> bool:
+        haystack = " ".join([bucket_id, bucket_type, self._first(data, "status")]).casefold()
+        return "afk" in haystack
+
+    def _normalized_afk_status(self, data: dict[str, Any]) -> str:
+        status = self._first(data, "status").casefold().replace("_", "-").replace(" ", "-")
+        if status in {"afk", "away", "inactive"}:
+            return "afk"
+        if status in {"not-afk", "not_afk", "active", "present"}:
+            return "not-afk"
+        return ""
 
     def _source_id(self, bucket_id: str, timestamp: datetime, data: dict[str, Any]) -> str:
         data_hash = hashlib.sha256(json.dumps(data, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:16]

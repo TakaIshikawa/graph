@@ -58,6 +58,18 @@ def test_activitywatch_json_ingests_browser_window_and_afk_events(tmp_path):
     assert "domain:example.com" in browser.tags
     assert browser.source_id == ActivityWatchJsonAdapter(path=str(export)).ingest().units[0].source_id
 
+    afk = next(unit for unit in result.units if unit.metadata["bucket_id"] == "aw-watcher-afk")
+    assert afk.title == "ActivityWatch AFK"
+    assert afk.metadata == {
+        "bucket_id": "aw-watcher-afk",
+        "bucket_type": "afkstatus",
+        "status": "afk",
+        "duration": 120.0,
+        "timestamp": "2025-01-01T10:02:00+00:00",
+        "source_file": "aw.json",
+    }
+    assert afk.tags == ["activitywatch", "afk"]
+
 
 def test_activitywatch_json_filters_and_registry(tmp_path):
     export = tmp_path / "aw.json"
@@ -85,6 +97,63 @@ def test_activitywatch_json_filters_and_registry(tmp_path):
     assert [unit.metadata["app"] for unit in result.units] == ["New"]
     assert ActivityWatchJsonAdapter(path=str(export)).ingest(entity_types=["event"]).units == []
     assert get_adapter("activitywatch_json", path=str(export)).name == "activitywatch_json"
+
+
+def test_activitywatch_json_filters_afk_events_since(tmp_path):
+    export = tmp_path / "aw.json"
+    export.write_text(
+        json.dumps(
+            {
+                "id": "aw-watcher-afk",
+                "type": "afkstatus",
+                "events": [
+                    {"timestamp": "2025-01-01T00:00:00Z", "duration": "10.5", "data": {"status": "afk"}},
+                    {"timestamp": "2025-01-02T00:00:00Z", "duration": "20", "data": {"status": "not-afk"}},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = ActivityWatchJsonAdapter(path=str(export)).ingest(
+        since=SyncState(
+            source_project="activitywatch_json",
+            source_entity_type="activity",
+            last_sync_at=datetime(2025, 1, 1, 12, tzinfo=timezone.utc),
+        )
+    )
+
+    assert [(unit.metadata["status"], unit.metadata["duration"]) for unit in result.units] == [("not-afk", 20.0)]
+
+
+def test_activitywatch_json_ignores_malformed_afk_events_and_sorts_deterministically(tmp_path):
+    export = tmp_path / "aw.json"
+    export.write_text(
+        json.dumps(
+            {
+                "buckets": {
+                    "aw-watcher-afk": {
+                        "type": "afkstatus",
+                        "events": [
+                            {"timestamp": "bad", "duration": 1, "data": {"status": "afk"}},
+                            {"timestamp": "2025-01-01T00:00:02Z", "duration": "bad", "data": {"status": "not-afk"}},
+                            {"timestamp": "2025-01-01T00:00:01Z", "duration": 1, "data": {"status": "unknown"}},
+                            {"timestamp": "2025-01-01T00:00:00Z", "duration": 2, "data": {"status": "afk"}},
+                        ],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = ActivityWatchJsonAdapter(path=str(export)).ingest()
+
+    assert [unit.metadata["timestamp"] for unit in result.units] == [
+        "2025-01-01T00:00:00+00:00",
+        "2025-01-01T00:00:02+00:00",
+    ]
+    assert result.units[1].metadata["duration"] is None
 
 
 def test_activitywatch_json_adds_normalized_http_domain_metadata(tmp_path):

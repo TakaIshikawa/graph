@@ -168,6 +168,36 @@ def test_slack_json_emits_thread_reply_edges(tmp_path):
     assert first.edges[0].metadata["thread_ts"] == "1712345000.000100"
 
 
+def test_slack_json_emits_reaction_units_without_losing_message(tmp_path):
+    export = tmp_path / "general.json"
+    _write_json(
+        export,
+        [
+            {
+                "type": "message",
+                "user": "U1",
+                "text": "React to this",
+                "ts": "1712345000.000100",
+                "reactions": [
+                    {"name": "eyes", "count": 2, "users": ["U2", "U3"]},
+                    {"name": "thumbsup", "count": 1, "users": ["U4"]},
+                ],
+            }
+        ],
+    )
+
+    result = SlackJsonAdapter(path=str(export)).ingest()
+
+    message = next(unit for unit in result.units if unit.source_entity_type == "slack_message")
+    reactions = [unit for unit in result.units if unit.source_entity_type == "reaction"]
+    assert message.metadata["reaction_count"] == 3
+    assert [unit.metadata["reaction_name"] for unit in reactions] == ["eyes", "thumbsup"]
+    assert reactions[0].metadata["message_ts"] == "1712345000.000100"
+    assert reactions[0].metadata["reaction_count"] == 2
+    assert reactions[0].metadata["reacting_users"] == ["U2", "U3"]
+    assert reactions[0].tags[:2] == ["slack", "reaction"]
+
+
 def test_slack_json_skips_deleted_and_empty_messages(tmp_path):
     export = tmp_path / "random.json"
     _write_json(

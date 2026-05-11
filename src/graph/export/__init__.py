@@ -3,6 +3,7 @@
 from graph.export.adjacency_markdown import export_graph_adjacency_markdown
 from graph.export.adjacency_csv import export_graph_adjacency_csv
 from graph.export.activity_heatmap_csv import export_units_to_activity_heatmap_csv
+from graph.export.activitywatch_focus_sessions_csv import export_units_to_activitywatch_focus_sessions_csv
 from graph.export.anki import export_units_to_anki_tsv
 from graph.export.atom import export_units_to_atom
 from graph.export.backlinks import export_unit_backlinks_markdown
@@ -12,6 +13,7 @@ from graph.export.bookmarks_html import export_units_to_bookmarks_html
 from graph.export.concept_map import export_concept_map_markdown
 from graph.export.context_pack import export_context_pack
 from graph.export.csl_json import export_units_to_csl_json
+from graph.export.chatgpt_digest_markdown import export_units_to_chatgpt_digest_markdown
 from graph.export.cytoscape import export_graph_cytoscape
 from graph.export.cytoscape_json import export_graph_cytoscape_json
 from graph.export.cypher import export_graph_cypher
@@ -32,6 +34,7 @@ from graph.export.ical_timeline import export_units_to_ical_timeline
 from graph.export.json import export_units_to_json
 from graph.export.json_ld import export_units_to_json_ld
 from graph.export.json_summary import export_graph_json_summary
+from graph.export.kindle_review_queue_markdown import export_units_to_kindle_review_queue_markdown
 from graph.export.llms_txt import export_units_to_llms_txt
 from graph.export.markdown_timeline import export_units_to_markdown_timeline
 from graph.export.metadata_completeness import export_metadata_completeness_markdown
@@ -49,6 +52,7 @@ from graph.export.schema_inventory import export_unit_schema_inventory
 from graph.export.source_coverage import export_source_coverage_markdown
 from graph.export.source_inventory import export_source_inventory_csv
 from graph.export.source_timeline_csv import export_source_timeline_csv
+from graph.export.slack_participation_csv import export_units_to_slack_participation_csv
 from graph.export.sqlite_snapshot import export_graph_sqlite
 from graph.export.tag_cooccurrence_csv import export_tag_cooccurrence_csv
 from graph.export.tag_glossary import export_tag_glossary_markdown
@@ -104,7 +108,9 @@ __all__ = [
     "export_graph_adjacency_csv",
     "export_graph_adjacency_markdown",
     "export_units_to_activity_heatmap_csv",
+    "export_units_to_activitywatch_focus_sessions_csv",
     "export_graph_cypher",
+    "export_units_to_chatgpt_digest_markdown",
     "export_units_to_flashcards_markdown",
     "export_graph_dot",
     "export_graph_gexf",
@@ -116,6 +122,7 @@ __all__ = [
     "export_graphviz_dot",
     "export_graph_sqlite",
     "export_units_to_hugo_bundle",
+    "export_units_to_kindle_review_queue_markdown",
     "export_metadata_completeness_markdown",
     "export_graph_ndjson",
     "export_graph_neo4j_bulk_csv",
@@ -126,6 +133,7 @@ __all__ = [
     "export_source_coverage_markdown",
     "export_source_inventory_csv",
     "export_source_timeline_csv",
+    "export_units_to_slack_participation_csv",
     "export_units_to_timelinejs",
     "export_units_to_tiddlywiki_json",
     "render_search_html_report",
