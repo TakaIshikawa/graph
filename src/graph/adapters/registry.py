@@ -40,6 +40,7 @@ from graph.adapters.jats import JatsAdapter
 from graph.adapters.jsonl_adapter import JsonlAdapter
 from graph.adapters.jsonl_notes import JsonlNotesAdapter
 from graph.adapters.kindle import KindleAdapter
+from graph.adapters.kindle_clippings import KindleClippingsAdapter
 from graph.adapters.logseq import LogseqAdapter
 from graph.adapters.markdown import MarkdownAdapter
 from graph.adapters.markdown_callouts import MarkdownCalloutsAdapter
@@ -140,6 +141,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "markdown_tasks": MarkdownTasksAdapter,
     "mastodon": MastodonAdapter,
     "kindle": KindleAdapter,
+    "kindle_clippings": KindleClippingsAdapter,
     "sota": SOTAAdapter,
     "feed": FeedAdapter,
     "mbox": MboxAdapter,
