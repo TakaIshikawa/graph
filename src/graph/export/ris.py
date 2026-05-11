@@ -23,6 +23,7 @@ _DATE_KEYS = (
     "issued",
 )
 _ABSTRACT_KEYS = ("abstract", "summary", "description")
+_DOI_KEYS = ("doi", "DOI", "digital_object_identifier", "identifier.doi")
 
 
 def export_units_to_ris(units: Iterable[KnowledgeUnit]) -> str:
@@ -57,6 +58,10 @@ def _unit_record_lines(unit: KnowledgeUnit) -> list[str]:
     url = _first_text(unit.metadata, _URL_KEYS)
     if url:
         lines.append(_ris_line("UR", url))
+
+    doi = _doi(unit.metadata)
+    if doi:
+        lines.append(_ris_line("DO", doi))
 
     for tag in _keywords(unit.tags):
         lines.append(_ris_line("KW", tag))
@@ -96,12 +101,36 @@ def _abstract(unit: KnowledgeUnit) -> str:
 
 def _first_text(metadata: Mapping[str, Any], keys: tuple[str, ...]) -> str:
     for key in keys:
-        if key not in metadata:
+        value = _nested_value(metadata, key)
+        if value is None:
             continue
-        value = _clean_text(_scalar_text(metadata.get(key)))
+        value = _clean_text(_scalar_text(value))
         if value:
             return value
     return ""
+
+
+def _doi(metadata: Mapping[str, Any]) -> str:
+    value = _first_text(metadata, _DOI_KEYS)
+    if not value:
+        return ""
+    doi = value.strip()
+    for prefix in ("https://doi.org/", "http://doi.org/", "doi:"):
+        if doi.lower().startswith(prefix):
+            doi = doi[len(prefix):]
+            break
+    return doi.strip()
+
+
+def _nested_value(metadata: Mapping[str, Any], key: str) -> Any:
+    if key in metadata:
+        return metadata.get(key)
+    current: Any = metadata
+    for part in key.split("."):
+        if not isinstance(current, Mapping) or part not in current:
+            return None
+        current = current.get(part)
+    return current
 
 
 def _list_text(value: Any) -> list[str]:

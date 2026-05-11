@@ -126,3 +126,33 @@ def test_export_units_to_ris_normalizes_multiple_authors_tags_and_multiline_valu
         "AB  - Content with line break\n"
         "ER  - \n"
     )
+
+
+def test_export_units_to_ris_emits_normalized_scalar_doi():
+    text = export_units_to_ris(
+        [
+            unit(
+                "unit-a",
+                metadata={
+                    "doi": " https://doi.org/10.1234/example ",
+                },
+            )
+        ]
+    )
+
+    assert "DO  - 10.1234/example\n" in text
+
+
+def test_export_units_to_ris_emits_nested_identifier_doi():
+    text = export_units_to_ris(
+        [
+            unit(
+                "unit-a",
+                metadata={
+                    "identifier": {"doi": "doi:10.5678/nested"},
+                },
+            )
+        ]
+    )
+
+    assert "DO  - 10.5678/nested\n" in text
