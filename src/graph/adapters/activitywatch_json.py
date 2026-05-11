@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class ActivityWatchJsonAdapter(SourceAdapter):
@@ -38,6 +38,7 @@ class ActivityWatchJsonAdapter(SourceAdapter):
 
         sync_at = self._ensure_utc(since.last_sync_at) if since else None
         units: list[KnowledgeUnit] = []
+        transition_groups: dict[tuple[str, str], list[KnowledgeUnit]] = {}
         for path in self._iter_paths():
             try:
                 buckets = self._read_buckets(path)
@@ -53,8 +54,17 @@ class ActivityWatchJsonAdapter(SourceAdapter):
                     if sync_at and unit.created_at <= sync_at:
                         continue
                     units.append(unit)
+                    group_key = (
+                        str(unit.metadata.get("source_file") or path.name),
+                        str(unit.metadata.get("bucket_id") or bucket_id),
+                    )
+                    transition_groups.setdefault(group_key, []).append(unit)
 
         result.units.extend(sorted(units, key=lambda unit: (unit.created_at, unit.source_id)))
+        result.edges.extend(self._transition_edges(transition_groups))
+        result.edges.sort(
+            key=lambda edge: (edge.created_at, edge.from_unit_id, edge.to_unit_id, edge.id)
+        )
         return result
 
     def _iter_paths(self) -> list[Path]:
@@ -74,9 +84,17 @@ class ActivityWatchJsonAdapter(SourceAdapter):
         if isinstance(parsed, dict) and isinstance(parsed.get("events"), list):
             return [(str(parsed.get("id") or path.stem), parsed)]
         if isinstance(parsed, dict):
-            return [(str(bucket.get("id") or bucket_id), bucket) for bucket_id, bucket in parsed.items() if isinstance(bucket, dict)]
+            return [
+                (str(bucket.get("id") or bucket_id), bucket)
+                for bucket_id, bucket in parsed.items()
+                if isinstance(bucket, dict)
+            ]
         if isinstance(parsed, list):
-            return [(str(bucket.get("id") or path.stem), bucket) for bucket in parsed if isinstance(bucket, dict)]
+            return [
+                (str(bucket.get("id") or path.stem), bucket)
+                for bucket in parsed
+                if isinstance(bucket, dict)
+            ]
         return []
 
     def _unit_from_event(
@@ -95,7 +113,9 @@ class ActivityWatchJsonAdapter(SourceAdapter):
         if self._is_afk_bucket(bucket_id, bucket_type, data):
             if not status:
                 return None
-            return self._afk_unit(bucket_id, bucket_type, status, data, event, timestamp, source_file)
+            return self._afk_unit(
+                bucket_id, bucket_type, status, data, event, timestamp, source_file
+            )
 
         app = self._first(data, "app", "application")
         title_text = self._first(data, "title", "status")
@@ -190,17 +210,83 @@ class ActivityWatchJsonAdapter(SourceAdapter):
         return ""
 
     def _source_id(self, bucket_id: str, timestamp: datetime, data: dict[str, Any]) -> str:
-        data_hash = hashlib.sha256(json.dumps(data, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:16]
+        data_hash = hashlib.sha256(
+            json.dumps(data, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()[:16]
         raw = f"{bucket_id}|{timestamp.isoformat()}|{data_hash}"
         digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
         return f"activitywatch_json:{digest}"
+
+    def _transition_edges(
+        self, groups: dict[tuple[str, str], list[KnowledgeUnit]]
+    ) -> list[KnowledgeEdge]:
+        edges: list[KnowledgeEdge] = []
+        for (source_file, bucket_id), units in sorted(groups.items()):
+            ordered = sorted(units, key=lambda unit: (unit.created_at, unit.source_id))
+            for previous, next_unit in zip(ordered, ordered[1:]):
+                if not self._can_transition(previous, next_unit):
+                    continue
+                edges.append(
+                    KnowledgeEdge(
+                        id=self._transition_edge_id(previous.source_id, next_unit.source_id),
+                        from_unit_id=previous.source_id,
+                        to_unit_id=next_unit.source_id,
+                        relation=EdgeRelation.RELATES_TO,
+                        source=EdgeSource.SOURCE,
+                        metadata={
+                            "source_project": SourceProject.ACTIVITYWATCH_JSON.value,
+                            "from_entity_type": "activity",
+                            "to_entity_type": "activity",
+                            "bucket_id": bucket_id,
+                            "source_file": source_file,
+                            "elapsed_seconds": int(
+                                (next_unit.created_at - previous.created_at).total_seconds()
+                            ),
+                            "previous_app": self._first(previous.metadata, "app"),
+                            "next_app": self._first(next_unit.metadata, "app"),
+                            "previous_title": self._first(previous.metadata, "title", "status"),
+                            "next_title": self._first(next_unit.metadata, "title", "status"),
+                        },
+                        created_at=next_unit.created_at,
+                    )
+                )
+        return edges
+
+    def _can_transition(self, previous: KnowledgeUnit, next_unit: KnowledgeUnit) -> bool:
+        if next_unit.created_at < previous.created_at:
+            return False
+        if previous.created_at.date() == next_unit.created_at.date():
+            return True
+        previous_end = self._unit_end(previous)
+        return previous_end is not None and previous_end == next_unit.created_at
+
+    def _unit_end(self, unit: KnowledgeUnit) -> datetime | None:
+        duration = self._parse_float(unit.metadata.get("duration"))
+        if duration is None:
+            return None
+        return unit.created_at + timedelta(seconds=duration)
+
+    def _transition_edge_id(self, from_id: str, to_id: str) -> str:
+        raw = "|".join(
+            [
+                SourceProject.ACTIVITYWATCH_JSON.value,
+                EdgeRelation.RELATES_TO.value,
+                "transition",
+                from_id,
+                to_id,
+            ]
+        )
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        return f"activitywatch-transition-{digest[:16]}"
 
     def _title(self, bucket_type: str, app: str, title: str, url: str) -> str:
         if app and title:
             return f"{app}: {title}"
         return title or app or url or bucket_type or "ActivityWatch event"
 
-    def _content(self, bucket_type: str, app: str, title: str, url: str, duration: float | None) -> str:
+    def _content(
+        self, bucket_type: str, app: str, title: str, url: str, duration: float | None
+    ) -> str:
         parts = []
         if bucket_type:
             parts.append(f"Bucket type: {bucket_type}")
@@ -270,7 +356,9 @@ class ActivityWatchJsonAdapter(SourceAdapter):
         if value is None or value == "":
             return None
         try:
-            return self._ensure_utc(datetime.fromisoformat(str(value).strip().replace("Z", "+00:00")))
+            return self._ensure_utc(
+                datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+            )
         except ValueError:
             return None
 

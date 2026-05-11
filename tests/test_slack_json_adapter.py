@@ -55,15 +55,11 @@ def test_slack_json_ingests_channel_directory_in_file_order(tmp_path):
     channel.mkdir()
     _write_json(
         channel / "2024-04-05.json",
-        [
-            {"type": "message", "user": "U1", "text": "First", "ts": "1712300000.000001"}
-        ],
+        [{"type": "message", "user": "U1", "text": "First", "ts": "1712300000.000001"}],
     )
     _write_json(
         channel / "2024-04-06.json",
-        [
-            {"type": "message", "user": "U2", "text": "Second", "ts": "1712400000.000002"}
-        ],
+        [{"type": "message", "user": "U2", "text": "Second", "ts": "1712400000.000002"}],
     )
 
     result = SlackJsonAdapter(path=str(channel)).ingest()
@@ -108,7 +104,7 @@ def test_slack_json_preserves_thread_metadata(tmp_path):
 
     result = SlackJsonAdapter(path=str(channel)).ingest()
 
-    root, reply = result.units
+    root, reply = [unit for unit in result.units if unit.source_entity_type == "slack_message"]
     assert root.metadata["thread_ts"] == "1712345000.000100"
     assert root.metadata["is_thread_reply"] is False
     assert root.metadata["reply_count"] == 1
@@ -158,14 +154,84 @@ def test_slack_json_emits_thread_reply_edges(tmp_path):
     second = SlackJsonAdapter(path=str(channel)).ingest()
 
     root_id = "slack_json:design:1712345000.000100"
-    assert [(edge.from_unit_id, edge.to_unit_id, edge.relation, edge.source) for edge in first.edges] == [
-        ("slack_json:design:1712345100.000200", root_id, EdgeRelation.REPLIES_TO, EdgeSource.SOURCE),
-        ("slack_json:design:1712345200.000300", root_id, EdgeRelation.REPLIES_TO, EdgeSource.SOURCE),
+    reply_edges = [edge for edge in first.edges if edge.relation == EdgeRelation.REPLIES_TO]
+    assert [
+        (edge.from_unit_id, edge.to_unit_id, edge.relation, edge.source) for edge in reply_edges
+    ] == [
+        (
+            "slack_json:design:1712345100.000200",
+            root_id,
+            EdgeRelation.REPLIES_TO,
+            EdgeSource.SOURCE,
+        ),
+        (
+            "slack_json:design:1712345200.000300",
+            root_id,
+            EdgeRelation.REPLIES_TO,
+            EdgeSource.SOURCE,
+        ),
     ]
     assert [edge.id for edge in first.edges] == [edge.id for edge in second.edges]
     assert [edge.created_at for edge in first.edges] == [edge.created_at for edge in second.edges]
     assert all(edge.from_unit_id != edge.to_unit_id for edge in first.edges)
-    assert first.edges[0].metadata["thread_ts"] == "1712345000.000100"
+    assert reply_edges[0].metadata["thread_ts"] == "1712345000.000100"
+
+
+def test_slack_json_emits_thread_summary_units(tmp_path):
+    channel = tmp_path / "design"
+    channel.mkdir()
+    _write_json(
+        channel / "2024-04-05.json",
+        [
+            {
+                "type": "message",
+                "user": "U1",
+                "text": "Root message",
+                "ts": "1712345000.000100",
+                "thread_ts": "1712345000.000100",
+                "reply_count": 2,
+            },
+            {
+                "type": "message",
+                "user": "U2",
+                "text": "First reply",
+                "ts": "1712345100.000200",
+                "thread_ts": "1712345000.000100",
+            },
+            {
+                "type": "message",
+                "user": "U1",
+                "text": "Second reply",
+                "ts": "1712345200.000300",
+                "thread_ts": "1712345000.000100",
+            },
+        ],
+    )
+
+    result = SlackJsonAdapter(path=str(channel)).ingest()
+
+    summary = next(unit for unit in result.units if unit.source_entity_type == "slack_thread")
+    assert summary.source_id == "slack_json:design:1712345000.000100:thread_summary"
+    assert summary.metadata["channel"] == "design"
+    assert summary.metadata["thread_ts"] == "1712345000.000100"
+    assert summary.metadata["participant_count"] == 2
+    assert summary.metadata["reply_count"] == 2
+    assert (
+        summary.metadata["started_at"]
+        == datetime.fromtimestamp(1712345000.0001, tz=timezone.utc).isoformat()
+    )
+    assert (
+        summary.metadata["ended_at"]
+        == datetime.fromtimestamp(1712345200.0003, tz=timezone.utc).isoformat()
+    )
+    assert summary.metadata["message_unit_ids"] == [
+        "slack_json:design:1712345000.000100",
+        "slack_json:design:1712345100.000200",
+        "slack_json:design:1712345200.000300",
+    ]
+    contains_edges = [edge for edge in result.edges if edge.relation == EdgeRelation.CONTAINS]
+    assert len(contains_edges) == 3
+    assert {edge.from_unit_id for edge in contains_edges} == {summary.source_id}
 
 
 def test_slack_json_emits_reaction_units_without_losing_message(tmp_path):

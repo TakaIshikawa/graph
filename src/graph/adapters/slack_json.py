@@ -56,9 +56,13 @@ class SlackJsonAdapter(SourceAdapter):
                     continue
                 result.units.append(unit)
                 message_units.append(unit)
-                result.units.extend(self._reaction_units(message, unit))
+                reaction_units = self._reaction_units(message, unit)
+                result.units.extend(reaction_units)
 
         result.edges.extend(self._thread_edges(message_units))
+        summary_units, summary_edges = self._thread_summary_units(message_units)
+        result.units.extend(summary_units)
+        result.edges.extend(summary_edges)
         result.edges.sort(key=lambda edge: (edge.from_unit_id, edge.to_unit_id, edge.id))
         return result
 
@@ -155,7 +159,9 @@ class SlackJsonAdapter(SourceAdapter):
             updated_at=updated_at,
         )
 
-    def _reaction_units(self, message: dict[str, Any], parent: KnowledgeUnit) -> list[KnowledgeUnit]:
+    def _reaction_units(
+        self, message: dict[str, Any], parent: KnowledgeUnit
+    ) -> list[KnowledgeUnit]:
         reactions = message.get("reactions")
         if not isinstance(reactions, list):
             return []
@@ -175,7 +181,11 @@ class SlackJsonAdapter(SourceAdapter):
             if not isinstance(count, int) or isinstance(count, bool):
                 users = reaction.get("users")
                 count = len(users) if isinstance(users, list) else 0
-            users = [self._string(user) for user in reaction.get("users", []) if self._string(user)] if isinstance(reaction.get("users"), list) else []
+            users = (
+                [self._string(user) for user in reaction.get("users", []) if self._string(user)]
+                if isinstance(reaction.get("users"), list)
+                else []
+            )
             metadata = {
                 "channel_id": channel_id,
                 "channel_name": channel,
@@ -293,10 +303,121 @@ class SlackJsonAdapter(SourceAdapter):
             )
         return edges
 
+    def _thread_summary_units(
+        self, units: list[KnowledgeUnit]
+    ) -> tuple[list[KnowledgeUnit], list[KnowledgeEdge]]:
+        threads: dict[tuple[str, str], list[KnowledgeUnit]] = {}
+        for unit in units:
+            channel = self._string(unit.metadata.get("channel"))
+            ts = self._string(unit.metadata.get("ts"))
+            thread_ts = self._string(unit.metadata.get("thread_ts"))
+            if not channel or not ts or not thread_ts:
+                continue
+            threads.setdefault((channel, thread_ts), []).append(unit)
+
+        summaries: list[KnowledgeUnit] = []
+        edges: list[KnowledgeEdge] = []
+        for (channel, thread_ts), thread_units in sorted(threads.items()):
+            ordered = sorted(
+                thread_units,
+                key=lambda unit: (
+                    unit.created_at,
+                    self._string(unit.metadata.get("ts")),
+                    unit.source_id,
+                ),
+            )
+            if len(ordered) < 2:
+                continue
+            root = next(
+                (unit for unit in ordered if self._string(unit.metadata.get("ts")) == thread_ts),
+                ordered[0],
+            )
+            replies = [
+                unit for unit in ordered if self._string(unit.metadata.get("ts")) != thread_ts
+            ]
+            if not replies:
+                continue
+            participants = sorted(
+                {
+                    self._string(unit.metadata.get("user"))
+                    for unit in ordered
+                    if self._string(unit.metadata.get("user"))
+                }
+            )
+            started_at = min(unit.created_at for unit in ordered)
+            ended_at = max(unit.created_at for unit in ordered)
+            source_id = self._thread_summary_source_id(channel, thread_ts)
+            message_unit_ids = [unit.source_id for unit in ordered]
+            summary = KnowledgeUnit(
+                source_project=SourceProject.SLACK_JSON,
+                source_id=source_id,
+                source_entity_type="slack_thread",
+                title=f"#{channel} thread {thread_ts}",
+                content=self._thread_summary_content(ordered),
+                content_type=ContentType.INSIGHT,
+                metadata={
+                    "channel": channel,
+                    "thread_ts": thread_ts,
+                    "participant_count": len(participants),
+                    "participants": participants,
+                    "reply_count": len(replies),
+                    "started_at": started_at.isoformat(),
+                    "ended_at": ended_at.isoformat(),
+                    "message_unit_ids": message_unit_ids,
+                    "root_message_unit_id": root.source_id,
+                },
+                tags=["slack", "slack-thread", f"slack-{channel}"],
+                created_at=started_at,
+                updated_at=ended_at,
+            )
+            summaries.append(summary)
+            for unit in ordered:
+                edges.append(
+                    KnowledgeEdge(
+                        id=self._thread_summary_edge_id(source_id, unit.source_id),
+                        from_unit_id=source_id,
+                        to_unit_id=unit.source_id,
+                        relation=EdgeRelation.CONTAINS,
+                        source=EdgeSource.SOURCE,
+                        metadata={
+                            "source_project": SourceProject.SLACK_JSON.value,
+                            "from_entity_type": "slack_thread",
+                            "to_entity_type": "slack_message",
+                            "channel": channel,
+                            "thread_ts": thread_ts,
+                            "message_ts": self._string(unit.metadata.get("ts")),
+                        },
+                        created_at=unit.created_at,
+                    )
+                )
+        return summaries, edges
+
     def _edge_id(self, from_id: str, to_id: str) -> str:
-        raw = "|".join([SourceProject.SLACK_JSON.value, EdgeRelation.REPLIES_TO.value, from_id, to_id])
+        raw = "|".join(
+            [SourceProject.SLACK_JSON.value, EdgeRelation.REPLIES_TO.value, from_id, to_id]
+        )
         digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
         return f"slack-json-replies-{digest[:16]}"
+
+    def _thread_summary_source_id(self, channel: str, thread_ts: str) -> str:
+        return f"slack_json:{channel}:{thread_ts}:thread_summary"
+
+    def _thread_summary_edge_id(self, from_id: str, to_id: str) -> str:
+        raw = "|".join(
+            [SourceProject.SLACK_JSON.value, EdgeRelation.CONTAINS.value, from_id, to_id]
+        )
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        return f"slack-json-thread-contains-{digest[:16]}"
+
+    def _thread_summary_content(self, units: list[KnowledgeUnit]) -> str:
+        lines: list[str] = []
+        for unit in units[:5]:
+            user = self._string(unit.metadata.get("user")) or "unknown"
+            text = " ".join(unit.content.split())
+            if len(text) > 160:
+                text = f"{text[:157].rstrip()}..."
+            lines.append(f"{user}: {text}")
+        return "\n".join(lines)
 
     def _parse_slack_timestamp(self, value: str) -> datetime | None:
         if not value:

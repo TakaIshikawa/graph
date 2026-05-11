@@ -221,6 +221,38 @@ def test_mbox_handles_email_with_cc(tmp_path):
     assert unit.metadata["cc"] == "charlie@example.com, david@example.com"
 
 
+def test_mbox_handles_email_with_bcc(tmp_path):
+    mbox_path = write_mbox(
+        tmp_path / "with-bcc.mbox",
+        [
+            {
+                "From": "alice@example.com",
+                "To": "bob@example.com",
+                "Bcc": "secret@example.com",
+                "Subject": "Email with BCC",
+                "Date": "Wed, 01 May 2026 10:00:00 +0000",
+                "Message-ID": "<bcc-test@example.com>",
+                "body": "This email has BCC recipients.",
+            },
+            {
+                "From": "alice@example.com",
+                "To": "bob@example.com",
+                "Subject": "Email without BCC",
+                "Date": "Wed, 01 May 2026 11:00:00 +0000",
+                "Message-ID": "<no-bcc-test@example.com>",
+                "body": "This email has no BCC recipients.",
+            },
+        ],
+    )
+
+    result = MboxAdapter(path=str(mbox_path)).ingest()
+
+    with_bcc = next(unit for unit in result.units if unit.title == "Email with BCC")
+    without_bcc = next(unit for unit in result.units if unit.title == "Email without BCC")
+    assert with_bcc.metadata["bcc"] == "secret@example.com"
+    assert "bcc" not in without_bcc.metadata
+
+
 def test_mbox_handles_email_without_subject(tmp_path):
     mbox_path = write_mbox(
         tmp_path / "no-subject.mbox",
@@ -1853,4 +1885,3 @@ def test_mbox_decodes_latin1_encoded_headers(tmp_path):
     # Should decode to "Café Résumé"
     assert "Caf" in unit.title
     assert "sum" in unit.title
-
