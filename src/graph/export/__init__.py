@@ -1,6 +1,7 @@
 """Export helpers for graph reports."""
 
 from graph.export.adjacency_markdown import export_graph_adjacency_markdown
+from graph.export.adjacency_csv import export_graph_adjacency_csv
 from graph.export.anki import export_units_to_anki_tsv
 from graph.export.atom import export_units_to_atom
 from graph.export.backlinks import export_unit_backlinks_markdown
@@ -11,6 +12,7 @@ from graph.export.concept_map import export_concept_map_markdown
 from graph.export.context_pack import export_context_pack
 from graph.export.csl_json import export_units_to_csl_json
 from graph.export.cytoscape import export_graph_cytoscape
+from graph.export.cytoscape_json import export_graph_cytoscape_json
 from graph.export.cypher import export_graph_cypher
 from graph.export.dot import export_graph_dot
 from graph.export.dublin_core_xml import export_units_to_dublin_core_xml
@@ -90,10 +92,12 @@ __all__ = [
     "export_context_pack",
     "export_units_to_csl_json",
     "export_graph_cytoscape",
+    "export_graph_cytoscape_json",
     "export_units_to_dublin_core_xml",
     "export_duplicate_candidates_markdown",
     "export_edge_adjacency_markdown",
     "export_edges_to_csv",
+    "export_graph_adjacency_csv",
     "export_graph_adjacency_markdown",
     "export_graph_cypher",
     "export_units_to_flashcards_markdown",
