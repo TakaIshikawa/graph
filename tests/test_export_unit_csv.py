@@ -20,6 +20,7 @@ def unit(
     content: str = "Alpha content",
     confidence: float | None = 0.8,
     utility_score: float | None = 0.6,
+    metadata: dict | None = None,
 ) -> KnowledgeUnit:
     return KnowledgeUnit(
         id=unit_id,
@@ -35,6 +36,7 @@ def unit(
         created_at=UNIT_TIME,
         ingested_at=UNIT_TIME,
         updated_at=UNIT_TIME,
+        metadata=metadata or {},
     )
 
 
@@ -160,3 +162,25 @@ def test_export_units_csv_empty_export_writes_header_only(tmp_path):
         "content_included": False,
         "bytes_written": len(text.encode("utf-8")),
     }
+
+
+def test_export_units_csv_supports_configurable_columns_and_metadata_fields(tmp_path):
+    path = tmp_path / "units.csv"
+
+    stats = export_units_to_csv(
+        [unit("unit-a", metadata={"source": {"url": "https://example.test"}, "rank": 3})],
+        path,
+        columns=["id", "title", "metadata.source.url", "metadata.rank"],
+        metadata_fields=["source.url", "rank"],
+    )
+
+    rows = read_rows(path)
+    assert rows == [
+        {
+            "id": "unit-a",
+            "title": "Title unit-a",
+            "metadata.source.url": "https://example.test",
+            "metadata.rank": "3",
+        }
+    ]
+    assert stats["columns"] == ["id", "title", "metadata.source.url", "metadata.rank"]

@@ -7,6 +7,7 @@ from graph.export.backlinks import export_unit_backlinks_markdown
 from graph.export.bibtex import export_units_to_bibtex
 from graph.export.concept_map import export_concept_map_markdown
 from graph.export.context_pack import export_context_pack
+from graph.export.csl_json import export_units_to_csl_json
 from graph.export.cypher import export_graph_cypher
 from graph.export.dot import export_graph_dot
 from graph.export.duplicate_candidates import export_duplicate_candidates_markdown
@@ -14,6 +15,7 @@ from graph.export.edge_csv import export_edges_to_csv
 from graph.export.edge_adjacency_markdown import export_edge_adjacency_markdown
 from graph.export.flashcards_markdown import export_units_to_flashcards_markdown
 from graph.export.gexf import export_graph_gexf
+from graph.export.geojson import export_units_to_geojson
 from graph.export.graphml import export_graph_graphml
 from graph.export.graphson import export_graphson
 from graph.export.graph_overview_html import render_graph_overview_html
@@ -26,7 +28,9 @@ from graph.export.mermaid_mindmap import export_units_to_mermaid_mindmap
 from graph.export.opml import export_units_to_opml
 from graph.export.org import export_units_to_org
 from graph.export.relation_evidence import export_relation_evidence_markdown
+from graph.export.rdf_turtle import export_graph_rdf_turtle
 from graph.export.ris import export_units_to_ris
+from graph.export.rss import export_units_to_rss
 from graph.export.schema_inventory import export_unit_schema_inventory
 from graph.export.source_coverage import export_source_coverage_markdown
 from graph.export.source_timeline_csv import export_source_timeline_csv
@@ -43,6 +47,7 @@ __all__ = [
     "export_units_to_bibtex",
     "export_concept_map_markdown",
     "export_context_pack",
+    "export_units_to_csl_json",
     "export_duplicate_candidates_markdown",
     "export_edge_adjacency_markdown",
     "export_edges_to_csv",
@@ -51,12 +56,15 @@ __all__ = [
     "export_units_to_flashcards_markdown",
     "export_graph_dot",
     "export_graph_gexf",
+    "export_units_to_geojson",
     "export_graph_graphml",
+    "export_graph_rdf_turtle",
     "export_graphson",
     "export_graph_sqlite",
     "export_metadata_completeness_markdown",
     "export_relation_evidence_markdown",
     "export_units_to_ris",
+    "export_units_to_rss",
     "export_source_coverage_markdown",
     "export_source_timeline_csv",
     "render_search_html_report",
