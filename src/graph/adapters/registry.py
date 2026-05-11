@@ -8,6 +8,7 @@ from graph.adapters.atom import AtomAdapter
 from graph.adapters.bibdesk import BibDeskAdapter
 from graph.adapters.bibtex import BibtexAdapter
 from graph.adapters.bluesky_archive import BlueskyArchiveAdapter
+from graph.adapters.boardgamegeek_collection_csv import BoardGameGeekCollectionCsvAdapter
 from graph.adapters.bookmarks import BookmarksAdapter
 from graph.adapters.bookmarks_html import BookmarksHtmlAdapter
 from graph.adapters.browser_history_csv import BrowserHistoryCsvAdapter
@@ -26,6 +27,7 @@ from graph.adapters.enex import EnexAdapter
 from graph.adapters.feed import FeedAdapter
 from graph.adapters.forty_two import FortyTwoAdapter
 from graph.adapters.git_adapter import GitAdapter
+from graph.adapters.github_issues_json import GithubIssuesJsonAdapter
 from graph.adapters.github_stars_csv import GithubStarsCsvAdapter
 from graph.adapters.goodreads_library import GoodreadsLibraryAdapter
 from graph.adapters.google_calendar_json import GoogleCalendarJsonAdapter
@@ -107,6 +109,7 @@ from graph.adapters.slack_json import SlackJsonAdapter
 from graph.adapters.sota import SOTAAdapter
 from graph.adapters.spotify_streaming_history import SpotifyStreamingHistoryAdapter
 from graph.adapters.spotify_takeout import SpotifyTakeoutAdapter
+from graph.adapters.steam_library_csv import SteamLibraryCsvAdapter
 from graph.adapters.trakt_watch_history_csv import TraktWatchHistoryCsvAdapter
 from graph.adapters.reddit_saved_csv import RedditSavedCsvAdapter
 from graph.adapters.reddit_saved_json import RedditSavedJsonAdapter
@@ -248,6 +251,9 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "spotify_streaming_history": SpotifyStreamingHistoryAdapter,
     "spotify_takeout": SpotifyTakeoutAdapter,
     "trakt_watch_history_csv": TraktWatchHistoryCsvAdapter,
+    "steam_library_csv": SteamLibraryCsvAdapter,
+    "github_issues_json": GithubIssuesJsonAdapter,
+    "boardgamegeek_collection_csv": BoardGameGeekCollectionCsvAdapter,
     "reddit_saved_csv": RedditSavedCsvAdapter,
     "reddit_saved_json": RedditSavedJsonAdapter,
     "archivebox_index_json": ArchiveBoxIndexJsonAdapter,

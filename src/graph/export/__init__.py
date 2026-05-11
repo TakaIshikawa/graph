@@ -37,6 +37,7 @@ from graph.export.markdown_timeline import export_units_to_markdown_timeline
 from graph.export.metadata_completeness import export_metadata_completeness_markdown
 from graph.export.mermaid_mindmap import export_units_to_mermaid_mindmap
 from graph.export.ndjson import export_graph_ndjson, export_units_to_ndjson
+from graph.export.neo4j_bulk_csv import export_graph_neo4j_bulk_csv
 from graph.export.node_edge_csv import export_graph_node_edge_csv
 from graph.export.opml import export_units_to_opml
 from graph.export.org import export_units_to_org
@@ -117,6 +118,7 @@ __all__ = [
     "export_units_to_hugo_bundle",
     "export_metadata_completeness_markdown",
     "export_graph_ndjson",
+    "export_graph_neo4j_bulk_csv",
     "export_graph_node_edge_csv",
     "export_relation_evidence_markdown",
     "export_units_to_ris",
