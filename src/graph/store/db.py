@@ -14,6 +14,7 @@ from collections.abc import Mapping
 from datetime import date
 from datetime import datetime, timedelta, timezone
 from enum import Enum
+from itertools import combinations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import urlsplit, urlunsplit
@@ -361,6 +362,22 @@ def _metadata_inventory_counter_values(counter: Counter[str]) -> list[str]:
         key
         for key, _count in sorted(counter.items(), key=lambda item: (-item[1], item[0]))
     ]
+
+
+def _model_value(value: Any) -> Any:
+    if isinstance(value, Enum):
+        return value.value
+    return value
+
+
+def _unit_brief(unit: KnowledgeUnit) -> dict[str, Any]:
+    return {
+        "id": unit.id,
+        "title": unit.title,
+        "source_project": _model_value(unit.source_project),
+        "content_type": _model_value(unit.content_type),
+        "tags": list(unit.tags),
+    }
 
 
 def _metadata_inventory_distinct_key(value: Any) -> tuple[str, str]:
@@ -2199,6 +2216,136 @@ class Store:
             self.fts_index_unit(updated_target)
         return summary
 
+    def preview_unit_merge(
+        self,
+        primary_unit_id: str,
+        duplicate_unit_ids: list[str],
+    ) -> dict:
+        """Return a deterministic dry-run preview for merging duplicates into a primary unit."""
+        if primary_unit_id in duplicate_unit_ids:
+            raise ValueError("duplicate_unit_ids must not include primary_unit_id.")
+
+        ordered_duplicate_ids = list(dict.fromkeys(duplicate_unit_ids))
+        unit_ids = [primary_unit_id, *ordered_duplicate_ids]
+        units_by_id = {unit_id: self.get_unit(unit_id) for unit_id in unit_ids}
+        missing_ids = [unit_id for unit_id in unit_ids if units_by_id[unit_id] is None]
+        if missing_ids:
+            return {
+                "primary_unit_id": primary_unit_id,
+                "duplicate_unit_ids": ordered_duplicate_ids,
+                "dry_run": True,
+                "mergeable": False,
+                "error": "unit_not_found",
+                "missing_unit_ids": missing_ids,
+            }
+
+        primary = units_by_id[primary_unit_id]
+        assert primary is not None
+        duplicates = [units_by_id[unit_id] for unit_id in ordered_duplicate_ids]
+        assert all(unit is not None for unit in duplicates)
+        duplicate_units = [unit for unit in duplicates if unit is not None]
+
+        title_unit = next(
+            (unit for unit in [primary, *duplicate_units] if (unit.title or "").strip()),
+            primary,
+        )
+        content_unit = next(
+            (unit for unit in [primary, *duplicate_units] if (unit.content or "").strip()),
+            primary,
+        )
+
+        combined_tags = list(primary.tags)
+        for unit in duplicate_units:
+            for tag in unit.tags:
+                if tag not in combined_tags:
+                    combined_tags.append(tag)
+
+        metadata_conflicts: list[dict[str, Any]] = []
+        merged_metadata = dict(primary.metadata)
+        for unit in duplicate_units:
+            for key in sorted(unit.metadata):
+                value = unit.metadata[key]
+                if key not in merged_metadata:
+                    merged_metadata[key] = value
+                elif merged_metadata[key] != value:
+                    metadata_conflicts.append(
+                        {
+                            "key": key,
+                            "primary_value": primary.metadata.get(key),
+                            "duplicate_unit_id": unit.id,
+                            "duplicate_value": value,
+                        }
+                    )
+
+        duplicate_id_set = set(ordered_duplicate_ids)
+        existing_keys = {
+            (row["from_unit_id"], row["to_unit_id"], row["relation"])
+            for row in self.conn.execute(
+                """SELECT from_unit_id, to_unit_id, relation
+                   FROM edges
+                   WHERE from_unit_id NOT IN ({placeholders})
+                     AND to_unit_id NOT IN ({placeholders})""".format(
+                    placeholders=",".join("?" for _ in ordered_duplicate_ids) or "''"
+                ),
+                [*ordered_duplicate_ids, *ordered_duplicate_ids],
+            ).fetchall()
+        }
+        edge_rows = self.conn.execute(
+            """SELECT * FROM edges
+               WHERE from_unit_id IN ({placeholders})
+                  OR to_unit_id IN ({placeholders})
+               ORDER BY created_at, id""".format(
+                placeholders=",".join("?" for _ in ordered_duplicate_ids) or "''"
+            ),
+            [*ordered_duplicate_ids, *ordered_duplicate_ids],
+        ).fetchall()
+
+        edges_rewired: list[dict[str, Any]] = []
+        duplicate_edges_collapsed: list[dict[str, Any]] = []
+        self_edges_skipped: list[dict[str, Any]] = []
+        for row in edge_rows:
+            edge = _row_to_edge(row)
+            new_from = (
+                primary_unit_id
+                if edge.from_unit_id in duplicate_id_set
+                else edge.from_unit_id
+            )
+            new_to = primary_unit_id if edge.to_unit_id in duplicate_id_set else edge.to_unit_id
+            planned = {
+                "edge_id": edge.id,
+                "from_unit_id": edge.from_unit_id,
+                "to_unit_id": edge.to_unit_id,
+                "relation": edge.relation,
+                "new_from_unit_id": new_from,
+                "new_to_unit_id": new_to,
+            }
+            if new_from == new_to:
+                self_edges_skipped.append(planned)
+                continue
+            edge_key = (new_from, new_to, edge.relation)
+            if edge_key in existing_keys:
+                duplicate_edges_collapsed.append(planned)
+                continue
+            existing_keys.add(edge_key)
+            edges_rewired.append(planned)
+
+        return {
+            "primary_unit_id": primary_unit_id,
+            "duplicate_unit_ids": ordered_duplicate_ids,
+            "dry_run": True,
+            "mergeable": True,
+            "merged_title": title_unit.title,
+            "title_source_unit_id": title_unit.id,
+            "merged_content": content_unit.content,
+            "content_source_unit_id": content_unit.id,
+            "combined_tags": combined_tags,
+            "metadata_conflicts": metadata_conflicts,
+            "edges_rewired": edges_rewired,
+            "duplicate_edges_collapsed": duplicate_edges_collapsed,
+            "self_edges_skipped": self_edges_skipped,
+            "units_removed": ordered_duplicate_ids,
+        }
+
     def get_pinned_units(
         self,
         *,
@@ -3384,6 +3531,117 @@ class Store:
                 continue
 
         return result
+
+    def compare_tag_cohorts(
+        self,
+        left_tag: str,
+        right_tag: str,
+        limit: int = 10,
+    ) -> dict[str, Any]:
+        """Compare units containing two exact tags with deterministic representatives."""
+        if not isinstance(left_tag, str) or not left_tag:
+            raise ValueError("left_tag must be a non-empty string")
+        if not isinstance(right_tag, str) or not right_tag:
+            raise ValueError("right_tag must be a non-empty string")
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
+            raise ValueError("limit must be a non-negative integer")
+
+        units = sorted(self.get_all_units(), key=lambda unit: (unit.id, unit.title))
+        left_units = [unit for unit in units if left_tag in unit.tags]
+        right_units = [unit for unit in units if right_tag in unit.tags]
+        left_ids = {unit.id for unit in left_units}
+        right_ids = {unit.id for unit in right_units}
+        overlap_ids = left_ids & right_ids
+
+        def distribution(cohort: list[KnowledgeUnit], attr: str) -> dict[str, int]:
+            counts: Counter[str] = Counter(
+                str(_model_value(getattr(unit, attr))) for unit in cohort
+            )
+            return dict(sorted(counts.items()))
+
+        def metadata_keys(cohort: list[KnowledgeUnit]) -> set[str]:
+            keys: set[str] = set()
+            for unit in cohort:
+                keys.update(path for path, _value in _flatten_metadata_inventory(unit.metadata))
+            return keys
+
+        left_keys = metadata_keys(left_units)
+        right_keys = metadata_keys(right_units)
+        return {
+            "left_tag": left_tag,
+            "right_tag": right_tag,
+            "left_count": len(left_units),
+            "right_count": len(right_units),
+            "overlap_count": len(overlap_ids),
+            "overlap_units": [
+                _unit_brief(unit) for unit in units if unit.id in overlap_ids
+            ][:limit],
+            "left_only": [
+                _unit_brief(unit) for unit in left_units if unit.id not in right_ids
+            ][:limit],
+            "right_only": [
+                _unit_brief(unit) for unit in right_units if unit.id not in left_ids
+            ][:limit],
+            "source_project_distributions": {
+                "left": distribution(left_units, "source_project"),
+                "right": distribution(right_units, "source_project"),
+            },
+            "content_type_distributions": {
+                "left": distribution(left_units, "content_type"),
+                "right": distribution(right_units, "content_type"),
+            },
+            "metadata_key_differences": {
+                "left_only": sorted(left_keys - right_keys),
+                "right_only": sorted(right_keys - left_keys),
+                "shared": sorted(left_keys & right_keys),
+            },
+        }
+
+    def compute_tag_cooccurrence_matrix(
+        self,
+        *,
+        min_count: int = 1,
+        normalization: Literal["raw", "jaccard", "cosine"] = "raw",
+    ) -> dict[tuple[str, str], int | float]:
+        """Compute a tag co-occurrence matrix across all units."""
+        if not isinstance(min_count, int) or isinstance(min_count, bool) or min_count < 1:
+            raise ValueError("min_count must be a positive integer")
+        if normalization not in {"raw", "jaccard", "cosine"}:
+            raise ValueError("normalization must be one of: raw, jaccard, cosine")
+
+        tag_counts: Counter[str] = Counter()
+        pair_counts: Counter[tuple[str, str]] = Counter()
+        for unit in self.get_all_units():
+            tags = sorted({tag for tag in unit.tags if isinstance(tag, str) and tag})
+            tag_counts.update(tags)
+            for pair in combinations(tags, 2):
+                pair_counts[pair] += 1
+
+        matrix: dict[tuple[str, str], int | float] = {}
+        for pair, count in sorted(pair_counts.items(), key=lambda item: (-item[1], item[0])):
+            if count < min_count:
+                continue
+            if normalization == "raw":
+                value: int | float = count
+            elif normalization == "jaccard":
+                left, right = pair
+                value = count / (tag_counts[left] + tag_counts[right] - count)
+            else:
+                left, right = pair
+                value = count / math.sqrt(tag_counts[left] * tag_counts[right])
+            matrix[pair] = value
+        return matrix
+
+    def get_tag_cooccurrence_matrix(
+        self,
+        *,
+        min_count: int = 1,
+        normalization: Literal["raw", "jaccard", "cosine"] = "raw",
+    ) -> dict[tuple[str, str], int | float]:
+        return self.compute_tag_cooccurrence_matrix(
+            min_count=min_count,
+            normalization=normalization,
+        )
 
     def get_content_length_distribution_stats(
         self,

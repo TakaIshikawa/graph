@@ -12,6 +12,7 @@ from graph.rag.query_intent import classify_query_intent
 from graph.rag.dedupe import rank_duplicate_candidates
 from graph.rag.facets import build_result_facets
 from graph.rag.citations import format_result_citations
+from graph.rag.answer_outline import build_answer_outline
 from graph.rag.recency import rerank_for_recency
 from graph.rag.reading_order import plan_reading_order
 from graph.rag.reading_queue import build_reading_queue
@@ -31,6 +32,7 @@ __all__ = [
     "build_tag_hierarchy",
     "analyze_citation_coverage",
     "analyze_result_date_coverage",
+    "build_answer_outline",
     "build_keyphrase_cooccurrence",
     "build_reading_queue",
     "build_result_coverage_checklist",
