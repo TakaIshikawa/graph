@@ -96,6 +96,73 @@ def test_firefox_places_opens_database_read_only(tmp_path):
     assert before == after
 
 
+def test_firefox_places_ingests_bookmark_without_visit(tmp_path):
+    db = tmp_path / "places.sqlite"
+    with sqlite3.connect(db) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE moz_places (
+                id INTEGER PRIMARY KEY,
+                url TEXT,
+                title TEXT,
+                visit_count INTEGER,
+                frecency INTEGER,
+                typed INTEGER,
+                last_visit_date INTEGER
+            );
+            CREATE TABLE moz_bookmarks (
+                id INTEGER PRIMARY KEY,
+                fk INTEGER,
+                type INTEGER,
+                dateAdded INTEGER
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO moz_places VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (1, "https://bookmark.test", "Saved only", 0, 20, 0, None),
+        )
+        conn.execute(
+            "INSERT INTO moz_bookmarks VALUES (?, ?, ?, ?)",
+            (1, 1, 1, 1_735_689_600_000_000),
+        )
+
+    result = FirefoxPlacesAdapter(path=str(db)).ingest()
+
+    assert len(result.units) == 1
+    unit = result.units[0]
+    assert unit.title == "Saved only"
+    assert unit.metadata["bookmarked"] is True
+    assert unit.created_at == datetime(2025, 1, 1, tzinfo=timezone.utc)
+
+
+def test_firefox_places_uses_url_for_missing_title(tmp_path):
+    db = tmp_path / "places.sqlite"
+    with sqlite3.connect(db) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE moz_places (
+                id INTEGER PRIMARY KEY,
+                url TEXT,
+                title TEXT,
+                visit_count INTEGER,
+                frecency INTEGER,
+                typed INTEGER,
+                last_visit_date INTEGER
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO moz_places VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (1, "https://untitled.test/path", "", 1, 10, 0, 1_735_689_600_000_000),
+        )
+
+    result = FirefoxPlacesAdapter(path=str(db)).ingest()
+
+    assert len(result.units) == 1
+    assert result.units[0].title == "https://untitled.test/path"
+
+
 def test_firefox_places_adapter_is_registered():
     assert "firefox_places" in list_adapters()
     assert get_adapter("firefox_places", path="/tmp/places.sqlite").name == "firefox_places"

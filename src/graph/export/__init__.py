@@ -37,6 +37,7 @@ from graph.export.ris import export_units_to_ris
 from graph.export.rss import export_units_to_rss
 from graph.export.schema_inventory import export_unit_schema_inventory
 from graph.export.source_coverage import export_source_coverage_markdown
+from graph.export.source_inventory import export_source_inventory_csv
 from graph.export.source_timeline_csv import export_source_timeline_csv
 from graph.export.sqlite_snapshot import export_graph_sqlite
 from graph.export.tag_cooccurrence_csv import export_tag_cooccurrence_csv
@@ -101,6 +102,7 @@ __all__ = [
     "export_units_to_ris",
     "export_units_to_rss",
     "export_source_coverage_markdown",
+    "export_source_inventory_csv",
     "export_source_timeline_csv",
     "export_units_to_timelinejs",
     "render_search_html_report",
