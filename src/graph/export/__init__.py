@@ -27,6 +27,7 @@ from graph.export.json_ld import export_units_to_json_ld
 from graph.export.llms_txt import export_units_to_llms_txt
 from graph.export.metadata_completeness import export_metadata_completeness_markdown
 from graph.export.mermaid_mindmap import export_units_to_mermaid_mindmap
+from graph.export.ndjson import export_graph_ndjson, export_units_to_ndjson
 from graph.export.opml import export_units_to_opml
 from graph.export.org import export_units_to_org
 from graph.export.relation_evidence import export_relation_evidence_markdown
@@ -66,6 +67,7 @@ __all__ = [
     "export_graphson",
     "export_graph_sqlite",
     "export_metadata_completeness_markdown",
+    "export_graph_ndjson",
     "export_relation_evidence_markdown",
     "export_units_to_ris",
     "export_units_to_rss",
@@ -87,6 +89,7 @@ __all__ = [
     "export_units_to_llms_txt",
     "export_units_to_markdown_table",
     "export_units_to_mermaid_mindmap",
+    "export_units_to_ndjson",
     "export_units_to_opml",
     "export_units_to_org",
     "export_units_to_yaml",
