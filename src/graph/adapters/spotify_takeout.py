@@ -21,7 +21,7 @@ class SpotifyTakeoutAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["play"]
+        return ["play", "podcast_play"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -33,7 +33,8 @@ class SpotifyTakeoutAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        if entity_types and "play" not in entity_types:
+        allowed_types = set(entity_types or ["play"])
+        if not allowed_types.intersection(self.entity_types):
             return result
 
         sync_at = self._ensure_utc(since.last_sync_at) if since else None
@@ -44,7 +45,7 @@ class SpotifyTakeoutAdapter(SourceAdapter):
             except (OSError, UnicodeDecodeError, json.JSONDecodeError):
                 continue
             for item in items:
-                unit = self._unit_from_item(item, path.name)
+                unit = self._unit_from_item(item, path.name, allowed_types)
                 if unit is None:
                     continue
                 if sync_at and unit.created_at <= sync_at:
@@ -87,9 +88,19 @@ class SpotifyTakeoutAdapter(SourceAdapter):
             return [parsed]
         return []
 
-    def _unit_from_item(self, item: dict[str, Any], source_file: str) -> KnowledgeUnit | None:
+    def _unit_from_item(
+        self,
+        item: dict[str, Any],
+        source_file: str,
+        allowed_types: set[str],
+    ) -> KnowledgeUnit | None:
         played_at = self._parse_datetime(self._first(item, "ts", "endTime", "end_time", "played_at"))
         if played_at is None:
+            return None
+
+        if "podcast_play" in allowed_types and self._is_podcast_item(item):
+            return self._podcast_unit_from_item(item, source_file, played_at)
+        if "play" not in allowed_types:
             return None
 
         track_name = self._first(item, "master_metadata_track_name", "trackName", "track_name", "song")
@@ -136,6 +147,61 @@ class SpotifyTakeoutAdapter(SourceAdapter):
             updated_at=played_at,
         )
 
+    def _podcast_unit_from_item(
+        self,
+        item: dict[str, Any],
+        source_file: str,
+        played_at: datetime,
+    ) -> KnowledgeUnit | None:
+        episode_name = self._first(
+            item,
+            "episode_name",
+            "episodeName",
+            "master_metadata_episode_name",
+            "podcast_episode_name",
+        )
+        show_name = self._first(
+            item,
+            "episode_show_name",
+            "episodeShowName",
+            "master_metadata_show_name",
+            "podcast_show_name",
+            "show_name",
+        )
+        spotify_uri = self._first(item, "spotify_episode_uri", "spotifyEpisodeUri", "episode_uri", "spotify_uri", "uri")
+        ms_played = self._parse_int(self._value(item, "ms_played", "msPlayed"))
+
+        if not episode_name and not show_name and not spotify_uri:
+            return None
+
+        metadata = {
+            "show_name": show_name,
+            "episode_name": episode_name,
+            "spotify_uri": spotify_uri,
+            "ms_played": ms_played,
+            "played_at": played_at.isoformat(),
+            "platform": self._first(item, "platform"),
+            "country": self._first(item, "conn_country", "country"),
+            "reason_start": self._first(item, "reason_start"),
+            "reason_end": self._first(item, "reason_end"),
+            "skipped": self._parse_bool(self._value(item, "skipped")),
+            "offline": self._parse_bool(self._value(item, "offline")),
+            "incognito_mode": self._parse_bool(self._value(item, "incognito_mode", "incognitoMode")),
+            "source_file": source_file,
+        }
+        return KnowledgeUnit(
+            source_project=SourceProject.SPOTIFY_TAKEOUT,
+            source_id=self._podcast_source_id(played_at, show_name, episode_name, spotify_uri, ms_played),
+            source_entity_type="podcast_play",
+            title=self._podcast_title(show_name, episode_name),
+            content=self._podcast_content(metadata),
+            content_type=ContentType.METADATA,
+            metadata=metadata,
+            tags=["spotify", "podcast"],
+            created_at=played_at,
+            updated_at=played_at,
+        )
+
     def _source_id(
         self,
         played_at: datetime,
@@ -155,6 +221,27 @@ class SpotifyTakeoutAdapter(SourceAdapter):
         )
         digest = hashlib.sha256(identifier.encode("utf-8")).hexdigest()[:24]
         return f"spotify_takeout:{digest}"
+
+    def _podcast_source_id(
+        self,
+        played_at: datetime,
+        show_name: str,
+        episode_name: str,
+        spotify_uri: str,
+        ms_played: int | None,
+    ) -> str:
+        identifier = "|".join(
+            [
+                "podcast",
+                played_at.isoformat(),
+                spotify_uri.strip().lower(),
+                show_name.strip().lower(),
+                episode_name.strip().lower(),
+                "" if ms_played is None else str(ms_played),
+            ]
+        )
+        digest = hashlib.sha256(identifier.encode("utf-8")).hexdigest()[:24]
+        return f"spotify_takeout:podcast_play:{digest}"
 
     def _title(self, artist_name: str, track_name: str) -> str:
         if artist_name and track_name:
@@ -178,6 +265,48 @@ class SpotifyTakeoutAdapter(SourceAdapter):
         if metadata["reason_end"]:
             parts.append(f"Ended because: {metadata['reason_end']}")
         return "\n".join(parts)
+
+    def _podcast_title(self, show_name: str, episode_name: str) -> str:
+        if show_name and episode_name:
+            return f"{show_name} - {episode_name}"
+        return episode_name or show_name or "Spotify podcast play"
+
+    def _podcast_content(self, metadata: dict[str, Any]) -> str:
+        parts = [f"Played at: {metadata['played_at']}"]
+        if metadata["show_name"] or metadata["episode_name"]:
+            parts.append(f"Episode: {self._podcast_title(metadata['show_name'], metadata['episode_name'])}")
+        if metadata["spotify_uri"]:
+            parts.append(f"URI: {metadata['spotify_uri']}")
+        if metadata["ms_played"] is not None:
+            parts.append(f"Milliseconds played: {metadata['ms_played']}")
+        if metadata["platform"]:
+            parts.append(f"Platform: {metadata['platform']}")
+        if metadata["country"]:
+            parts.append(f"Country: {metadata['country']}")
+        if metadata["reason_start"]:
+            parts.append(f"Started because: {metadata['reason_start']}")
+        if metadata["reason_end"]:
+            parts.append(f"Ended because: {metadata['reason_end']}")
+        return "\n".join(parts)
+
+    def _is_podcast_item(self, item: dict[str, Any]) -> bool:
+        return bool(
+            self._first(
+                item,
+                "episode_name",
+                "episodeName",
+                "master_metadata_episode_name",
+                "podcast_episode_name",
+                "episode_show_name",
+                "episodeShowName",
+                "master_metadata_show_name",
+                "podcast_show_name",
+                "show_name",
+                "spotify_episode_uri",
+                "spotifyEpisodeUri",
+                "episode_uri",
+            )
+        )
 
     def _first(self, item: dict[str, Any], *keys: str) -> str:
         value = self._value(item, *keys)
