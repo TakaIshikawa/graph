@@ -39,6 +39,7 @@ from graph.export.source_timeline_csv import export_source_timeline_csv
 from graph.export.sqlite_snapshot import export_graph_sqlite
 from graph.export.tag_cooccurrence_csv import export_tag_cooccurrence_csv
 from graph.export.tag_glossary import export_tag_glossary_markdown
+from graph.export.timelinejs import export_units_to_timelinejs
 from graph.export.unit_csv import export_units_to_csv
 from graph.export.unit_markdown_table import export_units_to_markdown_table
 from graph.export.unit_yaml import export_units_to_yaml
@@ -70,6 +71,7 @@ __all__ = [
     "export_units_to_rss",
     "export_source_coverage_markdown",
     "export_source_timeline_csv",
+    "export_units_to_timelinejs",
     "render_search_html_report",
     "render_graph_overview_html",
     "export_tag_cooccurrence_csv",
