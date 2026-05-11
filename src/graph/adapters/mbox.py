@@ -296,7 +296,7 @@ class MboxAdapter(SourceAdapter):
         charset = part.get_content_charset() or "utf-8"
         try:
             return data.decode(charset, errors="replace")
-        except LookupError:
+        except (LookupError, UnicodeError, ValueError):
             # Unknown or invalid charset, fall back to UTF-8 with replacement
             return data.decode("utf-8", errors="replace")
 

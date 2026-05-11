@@ -30,6 +30,7 @@ from graph.adapters.github_stars_csv import GithubStarsCsvAdapter
 from graph.adapters.goodreads_library import GoodreadsLibraryAdapter
 from graph.adapters.google_calendar_json import GoogleCalendarJsonAdapter
 from graph.adapters.google_calendar_takeout import GoogleCalendarTakeoutAdapter
+from graph.adapters.google_photos_takeout import GooglePhotosTakeoutAdapter
 from graph.adapters.google_keep import GoogleKeepAdapter
 from graph.adapters.html import HtmlAdapter
 from graph.adapters.hacker_news_saved import HackerNewsSavedAdapter
@@ -243,6 +244,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "airtable_csv": AirtableCsvAdapter,
     "google_calendar_json": GoogleCalendarJsonAdapter,
     "google_calendar_takeout": GoogleCalendarTakeoutAdapter,
+    "google_photos_takeout": GooglePhotosTakeoutAdapter,
     "activitywatch_json": ActivityWatchJsonAdapter,
     "fitbit_sleep_csv": FitbitSleepCsvAdapter,
     "spotify_streaming_history": SpotifyStreamingHistoryAdapter,

@@ -64,15 +64,12 @@ class FirefoxPlacesAdapter(SourceAdapter):
                 return []
             has_bookmarks = self._table_exists(conn, "moz_bookmarks")
             place_columns = self._columns(conn, "moz_places")
-            history_columns = self._columns(conn, "moz_historyvisits") if self._table_exists(conn, "moz_historyvisits") else set()
+            has_history = self._table_exists(conn, "moz_historyvisits")
             bookmark_columns = self._columns(conn, "moz_bookmarks") if has_bookmarks else set()
             visit_count_expr = "p.visit_count" if "visit_count" in place_columns else "NULL"
             frecency_expr = "p.frecency" if "frecency" in place_columns else "NULL"
             typed_expr = "p.typed" if "typed" in place_columns else "0"
             last_visit_expr = "p.last_visit_date" if "last_visit_date" in place_columns else "NULL"
-            history_visit_expr = "MAX(h.visit_date)" if "visit_date" in history_columns else "NULL"
-            history_count_expr = "COUNT(h.id)" if "id" in history_columns else "0"
-            history_join = "LEFT JOIN moz_historyvisits h ON h.place_id = p.id" if history_columns else ""
             bookmark_select = (
                 "EXISTS(SELECT 1 FROM moz_bookmarks b WHERE b.fk = p.id AND b.type = 1) AS bookmarked"
                 if has_bookmarks
@@ -97,25 +94,72 @@ class FirefoxPlacesAdapter(SourceAdapter):
                     {frecency_expr} AS frecency,
                     {typed_expr} AS typed,
                     {last_visit_expr} AS last_visit_date,
-                    {history_visit_expr} AS visit_date,
-                    {history_count_expr} AS history_visit_count,
                     {bookmark_select},
                     {bookmark_date_select}
                 FROM moz_places p
-                {history_join}
                 {bookmark_join}
                 WHERE p.url IS NOT NULL
                 GROUP BY p.id
             """
-            return list(conn.execute(query))
+            rows = [dict(row) for row in conn.execute(query)]
+            history = self._history_aggregates(conn) if has_history else {}
+            for row in rows:
+                aggregate = history.get(row["id"], {})
+                row["first_visit_date"] = aggregate.get("first_visit_date")
+                row["visit_date"] = aggregate.get("last_visit_date")
+                row["history_visit_count"] = aggregate.get("history_visit_count", 0)
+                row["transition_counts"] = aggregate.get("transition_counts", {})
+            return rows
 
-    def _unit_from_row(self, row: sqlite3.Row) -> KnowledgeUnit | None:
+    def _history_aggregates(self, conn: sqlite3.Connection) -> dict[int, dict[str, Any]]:
+        columns = self._columns(conn, "moz_historyvisits")
+        if "place_id" not in columns:
+            return {}
+        visit_date_expr = "visit_date" if "visit_date" in columns else "NULL"
+        count_expr = "COUNT(id)" if "id" in columns else "COUNT(*)"
+        rows = conn.execute(
+            f"""
+            SELECT
+                place_id,
+                MIN({visit_date_expr}) AS first_visit_date,
+                MAX({visit_date_expr}) AS last_visit_date,
+                {count_expr} AS history_visit_count
+            FROM moz_historyvisits
+            GROUP BY place_id
+            """
+        )
+        aggregates = {
+            int(row["place_id"]): {
+                "first_visit_date": row["first_visit_date"],
+                "last_visit_date": row["last_visit_date"],
+                "history_visit_count": row["history_visit_count"],
+                "transition_counts": {},
+            }
+            for row in rows
+        }
+        if "transition" in columns:
+            transition_rows = conn.execute(
+                """
+                SELECT place_id, transition, COUNT(*) AS count
+                FROM moz_historyvisits
+                GROUP BY place_id, transition
+                """
+            )
+            for row in transition_rows:
+                place_id = int(row["place_id"])
+                transition = str(row["transition"])
+                aggregates.setdefault(place_id, {"transition_counts": {}})
+                aggregates[place_id].setdefault("transition_counts", {})[transition] = row["count"]
+        return aggregates
+
+    def _unit_from_row(self, row: dict[str, Any]) -> KnowledgeUnit | None:
         url = str(row["url"] or "").strip()
         if not url:
             return None
         last_visit_at = self._firefox_datetime(row["visit_date"] or row["last_visit_date"] or row["bookmark_date"])
         if last_visit_at is None:
             return None
+        first_visit_at = self._firefox_datetime(row["first_visit_date"]) or last_visit_at
         title = str(row["title"] or url).strip()
         metadata = {
             "url": url,
@@ -123,7 +167,9 @@ class FirefoxPlacesAdapter(SourceAdapter):
             "visit_count": row["visit_count"],
             "history_visit_count": row["history_visit_count"],
             "frecency": row["frecency"],
+            "first_visit_at": first_visit_at.isoformat(),
             "last_visit_at": last_visit_at.isoformat(),
+            "transition_counts": row["transition_counts"],
             "typed": bool(row["typed"]),
             "bookmarked": bool(row["bookmarked"]),
             "bookmark_date": self._parse_int(row["bookmark_date"]),
