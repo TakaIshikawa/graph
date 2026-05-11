@@ -46,6 +46,7 @@ class SourceProject(StrEnum):
     GIT = "git"
     GOOGLE_KEEP = "google_keep"
     OBSIDIAN_CANVAS = "obsidian_canvas"
+    OMNIVORE_JSON = "omnivore_json"
     NOTION_MARKDOWN = "notion_markdown"
     TRANSCRIPT = "transcript"
     TWITTER_ARCHIVE = "twitter_archive"

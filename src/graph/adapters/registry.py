@@ -61,6 +61,7 @@ from graph.adapters.google_tasks import GoogleTasksAdapter
 from graph.adapters.google_keep_export import GoogleKeepExportAdapter
 from graph.adapters.opml import OpmlAdapter
 from graph.adapters.obsidian_canvas import ObsidianCanvasAdapter
+from graph.adapters.omnivore_json import OmnivoreJsonAdapter
 from graph.adapters.org import OrgAdapter
 from graph.adapters.pdf import PdfAdapter
 from graph.adapters.pinboard import PinboardAdapter
@@ -139,6 +140,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "google_keep_export": GoogleKeepExportAdapter,
     "opml": OpmlAdapter,
     "obsidian_canvas": ObsidianCanvasAdapter,
+    "omnivore_json": OmnivoreJsonAdapter,
     "org": OrgAdapter,
     "pdf": PdfAdapter,
     "plain_text": PlainTextAdapter,
