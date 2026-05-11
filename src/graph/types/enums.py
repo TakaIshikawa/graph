@@ -119,6 +119,9 @@ class SourceProject(StrEnum):
     ARCHIVEBOX_INDEX_JSON = "archivebox_index_json"
     BLUESKY_ARCHIVE = "bluesky_archive"
     REDDIT_SAVED_CSV = "reddit_saved_csv"
+    STEAM_LIBRARY_CSV = "steam_library_csv"
+    GITHUB_ISSUES_JSON = "github_issues_json"
+    BOARDGAMEGEEK_COLLECTION_CSV = "boardgamegeek_collection_csv"
 
 
 class ContentType(StrEnum):
