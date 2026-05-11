@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from graph.adapters.base import SourceAdapter
+from graph.adapters.activitywatch_json import ActivityWatchJsonAdapter
 from graph.adapters.atom import AtomAdapter
 from graph.adapters.bibdesk import BibDeskAdapter
 from graph.adapters.bibtex import BibtexAdapter
@@ -56,6 +57,7 @@ from graph.adapters.evernote_export import EvernoteExportAdapter
 from graph.adapters.bear_export import BearExportAdapter
 from graph.adapters.apple_notes_export import AppleNotesExportAdapter
 from graph.adapters.apple_health_workouts import AppleHealthWorkoutsAdapter
+from graph.adapters.apple_reminders_csv import AppleRemindersCsvAdapter
 from graph.adapters.day_one_json import DayOneJsonAdapter
 from graph.adapters.firefox_places import FirefoxPlacesAdapter
 from graph.adapters.things_csv import ThingsCsvAdapter
@@ -66,6 +68,8 @@ from graph.adapters.todoist import TodoistAdapter
 from graph.adapters.are_na import AreNaAdapter
 from graph.adapters.zotero_csv import ZoteroCsvAdapter
 from graph.adapters.google_tasks import GoogleTasksAdapter
+from graph.adapters.google_contacts_csv import GoogleContactsCsvAdapter
+from graph.adapters.fitbit_sleep_csv import FitbitSleepCsvAdapter
 from graph.adapters.airtable_csv import AirtableCsvAdapter
 from graph.adapters.google_keep_export import GoogleKeepExportAdapter
 from graph.adapters.opml import OpmlAdapter
@@ -150,6 +154,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "bear_export": BearExportAdapter,
     "apple_notes_export": AppleNotesExportAdapter,
     "apple_health_workouts": AppleHealthWorkoutsAdapter,
+    "apple_reminders_csv": AppleRemindersCsvAdapter,
     "day_one_json": DayOneJsonAdapter,
     "things_csv": ThingsCsvAdapter,
     "firefox_places": FirefoxPlacesAdapter,
@@ -217,10 +222,13 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "are_na": AreNaAdapter,
     "zotero_csv": ZoteroCsvAdapter,
     "google_tasks": GoogleTasksAdapter,
+    "google_contacts_csv": GoogleContactsCsvAdapter,
     "hacker_news_saved": HackerNewsSavedAdapter,
     "github_stars_csv": GithubStarsCsvAdapter,
     "airtable_csv": AirtableCsvAdapter,
     "google_calendar_json": GoogleCalendarJsonAdapter,
+    "activitywatch_json": ActivityWatchJsonAdapter,
+    "fitbit_sleep_csv": FitbitSleepCsvAdapter,
     "spotify_streaming_history": SpotifyStreamingHistoryAdapter,
     "spotify_takeout": SpotifyTakeoutAdapter,
 }
