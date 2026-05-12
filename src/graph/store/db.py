@@ -3839,6 +3839,71 @@ class Store:
             ],
         }
 
+    def collection_member_sources(
+        self,
+        collection_name: str,
+        *,
+        min_count: int = 1,
+        include_empty: bool = False,
+    ) -> dict[str, Any]:
+        """Summarize source project and entity type mix for collection members."""
+        if not isinstance(min_count, int) or isinstance(min_count, bool) or min_count < 1:
+            raise ValueError("min_count must be a positive integer")
+        if not isinstance(include_empty, bool):
+            raise ValueError("include_empty must be a boolean")
+
+        collection = self.get_collection(collection_name)
+        if collection is None:
+            return {
+                "collection": collection_name,
+                "total_units": 0,
+                "source_project_counts": {},
+                "source_entity_type_counts": {},
+                "rows": [],
+                "error": "collection_not_found",
+                "message": f"Collection not found: {collection_name}",
+            }
+
+        rows = self.conn.execute(
+            """SELECT ku.source_project, ku.source_entity_type, COUNT(*) AS count
+               FROM collection_units cu
+               JOIN knowledge_units ku ON ku.id = cu.unit_id
+               WHERE cu.collection_id = ?
+               GROUP BY ku.source_project, ku.source_entity_type
+               ORDER BY ku.source_project, count DESC, ku.source_entity_type""",
+            (collection["id"],),
+        ).fetchall()
+
+        source_project_counts: Counter[str] = Counter()
+        source_entity_type_counts: Counter[str] = Counter()
+        result_rows: list[dict[str, Any]] = []
+        for row in rows:
+            count = int(row["count"])
+            source_project = str(row["source_project"])
+            source_entity_type = str(row["source_entity_type"])
+            source_project_counts[source_project] += count
+            source_entity_type_counts[source_entity_type] += count
+            if count >= min_count:
+                result_rows.append(
+                    {
+                        "source_project": source_project,
+                        "source_entity_type": source_entity_type,
+                        "count": count,
+                    }
+                )
+
+        total_units = sum(source_project_counts.values())
+        if total_units == 0 and not include_empty:
+            result_rows = []
+
+        return {
+            "collection": collection,
+            "total_units": total_units,
+            "source_project_counts": _sorted_counter_dict(source_project_counts),
+            "source_entity_type_counts": _sorted_counter_dict(source_entity_type_counts),
+            "rows": result_rows,
+        }
+
     def collection_activity_summary(
         self,
         collection_name: str,
