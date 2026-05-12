@@ -81,7 +81,7 @@ def test_archivebox_index_json_emits_extractor_artifacts_and_edges(tmp_path):
     )
 
     adapter = ArchiveBoxIndexJsonAdapter(path=str(export))
-    assert adapter.entity_types == ["archive", "artifact", "url_reference"]
+    assert adapter.entity_types == ["archive", "artifact", "url_reference", "domain"]
 
     result = adapter.ingest(entity_types=["archive", "artifact"])
     archives = [unit for unit in result.units if unit.source_entity_type == "archive"]
@@ -166,3 +166,42 @@ def test_archivebox_index_json_emits_outbound_url_references(tmp_path):
     assert len(result.edges) == 3
     assert {edge.from_unit_id for edge in result.edges} == {archive.source_id}
     assert {edge.to_unit_id for edge in result.edges} == {unit.source_id for unit in references}
+
+
+def test_archivebox_index_json_emits_deduplicated_domains(tmp_path):
+    export = tmp_path / "index.json"
+    export.write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {"url": "https://www.Example.com/a", "title": "A", "timestamp": "2025-01-01T00:00:00Z"},
+                    {"url": "https://example.com/b", "title": "B", "timestamp": "2025-01-02T00:00:00Z"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = ArchiveBoxIndexJsonAdapter(path=str(export)).ingest(entity_types=["archive", "domain"])
+
+    domains = [unit for unit in result.units if unit.source_entity_type == "domain"]
+    archives = [unit for unit in result.units if unit.source_entity_type == "archive"]
+    assert len(domains) == 1
+    assert domains[0].source_id.startswith("archivebox_index_json:domain:")
+    assert domains[0].metadata["domain"] == "example.com"
+    assert len(result.edges) == 2
+    assert {edge.from_unit_id for edge in result.edges} == {unit.source_id for unit in archives}
+    assert {edge.to_unit_id for edge in result.edges} == {domains[0].source_id}
+
+
+def test_archivebox_index_json_domain_filtering(tmp_path):
+    export = tmp_path / "index.json"
+    export.write_text(
+        json.dumps({"entries": [{"url": "https://www.example.com/a", "title": "A"}]}),
+        encoding="utf-8",
+    )
+
+    domain_only = ArchiveBoxIndexJsonAdapter(path=str(export)).ingest(entity_types=["domain"])
+
+    assert [unit.source_entity_type for unit in domain_only.units] == ["domain"]
+    assert domain_only.edges == []

@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class GoogleKeepAdapter(SourceAdapter):
@@ -20,7 +21,7 @@ class GoogleKeepAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["keep_note"]
+        return ["keep_note", "checklist_item"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -32,7 +33,8 @@ class GoogleKeepAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        if entity_types and "keep_note" not in entity_types:
+        allowed = set(entity_types or ["keep_note"])
+        if not allowed.intersection(self.entity_types):
             return result
 
         sync_at = self._sync_datetime(since) if since else None
@@ -42,7 +44,13 @@ class GoogleKeepAdapter(SourceAdapter):
             comparable_at = self._comparable_datetime(unit)
             if sync_at and comparable_at and comparable_at <= sync_at:
                 continue
-            result.units.append(unit)
+            if "keep_note" in allowed:
+                result.units.append(unit)
+            item_units = self._checklist_item_units(note, path, unit)
+            if "checklist_item" in allowed:
+                result.units.extend(item_units)
+            if {"keep_note", "checklist_item"}.issubset(allowed):
+                result.edges.extend(self._checklist_edges(unit, item_units))
 
         return result
 
@@ -145,7 +153,7 @@ class GoogleKeepAdapter(SourceAdapter):
         if not isinstance(value, list):
             return []
         items: list[dict[str, Any]] = []
-        for item in value:
+        for index, item in enumerate(value, start=1):
             if not isinstance(item, dict):
                 continue
             text = self._string(item.get("text"))
@@ -155,9 +163,56 @@ class GoogleKeepAdapter(SourceAdapter):
                 {
                     "text": text,
                     "checked": bool(item.get("isChecked")),
+                    "position": index,
                 }
             )
         return items
+
+    def _checklist_item_units(self, note: dict[str, Any], path: Path, note_unit: KnowledgeUnit) -> list[KnowledgeUnit]:
+        items = self._checklist_items(note.get("listContent"))
+        units: list[KnowledgeUnit] = []
+        for item in items:
+            title = item["text"]
+            metadata = {
+                "text": title,
+                "checked": item["checked"],
+                "position": item["position"],
+                "parent_note_source_id": note_unit.source_id,
+                "parent_note_title": note_unit.title,
+                "source_path": str(path),
+            }
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.GOOGLE_KEEP,
+                    source_id=self._checklist_item_source_id(note_unit.source_id, item["position"], title),
+                    source_entity_type="checklist_item",
+                    title=title,
+                    content=f"[{'x' if item['checked'] else ' '}] {title}",
+                    content_type=ContentType.METADATA,
+                    metadata=metadata,
+                    tags=note_unit.tags,
+                    created_at=note_unit.created_at,
+                    updated_at=note_unit.updated_at,
+                )
+            )
+        return units
+
+    def _checklist_edges(self, note_unit: KnowledgeUnit, item_units: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        return [
+            KnowledgeEdge(
+                id=self._checklist_edge_id(note_unit.source_id, item.source_id),
+                from_unit_id=note_unit.source_id,
+                to_unit_id=item.source_id,
+                relation=EdgeRelation.CONTAINS,
+                source=EdgeSource.SOURCE,
+                metadata={
+                    "source_project": SourceProject.GOOGLE_KEEP.value,
+                    "relation_type": "note_contains_checklist_item",
+                    "position": item.metadata["position"],
+                },
+            )
+            for item in item_units
+        ]
 
     def _tags(self, value: Any) -> list[str]:
         raw_tags: list[Any]
@@ -192,6 +247,14 @@ class GoogleKeepAdapter(SourceAdapter):
         if note_id:
             return f"google_keep:{note_id}"
         return f"google_keep:path:{path}"
+
+    def _checklist_item_source_id(self, note_source_id: str, position: int, text: str) -> str:
+        digest = hashlib.sha256(f"{note_source_id}|{position}|{text}".encode("utf-8")).hexdigest()[:24]
+        return f"{note_source_id}:checklist_item:{digest}"
+
+    def _checklist_edge_id(self, note_source_id: str, item_source_id: str) -> str:
+        digest = hashlib.sha256(f"{note_source_id}|{item_source_id}|contains".encode("utf-8")).hexdigest()[:24]
+        return f"google-keep-contains-{digest}"
 
     def _timestamp(self, note: dict[str, Any], *keys: str) -> datetime | None:
         for key in keys:
