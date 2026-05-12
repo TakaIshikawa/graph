@@ -47,12 +47,33 @@ def test_kobo_highlights_csv_ingests_highlights_and_notes(tmp_path):
     assert unit.metadata["book_title"] == "The Left Hand of Darkness"
     assert unit.metadata["author"] == "Ursula K. Le Guin"
     assert unit.metadata["isbn"] == "9780441478125"
+    assert unit.metadata["highlight"] == "The king was pregnant."
+    assert unit.metadata["note"] == "Important opening."
+    assert unit.metadata["chapter"] == "1"
     assert unit.metadata["location"] == "12"
     assert unit.metadata["color"] == "Yellow"
+    assert unit.metadata["date_created"] == "2026-05-01T10:00:00+00:00"
+    assert unit.metadata["date_modified"] == "2026-05-02T10:00:00+00:00"
     assert unit.metadata["book_url"] == "https://example.test/book"
     assert unit.metadata["row"]["Note"] == "Important opening."
     assert unit.created_at == datetime(2026, 5, 1, 10, tzinfo=timezone.utc)
     assert unit.updated_at == datetime(2026, 5, 2, 10, tzinfo=timezone.utc)
+
+
+def test_kobo_highlights_csv_tolerates_missing_optional_columns(tmp_path):
+    path = tmp_path / "kobo.csv"
+    _write_csv(path, [{"Book Title": "Sparse Book", "Highlighted Text": "Sparse highlight"}])
+
+    result = KoboHighlightsCsvAdapter(path=str(path)).ingest()
+
+    assert len(result.units) == 1
+    unit = result.units[0]
+    assert unit.title == "Kobo highlight: Sparse Book"
+    assert unit.metadata["highlight"] == "Sparse highlight"
+    assert unit.metadata["note"] == ""
+    assert unit.metadata["color"] == ""
+    assert unit.metadata["chapter"] == ""
+    assert unit.metadata["location"] == ""
 
 
 def test_kobo_highlights_csv_directory_since_filter_and_blank_skip(tmp_path):

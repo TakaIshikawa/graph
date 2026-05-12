@@ -69,8 +69,8 @@ class KoboHighlightsCsvAdapter(SourceAdapter):
             return [{str(key).strip(): value for key, value in row.items() if key is not None} for row in reader]
 
     def _unit_from_row(self, row: dict[str, Any], path: Path) -> KnowledgeUnit | None:
-        highlight = self._first(row, "Annotation", "Highlight", "Text", "annotation", "highlight_text")
-        note = self._first(row, "Note", "Notes", "note", "note_text")
+        highlight = self._first(row, "Annotation", "Highlight", "Highlighted Text", "Text", "annotation", "highlight_text")
+        note = self._first(row, "Note", "Notes", "Annotation Note", "note", "note_text")
         if not highlight and not note:
             return None
 
@@ -78,8 +78,8 @@ class KoboHighlightsCsvAdapter(SourceAdapter):
         book_title = self._first(row, "Book Title", "Title", "book_title", "title")
         author = self._first(row, "Author", "Authors", "author")
         isbn = self._clean_isbn(self._first(row, "ISBN", "ISBN13", "isbn", "isbn13"))
-        chapter = self._first(row, "Chapter", "chapter")
-        location = self._first(row, "Location", "Page", "Position", "location", "page")
+        chapter = self._first(row, "Chapter", "Chapter Title", "chapter")
+        location = self._first(row, "Location", "Page", "Position", "Chapter Progress", "location", "page")
         color = self._first(row, "Color", "colour", "color")
         created = self._parse_datetime(self._first(row, "Date Created", "Created", "date_created", "created_at"))
         modified = self._parse_datetime(self._first(row, "Date Modified", "Modified", "date_modified", "updated_at"))
