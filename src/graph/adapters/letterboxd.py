@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import Any
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class LetterboxdAdapter(SourceAdapter):
@@ -22,7 +22,7 @@ class LetterboxdAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["film"]
+        return ["film", "director"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -34,7 +34,8 @@ class LetterboxdAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        if entity_types and "film" not in entity_types:
+        allowed_types = set(entity_types or self.entity_types)
+        if not allowed_types.intersection(self.entity_types):
             return result
 
         path = Path(self.path).expanduser() if self.path else None
@@ -66,10 +67,10 @@ class LetterboxdAdapter(SourceAdapter):
             tags = self._tags(item)
             review = self._first(item, "Review", "review")
 
-            result.units.append(
-                KnowledgeUnit(
-                    source_project=SourceProject.LETTERBOXD,
-                    source_id=self._source_id(letterboxd_uri, name, year),
+            film_id = self._source_id(letterboxd_uri, name, year)
+            film_unit = KnowledgeUnit(
+                source_project=SourceProject.LETTERBOXD,
+                source_id=film_id,
                     source_entity_type="film",
                     title=self._format_title(name, year),
                     content=self._content(name, year, rating, review, tags),
@@ -89,9 +90,17 @@ class LetterboxdAdapter(SourceAdapter):
                     tags=tags,
                     created_at=watched_date or datetime.now(timezone.utc),
                     updated_at=watched_date or datetime.now(timezone.utc),
-                )
             )
+            directors = self._people(self._first(item, "Director", "Directors", "director", "directors"))
+            if "film" in allowed_types:
+                result.units.append(film_unit)
+            if "director" in allowed_types:
+                result.units.extend(self._director_units(directors, film_unit))
+            if {"film", "director"}.issubset(allowed_types):
+                result.edges.extend(self._director_edges(film_unit, directors))
 
+        result.units = list({unit.source_id: unit for unit in result.units}.values())
+        result.edges = sorted({edge.id: edge for edge in result.edges}.values(), key=lambda edge: edge.id)
         return result
 
     def _read_items(self, path: Path) -> list[dict[str, Any]]:
@@ -163,6 +172,49 @@ class LetterboxdAdapter(SourceAdapter):
             if normalized and normalized not in tags:
                 tags.append(normalized)
         return tags
+
+    def _people(self, value: str) -> list[str]:
+        people: list[str] = []
+        for person in re.split(r"\s+(?:and|&)\s+|[,;|/]", value or "", flags=re.IGNORECASE):
+            text = re.sub(r"\s+", " ", person).strip()
+            if text and text not in people:
+                people.append(text)
+        return people
+
+    def _director_units(self, directors: list[str], film: KnowledgeUnit) -> list[KnowledgeUnit]:
+        return [
+            KnowledgeUnit(
+                source_project=SourceProject.LETTERBOXD,
+                source_id=self._director_source_id(director),
+                source_entity_type="director",
+                title=director,
+                content=f"Letterboxd director: {director}",
+                content_type=ContentType.METADATA,
+                metadata={"name": director, "film_source_ids": [film.source_id]},
+                tags=["letterboxd", "director"],
+                created_at=film.created_at,
+                updated_at=film.updated_at,
+            )
+            for director in directors
+        ]
+
+    def _director_edges(self, film: KnowledgeUnit, directors: list[str]) -> list[KnowledgeEdge]:
+        return [self._edge(film.source_id, self._director_source_id(director), "film_director") for director in directors]
+
+    def _director_source_id(self, director: str) -> str:
+        digest = hashlib.sha256(director.casefold().encode("utf-8")).hexdigest()[:24]
+        return f"letterboxd:director:{digest}"
+
+    def _edge(self, from_id: str, to_id: str, relation_type: str) -> KnowledgeEdge:
+        digest = hashlib.sha256(f"{from_id}|{relation_type}|{to_id}".encode("utf-8")).hexdigest()[:24]
+        return KnowledgeEdge(
+            id=f"letterboxd:edge:{digest}",
+            from_unit_id=from_id,
+            to_unit_id=to_id,
+            relation=EdgeRelation.RELATES_TO,
+            source=EdgeSource.SOURCE,
+            metadata={"source_project": SourceProject.LETTERBOXD.value, "relation_type": relation_type},
+        )
 
     def _first(self, item: dict[str, Any], *keys: str) -> str:
         for key in keys:

@@ -34,8 +34,9 @@ def test_apple_health_workouts_ingests_workout_records(tmp_path):
 
     result = AppleHealthWorkoutsAdapter(path=str(export)).ingest()
 
-    assert len(result.units) == 1
-    unit = result.units[0]
+    workouts = [unit for unit in result.units if unit.source_entity_type == "workout"]
+    assert len(workouts) == 1
+    unit = workouts[0]
     assert unit.source_project == SourceProject.APPLE_HEALTH_WORKOUTS
     assert unit.source_entity_type == "workout"
     assert unit.source_id.startswith("apple_health_workouts:")
@@ -77,8 +78,9 @@ def test_apple_health_workouts_allows_missing_optional_fields(tmp_path):
 
     result = AppleHealthWorkoutsAdapter(path=str(tmp_path)).ingest()
 
-    assert len(result.units) == 1
-    unit = result.units[0]
+    workouts = [unit for unit in result.units if unit.source_entity_type == "workout"]
+    assert len(workouts) == 1
+    unit = workouts[0]
     assert unit.title == "Yoga on 2025-03-10"
     assert unit.metadata["duration"] is None
     assert unit.metadata["distance"] is None
@@ -106,8 +108,9 @@ def test_apple_health_workouts_filters_by_sync_state(tmp_path):
 
     result = AppleHealthWorkoutsAdapter(path=str(export)).ingest(since=since)
 
-    assert len(result.units) == 1
-    assert result.units[0].metadata["activity_type"] == "Swimming"
+    workouts = [unit for unit in result.units if unit.source_entity_type == "workout"]
+    assert len(workouts) == 1
+    assert workouts[0].metadata["activity_type"] == "Swimming"
 
 
 def test_apple_health_workouts_entity_type_filtering(tmp_path):
@@ -137,10 +140,33 @@ def test_apple_health_workouts_source_id_is_stable(tmp_path):
         encoding="utf-8",
     )
 
-    first = AppleHealthWorkoutsAdapter(path=str(export)).ingest().units[0]
-    second = AppleHealthWorkoutsAdapter(path=str(export)).ingest().units[0]
+    first = [unit for unit in AppleHealthWorkoutsAdapter(path=str(export)).ingest().units if unit.source_entity_type == "workout"][0]
+    second = [unit for unit in AppleHealthWorkoutsAdapter(path=str(export)).ingest().units if unit.source_entity_type == "workout"][0]
 
     assert first.source_id == second.source_id
+
+
+def test_apple_health_workouts_emits_monthly_aggregates(tmp_path):
+    export = tmp_path / "export.xml"
+    export.write_text(
+        """<HealthData>
+  <Workout workoutActivityType="HKWorkoutActivityTypeRunning" duration="30" startDate="2025-01-01 00:00:00 +0000"/>
+  <Workout workoutActivityType="HKWorkoutActivityTypeRunning" duration="45" startDate="2025-01-20 00:00:00 +0000"/>
+  <Workout workoutActivityType="HKWorkoutActivityTypeWalking" duration="10" startDate="2025-01-20 00:00:00 +0000"/>
+  <Workout workoutActivityType="HKWorkoutActivityTypeRunning" duration="20" startDate="2025-02-01 00:00:00 +0000"/>
+</HealthData>
+""",
+        encoding="utf-8",
+    )
+
+    result = AppleHealthWorkoutsAdapter(path=str(export)).ingest()
+
+    aggregates = [unit for unit in result.units if unit.source_entity_type == "monthly_aggregate"]
+    assert len(aggregates) == 3
+    january_running = next(unit for unit in aggregates if unit.metadata["month"] == "2025-01" and unit.metadata["activity_type"] == "Running")
+    assert january_running.metadata["workout_count"] == 2
+    assert january_running.metadata["total_duration"] == 75.0
+    assert len([edge for edge in result.edges if edge.to_unit_id == january_running.source_id]) == 2
 
 
 def test_apple_health_workouts_adapter_is_registered():

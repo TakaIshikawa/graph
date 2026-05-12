@@ -21,14 +21,15 @@ class LibbyLoansCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["loan"]
+        return ["loan", "author"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
 
     def ingest(self, *, since: SyncState | None = None, entity_types: list[str] | None = None) -> IngestResult:
         result = IngestResult()
-        if entity_types and "loan" not in entity_types:
+        allowed_types = set(entity_types or self.entity_types)
+        if not allowed_types.intersection(self.entity_types):
             return result
         sync_at = self._ensure_utc(since.last_sync_at) if since else None
         for path in self._iter_paths():
@@ -42,8 +43,17 @@ class LibbyLoansCsvAdapter(SourceAdapter):
                     continue
                 if sync_at and unit.updated_at <= sync_at:
                     continue
-                result.units.append(unit)
-                result.edges.extend(self._edges_for_unit(unit))
+                authors = self._authors(unit)
+                if "loan" in allowed_types:
+                    result.units.append(unit)
+                if "author" in allowed_types:
+                    result.units.extend(self._author_units(authors, unit))
+                if {"loan", "author"}.issubset(allowed_types):
+                    result.edges.extend(self._author_edges(unit, authors))
+                if "loan" in allowed_types:
+                    result.edges.extend(self._edges_for_unit(unit))
+        result.units = list({unit.source_id: unit for unit in result.units}.values())
+        result.edges = list({edge.id: edge for edge in result.edges}.values())
         result.units.sort(key=lambda unit: unit.source_id)
         result.edges.sort(key=lambda edge: edge.id)
         return result
@@ -106,11 +116,33 @@ class LibbyLoansCsvAdapter(SourceAdapter):
 
     def _edges_for_unit(self, unit: KnowledgeUnit) -> list[KnowledgeEdge]:
         edges: list[KnowledgeEdge] = []
-        for kind in ("author", "library", "series"):
+        for kind in ("library", "series"):
             value = unit.metadata.get(kind)
             if value:
                 edges.append(self._edge(unit.source_id, f"libby:{kind}:{value}", kind, str(value)))
         return edges
+
+    def _author_units(self, authors: list[str], loan: KnowledgeUnit) -> list[KnowledgeUnit]:
+        units: list[KnowledgeUnit] = []
+        for author in authors:
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.LIBBY_LOANS_CSV,
+                    source_id=self._author_source_id(author),
+                    source_entity_type="author",
+                    title=author,
+                    content=f"Libby author: {author}",
+                    content_type=ContentType.METADATA,
+                    metadata={"name": author, "loan_source_ids": [loan.source_id]},
+                    tags=["libby", "author"],
+                    created_at=loan.created_at,
+                    updated_at=loan.updated_at,
+                )
+            )
+        return units
+
+    def _author_edges(self, unit: KnowledgeUnit, authors: list[str]) -> list[KnowledgeEdge]:
+        return [self._edge(unit.source_id, self._author_source_id(author), "author", author) for author in authors]
 
     def _edge(self, source_id: str, target: str, kind: str, value: str) -> KnowledgeEdge:
         digest = hashlib.sha256(f"{source_id}|{target}".encode("utf-8")).hexdigest()[:24]
@@ -147,6 +179,23 @@ class LibbyLoansCsvAdapter(SourceAdapter):
             if text and text not in items:
                 items.append(text)
         return items
+
+    def _authors(self, unit: KnowledgeUnit) -> list[str]:
+        authors: list[str] = []
+        for author in self._split_authors(str(unit.metadata.get("author") or "")):
+            if author.casefold() in {"unknown", "unknown author", "n/a", "na", "none"}:
+                continue
+            if author not in authors:
+                authors.append(author)
+        return authors
+
+    def _split_authors(self, value: str) -> list[str]:
+        text = re.sub(r"\s+(?:and|&)\s+", ";", value or "", flags=re.IGNORECASE)
+        return [item.strip() for item in re.split(r"[,;|/]", text) if item.strip()]
+
+    def _author_source_id(self, author: str) -> str:
+        digest = hashlib.sha256(author.casefold().encode("utf-8")).hexdigest()[:24]
+        return f"libby_loans_csv:author:{digest}"
 
     def _normalize_key(self, value: str) -> str:
         return re.sub(r"[^a-z0-9]+", "", str(value).casefold())

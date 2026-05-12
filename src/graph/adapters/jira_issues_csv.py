@@ -21,14 +21,15 @@ class JiraIssuesCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["issue"]
+        return ["issue", "component"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
 
     def ingest(self, *, since: SyncState | None = None, entity_types: list[str] | None = None) -> IngestResult:
         result = IngestResult()
-        if entity_types and "issue" not in entity_types:
+        allowed_types = set(entity_types or self.entity_types)
+        if not allowed_types.intersection(self.entity_types):
             return result
         sync_at = self._ensure_utc(since.last_sync_at) if since else None
         for path in self._iter_paths():
@@ -42,8 +43,16 @@ class JiraIssuesCsvAdapter(SourceAdapter):
                     continue
                 if sync_at and unit.updated_at <= sync_at:
                     continue
-                result.units.append(unit)
-                result.edges.extend(self._edges_for_unit(unit))
+                components = list(unit.metadata.get("components") or [])
+                if "issue" in allowed_types:
+                    result.units.append(unit)
+                    result.edges.extend(self._edges_for_unit(unit))
+                if "component" in allowed_types:
+                    result.units.extend(self._component_units(components, unit))
+                if {"issue", "component"}.issubset(allowed_types):
+                    result.edges.extend(self._component_edges(unit, components))
+        result.units = list({unit.source_id: unit for unit in result.units}.values())
+        result.edges = list({edge.id: edge for edge in result.edges}.values())
         result.units.sort(key=lambda unit: unit.source_id)
         result.edges.sort(key=lambda edge: edge.id)
         return result
@@ -117,6 +126,33 @@ class JiraIssuesCsvAdapter(SourceAdapter):
                 target = f"jira:{kind}:{value}"
                 edges.append(self._edge(unit.source_id, target, relation, kind, str(value)))
         return edges
+
+    def _component_units(self, components: list[str], issue: KnowledgeUnit) -> list[KnowledgeUnit]:
+        return [
+            KnowledgeUnit(
+                source_project=SourceProject.JIRA_ISSUES_CSV,
+                source_id=self._component_source_id(component),
+                source_entity_type="component",
+                title=component,
+                content=f"Jira component: {component}",
+                content_type=ContentType.METADATA,
+                metadata={"name": component, "issue_source_ids": [issue.source_id]},
+                tags=["jira", "component"],
+                created_at=issue.created_at,
+                updated_at=issue.updated_at,
+            )
+            for component in components
+        ]
+
+    def _component_edges(self, issue: KnowledgeUnit, components: list[str]) -> list[KnowledgeEdge]:
+        return [
+            self._edge(issue.source_id, self._component_source_id(component), EdgeRelation.RELATES_TO, "component", component)
+            for component in components
+        ]
+
+    def _component_source_id(self, component: str) -> str:
+        digest = hashlib.sha256(component.casefold().encode("utf-8")).hexdigest()[:24]
+        return f"jira_issues_csv:component:{digest}"
 
     def _edge(self, source_id: str, target: str, relation: EdgeRelation, kind: str, value: str) -> KnowledgeEdge:
         digest = hashlib.sha256(f"{source_id}|{relation}|{target}".encode("utf-8")).hexdigest()[:24]
