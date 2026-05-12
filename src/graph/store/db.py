@@ -1716,6 +1716,93 @@ class Store:
             "tags": tags,
         }
 
+    def source_tag_overlap(
+        self,
+        *,
+        min_shared_tags: int = 1,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Compare distinct tag overlap between source projects."""
+        if (
+            not isinstance(min_shared_tags, int)
+            or isinstance(min_shared_tags, bool)
+            or min_shared_tags < 1
+        ):
+            raise ValueError("min_shared_tags must be a positive integer")
+        if limit is not None and (
+            not isinstance(limit, int) or isinstance(limit, bool) or limit < 0
+        ):
+            raise ValueError("limit must be a non-negative integer or None")
+
+        source_tags: dict[str, set[str]] = defaultdict(set)
+        source_tag_units: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
+        for unit in self.get_all_units():
+            source_project = str(_model_value(unit.source_project))
+            tags = {
+                tag
+                for tag in unit.tags
+                if isinstance(tag, str) and tag.strip()
+            }
+            if not tags:
+                source_tags.setdefault(source_project, set())
+            for tag in tags:
+                source_tags[source_project].add(tag)
+                source_tag_units[source_project][tag].add(unit.id)
+
+        rows: list[dict[str, Any]] = []
+        for source_a, source_b in combinations(sorted(source_tags), 2):
+            tags_a = source_tags[source_a]
+            tags_b = source_tags[source_b]
+            shared_tags = tags_a & tags_b
+            if len(shared_tags) < min_shared_tags:
+                continue
+            union_count = len(tags_a | tags_b)
+            shared_units = {
+                unit_id
+                for tag in shared_tags
+                for unit_id in source_tag_units[source_a][tag] | source_tag_units[source_b][tag]
+            }
+            top_shared_tags = [
+                {
+                    "tag": tag,
+                    "source_a_count": len(source_tag_units[source_a][tag]),
+                    "source_b_count": len(source_tag_units[source_b][tag]),
+                }
+                for tag in sorted(
+                    shared_tags,
+                    key=lambda item: (
+                        -(
+                            len(source_tag_units[source_a][item])
+                            + len(source_tag_units[source_b][item])
+                        ),
+                        item,
+                    ),
+                )
+            ]
+            rows.append(
+                {
+                    "source_a": source_a,
+                    "source_b": source_b,
+                    "shared_tag_count": len(shared_tags),
+                    "shared_unit_count": len(shared_units),
+                    "jaccard": round(len(shared_tags) / union_count, 6)
+                    if union_count
+                    else 0.0,
+                    "top_shared_tags": top_shared_tags,
+                }
+            )
+
+        rows.sort(
+            key=lambda row: (
+                -row["jaccard"],
+                row["source_a"],
+                row["source_b"],
+            )
+        )
+        if limit is not None:
+            rows = rows[:limit]
+        return rows
+
     def source_entity_type_summary(self, *, sample_limit: int = 3) -> list[dict]:
         """Summarize units grouped by source project and source entity type."""
         if (
@@ -1779,6 +1866,46 @@ class Store:
                 groups,
                 key=lambda item: (-groups[item]["count"], item[0], item[1]),
             )
+        ]
+
+    def source_entity_type_distribution(
+        self,
+        *,
+        source_project: SourceProject | str | None = None,
+        content_type: str | None = None,
+        min_count: int = 1,
+    ) -> list[dict[str, Any]]:
+        """Return counts grouped by source project and source entity type."""
+        if not isinstance(min_count, int) or isinstance(min_count, bool) or min_count < 1:
+            raise ValueError("min_count must be a positive integer")
+
+        where_parts: list[str] = []
+        params: list[object] = []
+        if source_project is not None:
+            where_parts.append("source_project = ?")
+            params.append(str(_model_value(source_project)))
+        if content_type is not None:
+            where_parts.append("content_type = ?")
+            params.append(str(_model_value(content_type)))
+
+        query = """SELECT source_project, source_entity_type, COUNT(*) AS count
+                   FROM knowledge_units"""
+        if where_parts:
+            query += " WHERE " + " AND ".join(where_parts)
+        query += """
+                   GROUP BY source_project, source_entity_type
+                   HAVING count >= ?
+                   ORDER BY source_project, count DESC, source_entity_type"""
+        params.append(min_count)
+
+        rows = self.conn.execute(query, params).fetchall()
+        return [
+            {
+                "source_project": row["source_project"],
+                "source_entity_type": row["source_entity_type"],
+                "count": row["count"],
+            }
+            for row in rows
         ]
 
     def tag_freshness_summary(
