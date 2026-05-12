@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class GoogleCalendarJsonAdapter(SourceAdapter):
@@ -47,8 +48,10 @@ class GoogleCalendarJsonAdapter(SourceAdapter):
                 if sync_at and unit.updated_at <= sync_at:
                     continue
                 result.units.append(unit)
+                result.edges.extend(self._participant_edges(unit))
 
         result.units.sort(key=lambda unit: (unit.updated_at, unit.source_id))
+        result.edges = sorted({edge.id: edge for edge in result.edges}.values(), key=lambda edge: edge.id)
         return result
 
     def _read_events(self, path: Path) -> list[dict[str, Any]]:
@@ -70,6 +73,7 @@ class GoogleCalendarJsonAdapter(SourceAdapter):
         created = self._parse_datetime(self._first(event, "created"))
         comparable = updated or self._parse_datetime(start.get("dateTime", "")) or created
         now = datetime.now(timezone.utc)
+        organizer = self._person(event.get("organizer"))
         metadata = {
             "event_id": event_id,
             "source_url": html_link,
@@ -81,6 +85,8 @@ class GoogleCalendarJsonAdapter(SourceAdapter):
             "created": self._first(event, "created"),
             "updated": self._first(event, "updated"),
         }
+        if any(value is not None for value in organizer.values()):
+            metadata["organizer"] = organizer
         return KnowledgeUnit(
             source_project=SourceProject.GOOGLE_CALENDAR_JSON,
             source_id=f"google_calendar_json:{event_id or html_link or title}",
@@ -109,14 +115,58 @@ class GoogleCalendarJsonAdapter(SourceAdapter):
         attendees = []
         for attendee in value:
             if isinstance(attendee, dict):
-                attendees.append(
-                    {
-                        "email": attendee.get("email"),
-                        "displayName": attendee.get("displayName"),
-                        "responseStatus": attendee.get("responseStatus"),
-                    }
-                )
+                attendees.append(self._person(attendee, include_response=True))
         return attendees
+
+    def _person(self, value: Any, *, include_response: bool = False) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            return {}
+        person = {
+            "email": value.get("email"),
+            "displayName": value.get("displayName"),
+        }
+        if include_response:
+            person["responseStatus"] = value.get("responseStatus")
+        return person
+
+    def _participant_edges(self, unit: KnowledgeUnit) -> list[KnowledgeEdge]:
+        edges: list[KnowledgeEdge] = []
+        organizer = unit.metadata.get("organizer")
+        if isinstance(organizer, dict):
+            edge = self._participant_edge(unit.source_id, organizer, "organizer")
+            if edge:
+                edges.append(edge)
+        for attendee in unit.metadata.get("attendees", []):
+            if not isinstance(attendee, dict):
+                continue
+            edge = self._participant_edge(unit.source_id, attendee, "attendee")
+            if edge:
+                edges.append(edge)
+        return edges
+
+    def _participant_edge(self, source_id: str, person: dict[str, Any], kind: str) -> KnowledgeEdge | None:
+        email = self._normalize_email(person.get("email"))
+        if not email:
+            return None
+        target_id = f"google_calendar:person:{email}"
+        digest = hashlib.sha256(f"{source_id}|participant|{target_id}".encode("utf-8")).hexdigest()[:24]
+        return KnowledgeEdge(
+            id=f"google_calendar_json:participant:{digest}",
+            from_unit_id=source_id,
+            to_unit_id=target_id,
+            relation=EdgeRelation.RELATES_TO,
+            source=EdgeSource.SOURCE,
+            metadata={
+                "kind": kind,
+                "email": email,
+                "displayName": person.get("displayName"),
+                "responseStatus": person.get("responseStatus"),
+                "source_project": SourceProject.GOOGLE_CALENDAR_JSON.value,
+            },
+        )
+
+    def _normalize_email(self, value: Any) -> str:
+        return str(value).strip().casefold() if value not in ("", None) else ""
 
     def _content(
         self,
