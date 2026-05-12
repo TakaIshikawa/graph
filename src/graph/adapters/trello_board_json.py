@@ -92,6 +92,7 @@ class TrelloBoardJsonAdapter(SourceAdapter):
         labels = self._labels(card, context["labels"])
         members = [self._lookup_member(context["members"].get(str(member_id))) for member_id in card.get("idMembers", [])]
         checklists = self._checklists(card.get("idChecklists", []), context["checklists"])
+        checklist_items = self._checklist_items(card.get("idChecklists", []), context["checklists"])
         metadata = {
             "card_id": card_id,
             "name": name,
@@ -102,6 +103,7 @@ class TrelloBoardJsonAdapter(SourceAdapter):
             "labels": labels,
             "members": [item for item in members if item],
             "checklists": checklists,
+            "checklist_items": checklist_items,
             "url": self._text(card.get("url") or card.get("shortUrl")),
             "source_file": source_file,
             "card": card,
@@ -220,6 +222,34 @@ class TrelloBoardJsonAdapter(SourceAdapter):
             )
         return items
 
+    def _checklist_items(self, checklist_ids: list[Any], known_checklists: dict[str, Any]) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        for checklist in self._card_checklists(checklist_ids, known_checklists):
+            checklist_id = self._text(checklist.get("id"))
+            checklist_name = self._lookup_name(checklist)
+            check_items = checklist.get("checkItems", [])
+            if not isinstance(check_items, list):
+                continue
+            for index, check_item in enumerate(check_items):
+                if not isinstance(check_item, dict):
+                    continue
+                item_name = self._text(check_item.get("name"))
+                item_id = self._text(check_item.get("id"))
+                if not item_name and not item_id:
+                    continue
+                item = {
+                    "checklist_id": checklist_id,
+                    "checklist_name": checklist_name,
+                    "item_id": item_id,
+                    "item_name": item_name,
+                    "state": self._text(check_item.get("state")),
+                    "complete": self._text(check_item.get("state")).casefold() == "complete",
+                    "due": self._text(check_item.get("due")),
+                    "position": check_item.get("pos", index),
+                }
+                items.append({key: value for key, value in item.items() if value not in ("", None, [])})
+        return items
+
     def _card_checklists(self, checklist_ids: list[Any], known_checklists: dict[str, Any]) -> list[dict[str, Any]]:
         if not isinstance(checklist_ids, list):
             return []
@@ -239,6 +269,17 @@ class TrelloBoardJsonAdapter(SourceAdapter):
             parts.append(f"Labels: {', '.join(metadata['labels'])}")
         if metadata.get("members"):
             parts.append(f"Members: {', '.join(metadata['members'])}")
+        for item in metadata.get("checklist_items", []):
+            if not isinstance(item, dict):
+                continue
+            line = item.get("item_name") or item.get("item_id")
+            if not line:
+                continue
+            state = item.get("state")
+            checklist = item.get("checklist_name")
+            due = item.get("due")
+            details = [value for value in (state, f"Checklist: {checklist}" if checklist else "", f"Due: {due}" if due else "") if value]
+            parts.append(f"Checklist item: {line}" + (f" ({'; '.join(details)})" if details else ""))
         return "\n".join(item for item in parts if item)
 
     def _check_item_content(self, metadata: dict[str, Any]) -> str:

@@ -172,3 +172,57 @@ def test_trello_board_json_entity_type_filters_check_items(tmp_path):
     assert [unit.source_entity_type for unit in check_items.units] == ["check_item"]
     assert check_items.units[0].source_id == "trello_board_json:card-1:check_item:check-1:item-1"
     assert check_items.edges == []
+
+
+def test_trello_board_json_adds_checklist_items_to_card_metadata_and_content(tmp_path):
+    export = tmp_path / "board.json"
+    export.write_text(
+        json.dumps(
+            {
+                "checklists": [
+                    {
+                        "id": "check-1",
+                        "name": "Launch",
+                        "checkItems": [
+                            {"id": "item-1", "name": "Write tests", "state": "complete", "due": "2025-01-09T00:00:00Z"},
+                            {"id": "item-2", "name": "Ship adapter", "state": "incomplete"},
+                        ],
+                    }
+                ],
+                "cards": [
+                    {
+                        "id": "card-1",
+                        "name": "Add Trello import",
+                        "idChecklists": ["check-1"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    card = TrelloBoardJsonAdapter(path=str(export)).ingest(entity_types=["card"]).units[0]
+
+    assert card.metadata["checklist_items"] == [
+        {
+            "checklist_id": "check-1",
+            "checklist_name": "Launch",
+            "item_id": "item-1",
+            "item_name": "Write tests",
+            "state": "complete",
+            "complete": True,
+            "due": "2025-01-09T00:00:00Z",
+            "position": 0,
+        },
+        {
+            "checklist_id": "check-1",
+            "checklist_name": "Launch",
+            "item_id": "item-2",
+            "item_name": "Ship adapter",
+            "state": "incomplete",
+            "complete": False,
+            "position": 1,
+        },
+    ]
+    assert "Checklist item: Write tests (complete; Checklist: Launch; Due: 2025-01-09T00:00:00Z)" in card.content
+    assert "Checklist item: Ship adapter (incomplete; Checklist: Launch)" in card.content
