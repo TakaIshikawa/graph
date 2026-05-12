@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class FitbitSleepCsvAdapter(SourceAdapter):
@@ -20,7 +20,7 @@ class FitbitSleepCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["sleep"]
+        return ["sleep", "sleep_month"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -32,7 +32,8 @@ class FitbitSleepCsvAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        if entity_types and "sleep" not in entity_types:
+        allowed = set(entity_types or ["sleep"])
+        if not allowed.intersection(self.entity_types):
             return result
 
         sync_at = self._ensure_utc(since.last_sync_at) if since else None
@@ -50,7 +51,15 @@ class FitbitSleepCsvAdapter(SourceAdapter):
                     continue
                 units.append(unit)
 
-        result.units.extend(sorted(units, key=lambda unit: (unit.created_at, unit.source_id)))
+        months = self._month_units(units) if "sleep_month" in allowed else []
+        if "sleep" in allowed:
+            result.units.extend(units)
+        if "sleep_month" in allowed:
+            result.units.extend(months)
+        if {"sleep", "sleep_month"}.issubset(allowed):
+            result.edges.extend(self._month_sleep_edges(months))
+        result.units.sort(key=lambda unit: (unit.created_at, unit.source_id))
+        result.edges.sort(key=lambda edge: edge.id)
         return result
 
     def _iter_paths(self) -> list[Path]:
@@ -113,6 +122,76 @@ class FitbitSleepCsvAdapter(SourceAdapter):
         raw = explicit or "|".join([start.isoformat(), end.isoformat() if end else "", self._first(row, "Sleep Score", "Score")])
         digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
         return f"fitbit_sleep_csv:{digest}"
+
+    def _month_units(self, sleeps: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        for sleep in sleeps:
+            month = sleep.created_at.strftime("%Y-%m")
+            grouped.setdefault(month, []).append(sleep)
+
+        units: list[KnowledgeUnit] = []
+        for month, month_sleeps in sorted(grouped.items()):
+            minutes_asleep = [value for sleep in month_sleeps if isinstance((value := sleep.metadata.get("minutes_asleep")), int)]
+            sleep_scores = [value for sleep in month_sleeps if isinstance((value := sleep.metadata.get("sleep_score")), int)]
+            time_in_bed = [value for sleep in month_sleeps if isinstance((value := sleep.metadata.get("time_in_bed")), int)]
+            stage_totals = {
+                "deep_minutes": sum(int(sleep.metadata.get("deep_minutes") or 0) for sleep in month_sleeps),
+                "light_minutes": sum(int(sleep.metadata.get("light_minutes") or 0) for sleep in month_sleeps),
+                "rem_minutes": sum(int(sleep.metadata.get("rem_minutes") or 0) for sleep in month_sleeps),
+                "wake_minutes": sum(int(sleep.metadata.get("wake_minutes") or 0) for sleep in month_sleeps),
+            }
+            source_ids = sorted(sleep.source_id for sleep in month_sleeps)
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.FITBIT_SLEEP_CSV,
+                    source_id=self._month_source_id(month),
+                    source_entity_type="sleep_month",
+                    title=f"Fitbit sleep month {month}",
+                    content=f"Fitbit sleep month {month}\nSleeps: {len(month_sleeps)}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "month": month,
+                        "sleep_count": len(month_sleeps),
+                        "total_minutes_asleep": sum(minutes_asleep),
+                        "average_minutes_asleep": (sum(minutes_asleep) / len(minutes_asleep)) if minutes_asleep else None,
+                        "average_sleep_score": (sum(sleep_scores) / len(sleep_scores)) if sleep_scores else None,
+                        "total_time_in_bed": sum(time_in_bed),
+                        "stage_totals": stage_totals,
+                        "sleep_source_ids": source_ids,
+                    },
+                    tags=["fitbit", "sleep_month", month],
+                    created_at=min(sleep.created_at for sleep in month_sleeps),
+                    updated_at=max(sleep.updated_at for sleep in month_sleeps),
+                )
+            )
+        return units
+
+    def _month_sleep_edges(self, months: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        edges: list[KnowledgeEdge] = []
+        for month in months:
+            for sleep_source_id in month.metadata.get("sleep_source_ids") or []:
+                edges.append(
+                    KnowledgeEdge(
+                        id=self._edge_id(month.source_id, str(sleep_source_id), "sleep_month_contains_sleep"),
+                        from_unit_id=month.source_id,
+                        to_unit_id=str(sleep_source_id),
+                        relation=EdgeRelation.CONTAINS,
+                        source=EdgeSource.SOURCE,
+                        metadata={
+                            "source_project": SourceProject.FITBIT_SLEEP_CSV.value,
+                            "relation_type": "sleep_month_contains_sleep",
+                        },
+                    )
+                )
+        return edges
+
+    def _month_source_id(self, month: str) -> str:
+        digest = hashlib.sha256(month.encode("utf-8")).hexdigest()[:24]
+        return f"fitbit_sleep_csv:sleep_month:{digest}"
+
+    def _edge_id(self, from_id: str, to_id: str, relation_type: str) -> str:
+        digest = hashlib.sha256("|".join([from_id, to_id, relation_type]).encode("utf-8")).hexdigest()[:24]
+        return f"fitbit-sleep-csv-edge:{digest}"
 
     def _score_band(self, score: int | None) -> str:
         if score is None:
