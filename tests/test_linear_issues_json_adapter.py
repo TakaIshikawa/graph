@@ -79,3 +79,37 @@ def test_linear_issues_json_ignores_malformed_lifecycle_timestamps(tmp_path):
     assert unit.metadata["archived_at"] == "2026-05-02T00:00:00+00:00"
     assert unit.metadata["lead_time_days"] == 1
     assert unit.metadata["terminal_state_age_days"] == 1
+
+
+def test_linear_issues_json_preserves_priority_label_and_estimate(tmp_path):
+    export = tmp_path / "linear.json"
+    export.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "with-priority",
+                    "identifier": "LIN-5",
+                    "title": "Prioritized issue",
+                    "priority": 2,
+                    "priorityLabel": "High",
+                    "estimate": 5,
+                },
+                {
+                    "id": "without-priority",
+                    "identifier": "LIN-6",
+                    "title": "Unprioritized issue",
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    units = {unit.metadata["identifier"]: unit for unit in LinearIssuesJsonAdapter(path=str(export)).ingest().units}
+
+    assert units["LIN-5"].metadata["priority"] == 2
+    assert units["LIN-5"].metadata["priorityLabel"] == "High"
+    assert units["LIN-5"].metadata["estimate"] == 5
+    assert "High" in units["LIN-5"].tags
+    assert "2" not in units["LIN-5"].tags
+    assert "priorityLabel" not in units["LIN-6"].metadata
+    assert "estimate" not in units["LIN-6"].metadata

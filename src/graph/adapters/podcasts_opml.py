@@ -56,11 +56,31 @@ class PodcastsOpmlAdapter(SourceAdapter):
             html_url = self._attr(child, "htmlUrl") or self._attr(child, "url")
             description = self._attr(child, "description")
             category = self._attr(child, "category")
+            owner_name = self._attr(child, "ownerName")
+            owner_email = self._attr(child, "ownerEmail")
+            author = self._attr(child, "author")
+            language = self._attr(child, "language")
+            image_url = self._attr(child, "imageUrl") or self._attr(child, "imageHref")
             current_path = (*path_titles, title) if title and not xml_url else path_titles
             if xml_url:
                 folder_path = tuple(item for item in path_titles if item)
-                metadata = clean_metadata({"title": title, "xmlUrl": xml_url, "htmlUrl": html_url, "description": description, "category": category, "folder_path": list(folder_path), "source_file": source.name})
-                tags = list(dict.fromkeys(tag for tag in ["podcast", *folder_path, category] if tag))
+                metadata = clean_metadata(
+                    {
+                        "title": title,
+                        "xmlUrl": xml_url,
+                        "htmlUrl": html_url,
+                        "description": description,
+                        "category": category,
+                        "ownerName": owner_name,
+                        "ownerEmail": owner_email,
+                        "author": author,
+                        "language": language,
+                        "imageUrl": image_url,
+                        "folder_path": list(folder_path),
+                        "source_file": source.name,
+                    }
+                )
+                tags = list(dict.fromkeys(tag for tag in ["podcast", *folder_path, category, author, language] if tag))
                 now = datetime.now(timezone.utc)
                 units.append(
                     KnowledgeUnit(

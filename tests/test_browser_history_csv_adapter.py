@@ -118,3 +118,21 @@ def test_browser_history_csv_missing_path_or_url_returns_empty_result(tmp_path):
     malformed = BrowserHistoryCsvAdapter(path=str(csv_path)).ingest()
     assert malformed.units == []
     assert malformed.edges == []
+
+
+def test_browser_history_csv_preserves_supported_referrer_columns(tmp_path):
+    csv_path = tmp_path / "history.csv"
+    csv_path.write_text(
+        "url,title,referrer_url,from_url,source_url\n"
+        "https://example.com/one,One,https://search.example/?q=one,,\n"
+        "https://example.com/two,Two,,https://example.com/one,\n"
+        "https://example.com/three,Three,,,\n",
+        encoding="utf-8",
+    )
+
+    result = BrowserHistoryCsvAdapter(path=str(csv_path)).ingest()
+
+    units = {unit.title: unit for unit in result.units}
+    assert units["One"].metadata["referrer_url"] == "https://search.example/?q=one"
+    assert units["Two"].metadata["referrer_url"] == "https://example.com/one"
+    assert "referrer_url" not in units["Three"].metadata

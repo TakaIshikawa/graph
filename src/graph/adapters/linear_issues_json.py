@@ -91,6 +91,7 @@ class LinearIssuesJsonAdapter(SourceAdapter):
         labels = self._names(record.get("labels"))
         team = self._name(record.get("team"))
         project = self._name(record.get("project"))
+        priority_label = self._text(record.get("priorityLabel") or record.get("priority_label"))
         parent_id = self._parent_id(record.get("parent"))
         lifecycle_metadata = self._lifecycle_metadata(
             created=created,
@@ -108,6 +109,8 @@ class LinearIssuesJsonAdapter(SourceAdapter):
             "description": description,
             "state": self._name(record.get("state")),
             "priority": record.get("priority"),
+            "priorityLabel": priority_label,
+            "estimate": record.get("estimate"),
             "assignee": self._name(record.get("assignee")),
             "creator": self._name(record.get("creator")),
             "team": team,
@@ -131,7 +134,7 @@ class LinearIssuesJsonAdapter(SourceAdapter):
             content=self._content(title, description, metadata),
             content_type=ContentType.INSIGHT,
             metadata=clean_metadata(metadata),
-            tags=list(dict.fromkeys(tag for tag in ["linear", "issue", team, project, *labels] if tag)),
+            tags=list(dict.fromkeys(tag for tag in ["linear", "issue", team, project, *labels, priority_label] if tag)),
             created_at=created or now,
             updated_at=updated or completed or created or now,
         )

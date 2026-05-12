@@ -78,3 +78,40 @@ def test_github_issues_json_ingests_jsonl_pull_requests_and_registry(tmp_path):
     assert unit.metadata["closed_at"] == "2025-01-03T00:00:00+00:00"
     assert unit.tags[:2] == ["github", "pull_request"]
     assert get_adapter("github_issues_json", path=str(export)).name == "github_issues_json"
+
+
+def test_github_issues_json_preserves_milestone_metadata(tmp_path):
+    export = tmp_path / "issues.json"
+    export.write_text(
+        json.dumps(
+            [
+                {
+                    "number": 8,
+                    "title": "Ship milestone",
+                    "repository_full_name": "acme/graph",
+                    "milestone": {
+                        "title": "v1.0",
+                        "state": "open",
+                        "due_on": "2025-02-01T00:00:00Z",
+                        "number": 3,
+                    },
+                },
+                {
+                    "number": 9,
+                    "title": "No milestone",
+                    "repository_full_name": "acme/graph",
+                    "milestone": None,
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    units = {unit.title: unit for unit in GithubIssuesJsonAdapter(path=str(export)).ingest().units}
+
+    assert units["Ship milestone"].metadata["milestone_title"] == "v1.0"
+    assert units["Ship milestone"].metadata["milestone_state"] == "open"
+    assert units["Ship milestone"].metadata["milestone_due_on"] == "2025-02-01T00:00:00+00:00"
+    assert units["Ship milestone"].metadata["milestone_number"] == 3
+    assert "v1.0" in units["Ship milestone"].tags
+    assert "milestone_title" not in units["No milestone"].metadata

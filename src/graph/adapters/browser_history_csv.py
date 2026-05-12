@@ -119,6 +119,20 @@ class BrowserHistoryCsvAdapter(SourceAdapter):
         created_at = visit_at or last_visit_at or datetime.now(timezone.utc)
         updated_at = last_visit_at or visit_at or created_at
         domain = urlsplit(normalized_url).hostname or ""
+        referrer_url = self._first(row, "referrer", "referrer_url", "from_url", "source_url")
+        metadata = {
+            "url": url,
+            "normalized_url": normalized_url,
+            "domain": domain,
+            "visit_time": visit_time_text,
+            "last_visit_time": last_visit_time_text,
+            "visit_timestamps": self._visit_timestamps(visit_at, last_visit_at),
+            "visit_count": self._parse_int(self._first(row, "visit_count", "visits")),
+            "typed_count": self._parse_int(self._first(row, "typed_count", "typed")),
+            "source_file": source_file,
+        }
+        if referrer_url:
+            metadata["referrer_url"] = referrer_url
 
         return KnowledgeUnit(
             source_project=SourceProject.BROWSER_HISTORY_CSV,
@@ -127,17 +141,7 @@ class BrowserHistoryCsvAdapter(SourceAdapter):
             title=title,
             content=self._content(title, normalized_url),
             content_type=ContentType.METADATA,
-            metadata={
-                "url": url,
-                "normalized_url": normalized_url,
-                "domain": domain,
-                "visit_time": visit_time_text,
-                "last_visit_time": last_visit_time_text,
-                "visit_timestamps": self._visit_timestamps(visit_at, last_visit_at),
-                "visit_count": self._parse_int(self._first(row, "visit_count", "visits")),
-                "typed_count": self._parse_int(self._first(row, "typed_count", "typed")),
-                "source_file": source_file,
-            },
+            metadata=metadata,
             created_at=created_at,
             updated_at=updated_at,
         )

@@ -112,6 +112,9 @@ class GoogleTasksAdapter(SourceAdapter):
                     metadata["parent_id"] = item["parent"]
                 if item.get("links"):
                     metadata["links"] = item["links"]
+                recurrence = self._recurrence_metadata(item)
+                if recurrence not in (None, "", [], {}):
+                    metadata["recurrence"] = recurrence
 
                 created_at = self._parse_datetime(item.get("updated")) or datetime.now(timezone.utc)
 
@@ -171,6 +174,31 @@ class GoogleTasksAdapter(SourceAdapter):
         raw = "|".join([SourceProject.GOOGLE_TASKS.value, relation_type, from_id, to_id])
         digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
         return f"google_tasks-{relation_type}-{digest}"
+
+    def _recurrence_metadata(self, item: dict[str, Any]) -> Any:
+        values: dict[str, Any] = {}
+        for key in ("recurrence", "repeat", "recurrenceRule", "recurrence_rule"):
+            value = self._clean_recurrence_value(item.get(key))
+            if value not in (None, "", [], {}):
+                values[key] = value
+        if not values:
+            return None
+        if len(values) == 1:
+            return next(iter(values.values()))
+        return values
+
+    def _clean_recurrence_value(self, value: Any) -> Any:
+        if isinstance(value, dict):
+            cleaned = {
+                str(key): self._clean_recurrence_value(item)
+                for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+            }
+            return {key: item for key, item in cleaned.items() if item not in (None, "", [], {})}
+        if isinstance(value, list):
+            return [item for item in (self._clean_recurrence_value(item) for item in value) if item not in (None, "", [], {})]
+        if isinstance(value, str):
+            return value.strip()
+        return value
 
     def _parse_datetime(self, value: Any) -> datetime | None:
         if value is None:

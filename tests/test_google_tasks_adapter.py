@@ -136,3 +136,24 @@ def test_task_metadata_fields(tmp_path):
     task = [u for u in result.units if u.source_entity_type == "task"][0]
     assert task.metadata["due"] == "2024-06-15T00:00:00.000Z"
     assert task.metadata["list_title"] == "My Tasks"
+
+
+def test_task_recurrence_metadata_is_normalized_and_omitted_when_empty(tmp_path):
+    data = _make_task_list(items=[
+        {
+            "id": "t1",
+            "title": "Weekly sync",
+            "status": "needsAction",
+            "recurrence": {"frequency": "weekly", "interval": 1, "until": ""},
+        },
+        {"id": "t2", "title": "Daily review", "status": "needsAction", "repeat": "RRULE:FREQ=DAILY"},
+        {"id": "t3", "title": "One-off", "status": "needsAction", "recurrence": {}},
+    ])
+    _write_json(tmp_path / "tasks.json", data)
+
+    result = GoogleTasksAdapter(path=str(tmp_path / "tasks.json")).ingest()
+
+    tasks = {u.title: u for u in result.units if u.source_entity_type == "task"}
+    assert tasks["Weekly sync"].metadata["recurrence"] == {"frequency": "weekly", "interval": 1}
+    assert tasks["Daily review"].metadata["recurrence"] == "RRULE:FREQ=DAILY"
+    assert "recurrence" not in tasks["One-off"].metadata

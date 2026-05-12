@@ -84,6 +84,7 @@ class GithubIssuesJsonAdapter(SourceAdapter):
         closed_at = self._parse_datetime(record.get("closed_at"))
         labels = self._labels(record.get("labels"))
         author = self._author(record.get("user"))
+        milestone = self._milestone_metadata(record.get("milestone"))
         metadata = {
             "title": title,
             "body": body,
@@ -96,12 +97,13 @@ class GithubIssuesJsonAdapter(SourceAdapter):
             "created_at": created_at.isoformat() if created_at else self._text(record.get("created_at")),
             "updated_at": updated_at.isoformat() if updated_at else self._text(record.get("updated_at")),
             "closed_at": closed_at.isoformat() if closed_at else self._text(record.get("closed_at")),
+            **milestone,
             "pull_request": record.get("pull_request") if entity_type == "pull_request" else None,
             "source_file": source_file,
             "record": record,
         }
         now = datetime.now(timezone.utc)
-        tags = ["github", entity_type, *labels]
+        tags = ["github", entity_type, *labels, milestone.get("milestone_title")]
         return KnowledgeUnit(
             source_project=SourceProject.GITHUB_ISSUES_JSON,
             source_id=self._source_id(repository, number, url, title),
@@ -157,6 +159,17 @@ class GithubIssuesJsonAdapter(SourceAdapter):
         if isinstance(value, dict):
             return self._text(value.get("login") or value.get("name"))
         return self._text(value)
+
+    def _milestone_metadata(self, value: Any) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            return {}
+        due_on = self._parse_datetime(value.get("due_on"))
+        return {
+            "milestone_title": self._text(value.get("title")),
+            "milestone_state": self._text(value.get("state")),
+            "milestone_due_on": due_on.isoformat() if due_on else self._text(value.get("due_on")),
+            "milestone_number": self._parse_int(value.get("number")),
+        }
 
     def _parse_int(self, value: Any) -> int | None:
         try:
