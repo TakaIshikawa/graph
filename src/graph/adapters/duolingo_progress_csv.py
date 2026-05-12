@@ -19,7 +19,7 @@ class DuolingoProgressCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["course", "skill", "lesson", "practice"]
+        return ["course", "skill", "lesson", "practice", "language"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -45,9 +45,14 @@ class DuolingoProgressCsvAdapter(SourceAdapter):
                 result.units.append(unit)
 
         activities = sorted(result.units, key=lambda unit: (unit.updated_at, unit.source_id))
-        courses = self._course_units(activities) if "course" in allowed else []
-        skills = self._skill_units(activities) if "skill" in allowed else []
+        needs_courses = "course" in allowed or "language" in allowed
+        needs_skills = "skill" in allowed or "language" in allowed
+        courses = self._course_units(activities) if needs_courses else []
+        skills = self._skill_units(activities) if needs_skills else []
+        languages = self._language_units(activities, courses, skills) if "language" in allowed else []
         result.units = []
+        if "language" in allowed:
+            result.units.extend(languages)
         if "course" in allowed:
             result.units.extend(courses)
         if "skill" in allowed:
@@ -57,6 +62,10 @@ class DuolingoProgressCsvAdapter(SourceAdapter):
                 result.units.extend(unit for unit in activities if unit.source_entity_type == entity_type)
         if {"course", "skill"}.issubset(allowed):
             result.edges.extend(self._course_skill_edges(courses, skills))
+        if {"language", "course"}.issubset(allowed):
+            result.edges.extend(self._language_course_edges(languages, courses))
+        if {"language", "skill"}.issubset(allowed) and "course" not in allowed:
+            result.edges.extend(self._language_skill_edges(languages, skills))
         if "skill" in allowed and {"lesson", "practice"}.intersection(allowed):
             result.edges.extend(self._skill_activity_edges(skills, activities, allowed))
         result.units.sort(key=lambda unit: (unit.updated_at, unit.source_id))
@@ -202,6 +211,64 @@ class DuolingoProgressCsvAdapter(SourceAdapter):
             "source_files": sorted({str(unit.metadata.get("source_file")) for unit in activities if unit.metadata.get("source_file")}),
         }
 
+    def _language_units(
+        self,
+        activities: list[KnowledgeUnit],
+        courses: list[KnowledgeUnit],
+        skills: list[KnowledgeUnit],
+    ) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        names: dict[str, str] = {}
+        for activity in activities:
+            language = str(activity.metadata.get("language") or "").strip()
+            if not language:
+                continue
+            identity = self._language_identity(activity.metadata)
+            grouped.setdefault(identity, []).append(activity)
+            names.setdefault(identity, language)
+
+        course_ids_by_language: dict[str, list[str]] = {}
+        for course in courses:
+            language_identity = self._language_identity(course.metadata)
+            course_ids_by_language.setdefault(language_identity, []).append(course.source_id)
+        skill_ids_by_language: dict[str, list[str]] = {}
+        for skill in skills:
+            language_identity = self._language_identity(skill.metadata)
+            skill_ids_by_language.setdefault(language_identity, []).append(skill.source_id)
+
+        units: list[KnowledgeUnit] = []
+        for identity, language_activities in sorted(grouped.items()):
+            language = names[identity]
+            metadata = self._aggregate_metadata(language_activities)
+            course_source_ids = sorted(set(course_ids_by_language.get(identity, [])))
+            skill_source_ids = sorted(set(skill_ids_by_language.get(identity, [])))
+            metadata.update(
+                {
+                    "language": language,
+                    "normalized_language": identity,
+                    "course_count": len(course_source_ids),
+                    "skill_count": len(skill_source_ids),
+                    "course_source_ids": course_source_ids,
+                    "skill_source_ids": skill_source_ids,
+                    "activity_source_ids": [unit.source_id for unit in language_activities],
+                }
+            )
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.DUOLINGO_PROGRESS_CSV,
+                    source_id=self._language_source_id(identity),
+                    source_entity_type="language",
+                    title=f"Duolingo language: {language}",
+                    content=f"Duolingo language: {language}",
+                    content_type=ContentType.METADATA,
+                    metadata=metadata,
+                    tags=self._dedupe(["duolingo", language.casefold(), "language"]),
+                    created_at=min(unit.created_at for unit in language_activities),
+                    updated_at=max(unit.updated_at for unit in language_activities),
+                )
+            )
+        return units
+
     def _course_skill_edges(self, courses: list[KnowledgeUnit], skills: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
         course_ids = {self._course_identity(course.metadata): course.source_id for course in courses}
         edges: list[KnowledgeEdge] = []
@@ -222,6 +289,24 @@ class DuolingoProgressCsvAdapter(SourceAdapter):
                 edges.append(self._edge(skill_id, activity.source_id, "skill_contains_activity"))
         return list({edge.id: edge for edge in edges}.values())
 
+    def _language_course_edges(self, languages: list[KnowledgeUnit], courses: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        language_ids = {self._language_identity(language.metadata): language.source_id for language in languages}
+        edges: list[KnowledgeEdge] = []
+        for course in courses:
+            language_id = language_ids.get(self._language_identity(course.metadata))
+            if language_id:
+                edges.append(self._edge(language_id, course.source_id, "language_contains_course"))
+        return list({edge.id: edge for edge in edges}.values())
+
+    def _language_skill_edges(self, languages: list[KnowledgeUnit], skills: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        language_ids = {self._language_identity(language.metadata): language.source_id for language in languages}
+        edges: list[KnowledgeEdge] = []
+        for skill in skills:
+            language_id = language_ids.get(self._language_identity(skill.metadata))
+            if language_id:
+                edges.append(self._edge(language_id, skill.source_id, "language_contains_skill"))
+        return list({edge.id: edge for edge in edges}.values())
+
     def _course_identity(self, metadata: dict[str, Any]) -> tuple[str, str]:
         course = " ".join(str(metadata.get("course") or "").casefold().split())
         language = " ".join(str(metadata.get("language") or "").casefold().split())
@@ -232,11 +317,17 @@ class DuolingoProgressCsvAdapter(SourceAdapter):
         skill = " ".join(str(metadata.get("skill") or "").casefold().split())
         return course, language, skill
 
+    def _language_identity(self, metadata: dict[str, Any]) -> str:
+        return " ".join(str(metadata.get("language") or "").casefold().split())
+
     def _course_source_id(self, identity: tuple[str, str]) -> str:
         return digest_source_id("duolingo_progress_csv:course", *identity)
 
     def _skill_source_id(self, identity: tuple[str, str, str]) -> str:
         return digest_source_id("duolingo_progress_csv:skill", *identity)
+
+    def _language_source_id(self, identity: str) -> str:
+        return digest_source_id("duolingo_progress_csv:language", identity)
 
     def _edge(self, from_id: str, to_id: str, relation_type: str) -> KnowledgeEdge:
         return KnowledgeEdge(

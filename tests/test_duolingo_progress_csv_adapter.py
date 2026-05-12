@@ -82,3 +82,67 @@ def test_duolingo_progress_csv_course_and_skill_aggregates(tmp_path):
     assert course.metadata["average_score"] == 95.0
     assert skill.metadata["mistake_total"] == 3
     assert {edge.metadata["relation_type"] for edge in result.edges} == {"course_contains_skill", "skill_contains_activity"}
+
+
+def test_duolingo_progress_csv_language_aggregates_and_course_edges(tmp_path):
+    export = tmp_path / "duolingo.csv"
+    export.write_text(
+        "Timestamp,Language,Course,Skill,Lesson Type,XP,Score,Mistakes\n"
+        "2026-05-01T08:00:00Z,Spanish,Spanish from English,Basics,Lesson,15,90,1\n"
+        "2026-05-02T08:00:00Z,spanish,Spanish from English,Food,Practice,10,100,2\n"
+        "2026-05-03T08:00:00Z,French,French from English,Food,Lesson,20,80,0\n",
+        encoding="utf-8",
+    )
+
+    result = DuolingoProgressCsvAdapter(path=str(export)).ingest(entity_types=["language", "course", "skill", "lesson", "practice"])
+
+    languages = [unit for unit in result.units if unit.source_entity_type == "language"]
+    courses = [unit for unit in result.units if unit.source_entity_type == "course"]
+    skills = [unit for unit in result.units if unit.source_entity_type == "skill"]
+    activities = [unit for unit in result.units if unit.source_entity_type in {"lesson", "practice"}]
+    assert len(languages) == 2
+
+    spanish = next(unit for unit in languages if unit.metadata["normalized_language"] == "spanish")
+    spanish_activities = [unit for unit in activities if str(unit.metadata.get("language", "")).casefold() == "spanish"]
+    assert spanish.source_id.startswith("duolingo_progress_csv:language:")
+    assert spanish.metadata["language"] == "Spanish"
+    assert spanish.metadata["course_count"] == 1
+    assert spanish.metadata["skill_count"] == 2
+    assert spanish.metadata["lesson_count"] == 1
+    assert spanish.metadata["practice_count"] == 1
+    assert spanish.metadata["total_xp"] == 25
+    assert spanish.metadata["average_score"] == 95.0
+    assert spanish.metadata["first_completed_at"] == "2026-05-01T08:00:00+00:00"
+    assert spanish.metadata["last_completed_at"] == "2026-05-02T08:00:00+00:00"
+    assert spanish.metadata["course_source_ids"] == sorted(
+        course.source_id for course in courses if str(course.metadata.get("language", "")).casefold() == "spanish"
+    )
+    assert spanish.metadata["skill_source_ids"] == sorted(
+        skill.source_id for skill in skills if str(skill.metadata.get("language", "")).casefold() == "spanish"
+    )
+    assert spanish.metadata["activity_source_ids"] == [unit.source_id for unit in spanish_activities]
+
+    assert any(
+        edge.from_unit_id == spanish.source_id
+        and edge.to_unit_id in spanish.metadata["course_source_ids"]
+        and edge.metadata["relation_type"] == "language_contains_course"
+        for edge in result.edges
+    )
+    assert "language_contains_skill" not in {edge.metadata["relation_type"] for edge in result.edges}
+
+
+def test_duolingo_progress_csv_language_to_skill_edges_without_courses(tmp_path):
+    export = tmp_path / "duolingo.csv"
+    export.write_text(
+        "Timestamp,Language,Skill,Lesson Type,XP\n"
+        "2026-05-01T08:00:00Z,Spanish,Basics,Lesson,15\n",
+        encoding="utf-8",
+    )
+
+    result = DuolingoProgressCsvAdapter(path=str(export)).ingest(entity_types=["language", "skill"])
+
+    language = next(unit for unit in result.units if unit.source_entity_type == "language")
+    skill = next(unit for unit in result.units if unit.source_entity_type == "skill")
+    assert {(edge.from_unit_id, edge.to_unit_id, edge.metadata["relation_type"]) for edge in result.edges} == {
+        (language.source_id, skill.source_id, "language_contains_skill")
+    }
