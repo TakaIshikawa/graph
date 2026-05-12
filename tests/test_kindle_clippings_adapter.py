@@ -373,3 +373,52 @@ Note one.
     assert author.metadata["book_source_ids"] == [book.source_id for book in books]
     assert len(result.edges) == 2
     assert all(edge.metadata["relation_type"] == "author_contains_book" for edge in result.edges)
+
+
+def test_kindle_clippings_emits_clipping_type_aggregates_and_edges(tmp_path):
+    clippings = tmp_path / "My Clippings.txt"
+    clippings.write_text(
+        """First Book (Ada Author)
+- Your Highlight at location 10-12 | Added on Monday, January 1, 2024 1:00:00 PM
+
+Highlight one.
+==========
+Second Book (Grace Author)
+- Your Highlight at location 30 | Added on Tuesday, January 2, 2024 2:00:00 PM
+
+Highlight two.
+==========
+First Book (Ada Author)
+- Your Note at location 20 | Added on Wednesday, January 3, 2024 3:00:00 PM
+
+Note one.
+==========
+First Book (Ada Author)
+- Your Bookmark at location 40 | Added on Thursday, January 4, 2024 4:00:00 PM
+
+==========
+""",
+        encoding="utf-8",
+    )
+
+    result = KindleClippingsAdapter(path=str(clippings)).ingest(entity_types=["clipping", "clipping_type"])
+
+    assert "clipping_type" in KindleClippingsAdapter(path=str(clippings)).entity_types
+    types = {unit.metadata["clipping_type"]: unit for unit in result.units if unit.source_entity_type == "clipping_type"}
+    assert set(types) == {"highlight", "note", "bookmark"}
+    highlight = types["highlight"]
+    assert highlight.metadata["clipping_count"] == 2
+    assert highlight.metadata["book_count"] == 2
+    assert highlight.metadata["authors"] == ["Ada Author", "Grace Author"]
+    assert highlight.metadata["source_files"] == ["My Clippings.txt"]
+    assert highlight.metadata["first_added_at"] == "2024-01-01T13:00:00+00:00"
+    assert highlight.metadata["latest_added_at"] == "2024-01-02T14:00:00+00:00"
+    assert highlight.metadata["location_start"] == 10
+    assert highlight.metadata["location_end"] == 30
+    type_edges = [edge for edge in result.edges if edge.metadata.get("relation_type") == "clipping_type_contains_clipping"]
+    assert len(type_edges) == 4
+    assert all(edge.relation == EdgeRelation.CONTAINS for edge in type_edges)
+
+    type_only = KindleClippingsAdapter(path=str(clippings)).ingest(entity_types=["clipping_type"])
+    assert {unit.source_entity_type for unit in type_only.units} == {"clipping_type"}
+    assert type_only.edges == []

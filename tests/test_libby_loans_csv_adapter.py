@@ -57,3 +57,37 @@ def test_libby_loans_csv_skips_blank_and_unknown_authors(tmp_path):
 
     assert [unit.source_entity_type for unit in result.units] == ["loan", "loan"]
     assert [edge for edge in result.edges if edge.metadata["kind"] == "author"] == []
+
+
+def test_libby_loans_csv_emits_book_aggregates_and_edges(tmp_path):
+    export = tmp_path / "loans.csv"
+    export.write_text(
+        "\n".join(
+            [
+                "Title,Author,Format,Library,Borrowed Date,Returned Date,Subjects,ISBN",
+                "The Book,Ada Lovelace,eBook,City,2025-01-01,2025-01-10,\"History,Technology\",9781234567890",
+                "Another Book,Grace Hopper,Audiobook,County,2025-02-01,2025-02-05,Computing,",
+                "Another Book,Grace Hopper,eBook,City,2025-03-01,2025-03-07,\"Computing,History\",",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = LibbyLoansCsvAdapter(path=str(export)).ingest(entity_types=["loan", "book"])
+    books = {unit.title: unit for unit in result.units if unit.source_entity_type == "book"}
+
+    assert LibbyLoansCsvAdapter(path=str(export)).entity_types == ["loan", "author", "book"]
+    assert books["The Book"].metadata["isbn"] == "9781234567890"
+    assert books["The Book"].metadata["loan_count"] == 1
+    assert books["Another Book"].metadata["loan_count"] == 2
+    assert books["Another Book"].metadata["authors"] == ["Grace Hopper"]
+    assert books["Another Book"].metadata["formats"] == ["Audiobook", "eBook"]
+    assert books["Another Book"].metadata["libraries"] == ["City", "County"]
+    assert books["Another Book"].metadata["first_borrowed_at"] == "2025-02-01T00:00:00+00:00"
+    assert books["Another Book"].metadata["last_returned_at"] == "2025-03-07T00:00:00+00:00"
+    assert books["Another Book"].metadata["subjects"] == ["Computing", "History"]
+    assert len([edge for edge in result.edges if edge.metadata.get("relation_type") == "book_contains_loan"]) == 3
+
+    book_only = LibbyLoansCsvAdapter(path=str(export)).ingest(entity_types=["book"])
+    assert {unit.source_entity_type for unit in book_only.units} == {"book"}
+    assert book_only.edges == []

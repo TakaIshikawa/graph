@@ -63,3 +63,34 @@ def test_libby_holds_csv_source_id_falls_back_to_title_author_and_placed_date(tm
 
     assert first.source_id == second.source_id
     assert first.source_id.startswith("libby_holds_csv:")
+
+
+def test_libby_holds_csv_emits_author_aggregates_and_edges(tmp_path):
+    export = tmp_path / "holds.csv"
+    export.write_text(
+        "Title,Authors,Format,Library,Placed Date\n"
+        "One,Ada Lovelace,eBook,City,2026-05-01\n"
+        "Two,ada lovelace,Audiobook,County,2026-05-03\n"
+        "Three,Grace Hopper,eBook,City,2026-05-02\n",
+        encoding="utf-8",
+    )
+
+    result = LibbyHoldsCsvAdapter(path=str(export)).ingest(entity_types=["libby_hold", "author"])
+    authors = {unit.title: unit for unit in result.units if unit.source_entity_type == "author"}
+
+    assert set(authors) == {"Ada Lovelace", "Grace Hopper"}
+    ada = authors["Ada Lovelace"]
+    assert ada.metadata["hold_count"] == 2
+    assert ada.metadata["libraries"] == ["City", "County"]
+    assert ada.metadata["formats"] == ["Audiobook", "eBook"]
+    assert ada.metadata["earliest_placed_at"] == "2026-05-01T00:00:00+00:00"
+    assert ada.metadata["latest_placed_at"] == "2026-05-03T00:00:00+00:00"
+    assert ada.metadata["source_files"] == ["holds.csv"]
+    assert len([edge for edge in result.edges if edge.metadata["relation_type"] == "hold_author"]) == 3
+
+    author_only = LibbyHoldsCsvAdapter(path=str(export)).ingest(entity_types=["author"])
+    hold_only = LibbyHoldsCsvAdapter(path=str(export)).ingest(entity_types=["libby_hold"])
+    assert {unit.source_entity_type for unit in author_only.units} == {"author"}
+    assert author_only.edges == []
+    assert {unit.source_entity_type for unit in hold_only.units} == {"libby_hold"}
+    assert hold_only.edges == []

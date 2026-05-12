@@ -19,14 +19,14 @@ class PelotonWorkoutSummaryCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["workout", "workout_month"]
+        return ["workout", "workout_month", "instructor"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
 
     def ingest(self, *, since: SyncState | None = None, entity_types: list[str] | None = None) -> IngestResult:
         result = IngestResult()
-        allowed_types = set(entity_types or self.entity_types)
+        allowed_types = set(entity_types) if entity_types is not None else {"workout", "workout_month"}
         if not allowed_types.intersection(self.entity_types):
             return result
 
@@ -46,12 +46,17 @@ class PelotonWorkoutSummaryCsvAdapter(SourceAdapter):
                 workout_units.append(unit)
 
         month_units = self._month_units(workout_units)
+        instructor_units = self._instructor_units(workout_units)
         if "workout" in allowed_types:
             result.units.extend(workout_units)
         if "workout_month" in allowed_types:
             result.units.extend(month_units)
+        if "instructor" in allowed_types:
+            result.units.extend(instructor_units)
         if {"workout", "workout_month"}.issubset(allowed_types):
             result.edges.extend(self._month_edges(month_units, workout_units))
+        if {"workout", "instructor"}.issubset(allowed_types):
+            result.edges.extend(self._instructor_edges(instructor_units, workout_units))
         result.units.sort(key=lambda unit: unit.source_id)
         result.edges.sort(key=lambda edge: edge.id)
         return result
@@ -156,6 +161,71 @@ class PelotonWorkoutSummaryCsvAdapter(SourceAdapter):
                     relation=EdgeRelation.CONTAINS,
                     source=EdgeSource.SOURCE,
                     metadata={"relation_type": "month_contains_workout", "month": workout.created_at.strftime("%Y-%m")},
+                )
+            )
+        return edges
+
+    def _instructor_units(self, workouts: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        names: dict[str, str] = {}
+        for workout in workouts:
+            instructor = str(workout.metadata.get("instructor") or "").strip()
+            if not instructor:
+                continue
+            key = instructor.casefold()
+            names.setdefault(key, instructor)
+            grouped.setdefault(key, []).append(workout)
+
+        units: list[KnowledgeUnit] = []
+        for key, instructor_workouts in sorted(grouped.items()):
+            durations = [value for workout in instructor_workouts if (value := workout.metadata.get("duration_seconds")) is not None]
+            outputs = [value for workout in instructor_workouts if (value := workout.metadata.get("output")) is not None]
+            distances = [value for workout in instructor_workouts if (value := workout.metadata.get("distance")) is not None]
+            calories = [value for workout in instructor_workouts if (value := workout.metadata.get("calories")) is not None]
+            name = names[key]
+            units.append(
+                KnowledgeUnit(
+                    source_project="peloton_workout_summary_csv",
+                    source_id=digest_source_id("peloton_workout_summary_csv_instructor", key),
+                    source_entity_type="instructor",
+                    title=name,
+                    content=f"Peloton instructor: {name}\nWorkouts: {len(instructor_workouts)}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "instructor": name,
+                        "workout_count": len(instructor_workouts),
+                        "disciplines": sorted({str(workout.metadata.get("discipline")) for workout in instructor_workouts if workout.metadata.get("discipline")}),
+                        "total_duration_seconds": sum(durations),
+                        "total_output": sum(outputs),
+                        "total_distance": sum(distances),
+                        "total_calories": sum(calories),
+                        "first_workout_at": min(workout.created_at for workout in instructor_workouts).isoformat(),
+                        "last_workout_at": max(workout.created_at for workout in instructor_workouts).isoformat(),
+                        "source_files": sorted({str(workout.metadata.get("source_file")) for workout in instructor_workouts if workout.metadata.get("source_file")}),
+                        "workout_source_ids": sorted(workout.source_id for workout in instructor_workouts),
+                    },
+                    tags=["peloton", "instructor", name],
+                    created_at=min(workout.created_at for workout in instructor_workouts),
+                    updated_at=max(workout.updated_at for workout in instructor_workouts),
+                )
+            )
+        return units
+
+    def _instructor_edges(self, instructors: list[KnowledgeUnit], workouts: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        instructor_ids = {str(instructor.metadata.get("instructor") or "").casefold(): instructor.source_id for instructor in instructors}
+        edges: list[KnowledgeEdge] = []
+        for workout in workouts:
+            instructor_id = instructor_ids.get(str(workout.metadata.get("instructor") or "").casefold())
+            if not instructor_id:
+                continue
+            edges.append(
+                KnowledgeEdge(
+                    id=digest_source_id("peloton_workout_summary_csv_instructor_edge", workout.source_id, instructor_id),
+                    from_unit_id=workout.source_id,
+                    to_unit_id=instructor_id,
+                    relation=EdgeRelation.RELATES_TO,
+                    source=EdgeSource.SOURCE,
+                    metadata={"relation_type": "workout_instructor", "instructor": workout.metadata.get("instructor")},
                 )
             )
         return edges

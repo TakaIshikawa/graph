@@ -9,8 +9,8 @@ from typing import Any
 
 from graph.adapters._personal_exports import clean_metadata, digest_source_id, ensure_utc, first, iter_paths, parse_datetime, parse_int, read_csv_rows, split_values
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class LibbyHoldsCsvAdapter(SourceAdapter):
@@ -20,17 +20,19 @@ class LibbyHoldsCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["libby_hold"]
+        return ["libby_hold", "author"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
 
     def ingest(self, *, since: SyncState | None = None, entity_types: list[str] | None = None) -> IngestResult:
         result = IngestResult()
-        if entity_types and "libby_hold" not in entity_types:
+        allowed_types = set(entity_types) if entity_types is not None else {"libby_hold"}
+        if not allowed_types.intersection(self.entity_types):
             return result
 
         sync_at = ensure_utc(since.last_sync_at) if since else None
+        holds: list[KnowledgeUnit] = []
         for path in iter_paths(self.path, {".csv"}):
             try:
                 rows = read_csv_rows(path)
@@ -43,9 +45,17 @@ class LibbyHoldsCsvAdapter(SourceAdapter):
                 placed_at = self._placed_at(unit)
                 if sync_at and placed_at and placed_at <= sync_at:
                     continue
-                result.units.append(unit)
+                holds.append(unit)
 
+        authors = self._author_units(holds) if "author" in allowed_types else []
+        if "libby_hold" in allowed_types:
+            result.units.extend(holds)
+        if "author" in allowed_types:
+            result.units.extend(authors)
+        if {"libby_hold", "author"}.issubset(allowed_types):
+            result.edges.extend(self._author_edges(holds, authors))
         result.units.sort(key=lambda unit: unit.source_id)
+        result.edges.sort(key=lambda edge: edge.id)
         return result
 
     def _unit(self, row: dict[str, Any], source_file: str) -> KnowledgeUnit | None:
@@ -129,3 +139,66 @@ class LibbyHoldsCsvAdapter(SourceAdapter):
     def _placed_at(self, unit: KnowledgeUnit) -> datetime | None:
         value = unit.metadata.get("placed_at")
         return parse_datetime(value)
+
+    def _author_units(self, holds: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        names: dict[str, str] = {}
+        for hold in holds:
+            for author in hold.metadata.get("authors") or []:
+                key = str(author).strip().casefold()
+                if not key:
+                    continue
+                names.setdefault(key, str(author).strip())
+                grouped.setdefault(key, []).append(hold)
+
+        units: list[KnowledgeUnit] = []
+        now = datetime.now(timezone.utc)
+        for key, author_holds in grouped.items():
+            placed = [parsed for hold in author_holds if (parsed := self._placed_at(hold)) is not None]
+            name = names[key]
+            units.append(
+                KnowledgeUnit(
+                    source_project="libby_holds_csv",
+                    source_id=digest_source_id("libby_holds_csv_author", key),
+                    source_entity_type="author",
+                    title=name,
+                    content=f"Libby hold author: {name}\nHolds: {len(author_holds)}",
+                    content_type=ContentType.METADATA,
+                    metadata=clean_metadata(
+                        {
+                            "author": name,
+                            "hold_count": len(author_holds),
+                            "libraries": sorted({str(hold.metadata.get("library")) for hold in author_holds if hold.metadata.get("library")}),
+                            "formats": sorted({str(hold.metadata.get("format")) for hold in author_holds if hold.metadata.get("format")}),
+                            "earliest_placed_at": min(placed).isoformat() if placed else "",
+                            "latest_placed_at": max(placed).isoformat() if placed else "",
+                            "source_files": sorted({str(hold.metadata.get("source_file")) for hold in author_holds if hold.metadata.get("source_file")}),
+                            "hold_source_ids": sorted(hold.source_id for hold in author_holds),
+                        }
+                    ),
+                    tags=["libby", "hold-author", name],
+                    created_at=min(placed, default=now),
+                    updated_at=max(placed, default=now),
+                )
+            )
+        return units
+
+    def _author_edges(self, holds: list[KnowledgeUnit], authors: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        author_ids = {str(author.metadata.get("author") or "").casefold(): author.source_id for author in authors}
+        edges: list[KnowledgeEdge] = []
+        for hold in holds:
+            for author in hold.metadata.get("authors") or []:
+                author_id = author_ids.get(str(author).casefold())
+                if not author_id:
+                    continue
+                edges.append(
+                    KnowledgeEdge(
+                        id=digest_source_id("libby_holds_csv_author_edge", hold.source_id, author_id),
+                        from_unit_id=hold.source_id,
+                        to_unit_id=author_id,
+                        relation=EdgeRelation.RELATES_TO,
+                        source=EdgeSource.SOURCE,
+                        metadata={"relation_type": "hold_author", "author": author},
+                    )
+                )
+        return edges

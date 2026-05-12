@@ -116,6 +116,30 @@ def test_goodreads_library_entity_filters_for_author_shelf_and_book(tmp_path):
     assert book_only.edges == []
 
 
+def test_goodreads_library_shelf_units_include_reading_status_aggregates(tmp_path):
+    path = tmp_path / "goodreads_library_export.csv"
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["Book Id", "Title", "Author", "My Rating", "Exclusive Shelf", "Bookshelves", "Date Read", "Date Added", "My Review"])
+        writer.writeheader()
+        writer.writerow({"Book Id": "1", "Title": "One", "Author": "Ada", "My Rating": "5", "Exclusive Shelf": "read", "Bookshelves": "favorites", "Date Read": "2025/01/03", "Date Added": "2025/01/01", "My Review": "Review"})
+        writer.writerow({"Book Id": "2", "Title": "Two", "Author": "Ada", "My Rating": "3", "Exclusive Shelf": "currently-reading", "Bookshelves": "favorites", "Date Read": "", "Date Added": "2025/01/02", "My Review": ""})
+        writer.writerow({"Book Id": "3", "Title": "Three", "Author": "Grace", "My Rating": "", "Exclusive Shelf": "to-read", "Bookshelves": "favorites", "Date Read": "", "Date Added": "", "My Review": ""})
+
+    result = GoodreadsLibraryAdapter(path=str(path)).ingest(entity_types=["shelf", "book"])
+    shelf = next(unit for unit in result.units if unit.source_entity_type == "shelf" and unit.metadata["shelf"] == "favorites")
+
+    assert shelf.metadata["rating_count"] == 2
+    assert shelf.metadata["average_rating"] == 4.0
+    assert shelf.metadata["read_count"] == 1
+    assert shelf.metadata["to_read_count"] == 1
+    assert shelf.metadata["currently_reading_count"] == 1
+    assert shelf.metadata["reviewed_count"] == 1
+    assert shelf.metadata["first_date_added"] == "2025-01-01T00:00:00+00:00"
+    assert shelf.metadata["latest_date_read"] == "2025-01-03T00:00:00+00:00"
+    assert shelf.metadata["top_authors"] == [{"author": "Ada", "book_count": 2}, {"author": "Grace", "book_count": 1}]
+    assert all(edge.metadata["relation_type"] == "shelf_contains_book" for edge in result.edges)
+
+
 def test_goodreads_library_ingests_series_from_columns_and_titles(tmp_path):
     path = tmp_path / "goodreads_library_export.csv"
     with path.open("w", encoding="utf-8", newline="") as handle:

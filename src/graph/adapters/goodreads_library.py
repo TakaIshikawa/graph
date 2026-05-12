@@ -344,6 +344,17 @@ class GoodreadsLibraryAdapter(SourceAdapter):
         now = datetime.now(timezone.utc)
         units: list[KnowledgeUnit] = []
         for shelf, shelf_books in grouped.items():
+            ratings = [rating for book in shelf_books if (rating := book.metadata.get("rating")) is not None]
+            date_added = [
+                parsed
+                for book in shelf_books
+                if (parsed := self._parse_datetime(str(book.metadata.get("date_added") or ""))) is not None
+            ]
+            date_read = [
+                parsed
+                for book in shelf_books
+                if (parsed := self._parse_datetime(str(book.metadata.get("date_read") or ""))) is not None
+            ]
             units.append(
                 KnowledgeUnit(
                     source_project=SourceProject.GOODREADS_LIBRARY,
@@ -355,6 +366,15 @@ class GoodreadsLibraryAdapter(SourceAdapter):
                     metadata={
                         "shelf": shelf,
                         "book_count": len(shelf_books),
+                        "rating_count": len(ratings),
+                        "average_rating": round(sum(ratings) / len(ratings), 2) if ratings else None,
+                        "read_count": self._shelf_status_count(shelf_books, "read"),
+                        "to_read_count": self._shelf_status_count(shelf_books, "to-read"),
+                        "currently_reading_count": self._shelf_status_count(shelf_books, "currently-reading"),
+                        "reviewed_count": sum(1 for book in shelf_books if book.metadata.get("review")),
+                        "first_date_added": min(date_added).isoformat() if date_added else "",
+                        "latest_date_read": max(date_read).isoformat() if date_read else "",
+                        "top_authors": self._top_authors(shelf_books),
                         "source_file": sorted({str(book.metadata.get("source_file")) for book in shelf_books}),
                     },
                     tags=["shelf", shelf],
@@ -363,6 +383,17 @@ class GoodreadsLibraryAdapter(SourceAdapter):
                 )
             )
         return units
+
+    def _shelf_status_count(self, books: list[KnowledgeUnit], status: str) -> int:
+        return sum(1 for book in books if str(book.metadata.get("exclusive_shelf") or "").strip().lower() == status)
+
+    def _top_authors(self, books: list[KnowledgeUnit]) -> list[dict[str, Any]]:
+        counts: dict[str, int] = {}
+        for book in books:
+            author = str(book.metadata.get("author") or "").strip()
+            if author:
+                counts[author] = counts.get(author, 0) + 1
+        return [{"author": author, "book_count": count} for author, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:5]]
 
     def _publisher_units(self, books: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
         grouped: dict[str, list[KnowledgeUnit]] = {}
