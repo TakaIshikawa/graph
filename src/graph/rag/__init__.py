@@ -10,6 +10,7 @@ from graph.rag.date_coverage import analyze_result_date_coverage
 from graph.rag.diversity import rerank_for_source_diversity
 from graph.rag.evidence_pack import build_evidence_pack
 from graph.rag.evidence_packets import build_evidence_packets
+from graph.rag.evidence_budget import allocate_evidence_budget
 from graph.rag.keywords import extract_keywords
 from graph.rag.query_intent import classify_query_intent
 from graph.rag.dedupe import rank_duplicate_candidates
@@ -39,6 +40,7 @@ __all__ = [
     "build_tag_hierarchy",
     "analyze_citation_coverage",
     "analyze_result_date_coverage",
+    "allocate_evidence_budget",
     "build_answer_outline",
     "build_evidence_pack",
     "build_evidence_packets",
