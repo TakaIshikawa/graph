@@ -20,7 +20,7 @@ class AmazonOrdersCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["order", "shipment", "item", "return"]
+        return ["order", "shipment", "item", "return", "seller"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -44,10 +44,14 @@ class AmazonOrdersCsvAdapter(SourceAdapter):
                     order_id = digest_source_id("order", first(row, "Order Date"), first(row, "Title"))
                 groups[order_id].append(row)
                 files[order_id].add(path.name)
+        seller_items: list[KnowledgeUnit] = []
+        seller_orders: dict[str, KnowledgeUnit] = {}
         for order_id, rows in groups.items():
             order, shipments, items, returns = self._units(order_id, rows, sorted(files[order_id]))
             if sync_at and order.updated_at <= sync_at:
                 continue
+            seller_items.extend(items)
+            seller_orders[order.source_id] = order
             if "order" in allowed:
                 result.units.append(order)
             if "shipment" in allowed:
@@ -79,6 +83,11 @@ class AmazonOrdersCsvAdapter(SourceAdapter):
                         item_source_id = return_unit.metadata.get("item_source_id")
                         if item_source_id in item_ids:
                             result.edges.append(self._edge(str(item_source_id), return_unit.source_id))
+        sellers = self._seller_units(seller_items, seller_orders) if "seller" in allowed else []
+        if "seller" in allowed:
+            result.units.extend(sellers)
+        if {"seller", "item"}.issubset(allowed):
+            result.edges.extend(self._seller_item_edges(sellers))
         result.units.sort(key=lambda unit: unit.source_id)
         result.edges.sort(key=lambda edge: edge.id)
         return result
@@ -264,3 +273,86 @@ class AmazonOrdersCsvAdapter(SourceAdapter):
 
     def _edge(self, order_id: str, item_id: str) -> KnowledgeEdge:
         return KnowledgeEdge(id=digest_source_id("amazon_orders_csv:contains", order_id, item_id), from_unit_id=order_id, to_unit_id=item_id, relation=EdgeRelation.CONTAINS, source=EdgeSource.SOURCE, metadata={"source_project": SourceProject.AMAZON_ORDERS_CSV.value})
+
+    def _seller_units(self, items: list[KnowledgeUnit], orders: dict[str, KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = defaultdict(list)
+        names: dict[str, str] = {}
+        for item in items:
+            seller = str(item.metadata.get("seller") or "").strip()
+            if not seller:
+                continue
+            normalized = self._normalize_seller(seller)
+            grouped[normalized].append(item)
+            names.setdefault(normalized, seller)
+
+        units: list[KnowledgeUnit] = []
+        for normalized, seller_items in sorted(grouped.items()):
+            order_source_ids = sorted(
+                {
+                    f"amazon_orders_csv:{item.metadata.get('order_id')}"
+                    for item in seller_items
+                    if item.metadata.get("order_id")
+                }
+            )
+            item_source_ids = sorted(item.source_id for item in seller_items)
+            categories = dict(
+                sorted(
+                    Counter(
+                        str(item.metadata.get("category") or "")
+                        for item in seller_items
+                        if item.metadata.get("category")
+                    ).items()
+                )
+            )
+            owed_values = [item.metadata.get("total_owed") for item in seller_items if isinstance(item.metadata.get("total_owed"), int | float)]
+            order_units = [orders[source_id] for source_id in order_source_ids if source_id in orders]
+            seller = names[normalized]
+            total_owed = round(sum(float(value) for value in owed_values), 2) if owed_values else None
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.AMAZON_ORDERS_CSV,
+                    source_id=digest_source_id("amazon_orders_csv:seller", normalized),
+                    source_entity_type="seller",
+                    title=seller,
+                    content=f"Amazon seller: {seller}\nItems: {len(seller_items)}",
+                    content_type=ContentType.METADATA,
+                    metadata=clean_metadata(
+                        {
+                            "seller": seller,
+                            "normalized_seller": normalized,
+                            "item_count": len(seller_items),
+                            "order_count": len(order_source_ids),
+                            "total_owed": total_owed,
+                            "categories": categories,
+                            "order_source_ids": order_source_ids,
+                            "item_source_ids": item_source_ids,
+                        }
+                    ),
+                    tags=list(dict.fromkeys(tag for tag in ["amazon", "seller", seller, *categories.keys()] if tag)),
+                    created_at=min((item.created_at for item in seller_items), default=datetime.now(timezone.utc)),
+                    updated_at=max((unit.updated_at for unit in [*seller_items, *order_units]), default=datetime.now(timezone.utc)),
+                )
+            )
+        return units
+
+    def _seller_item_edges(self, sellers: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        edges: list[KnowledgeEdge] = []
+        for seller in sellers:
+            for item_source_id in seller.metadata.get("item_source_ids") or []:
+                edges.append(
+                    KnowledgeEdge(
+                        id=digest_source_id("amazon_orders_csv:seller_contains_item", seller.source_id, str(item_source_id)),
+                        from_unit_id=seller.source_id,
+                        to_unit_id=str(item_source_id),
+                        relation=EdgeRelation.CONTAINS,
+                        source=EdgeSource.SOURCE,
+                        metadata={
+                            "source_project": SourceProject.AMAZON_ORDERS_CSV.value,
+                            "relation_type": "seller_contains_item",
+                        },
+                    )
+                )
+        return edges
+
+    def _normalize_seller(self, seller: str) -> str:
+        return " ".join(seller.split()).casefold()
