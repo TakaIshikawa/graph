@@ -155,6 +155,7 @@ class MboxAdapter(SourceAdapter):
                 from_header = self._clean_header(message.get("From") or "")
                 to_header = self._clean_header(message.get("To") or "")
                 cc_header = self._clean_header(message.get("Cc") or "")
+                bcc_header = self._clean_header(message.get("Bcc") or "")
                 subject = self._clean_header(message.get("Subject") or "Untitled")
 
                 # Extract body
@@ -190,6 +191,8 @@ class MboxAdapter(SourceAdapter):
 
                 if cc_header:
                     metadata["cc"] = cc_header
+                if bcc_header:
+                    metadata["bcc"] = bcc_header
                 if message_id:
                     metadata["message_id"] = message_id
                 if in_reply_to:
