@@ -130,12 +130,12 @@ def test_readwise_csv_reports_document_entity_type():
     assert ReadwiseCsvAdapter().entity_types == ["highlight", "document"]
 
 
-def test_readwise_csv_emits_deduplicated_documents_and_edges(tmp_path):
+def test_readwise_csv_groups_multiple_highlights_under_document(tmp_path):
     export = tmp_path / "readwise.csv"
     export.write_text(
         "Highlight,Book Title,Book Author,URL,Category,Highlighted at\n"
-        "First,Deep Work,Cal Newport,https://example.com/deep,books,2025-01-02T10:30:00Z\n"
-        "Second,Deep Work,Cal Newport,https://example.com/deep,books,2025-01-03T10:30:00Z\n",
+        "One,Deep Work,Cal Newport,https://example.com/deep,books,2025-01-01T00:00:00Z\n"
+        "Two,Deep Work,Cal Newport,https://example.com/deep,books,2025-01-02T00:00:00Z\n",
         encoding="utf-8",
     )
 
@@ -147,6 +147,7 @@ def test_readwise_csv_emits_deduplicated_documents_and_edges(tmp_path):
     assert len(highlights) == 2
     document = documents[0]
     assert document.source_id.startswith("readwise_csv:document:")
+    assert document.title == "Deep Work"
     assert document.metadata["title"] == "Deep Work"
     assert document.metadata["author"] == "Cal Newport"
     assert document.metadata["url"] == "https://example.com/deep"
@@ -154,15 +155,45 @@ def test_readwise_csv_emits_deduplicated_documents_and_edges(tmp_path):
     assert document.metadata["source_files"] == ["readwise.csv"]
     assert document.metadata["highlight_count"] == 2
     assert len(result.edges) == 2
-    assert {edge.from_unit_id for edge in result.edges} == {document.source_id}
-    assert {edge.to_unit_id for edge in result.edges} == {unit.source_id for unit in highlights}
+    assert {(edge.from_unit_id, edge.to_unit_id) for edge in result.edges} == {
+        (document.source_id, highlight.source_id) for highlight in highlights
+    }
     assert {edge.relation for edge in result.edges} == {EdgeRelation.CONTAINS}
 
 
-def test_readwise_csv_document_filtering(tmp_path):
+def test_readwise_csv_document_missing_title_falls_back_to_url(tmp_path):
     export = tmp_path / "readwise.csv"
     export.write_text(
-        "Highlight,Book Title,Book Author\nA useful passage,The Book,The Author\n",
+        "Highlight,URL,Category\nA note,https://example.com/article,articles\n",
+        encoding="utf-8",
+    )
+
+    document = ReadwiseCsvAdapter(path=str(export)).ingest(entity_types=["document"]).units[0]
+
+    assert document.title == "https://example.com/article"
+    assert document.metadata["title"] == ""
+    assert document.metadata["highlight_count"] == 1
+
+
+def test_readwise_csv_document_identity_prefers_url(tmp_path):
+    export = tmp_path / "readwise.csv"
+    export.write_text(
+        "Highlight,Book Title,Book Author,URL,Category\n"
+        "One,First Title,Ada,https://example.com/same,article\n"
+        "Two,Second Title,Grace,https://example.com/same,article\n",
+        encoding="utf-8",
+    )
+
+    documents = ReadwiseCsvAdapter(path=str(export)).ingest(entity_types=["document"]).units
+
+    assert len(documents) == 1
+    assert documents[0].metadata["highlight_count"] == 2
+
+
+def test_readwise_csv_document_filtering_preserves_highlight_default(tmp_path):
+    export = tmp_path / "readwise.csv"
+    export.write_text(
+        "Highlight,Book Title\nOne,Book\n",
         encoding="utf-8",
     )
 

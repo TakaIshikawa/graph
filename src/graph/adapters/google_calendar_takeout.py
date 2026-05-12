@@ -281,7 +281,7 @@ class GoogleCalendarTakeoutAdapter(SourceAdapter):
             if conference_id or url or entry_points:
                 conferences.append(
                     {
-                        "provider": solution_name if solution_key else self._normalize_provider(solution_name or solution_key),
+                        "provider": solution_name or self._normalize_provider(solution_key),
                         "provider_type": solution_key,
                         "meeting_code": conference_id,
                         "url": url,
