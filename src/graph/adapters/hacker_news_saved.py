@@ -8,10 +8,11 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class HackerNewsSavedAdapter(SourceAdapter):
@@ -21,7 +22,7 @@ class HackerNewsSavedAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["saved_item"]
+        return ["saved_item", "submitter"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -33,10 +34,12 @@ class HackerNewsSavedAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        if entity_types and "saved_item" not in entity_types:
+        requested = set(entity_types or self.entity_types)
+        if not requested.intersection(self.entity_types):
             return result
 
         sync_at = self._sync_datetime(since) if since else None
+        saved_items: list[KnowledgeUnit] = []
         for path in self._iter_paths():
             try:
                 items = self._read_items(path)
@@ -49,9 +52,17 @@ class HackerNewsSavedAdapter(SourceAdapter):
                     continue
                 if sync_at and unit.updated_at <= sync_at:
                     continue
-                result.units.append(unit)
+                saved_items.append(unit)
 
+        submitter_units = self._submitter_units(saved_items)
+        if "saved_item" in requested:
+            result.units.extend(saved_items)
+        if "submitter" in requested:
+            result.units.extend(submitter_units)
+        if {"saved_item", "submitter"}.issubset(requested):
+            result.edges.extend(self._submitter_edges(submitter_units, saved_items))
         result.units.sort(key=lambda unit: (unit.updated_at, unit.source_id))
+        result.edges.sort(key=lambda edge: edge.id)
         return result
 
     def _iter_paths(self) -> list[Path]:
@@ -95,10 +106,12 @@ class HackerNewsSavedAdapter(SourceAdapter):
         source_id = self._source_id(item_id, source_url, title)
         parent_id = self._first_int(item, "parent", "parent_id", "parentId")
         story_id = self._first_int(item, "story_id", "story", "storyId", "root_id", "root")
+        submitter = self._first(item, "author", "by", "submitter")
         metadata: dict[str, Any] = {
             "item_id": self._parse_int(item_id),
             "hn_item_id": hn_item_id,
-            "author": self._first(item, "by"),
+            "author": submitter,
+            "submitter": submitter,
             "score": self._parse_int(item.get("score")),
             "item_type": item_type,
             "hn_item_type": item_type,
@@ -107,6 +120,7 @@ class HackerNewsSavedAdapter(SourceAdapter):
             "time_iso": item_time_iso,
             "source_url": source_url,
             "hn_item_url": hn_item_url,
+            "domain": self._domain(url),
             "source_file": source_file,
         }
         if parent_id is not None:
@@ -148,6 +162,79 @@ class HackerNewsSavedAdapter(SourceAdapter):
             return f"hacker_news_saved:{item_id}"
         digest = hashlib.sha256((source_url or title).encode("utf-8")).hexdigest()[:24]
         return f"hacker_news_saved:{digest}"
+
+    def _submitter_units(self, saved_items: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        names: dict[str, str] = {}
+        for item in saved_items:
+            submitter = str(item.metadata.get("submitter") or "")
+            key = self._submitter_key(submitter)
+            if not key:
+                continue
+            grouped.setdefault(key, []).append(item)
+            names.setdefault(key, submitter.strip())
+
+        units: list[KnowledgeUnit] = []
+        for key, items in sorted(grouped.items()):
+            unique_items = sorted({item.source_id: item for item in items}.values(), key=lambda item: item.source_id)
+            submitter = names[key]
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.HACKER_NEWS_SAVED,
+                    source_id=self._submitter_source_id(key),
+                    source_entity_type="submitter",
+                    title=submitter,
+                    content=f"Hacker News submitter: {submitter}\nItems: {len(unique_items)}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "submitter": submitter,
+                        "normalized_submitter": key,
+                        "item_count": len(unique_items),
+                        "item_source_ids": [item.source_id for item in unique_items],
+                        "item_types": sorted({str(item.metadata.get("item_type")) for item in unique_items if item.metadata.get("item_type")}),
+                        "domains": sorted({str(item.metadata.get("domain")) for item in unique_items if item.metadata.get("domain")}),
+                        "source_files": sorted({str(item.metadata.get("source_file")) for item in unique_items if item.metadata.get("source_file")}),
+                    },
+                    tags=["hacker_news", "submitter"],
+                    created_at=min(item.created_at for item in unique_items),
+                    updated_at=max(item.updated_at for item in unique_items),
+                )
+            )
+        return units
+
+    def _submitter_edges(self, submitters: list[KnowledgeUnit], saved_items: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        submitter_ids = {str(submitter.metadata.get("normalized_submitter")): submitter.source_id for submitter in submitters}
+        edges: list[KnowledgeEdge] = []
+        for item in saved_items:
+            key = self._submitter_key(str(item.metadata.get("submitter") or ""))
+            submitter_id = submitter_ids.get(key)
+            if not submitter_id:
+                continue
+            digest = hashlib.sha256(f"{submitter_id}|{item.source_id}|contains".encode("utf-8")).hexdigest()[:24]
+            edges.append(
+                KnowledgeEdge(
+                    id=f"hacker-news-saved-submitter-contains-{digest}",
+                    from_unit_id=submitter_id,
+                    to_unit_id=item.source_id,
+                    relation=EdgeRelation.CONTAINS,
+                    source=EdgeSource.SOURCE,
+                    metadata={
+                        "source_project": SourceProject.HACKER_NEWS_SAVED.value,
+                        "from_entity_type": "submitter",
+                        "to_entity_type": "saved_item",
+                        "submitter": item.metadata.get("submitter"),
+                    },
+                    created_at=item.created_at,
+                )
+            )
+        return edges
+
+    def _submitter_key(self, submitter: str) -> str:
+        return " ".join(submitter.casefold().split())
+
+    def _submitter_source_id(self, normalized_submitter: str) -> str:
+        digest = hashlib.sha256(normalized_submitter.encode("utf-8")).hexdigest()[:24]
+        return f"hacker_news_saved:submitter:{digest}"
 
     def _hn_item_url(self, item_id: str) -> str:
         if not item_id:
@@ -199,6 +286,17 @@ class HackerNewsSavedAdapter(SourceAdapter):
         if title or url:
             return "story"
         return "unknown"
+
+    def _domain(self, url: str) -> str:
+        if not url:
+            return ""
+        parsed = urlparse(url)
+        if not parsed.hostname and "://" not in url:
+            parsed = urlparse(f"https://{url}")
+        host = (parsed.hostname or "").rstrip(".").casefold()
+        if not host or any(char.isspace() for char in host):
+            return ""
+        return host.removeprefix("www.")
 
     def _parse_int(self, value: Any) -> int | None:
         if value is None or value == "":

@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from graph.adapters.hacker_news_saved import HackerNewsSavedAdapter
 from graph.adapters.registry import get_adapter, list_adapters
-from graph.types.enums import ContentType, SourceProject
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
 from graph.types.models import SyncState
 
 
@@ -32,8 +32,9 @@ def test_hacker_news_saved_imports_story_metadata(tmp_path):
 
     result = HackerNewsSavedAdapter(path=str(path)).ingest()
 
-    assert len(result.units) == 1
-    unit = result.units[0]
+    saved_items = [unit for unit in result.units if unit.source_entity_type == "saved_item"]
+    assert len(saved_items) == 1
+    unit = saved_items[0]
     assert unit.source_project == SourceProject.HACKER_NEWS_SAVED
     assert unit.source_entity_type == "saved_item"
     assert unit.source_id == "hacker_news_saved:424242"
@@ -79,8 +80,9 @@ def test_hacker_news_saved_normalizes_comment_metadata_and_references(tmp_path):
 
     result = HackerNewsSavedAdapter(path=str(path)).ingest()
 
-    assert len(result.units) == 1
-    unit = result.units[0]
+    saved_items = [unit for unit in result.units if unit.source_entity_type == "saved_item"]
+    assert len(saved_items) == 1
+    unit = saved_items[0]
     assert unit.metadata["hn_item_type"] == "comment"
     assert unit.metadata["hn_item_id"] == 424243
     assert unit.metadata["hn_parent_id"] == 424242
@@ -170,3 +172,68 @@ def test_hacker_news_saved_adapter_is_registered():
     adapter = get_adapter("hacker-news-saved", path="/tmp/saved.json")
     assert isinstance(adapter, HackerNewsSavedAdapter)
     assert adapter.name == "hacker_news_saved"
+
+
+def test_hacker_news_saved_emits_submitter_units_and_edges(tmp_path):
+    path = tmp_path / "saved.json"
+    path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": 1,
+                    "title": "One",
+                    "url": "https://www.example.com/one",
+                    "author": "PG",
+                    "type": "story",
+                    "time": 1735689600,
+                },
+                {
+                    "id": 2,
+                    "title": "Two",
+                    "url": "https://example.com/two",
+                    "by": " pg ",
+                    "type": "comment",
+                    "time": 1735689601,
+                },
+                {
+                    "id": 3,
+                    "title": "Three",
+                    "url": "https://news.ycombinator.com/item?id=3",
+                    "submitter": "dang",
+                    "type": "story",
+                    "time": 1735689602,
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = HackerNewsSavedAdapter(path=str(path)).ingest()
+
+    saved_items = [unit for unit in result.units if unit.source_entity_type == "saved_item"]
+    submitters = sorted((unit for unit in result.units if unit.source_entity_type == "submitter"), key=lambda unit: unit.title)
+    assert [unit.title for unit in submitters] == ["PG", "dang"]
+    pg = next(unit for unit in submitters if unit.title == "PG")
+    assert pg.metadata["submitter"] == "PG"
+    assert pg.metadata["item_count"] == 2
+    assert pg.metadata["item_source_ids"] == sorted(item.source_id for item in saved_items if item.metadata["submitter"].strip().casefold() == "pg")
+    assert pg.metadata["item_types"] == ["comment", "story"]
+    assert pg.metadata["domains"] == ["example.com"]
+    assert pg.metadata["source_files"] == ["saved.json"]
+    assert len(result.edges) == 3
+    assert {edge.relation for edge in result.edges} == {EdgeRelation.CONTAINS}
+    assert {edge.source for edge in result.edges} == {EdgeSource.SOURCE}
+    assert {edge.to_unit_id for edge in result.edges} == {item.source_id for item in saved_items}
+
+
+def test_hacker_news_saved_submitter_filtering(tmp_path):
+    path = tmp_path / "saved.json"
+    path.write_text(json.dumps([{"id": 1, "title": "One", "by": "pg", "time": 1735689600}]), encoding="utf-8")
+
+    submitter_only = HackerNewsSavedAdapter(path=str(path)).ingest(entity_types=["submitter"])
+    item_only = HackerNewsSavedAdapter(path=str(path)).ingest(entity_types=["saved_item"])
+
+    assert [unit.source_entity_type for unit in submitter_only.units] == ["submitter"]
+    assert submitter_only.edges == []
+    assert [unit.source_entity_type for unit in item_only.units] == ["saved_item"]
+    assert item_only.edges == []
