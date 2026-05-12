@@ -20,7 +20,7 @@ class TraktWatchHistoryCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["media", "watch", "rating", "show", "season"]
+        return ["media", "watch", "rating", "show", "season", "watched_day"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -58,6 +58,7 @@ class TraktWatchHistoryCsvAdapter(SourceAdapter):
         media = self._media_units(units) if "media" in allowed_types else []
         shows = self._show_units(watches) if "show" in allowed_types else []
         seasons = self._season_units(watches) if "season" in allowed_types else []
+        watched_days = self._watched_day_units(watches) if "watched_day" in allowed_types else []
         if "media" in allowed_types:
             result.units.extend(media)
         if "show" in allowed_types:
@@ -68,6 +69,8 @@ class TraktWatchHistoryCsvAdapter(SourceAdapter):
             result.units.extend(watches)
         if "rating" in allowed_types:
             result.units.extend(ratings)
+        if "watched_day" in allowed_types:
+            result.units.extend(watched_days)
         if "media" in allowed_types and "watch" in allowed_types:
             result.edges.extend(self._media_item_edges(media, watches, "media_contains_watch"))
         if "media" in allowed_types and "rating" in allowed_types:
@@ -76,6 +79,8 @@ class TraktWatchHistoryCsvAdapter(SourceAdapter):
             result.edges.extend(self._show_season_edges(shows, seasons))
         if "season" in allowed_types and "watch" in allowed_types:
             result.edges.extend(self._season_watch_edges(seasons, watches))
+        if "watched_day" in allowed_types and "watch" in allowed_types:
+            result.edges.extend(self._watched_day_watch_edges(watched_days))
         result.units.sort(key=lambda unit: (unit.created_at, unit.source_id))
         result.edges.sort(key=lambda edge: edge.id)
         return result
@@ -345,6 +350,41 @@ class TraktWatchHistoryCsvAdapter(SourceAdapter):
             )
         return units
 
+    def _watched_day_units(self, watches: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        for watch in watches:
+            grouped.setdefault(watch.created_at.date().isoformat(), []).append(watch)
+
+        units: list[KnowledgeUnit] = []
+        for date, day_watches in sorted(grouped.items()):
+            first_seen = min(watch.created_at for watch in day_watches)
+            last_seen = max(watch.created_at for watch in day_watches)
+            media_identities = {self._watch_identity(watch.metadata) for watch in day_watches}
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.TRAKT_WATCH_HISTORY_CSV,
+                    source_id=self._watched_day_source_id(date),
+                    source_entity_type="watched_day",
+                    title=f"Trakt watches on {date}",
+                    content=f"{len(day_watches)} Trakt watches on {date}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "date": date,
+                        "watch_count": len(day_watches),
+                        "movie_count": sum(1 for watch in day_watches if str(watch.metadata.get("type") or "").casefold() == "movie"),
+                        "episode_count": sum(1 for watch in day_watches if str(watch.metadata.get("type") or "").casefold() == "episode"),
+                        "rewatch_count": sum(1 for watch in day_watches if watch.metadata.get("is_rewatch")),
+                        "unique_media_count": len(media_identities),
+                        "source_files": sorted({str(watch.metadata.get("source_file")) for watch in day_watches if watch.metadata.get("source_file")}),
+                        "watch_source_ids": [watch.source_id for watch in day_watches],
+                    },
+                    tags=["trakt", "watched-day"],
+                    created_at=first_seen,
+                    updated_at=last_seen,
+                )
+            )
+        return units
+
     def _media_item_edges(self, media: list[KnowledgeUnit], items: list[KnowledgeUnit], relation_type: str) -> list[KnowledgeEdge]:
         media_ids = {}
         for unit in media:
@@ -386,6 +426,13 @@ class TraktWatchHistoryCsvAdapter(SourceAdapter):
             season_id = season_ids.get(self._season_identity(watch.metadata))
             if season_id:
                 edges.append(self._edge(season_id, watch.source_id, "season_contains_watch"))
+        return list({edge.id: edge for edge in edges}.values())
+
+    def _watched_day_watch_edges(self, watched_days: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        edges: list[KnowledgeEdge] = []
+        for day in watched_days:
+            for watch_source_id in day.metadata.get("watch_source_ids") or []:
+                edges.append(self._edge(day.source_id, str(watch_source_id), "watched_day_contains_watch"))
         return list({edge.id: edge for edge in edges}.values())
 
     def _edge(self, from_id: str, to_id: str, relation_type: str) -> KnowledgeEdge:
@@ -443,6 +490,10 @@ class TraktWatchHistoryCsvAdapter(SourceAdapter):
     def _season_source_id(self, identity: tuple[Any, ...]) -> str:
         digest = hashlib.sha256("|".join(str(part) for part in identity).encode("utf-8")).hexdigest()[:24]
         return f"trakt_watch_history_csv:season:{digest}"
+
+    def _watched_day_source_id(self, date: str) -> str:
+        digest = hashlib.sha256(date.encode("utf-8")).hexdigest()[:24]
+        return f"trakt_watch_history_csv:watched_day:{digest}"
 
     def _show_title(self, metadata: dict[str, Any]) -> str:
         title = str(metadata.get("show_title") or metadata.get("title") or "")

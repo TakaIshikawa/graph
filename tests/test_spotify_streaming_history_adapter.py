@@ -282,6 +282,61 @@ def test_spotify_streaming_history_sessions_and_filters(tmp_path):
     assert play_only.edges == []
 
 
+def test_spotify_streaming_history_listening_day_aggregates_and_filters(tmp_path):
+    export = tmp_path / "endsong_0.json"
+    export.write_text(
+        json.dumps(
+            [
+                {
+                    "ts": "2025-01-01T23:50:00-01:00",
+                    "master_metadata_track_name": "Late Local",
+                    "master_metadata_album_artist_name": "Artist A",
+                    "ms_played": 100,
+                },
+                {
+                    "ts": "2025-01-02T01:00:00Z",
+                    "master_metadata_track_name": "UTC Track",
+                    "master_metadata_album_artist_name": "Artist A",
+                    "ms_played": 200,
+                },
+                {
+                    "ts": "2025-01-02T02:00:00Z",
+                    "episode_name": "Episode One",
+                    "episode_show_name": "Show A",
+                    "spotify_episode_uri": "spotify:episode:one",
+                    "ms_played": 300,
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    combined = SpotifyStreamingHistoryAdapter(path=str(export)).ingest(entity_types=["listening_day", "play"])
+    days = [unit for unit in combined.units if unit.source_entity_type == "listening_day"]
+    plays = [unit for unit in combined.units if unit.source_entity_type == "play"]
+
+    assert len(days) == 2
+    music_day = next(unit for unit in days if unit.metadata["media_kind"] == "music")
+    podcast_day = next(unit for unit in days if unit.metadata["media_kind"] == "podcast")
+    assert music_day.source_id.startswith("spotify_streaming_history:listening_day:")
+    assert music_day.metadata["date"] == "2025-01-02"
+    assert music_day.metadata["play_count"] == 2
+    assert music_day.metadata["total_ms_played"] == 300
+    assert music_day.metadata["unique_track_count"] == 2
+    assert music_day.metadata["unique_artist_count"] == 1
+    assert music_day.metadata["unique_episode_count"] == 0
+    assert music_day.metadata["source_files"] == ["endsong_0.json"]
+    assert podcast_day.metadata["unique_episode_count"] == 1
+    assert len([edge for edge in combined.edges if edge.metadata["relation_type"] == "listening_day_contains_play"]) == len(plays)
+
+    day_only = SpotifyStreamingHistoryAdapter(path=str(export)).ingest(entity_types=["listening_day"])
+    play_only = SpotifyStreamingHistoryAdapter(path=str(export)).ingest(entity_types=["play"])
+    assert {unit.source_entity_type for unit in day_only.units} == {"listening_day"}
+    assert day_only.edges == []
+    assert {unit.source_entity_type for unit in play_only.units} == {"play"}
+    assert play_only.edges == []
+
+
 def test_spotify_streaming_history_artist_and_track_aggregates(tmp_path):
     export = tmp_path / "endsong_0.json"
     export.write_text(

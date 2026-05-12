@@ -21,7 +21,7 @@ class SpotifyStreamingHistoryAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["album", "artist", "track", "play", "session", "podcast_show", "podcast_episode"]
+        return ["album", "artist", "track", "play", "session", "podcast_show", "podcast_episode", "listening_day"]
 
     def __init__(self, path: str = "", session_gap_minutes: int = 30) -> None:
         self.path = path
@@ -61,6 +61,7 @@ class SpotifyStreamingHistoryAdapter(SourceAdapter):
         sessions = self._session_units(units) if "session" in allowed_types else []
         podcast_shows = self._podcast_show_units(units) if "podcast_show" in allowed_types else []
         podcast_episodes = self._podcast_episode_units(units) if "podcast_episode" in allowed_types else []
+        listening_days = self._listening_day_units(units) if "listening_day" in allowed_types else []
         if "album" in allowed_types:
             result.units.extend(albums)
         if "artist" in allowed_types:
@@ -75,6 +76,8 @@ class SpotifyStreamingHistoryAdapter(SourceAdapter):
             result.units.extend(podcast_shows)
         if "podcast_episode" in allowed_types:
             result.units.extend(podcast_episodes)
+        if "listening_day" in allowed_types:
+            result.units.extend(listening_days)
         if "artist" in allowed_types and "track" in allowed_types:
             result.edges.extend(self._artist_track_edges(artists, tracks))
         if "album" in allowed_types and "track" in allowed_types:
@@ -91,6 +94,8 @@ class SpotifyStreamingHistoryAdapter(SourceAdapter):
             result.edges.extend(self._podcast_episode_play_edges(podcast_episodes, units))
         if "podcast_show" in allowed_types and "play" in allowed_types:
             result.edges.extend(self._podcast_show_play_edges(podcast_shows, units))
+        if "listening_day" in allowed_types and "play" in allowed_types:
+            result.edges.extend(self._listening_day_play_edges(listening_days))
         result.units.sort(key=lambda unit: (unit.created_at, unit.source_id))
         result.edges.sort(key=lambda edge: edge.id)
         return result
@@ -427,6 +432,72 @@ class SpotifyStreamingHistoryAdapter(SourceAdapter):
             )
         return units
 
+    def _listening_day_units(self, plays: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[tuple[str, str], list[KnowledgeUnit]] = {}
+        for play in plays:
+            media_kind = str(play.metadata.get("media_kind") or "music")
+            grouped.setdefault((play.created_at.date().isoformat(), media_kind), []).append(play)
+
+        units: list[KnowledgeUnit] = []
+        for (date, media_kind), day_plays in sorted(grouped.items()):
+            first_played = min(play.created_at for play in day_plays)
+            last_played = max(play.created_at for play in day_plays)
+            total_ms = sum(
+                int(play.metadata["ms_played"])
+                for play in day_plays
+                if isinstance(play.metadata.get("ms_played"), int)
+            )
+            tracks = {
+                self._track_source_id(
+                    str(play.metadata.get("track_name") or ""),
+                    str(play.metadata.get("artist_name") or ""),
+                    str(play.metadata.get("spotify_uri") or ""),
+                )
+                for play in day_plays
+                if self._track_key(play)
+            }
+            artists = {
+                str(play.metadata.get("artist_name") or "").strip().casefold()
+                for play in day_plays
+                if str(play.metadata.get("artist_name") or "").strip()
+            }
+            episodes = {
+                self._podcast_episode_source_id(
+                    str(play.metadata.get("episode_name") or ""),
+                    str(play.metadata.get("show_name") or ""),
+                    str(play.metadata.get("spotify_episode_uri") or ""),
+                )
+                for play in day_plays
+                if self._podcast_episode_key(play)
+            }
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.SPOTIFY_STREAMING_HISTORY,
+                    source_id=self._listening_day_source_id(date, media_kind),
+                    source_entity_type="listening_day",
+                    title=f"Spotify {media_kind} listening on {date}",
+                    content=f"{len(day_plays)} Spotify {media_kind} plays on {date}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "date": date,
+                        "media_kind": media_kind,
+                        "play_count": len(day_plays),
+                        "total_ms_played": total_ms,
+                        "unique_track_count": len(tracks),
+                        "unique_artist_count": len(artists),
+                        "unique_episode_count": len(episodes),
+                        "source_files": sorted(
+                            {str(play.metadata.get("source_file")) for play in day_plays if play.metadata.get("source_file")}
+                        ),
+                        "play_source_ids": [play.source_id for play in day_plays],
+                    },
+                    tags=["spotify", media_kind, "listening-day"],
+                    created_at=first_played,
+                    updated_at=last_played,
+                )
+            )
+        return units
+
     def _aggregate_unit(
         self,
         entity_type: str,
@@ -555,6 +626,13 @@ class SpotifyStreamingHistoryAdapter(SourceAdapter):
                 edges.append(self._edge(show_id, play.source_id, "podcast_show_contains_play"))
         return list({edge.id: edge for edge in edges}.values())
 
+    def _listening_day_play_edges(self, listening_days: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        edges: list[KnowledgeEdge] = []
+        for day in listening_days:
+            for play_source_id in day.metadata.get("play_source_ids") or []:
+                edges.append(self._edge(day.source_id, str(play_source_id), "listening_day_contains_play"))
+        return list({edge.id: edge for edge in edges}.values())
+
     def _track_play_edges(self, tracks: list[KnowledgeUnit], plays: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
         track_ids = {
             self._track_source_id(
@@ -659,6 +737,10 @@ class SpotifyStreamingHistoryAdapter(SourceAdapter):
         raw = episode_uri.strip().casefold() or "|".join((episode_name.strip().casefold(), show_name.strip().casefold()))
         digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
         return f"spotify_streaming_history:podcast_episode:{digest}"
+
+    def _listening_day_source_id(self, date: str, media_kind: str) -> str:
+        digest = hashlib.sha256("|".join((date, media_kind)).encode("utf-8")).hexdigest()[:24]
+        return f"spotify_streaming_history:listening_day:{digest}"
 
     def _track_key(self, play: KnowledgeUnit) -> tuple[str, str, str] | None:
         if play.metadata.get("media_kind") == "podcast":

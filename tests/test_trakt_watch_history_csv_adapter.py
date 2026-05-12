@@ -228,6 +228,38 @@ def test_trakt_watch_history_csv_media_aggregates_repeated_watches(tmp_path):
     assert all(edge.from_unit_id == unit.source_id for edge in result.edges)
 
 
+def test_trakt_watch_history_csv_watched_day_aggregates_and_edges(tmp_path):
+    export = tmp_path / "history.csv"
+    _write_csv(
+        export,
+        [
+            {"watched_at": "2025-01-01T23:30:00-01:00", "title": "Arrival", "year": "2016", "type": "movie", "trakt_id": "movie-1"},
+            {"watched_at": "2025-01-02T02:00:00Z", "title": "Arrival", "year": "2016", "type": "movie", "trakt_id": "movie-1"},
+            {"watched_at": "2025-01-02T03:00:00Z", "title": "Example", "type": "episode", "season": "1", "episode": "1"},
+        ],
+    )
+
+    result = TraktWatchHistoryCsvAdapter(path=str(export)).ingest(entity_types=["watched_day", "watch"])
+    watched_days = [unit for unit in result.units if unit.source_entity_type == "watched_day"]
+    watches = [unit for unit in result.units if unit.source_entity_type == "watch"]
+
+    assert len(watched_days) == 1
+    day = watched_days[0]
+    assert day.source_id.startswith("trakt_watch_history_csv:watched_day:")
+    assert day.metadata["date"] == "2025-01-02"
+    assert day.metadata["watch_count"] == 3
+    assert day.metadata["movie_count"] == 2
+    assert day.metadata["episode_count"] == 1
+    assert day.metadata["rewatch_count"] == 1
+    assert day.metadata["unique_media_count"] == 2
+    assert day.metadata["source_files"] == ["history.csv"]
+    assert len([edge for edge in result.edges if edge.metadata["relation_type"] == "watched_day_contains_watch"]) == len(watches)
+
+    day_only = TraktWatchHistoryCsvAdapter(path=str(export)).ingest(entity_types=["watched_day"])
+    assert {unit.source_entity_type for unit in day_only.units} == {"watched_day"}
+    assert day_only.edges == []
+
+
 def test_trakt_watch_history_csv_ingests_ratings_and_merges_media(tmp_path):
     export = tmp_path / "ratings.csv"
     _write_csv(

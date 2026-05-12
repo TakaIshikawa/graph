@@ -192,6 +192,7 @@ class AppleRemindersCsvAdapter(SourceAdapter):
                         "list_name": list_name,
                         "reminder_count": len(list_reminders),
                         "open_count": open_count,
+                        "incomplete_count": open_count,
                         "completed_count": completed_count,
                         "overdue_count": overdue_count,
                         "first_due_date": min(due_dates).isoformat() if due_dates else None,
