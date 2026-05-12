@@ -850,6 +850,68 @@ class Store:
         ]
         return inventory_rows[:limit] if limit is not None else inventory_rows
 
+    def metadata_schema_conflicts(
+        self,
+        prefix: str | None = None,
+        *,
+        min_type_count: int = 2,
+        limit: int = 100,
+    ) -> list[dict]:
+        """Return metadata paths whose values use multiple simple types."""
+        if (
+            not isinstance(min_type_count, int)
+            or isinstance(min_type_count, bool)
+            or min_type_count <= 0
+        ):
+            raise ValueError("min_type_count must be a positive integer.")
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
+            raise ValueError("limit must be a positive integer.")
+
+        normalized_prefix = str(prefix).strip() if prefix is not None else None
+        if normalized_prefix == "":
+            normalized_prefix = None
+
+        counts: Counter[str] = Counter()
+        value_types: dict[str, Counter[str]] = defaultdict(Counter)
+        source_projects: dict[str, Counter[str]] = defaultdict(Counter)
+        example_values: dict[str, set[str]] = defaultdict(set)
+
+        rows = self.conn.execute(
+            """SELECT source_project, metadata
+               FROM knowledge_units
+               ORDER BY source_project, id"""
+        ).fetchall()
+        for row in rows:
+            metadata = json.loads(row["metadata"])
+            if not isinstance(metadata, Mapping):
+                continue
+            for path, value in _flatten_metadata_inventory(metadata):
+                if normalized_prefix is not None and not path.startswith(normalized_prefix):
+                    continue
+                counts[path] += 1
+                value_types[path][_metadata_inventory_value_type(value)] += 1
+                source_projects[path][str(row["source_project"])] += 1
+                if len(example_values[path]) < _MAX_METADATA_INVENTORY_EXAMPLES:
+                    example_values[path].add(_metadata_inventory_example_value(value))
+
+        conflict_rows = [
+            {
+                "path": path,
+                "count": counts[path],
+                "value_types": _metadata_inventory_counter_values(value_types[path]),
+                "source_projects": _metadata_inventory_counter_values(source_projects[path]),
+                "example_values": sorted(example_values[path])[
+                    :_MAX_METADATA_INVENTORY_EXAMPLES
+                ],
+            }
+            for path in counts
+            if len(value_types[path]) >= min_type_count
+        ]
+        conflict_rows.sort(
+            key=lambda row: (-len(row["value_types"]), -row["count"], row["path"])
+        )
+        return conflict_rows[:limit]
+
     def metadata_key_profile(
         self,
         prefix: str | None = None,
@@ -1627,6 +1689,47 @@ class Store:
             params.append(max(0, limit))
         rows = self.conn.execute(query, params).fetchall()
         return [_row_to_unit(r) for r in rows]
+
+    def get_unlinked_units(
+        self,
+        *,
+        source_project: str | None = None,
+        content_type: str | None = None,
+        tag: str | None = None,
+        limit: int | None = 100,
+    ) -> list[KnowledgeUnit]:
+        """Return units with no incoming or outgoing edges."""
+        if limit is not None and (
+            not isinstance(limit, int) or isinstance(limit, bool) or limit < 0
+        ):
+            raise ValueError("limit must be a non-negative integer or None.")
+
+        where_parts = [
+            "NOT EXISTS (SELECT 1 FROM edges e WHERE e.from_unit_id = u.id OR e.to_unit_id = u.id)"
+        ]
+        params: list[object] = []
+        if source_project is not None:
+            where_parts.append("u.source_project = ?")
+            params.append(source_project)
+        if content_type is not None:
+            where_parts.append("u.content_type = ?")
+            params.append(content_type)
+        if tag is not None:
+            where_parts.append("EXISTS (SELECT 1 FROM json_each(u.tags) WHERE value = ?)")
+            params.append(tag)
+
+        query = f"""
+            SELECT u.*
+            FROM knowledge_units u
+            WHERE {' AND '.join(where_parts)}
+            ORDER BY u.created_at DESC, u.id
+        """
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+
+        rows = self.conn.execute(query, params).fetchall()
+        return [_row_to_unit(row) for row in rows]
 
     def get_units_by_source_project(
         self,
@@ -3916,6 +4019,45 @@ class Store:
         rows = self.conn.execute("SELECT * FROM saved_queries ORDER BY name").fetchall()
         return [_row_to_saved_query(row) for row in rows]
 
+    def list_due_saved_queries(self, now: datetime | None = None) -> list[dict]:
+        """Return scheduled saved queries whose elapsed interval is due."""
+        current = now or datetime.now(timezone.utc)
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=timezone.utc)
+        else:
+            current = current.astimezone(timezone.utc)
+
+        intervals = {
+            "daily": timedelta(days=1),
+            "weekly": timedelta(days=7),
+            "monthly": timedelta(days=30),
+        }
+        due_rows: list[tuple[timedelta, str, dict]] = []
+        rows = self.conn.execute(
+            "SELECT * FROM saved_queries WHERE schedule IS NOT NULL ORDER BY name"
+        ).fetchall()
+        for row in rows:
+            saved = _row_to_saved_query(row)
+            schedule = saved["schedule"]
+            if schedule not in intervals:
+                continue
+            anchor_text = saved["last_run_at"] or saved["created_at"]
+            try:
+                anchor = _parse_datetime(anchor_text)
+            except ValueError:
+                continue
+            if saved["last_run_at"] is None:
+                due_rows.append((timedelta.max, saved["name"], saved))
+                continue
+            if anchor is None:
+                continue
+            overdue_by = current - anchor - intervals[schedule]
+            if overdue_by >= timedelta(0):
+                due_rows.append((overdue_by, saved["name"], saved))
+
+        due_rows.sort(key=lambda item: (-item[0].total_seconds(), item[1]))
+        return [saved for _urgency, _name, saved in due_rows]
+
     def mark_saved_query_run(
         self,
         name: str,
@@ -4337,6 +4479,79 @@ class Store:
 
         rows = self.conn.execute(query, params).fetchall()
         return [_row_to_edge(r) for r in rows]
+
+    def edge_weight_outliers(
+        self,
+        *,
+        min_weight: float | None = None,
+        max_weight: float | None = None,
+        relation: str | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        """Return edge rows below min_weight or above max_weight."""
+        if min_weight is None and max_weight is None:
+            raise ValueError("At least one of min_weight or max_weight must be provided.")
+        if (
+            not isinstance(limit, int)
+            or isinstance(limit, bool)
+            or limit <= 0
+        ):
+            raise ValueError("limit must be a positive integer.")
+        if min_weight is not None and max_weight is not None and min_weight > max_weight:
+            raise ValueError("min_weight must be less than or equal to max_weight.")
+
+        clauses: list[str] = []
+        params: list[object] = []
+        threshold_clauses: list[str] = []
+        if min_weight is not None:
+            threshold_clauses.append("e.weight < ?")
+            params.append(float(min_weight))
+        if max_weight is not None:
+            threshold_clauses.append("e.weight > ?")
+            params.append(float(max_weight))
+        clauses.append("(" + " OR ".join(threshold_clauses) + ")")
+        if relation is not None:
+            clauses.append("e.relation = ?")
+            params.append(relation)
+
+        rows = self.conn.execute(
+            f"""
+            SELECT e.*,
+                   from_unit.title AS from_title,
+                   to_unit.title AS to_title
+            FROM edges e
+            LEFT JOIN knowledge_units from_unit ON from_unit.id = e.from_unit_id
+            LEFT JOIN knowledge_units to_unit ON to_unit.id = e.to_unit_id
+            WHERE {' AND '.join(clauses)}
+            """,
+            params,
+        ).fetchall()
+
+        def distance(row: sqlite3.Row) -> float:
+            distances: list[float] = []
+            weight = float(row["weight"])
+            if min_weight is not None and weight < min_weight:
+                distances.append(float(min_weight) - weight)
+            if max_weight is not None and weight > max_weight:
+                distances.append(weight - float(max_weight))
+            return max(distances) if distances else 0.0
+
+        ordered = sorted(rows, key=lambda row: (-distance(row), row["id"]))[:limit]
+        return [
+            {
+                "id": row["id"],
+                "from_unit_id": row["from_unit_id"],
+                "to_unit_id": row["to_unit_id"],
+                "relation": row["relation"],
+                "weight": row["weight"],
+                "source": row["source"],
+                "metadata": json.loads(row["metadata"]),
+                "created_at": row["created_at"],
+                "from_title": row["from_title"],
+                "to_title": row["to_title"],
+            }
+            for row in ordered
+        ]
 
     def edge_exists(self, from_unit_id: str, to_unit_id: str, relation: str) -> bool:
         row = self.conn.execute(
