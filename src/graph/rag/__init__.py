@@ -10,6 +10,7 @@ from graph.rag.date_coverage import analyze_result_date_coverage
 from graph.rag.diversity import rerank_for_source_diversity
 from graph.rag.evidence_pack import build_evidence_pack
 from graph.rag.evidence_packets import build_evidence_packets
+from graph.rag.evidence_budget import allocate_evidence_budget
 from graph.rag.keywords import extract_keywords
 from graph.rag.query_intent import classify_query_intent
 from graph.rag.dedupe import rank_duplicate_candidates
@@ -21,12 +22,15 @@ from graph.rag.reading_order import plan_reading_order
 from graph.rag.reading_queue import build_reading_queue
 from graph.rag.reading_time import estimate_reading_time
 from graph.rag.result_clusters import cluster_results_by_overlap
+from graph.rag.result_explanations import explain_rag_results
 from graph.rag.source_agreement import score_source_agreement
 from graph.rag.snippets import highlight_result_snippets
 from graph.rag.source_credibility import score_source_credibility
+from graph.rag.source_diversity_audit import audit_source_diversity
 from graph.rag.source_reliability import score_source_reliability
 from graph.rag.source_timeline import build_source_timeline
 from graph.rag.query_focus_terms import extract_query_focus_terms
+from graph.rag.query_expansion import suggest_query_expansion_terms
 from graph.rag.evidence_tension_map import map_evidence_tensions
 from graph.rag.tag_cooccurrence import build_tag_cooccurrence_matrix
 from graph.rag.tag_hierarchy import build_tag_hierarchy
@@ -38,6 +42,8 @@ __all__ = [
     "build_tag_hierarchy",
     "analyze_citation_coverage",
     "analyze_result_date_coverage",
+    "audit_source_diversity",
+    "allocate_evidence_budget",
     "build_answer_outline",
     "build_evidence_pack",
     "build_evidence_packets",
@@ -53,6 +59,7 @@ __all__ = [
     "extract_keywords",
     "extract_query_focus_terms",
     "estimate_reading_time",
+    "explain_rag_results",
     "format_result_citations",
     "cluster_results_by_overlap",
     "highlight_result_snippets",
@@ -66,4 +73,5 @@ __all__ = [
     "score_source_credibility",
     "score_source_reliability",
     "suggest_tag_normalizations",
+    "suggest_query_expansion_terms",
 ]
