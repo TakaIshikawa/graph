@@ -171,6 +171,62 @@ Note.
     assert book.metadata["source_files"] == ["My Clippings.txt"]
 
 
+def test_kindle_clippings_ingests_notebook_html_exports(tmp_path):
+    notebook = tmp_path / "notebook.html"
+    notebook.write_text(
+        """<html><body>
+<h1>HTML Book (Ada Author)</h1>
+<div>Highlight (page 12 | location 120-121)</div>
+<div>HTML highlighted text.</div>
+<div>Added on January 2, 2024 03:04:05 PM</div>
+<div>Note (location 122)</div>
+<div>HTML note text.</div>
+<div>Added on 2024-01-03 04:05:06</div>
+</body></html>""",
+        encoding="utf-8",
+    )
+
+    result = KindleClippingsAdapter(path=str(notebook)).ingest()
+
+    clippings = [unit for unit in result.units if unit.source_entity_type == "clipping"]
+    assert len(clippings) == 2
+    highlight = next(unit for unit in clippings if unit.metadata["clipping_type"] == "highlight")
+    note = next(unit for unit in clippings if unit.metadata["clipping_type"] == "note")
+    assert highlight.content == "HTML highlighted text."
+    assert highlight.metadata["book_title"] == "HTML Book"
+    assert highlight.metadata["author"] == "Ada Author"
+    assert highlight.metadata["page"] == "12"
+    assert highlight.metadata["location"] == "120-121"
+    assert highlight.metadata["source_file"] == "notebook.html"
+    assert highlight.created_at == datetime(2024, 1, 2, 15, 4, 5, tzinfo=timezone.utc)
+    assert note.content == "HTML note text."
+    assert note.metadata["location"] == "122"
+    book = next(unit for unit in result.units if unit.source_entity_type == "book")
+    assert book.metadata["highlight_count"] == 1
+    assert book.metadata["note_count"] == 1
+    assert len(result.edges) == 2
+
+
+def test_kindle_clippings_directory_discovers_txt_html_and_htm(tmp_path):
+    (tmp_path / "My Clippings.txt").write_text(
+        """Text Book (Author)
+- Your Highlight at location 1 | Added on Monday, January 1, 2024 1:00:00 PM
+
+Text highlight.
+==========
+""",
+        encoding="utf-8",
+    )
+    (tmp_path / "notebook.htm").write_text(
+        """<h1>HTML Book</h1><div>Highlight (location 2)</div><div>HTML highlight.</div>""",
+        encoding="utf-8",
+    )
+
+    result = KindleClippingsAdapter(path=str(tmp_path)).ingest(entity_types=["clipping"])
+
+    assert {unit.content for unit in result.units} == {"Text highlight.", "HTML highlight."}
+
+
 def test_kindle_clippings_adapter_is_registered():
     assert "kindle_clippings" in list_adapters()
     adapter = get_adapter("kindle_clippings", path="/tmp/My Clippings.txt")

@@ -226,3 +226,63 @@ def test_trakt_watch_history_csv_media_aggregates_repeated_watches(tmp_path):
     assert unit.metadata["identifiers"] == {"trakt_id": "movie-1"}
     assert len(result.edges) == 2
     assert all(edge.from_unit_id == unit.source_id for edge in result.edges)
+
+
+def test_trakt_watch_history_csv_ingests_ratings_and_merges_media(tmp_path):
+    export = tmp_path / "ratings.csv"
+    _write_csv(
+        export,
+        [
+            {
+                "rated_at": "2025-01-03T00:00:00Z",
+                "title": "Arrival",
+                "year": "2016",
+                "type": "movie",
+                "trakt_id": "movie-1",
+                "rating": "9",
+            },
+            {
+                "watched_at": "2025-01-01T00:00:00Z",
+                "title": "Arrival",
+                "year": "2016",
+                "type": "movie",
+                "trakt_id": "movie-1",
+            },
+        ],
+    )
+
+    result = TraktWatchHistoryCsvAdapter(path=str(export)).ingest(entity_types=["media", "watch", "rating"])
+
+    ratings = [unit for unit in result.units if unit.source_entity_type == "rating"]
+    watches = [unit for unit in result.units if unit.source_entity_type == "watch"]
+    media = [unit for unit in result.units if unit.source_entity_type == "media"]
+    assert len(ratings) == 1
+    assert len(watches) == 1
+    assert len(media) == 1
+    assert ratings[0].source_id.startswith("trakt_watch_history_csv:rating:")
+    assert ratings[0].metadata["rating"] == 9
+    assert ratings[0].metadata["rated_at"] == "2025-01-03T00:00:00+00:00"
+    assert media[0].metadata["watch_count"] == 1
+    assert media[0].metadata["rating_count"] == 1
+    assert media[0].metadata["ratings"] == [9]
+    assert media[0].metadata["last_rated_at"] == "2025-01-03T00:00:00+00:00"
+    assert {edge.metadata["relation_type"] for edge in result.edges} == {
+        "media_contains_watch",
+        "media_contains_rating",
+    }
+
+
+def test_trakt_watch_history_csv_rating_edges_follow_entity_filters(tmp_path):
+    export = tmp_path / "ratings.csv"
+    _write_csv(
+        export,
+        [{"rated_at": "2025-01-03T00:00:00Z", "title": "Arrival", "type": "movie", "rating": "8"}],
+    )
+
+    rating_only = TraktWatchHistoryCsvAdapter(path=str(export)).ingest(entity_types=["rating"])
+    media_and_rating = TraktWatchHistoryCsvAdapter(path=str(export)).ingest(entity_types=["media", "rating"])
+
+    assert [unit.source_entity_type for unit in rating_only.units] == ["rating"]
+    assert rating_only.edges == []
+    assert {unit.source_entity_type for unit in media_and_rating.units} == {"media", "rating"}
+    assert [edge.metadata["relation_type"] for edge in media_and_rating.edges] == ["media_contains_rating"]

@@ -21,7 +21,7 @@ class GoodreadsLibraryAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["author", "book", "series", "shelf"]
+        return ["author", "book", "publisher", "series", "shelf"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -66,6 +66,7 @@ class GoodreadsLibraryAdapter(SourceAdapter):
                 rating = self._first(row, "My Rating", "my_rating", "rating")
                 book_id = self._first(row, "Book Id", "book_id", "id")
                 series = self._series_metadata(row, title)
+                publisher = self._first(row, "Publisher", "publisher", "Original Publisher", "original_publisher")
                 now = datetime.now(timezone.utc)
 
                 metadata = {
@@ -80,6 +81,7 @@ class GoodreadsLibraryAdapter(SourceAdapter):
                     "date_read": self._first(row, "Date Read", "date_read"),
                     "date_added": self._first(row, "Date Added", "date_added"),
                     "review": review,
+                    "publisher": publisher,
                     "source_file": str(path),
                 }
                 if series:
@@ -100,17 +102,20 @@ class GoodreadsLibraryAdapter(SourceAdapter):
                 )
 
         authors = self._author_units(books) if "author" in allowed_types else []
+        publishers = self._publisher_units(books) if "publisher" in allowed_types else []
         series = self._series_units(books) if "series" in allowed_types else []
         shelves = self._shelf_units(books) if "shelf" in allowed_types else []
         if "author" in allowed_types:
             result.units.extend(authors)
         if "book" in allowed_types:
             result.units.extend(books)
+        if "publisher" in allowed_types:
+            result.units.extend(publishers)
         if "series" in allowed_types:
             result.units.extend(series)
         if "shelf" in allowed_types:
             result.units.extend(shelves)
-        result.edges.extend(self._edges(books, authors, series, shelves, allowed_types))
+        result.edges.extend(self._edges(books, authors, publishers, series, shelves, allowed_types))
         result.units.sort(key=lambda unit: (unit.created_at, unit.source_id))
         result.edges.sort(key=lambda edge: edge.id)
         return result
@@ -259,6 +264,42 @@ class GoodreadsLibraryAdapter(SourceAdapter):
             )
         return units
 
+    def _publisher_units(self, books: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        names: dict[str, str] = {}
+        for book in books:
+            publisher = str(book.metadata.get("publisher") or "").strip()
+            if not publisher:
+                continue
+            key = publisher.casefold()
+            names.setdefault(key, publisher)
+            grouped.setdefault(key, []).append(book)
+
+        now = datetime.now(timezone.utc)
+        units: list[KnowledgeUnit] = []
+        for key, publisher_books in grouped.items():
+            publisher = names[key]
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.GOODREADS_LIBRARY,
+                    source_id=self._publisher_source_id(publisher),
+                    source_entity_type="publisher",
+                    title=publisher,
+                    content=f"Goodreads publisher: {publisher}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "publisher": publisher,
+                        "book_count": len(publisher_books),
+                        "book_source_ids": [book.source_id for book in publisher_books],
+                        "source_file": sorted({str(book.metadata.get("source_file")) for book in publisher_books}),
+                    },
+                    tags=["publisher"],
+                    created_at=min((book.created_at for book in publisher_books), default=now),
+                    updated_at=max((book.updated_at for book in publisher_books), default=now),
+                )
+            )
+        return units
+
     def _series_units(self, books: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
         grouped: dict[str, list[KnowledgeUnit]] = {}
         names: dict[str, str] = {}
@@ -317,12 +358,14 @@ class GoodreadsLibraryAdapter(SourceAdapter):
         self,
         books: list[KnowledgeUnit],
         authors: list[KnowledgeUnit],
+        publishers: list[KnowledgeUnit],
         series: list[KnowledgeUnit],
         shelves: list[KnowledgeUnit],
         allowed_types: set[str],
     ) -> list[KnowledgeEdge]:
         edges: list[KnowledgeEdge] = []
         author_ids = {str(author.metadata["author"]): author.source_id for author in authors}
+        publisher_ids = {str(publisher.metadata["publisher"]).casefold(): publisher.source_id for publisher in publishers}
         series_ids = {str(unit.metadata["series"]).casefold(): unit.source_id for unit in series}
         shelf_ids = {str(shelf.metadata["shelf"]): shelf.source_id for shelf in shelves}
         if {"book", "author"}.issubset(allowed_types):
@@ -330,6 +373,12 @@ class GoodreadsLibraryAdapter(SourceAdapter):
                 author_id = author_ids.get(str(book.metadata.get("author") or ""))
                 if author_id:
                     edges.append(self._edge(book.source_id, author_id, "book_author", EdgeRelation.RELATES_TO))
+        if {"book", "publisher"}.issubset(allowed_types):
+            for book in books:
+                publisher_name = str(book.metadata.get("publisher") or "").strip()
+                publisher_id = publisher_ids.get(publisher_name.casefold())
+                if publisher_id:
+                    edges.append(self._edge(book.source_id, publisher_id, "book_publisher", EdgeRelation.RELATES_TO))
         if {"book", "shelf"}.issubset(allowed_types):
             for book in books:
                 for shelf in book.metadata.get("shelves") or []:
@@ -372,6 +421,10 @@ class GoodreadsLibraryAdapter(SourceAdapter):
     def _series_source_id(self, series: str) -> str:
         digest = hashlib.sha256(series.strip().lower().encode("utf-8")).hexdigest()[:24]
         return f"goodreads_library:series:{digest}"
+
+    def _publisher_source_id(self, publisher: str) -> str:
+        digest = hashlib.sha256(publisher.strip().casefold().encode("utf-8")).hexdigest()[:24]
+        return f"goodreads_library:publisher:{digest}"
 
     def _edge_id(self, from_id: str, to_id: str, relation_type: str) -> str:
         digest = hashlib.sha256("|".join((from_id, to_id, relation_type)).encode("utf-8")).hexdigest()[:24]

@@ -20,7 +20,7 @@ class TraktWatchHistoryCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["media", "watch"]
+        return ["media", "watch", "rating"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -52,14 +52,20 @@ class TraktWatchHistoryCsvAdapter(SourceAdapter):
                 units.append(unit)
 
         units = sorted(units, key=lambda unit: (unit.created_at, unit.source_id))
-        self._add_rewatch_metadata(units)
+        watches = [unit for unit in units if unit.source_entity_type == "watch"]
+        ratings = [unit for unit in units if unit.source_entity_type == "rating"]
+        self._add_rewatch_metadata(watches)
         media = self._media_units(units) if "media" in allowed_types else []
         if "media" in allowed_types:
             result.units.extend(media)
         if "watch" in allowed_types:
-            result.units.extend(units)
+            result.units.extend(watches)
+        if "rating" in allowed_types:
+            result.units.extend(ratings)
         if "media" in allowed_types and "watch" in allowed_types:
-            result.edges.extend(self._media_watch_edges(media, units))
+            result.edges.extend(self._media_item_edges(media, watches, "media_contains_watch"))
+        if "media" in allowed_types and "rating" in allowed_types:
+            result.edges.extend(self._media_item_edges(media, ratings, "media_contains_rating"))
         result.units.sort(key=lambda unit: (unit.created_at, unit.source_id))
         result.edges.sort(key=lambda edge: edge.id)
         return result
@@ -81,9 +87,13 @@ class TraktWatchHistoryCsvAdapter(SourceAdapter):
     def _unit_from_row(self, row: dict[str, Any], source_file: str) -> KnowledgeUnit | None:
         watched_text = self._first(row, "watched_at", "Watched At", "watched date", "watched")
         watched_at = self._parse_datetime(watched_text)
+        rated_text = self._first(row, "rated_at", "Rated At", "rated date", "rated")
+        rated_at = self._parse_datetime(rated_text)
         title = self._first(row, "title", "Title", "movie_title", "show_title", "episode_title", "name")
         media_type = self._first(row, "type", "Type", "media_type") or "watch"
-        if watched_at is None or not title:
+        is_rating = self._is_rating_row(row, rated_at)
+        event_at = rated_at if is_rating else watched_at
+        if event_at is None or not title:
             return None
 
         year = self._first(row, "year", "Year")
@@ -93,9 +103,9 @@ class TraktWatchHistoryCsvAdapter(SourceAdapter):
         tmdb_id = self._first(row, "tmdb_id", "tmdb", "TMDB ID")
         trakt_id = self._first(row, "trakt_id", "trakt", "Trakt ID")
         urls = self._url_fields(row)
+        rating = self._parse_int(self._first(row, "rating", "Rating", "rated", "Rated"))
 
         metadata = {
-            "watched_at": watched_at.isoformat(),
             "title": title,
             "year": year,
             "type": media_type,
@@ -108,34 +118,48 @@ class TraktWatchHistoryCsvAdapter(SourceAdapter):
             "source_file": source_file,
             "row": dict(row),
         }
+        if is_rating:
+            metadata["rated_at"] = event_at.isoformat()
+            metadata["rating"] = rating
+            metadata["watched_at"] = watched_at.isoformat() if watched_at else ""
+        else:
+            metadata["watched_at"] = event_at.isoformat()
         tags = ["trakt", media_type.lower()]
+        entity_type = "rating" if is_rating else "watch"
         return KnowledgeUnit(
             source_project=SourceProject.TRAKT_WATCH_HISTORY_CSV,
-            source_id=self._source_id(row, watched_at, title),
-            source_entity_type="watch",
+            source_id=self._source_id(row, event_at, title, entity_type),
+            source_entity_type=entity_type,
             title=self._title(title, year, media_type, season, episode),
-            content=self._content(title, year, media_type, season, episode, watched_at, imdb_id, tmdb_id, trakt_id, urls),
+            content=self._content(title, year, media_type, season, episode, event_at, imdb_id, tmdb_id, trakt_id, urls, rating if is_rating else None),
             content_type=ContentType.METADATA,
             metadata=metadata,
             tags=tags,
-            created_at=watched_at,
-            updated_at=watched_at,
+            created_at=event_at,
+            updated_at=event_at,
         )
 
-    def _source_id(self, row: dict[str, Any], watched_at: datetime, title: str) -> str:
-        explicit = self._first(row, "history_id", "id", "ID")
+    def _is_rating_row(self, row: dict[str, Any], rated_at: datetime | None) -> bool:
+        if rated_at is not None:
+            return True
+        return bool(self._first(row, "rating", "Rating")) and not self._first(row, "watched_at", "Watched At", "watched date", "watched")
+
+    def _source_id(self, row: dict[str, Any], event_at: datetime, title: str, entity_type: str) -> str:
+        explicit = self._first(row, "history_id", "rating_id", "id", "ID")
         raw = explicit or "|".join(
             [
-                watched_at.isoformat(),
+                entity_type,
+                event_at.isoformat(),
                 title,
                 self._first(row, "type", "Type"),
                 self._first(row, "season", "Season"),
                 self._first(row, "episode", "Episode"),
                 self._first(row, "trakt_id", "trakt", "Trakt ID"),
+                self._first(row, "rating", "Rating", "rated"),
             ]
         )
         digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
-        return f"trakt_watch_history_csv:{digest}"
+        return f"trakt_watch_history_csv:{entity_type}:{digest}"
 
     def _add_rewatch_metadata(self, units: list[KnowledgeUnit]) -> None:
         previous_by_identity: dict[tuple[Any, ...], datetime] = {}
@@ -165,25 +189,31 @@ class TraktWatchHistoryCsvAdapter(SourceAdapter):
             metadata.get("episode"),
         )
 
-    def _media_units(self, watches: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+    def _media_units(self, items: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
         grouped: dict[tuple[Any, ...], list[KnowledgeUnit]] = {}
-        for watch in watches:
-            grouped.setdefault(self._watch_identity(watch.metadata), []).append(watch)
+        for item in items:
+            grouped.setdefault(self._watch_identity(item.metadata), []).append(item)
 
         units: list[KnowledgeUnit] = []
-        for identity, media_watches in grouped.items():
-            first = media_watches[0]
+        for identity, media_items in grouped.items():
+            first = media_items[0]
             identifiers = {
                 key: first.metadata.get(key)
                 for key in ("trakt_id", "imdb_id", "tmdb_id")
                 if first.metadata.get(key)
             }
             urls: dict[str, str] = {}
-            for watch in media_watches:
-                urls.update(watch.metadata.get("urls") or {})
-            first_watched = min(watch.created_at for watch in media_watches)
-            last_watched = max(watch.created_at for watch in media_watches)
-            rewatch_count = sum(1 for watch in media_watches if watch.metadata.get("is_rewatch"))
+            for item in media_items:
+                urls.update(item.metadata.get("urls") or {})
+            watches = [item for item in media_items if item.source_entity_type == "watch"]
+            ratings = [item for item in media_items if item.source_entity_type == "rating"]
+            first_seen = min(item.created_at for item in media_items)
+            last_seen = max(item.created_at for item in media_items)
+            first_watched = min((watch.created_at for watch in watches), default=None)
+            last_watched = max((watch.created_at for watch in watches), default=None)
+            first_rated = min((rating.created_at for rating in ratings), default=None)
+            last_rated = max((rating.created_at for rating in ratings), default=None)
+            rewatch_count = sum(1 for watch in watches if watch.metadata.get("is_rewatch"))
             units.append(
                 KnowledgeUnit(
                     source_project=SourceProject.TRAKT_WATCH_HISTORY_CSV,
@@ -198,42 +228,47 @@ class TraktWatchHistoryCsvAdapter(SourceAdapter):
                         "type": first.metadata.get("type"),
                         "season": first.metadata.get("season"),
                         "episode": first.metadata.get("episode"),
-                        "watch_count": len(media_watches),
+                        "watch_count": len(watches),
+                        "rating_count": len(ratings),
                         "rewatch_count": rewatch_count,
-                        "first_watched_at": first_watched.isoformat(),
-                        "last_watched_at": last_watched.isoformat(),
+                        "first_watched_at": first_watched.isoformat() if first_watched else None,
+                        "last_watched_at": last_watched.isoformat() if last_watched else None,
+                        "first_rated_at": first_rated.isoformat() if first_rated else None,
+                        "last_rated_at": last_rated.isoformat() if last_rated else None,
+                        "ratings": [rating.metadata.get("rating") for rating in ratings if rating.metadata.get("rating") is not None],
                         "identifiers": identifiers,
                         "urls": urls,
-                        "source_files": sorted({str(watch.metadata.get("source_file")) for watch in media_watches if watch.metadata.get("source_file")}),
-                        "watch_source_ids": [watch.source_id for watch in media_watches],
+                        "source_files": sorted({str(item.metadata.get("source_file")) for item in media_items if item.metadata.get("source_file")}),
+                        "watch_source_ids": [watch.source_id for watch in watches],
+                        "rating_source_ids": [rating.source_id for rating in ratings],
                     },
                     tags=["trakt", str(first.metadata.get("type") or "media").lower(), "media"],
-                    created_at=first_watched,
-                    updated_at=last_watched,
+                    created_at=first_seen,
+                    updated_at=last_seen,
                 )
             )
         return units
 
-    def _media_watch_edges(self, media: list[KnowledgeUnit], watches: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+    def _media_item_edges(self, media: list[KnowledgeUnit], items: list[KnowledgeUnit], relation_type: str) -> list[KnowledgeEdge]:
         media_ids = {}
         for unit in media:
             identity = self._media_identity_from_metadata(unit.metadata)
             media_ids[identity] = unit.source_id
         edges: list[KnowledgeEdge] = []
-        for watch in watches:
-            media_id = media_ids.get(self._watch_identity(watch.metadata))
+        for item in items:
+            media_id = media_ids.get(self._watch_identity(item.metadata))
             if not media_id:
                 continue
             edges.append(
                 KnowledgeEdge(
-                    id=self._edge_id(media_id, watch.source_id),
+                    id=self._edge_id(media_id, item.source_id, relation_type),
                     from_unit_id=media_id,
-                    to_unit_id=watch.source_id,
+                    to_unit_id=item.source_id,
                     relation=EdgeRelation.CONTAINS,
                     source=EdgeSource.SOURCE,
                     metadata={
                         "source_project": SourceProject.TRAKT_WATCH_HISTORY_CSV.value,
-                        "relation_type": "media_contains_watch",
+                        "relation_type": relation_type,
                     },
                 )
             )
@@ -256,8 +291,8 @@ class TraktWatchHistoryCsvAdapter(SourceAdapter):
         digest = hashlib.sha256("|".join(str(part) for part in identity).encode("utf-8")).hexdigest()[:24]
         return f"trakt_watch_history_csv:media:{digest}"
 
-    def _edge_id(self, media_source_id: str, watch_source_id: str) -> str:
-        digest = hashlib.sha256("|".join((media_source_id, watch_source_id, "contains")).encode("utf-8")).hexdigest()[:24]
+    def _edge_id(self, media_source_id: str, watch_source_id: str, relation_type: str = "media_contains_watch") -> str:
+        digest = hashlib.sha256("|".join((media_source_id, watch_source_id, relation_type)).encode("utf-8")).hexdigest()[:24]
         return f"trakt-watch-history-csv-contains-{digest}"
 
     def _normalize_identity_text(self, value: Any) -> str:
@@ -276,13 +311,17 @@ class TraktWatchHistoryCsvAdapter(SourceAdapter):
         media_type: str,
         season: int | None,
         episode: int | None,
-        watched_at: datetime,
+        event_at: datetime,
         imdb_id: str,
         tmdb_id: str,
         trakt_id: str,
         urls: dict[str, str],
+        rating: int | None = None,
     ) -> str:
-        parts = [f"Title: {title}", f"Watched at: {watched_at.isoformat()}", f"Type: {media_type}"]
+        label = "Rated at" if rating is not None else "Watched at"
+        parts = [f"Title: {title}", f"{label}: {event_at.isoformat()}", f"Type: {media_type}"]
+        if rating is not None:
+            parts.append(f"Rating: {rating}")
         if year:
             parts.append(f"Year: {year}")
         if season is not None:

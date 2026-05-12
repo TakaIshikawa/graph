@@ -330,6 +330,80 @@ def test_spotify_streaming_history_artist_and_track_aggregates(tmp_path):
     assert len([edge for edge in result.edges if edge.metadata["relation_type"] == "track_contains_play"]) == 2
 
 
+def test_spotify_streaming_history_ingests_podcast_show_and_episode(tmp_path):
+    export = tmp_path / "endsong_0.json"
+    export.write_text(
+        json.dumps(
+            [
+                {
+                    "ts": "2025-01-01T10:00:00Z",
+                    "episode_name": "Episode One",
+                    "episode_show_name": "A Good Show",
+                    "spotify_episode_uri": "spotify:episode:one",
+                    "spotify_show_uri": "spotify:show:good",
+                    "ms_played": 1000,
+                },
+                {
+                    "ts": "2025-01-02T10:00:00Z",
+                    "master_metadata_episode_name": "Episode One",
+                    "master_metadata_show_name": "A Good Show",
+                    "spotify_episode_uri": "spotify:episode:one",
+                    "spotify_show_uri": "spotify:show:good",
+                    "ms_played": 2000,
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = SpotifyStreamingHistoryAdapter(path=str(export)).ingest(
+        entity_types=["play", "podcast_show", "podcast_episode"]
+    )
+
+    plays = [unit for unit in result.units if unit.source_entity_type == "play"]
+    shows = [unit for unit in result.units if unit.source_entity_type == "podcast_show"]
+    episodes = [unit for unit in result.units if unit.source_entity_type == "podcast_episode"]
+    assert len(plays) == 2
+    assert len(shows) == 1
+    assert len(episodes) == 1
+    assert plays[0].title == "Episode One - A Good Show"
+    assert plays[0].metadata["media_kind"] == "podcast"
+    assert shows[0].metadata["show_name"] == "A Good Show"
+    assert shows[0].metadata["play_count"] == 2
+    assert episodes[0].metadata["episode_name"] == "Episode One"
+    assert episodes[0].metadata["total_ms_played"] == 3000
+    assert {edge.metadata["relation_type"] for edge in result.edges} == {
+        "podcast_show_contains_episode",
+        "podcast_episode_contains_play",
+        "podcast_show_contains_play",
+    }
+    assert len([edge for edge in result.edges if edge.metadata["relation_type"] == "podcast_episode_contains_play"]) == 2
+
+
+def test_spotify_streaming_history_podcast_edges_follow_entity_filters(tmp_path):
+    export = tmp_path / "endsong_0.json"
+    export.write_text(
+        json.dumps(
+            [
+                {
+                    "ts": "2025-01-01T10:00:00Z",
+                    "episode_name": "Episode",
+                    "episode_show_name": "Show",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    episode_only = SpotifyStreamingHistoryAdapter(path=str(export)).ingest(entity_types=["podcast_episode"])
+    play_only = SpotifyStreamingHistoryAdapter(path=str(export)).ingest(entity_types=["play"])
+
+    assert [unit.source_entity_type for unit in episode_only.units] == ["podcast_episode"]
+    assert episode_only.edges == []
+    assert [unit.source_entity_type for unit in play_only.units] == ["play"]
+    assert play_only.edges == []
+
+
 def test_spotify_streaming_history_adapter_is_registered():
     assert "spotify_streaming_history" in list_adapters()
     adapter = get_adapter("spotify_streaming_history", path="/tmp/spotify")

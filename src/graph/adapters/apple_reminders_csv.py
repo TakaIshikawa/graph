@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -151,15 +152,19 @@ class AppleRemindersCsvAdapter(SourceAdapter):
 
     def _list_units(self, reminders: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
         grouped: dict[str, list[KnowledgeUnit]] = {}
+        names: dict[str, str] = {}
         for reminder in reminders:
             list_name = str(reminder.metadata.get("list_name") or "").strip()
             if list_name:
-                grouped.setdefault(list_name, []).append(reminder)
+                key = self._normalize_list_name(list_name)
+                names.setdefault(key, list_name)
+                grouped.setdefault(key, []).append(reminder)
 
         now = datetime.now(timezone.utc)
         today = now.date()
         list_units: list[KnowledgeUnit] = []
-        for list_name, list_reminders in grouped.items():
+        for key, list_reminders in grouped.items():
+            list_name = names[key]
             open_count = sum(1 for reminder in list_reminders if reminder.metadata.get("status") == "open")
             completed_count = sum(1 for reminder in list_reminders if reminder.metadata.get("status") == "completed")
             due_dates = [
@@ -167,6 +172,7 @@ class AppleRemindersCsvAdapter(SourceAdapter):
                 for reminder in list_reminders
                 if (due := self._parse_datetime(reminder.metadata.get("due_date"))) is not None
             ]
+            updated_dates = [reminder.updated_at for reminder in list_reminders]
             overdue_count = 0
             for reminder in list_reminders:
                 due = self._parse_datetime(reminder.metadata.get("due_date"))
@@ -186,8 +192,10 @@ class AppleRemindersCsvAdapter(SourceAdapter):
                         "open_count": open_count,
                         "completed_count": completed_count,
                         "overdue_count": overdue_count,
+                        "first_due_date": min(due_dates).isoformat() if due_dates else None,
                         "earliest_due_date": min(due_dates).isoformat() if due_dates else None,
                         "latest_due_date": max(due_dates).isoformat() if due_dates else None,
+                        "last_updated_date": max(updated_dates).isoformat() if updated_dates else None,
                         "source_files": sorted({str(reminder.metadata.get("source_file")) for reminder in list_reminders}),
                     },
                     tags=["reminder-list", list_name],
@@ -198,10 +206,10 @@ class AppleRemindersCsvAdapter(SourceAdapter):
         return list_units
 
     def _contains_edges(self, list_units: list[KnowledgeUnit], reminders: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
-        list_ids = {str(unit.metadata.get("list_name")): unit.source_id for unit in list_units}
+        list_ids = {self._normalize_list_name(str(unit.metadata.get("list_name") or "")): unit.source_id for unit in list_units}
         edges: list[KnowledgeEdge] = []
         for reminder in reminders:
-            list_id = list_ids.get(str(reminder.metadata.get("list_name") or ""))
+            list_id = list_ids.get(self._normalize_list_name(str(reminder.metadata.get("list_name") or "")))
             if not list_id:
                 continue
             edges.append(
@@ -220,8 +228,11 @@ class AppleRemindersCsvAdapter(SourceAdapter):
         return list({edge.id: edge for edge in edges}.values())
 
     def _list_source_id(self, list_name: str) -> str:
-        digest = hashlib.sha256(list_name.strip().lower().encode("utf-8")).hexdigest()[:24]
+        digest = hashlib.sha256(self._normalize_list_name(list_name).encode("utf-8")).hexdigest()[:24]
         return f"apple_reminders_csv:list:{digest}"
+
+    def _normalize_list_name(self, list_name: str) -> str:
+        return " ".join(list_name.strip().casefold().split())
 
     def _edge_id(self, list_source_id: str, reminder_source_id: str) -> str:
         digest = hashlib.sha256("|".join((list_source_id, reminder_source_id, "contains")).encode("utf-8")).hexdigest()[:24]
@@ -239,13 +250,19 @@ class AppleRemindersCsvAdapter(SourceAdapter):
 
     def _first(self, row: dict[str, Any], *keys: str) -> str:
         lowered = {str(key).lower(): value for key, value in row.items()}
+        compact = {self._normalize_field_name(str(key)): value for key, value in row.items()}
         for key in keys:
             value = row.get(key)
             if value is None:
                 value = lowered.get(key.lower())
+            if value is None:
+                value = compact.get(self._normalize_field_name(key))
             if value is not None and str(value).strip():
                 return str(value).strip()
         return ""
+
+    def _normalize_field_name(self, value: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "", value.casefold())
 
     def _parse_bool(self, value: Any) -> bool | None:
         if value is None or value == "":
