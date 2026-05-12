@@ -206,6 +206,67 @@ def test_goodreads_library_ingests_publishers_and_edges_follow_filters(tmp_path)
     assert publisher_only.edges == []
 
 
+def test_goodreads_library_ingests_owned_copy_units(tmp_path):
+    path = tmp_path / "goodreads_library_export.csv"
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=[
+                "Book Id",
+                "Title",
+                "Author",
+                "Condition",
+                "Date Acquired",
+                "Purchase Location",
+                "Format",
+            ],
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "Book Id": "1",
+                "Title": "Owned Book",
+                "Author": "Ada",
+                "Condition": "Very Good",
+                "Date Acquired": "2025/01/05",
+                "Purchase Location": "Local Shop",
+                "Format": "Hardcover",
+            }
+        )
+        writer.writerow({"Book Id": "2", "Title": "Digital Book", "Author": "Grace"})
+
+    result = GoodreadsLibraryAdapter(path=str(path)).ingest(entity_types=["book", "copy"])
+
+    copies = [unit for unit in result.units if unit.source_entity_type == "copy"]
+    assert len(copies) == 1
+    copy = copies[0]
+    book = next(unit for unit in result.units if unit.source_entity_type == "book" and unit.metadata["book_id"] == "1")
+    assert copy.source_id.startswith("goodreads_library:copy:")
+    assert copy.metadata["book_source_id"] == book.source_id
+    assert copy.metadata["condition"] == "Very Good"
+    assert copy.metadata["date_acquired"] == "2025/01/05"
+    assert copy.metadata["purchase_location"] == "Local Shop"
+    assert copy.metadata["format"] == "Hardcover"
+    assert copy.created_at == datetime(2025, 1, 5, tzinfo=timezone.utc)
+    copy_edges = [edge for edge in result.edges if edge.metadata["relation_type"] == "book_contains_copy"]
+    assert len(copy_edges) == 1
+    assert copy_edges[0].from_unit_id == book.source_id
+    assert copy_edges[0].to_unit_id == copy.source_id
+
+
+def test_goodreads_library_copy_edges_follow_entity_filters(tmp_path):
+    path = tmp_path / "goodreads_library_export.csv"
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["Book Id", "Title", "Author", "Condition"])
+        writer.writeheader()
+        writer.writerow({"Book Id": "1", "Title": "Owned Book", "Author": "Ada", "Condition": "Good"})
+
+    copy_only = GoodreadsLibraryAdapter(path=str(path)).ingest(entity_types=["copy"])
+
+    assert [unit.source_entity_type for unit in copy_only.units] == ["copy"]
+    assert copy_only.edges == []
+
+
 def test_goodreads_library_adapter_is_registered():
     assert "goodreads_library" in list_adapters()
     assert get_adapter("goodreads_library", path="/tmp/books.csv").name == "goodreads_library"

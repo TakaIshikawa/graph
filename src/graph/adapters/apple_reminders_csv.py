@@ -95,7 +95,8 @@ class AppleRemindersCsvAdapter(SourceAdapter):
         now = datetime.now(timezone.utc)
         created_at = created or due or completed or now
 
-        priority = self._first(row, "Priority")
+        priority = self._first(row, "Priority", "priority")
+        recurrence = self._recurrence_metadata(row)
         url = self._first(row, "URL", "Url", "Link")
         metadata = {
             "title": title,
@@ -104,6 +105,7 @@ class AppleRemindersCsvAdapter(SourceAdapter):
             "status": status,
             "completed": status == "completed",
             "priority": priority,
+            "recurrence": recurrence,
             "due_date": due.isoformat() if due else None,
             "completion_date": completed.isoformat() if completed else None,
             "created_date": created.isoformat() if created else None,
@@ -119,7 +121,7 @@ class AppleRemindersCsvAdapter(SourceAdapter):
             source_id=self._source_id(row, title, list_name, created_at, due, completed),
             source_entity_type="reminder",
             title=title,
-            content=self._content(title, notes, due, url),
+            content=self._content(title, notes, due, url, recurrence, priority),
             content_type=ContentType.METADATA,
             metadata=metadata,
             tags=tags,
@@ -238,15 +240,48 @@ class AppleRemindersCsvAdapter(SourceAdapter):
         digest = hashlib.sha256("|".join((list_source_id, reminder_source_id, "contains")).encode("utf-8")).hexdigest()[:24]
         return f"apple-reminders-csv-contains-{digest}"
 
-    def _content(self, title: str, notes: str, due: datetime | None, url: str) -> str:
+    def _content(
+        self,
+        title: str,
+        notes: str,
+        due: datetime | None,
+        url: str,
+        recurrence: dict[str, str] | None = None,
+        priority: str = "",
+    ) -> str:
         parts = [title]
         if notes:
             parts.append(notes)
         if due:
             parts.append(f"Due: {due.isoformat()}")
+        if priority:
+            parts.append(f"Priority: {priority}")
+        if recurrence:
+            details = []
+            if recurrence.get("repeat"):
+                details.append(f"repeat {recurrence['repeat']}")
+            if recurrence.get("repeat_interval"):
+                details.append(f"every {recurrence['repeat_interval']}")
+            if recurrence.get("repeat_end"):
+                details.append(f"until {recurrence['repeat_end']}")
+            if details:
+                parts.append(f"Recurrence: {', '.join(details)}")
         if url:
             parts.append(f"URL: {url}")
         return "\n\n".join(parts)
+
+    def _recurrence_metadata(self, row: dict[str, Any]) -> dict[str, str]:
+        repeat = self._first(row, "Repeat", "Repeats", "Recurrence", "Recurrence Rule")
+        interval = self._first(row, "Repeat Interval", "Interval", "Recurrence Interval")
+        repeat_end = self._first(row, "Repeat End", "Repeat End Date", "Recurrence End")
+        frequency = self._first(row, "Repeat Frequency", "Frequency")
+        metadata = {
+            "repeat": repeat,
+            "repeat_interval": interval,
+            "repeat_end": repeat_end,
+            "frequency": frequency,
+        }
+        return {key: value for key, value in metadata.items() if value}
 
     def _first(self, row: dict[str, Any], *keys: str) -> str:
         lowered = {str(key).lower(): value for key, value in row.items()}

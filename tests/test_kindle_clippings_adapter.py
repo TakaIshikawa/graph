@@ -204,7 +204,10 @@ def test_kindle_clippings_ingests_notebook_html_exports(tmp_path):
     book = next(unit for unit in result.units if unit.source_entity_type == "book")
     assert book.metadata["highlight_count"] == 1
     assert book.metadata["note_count"] == 1
-    assert len(result.edges) == 2
+    assert len(result.edges) == 3
+    assert [edge.metadata["relation_type"] for edge in result.edges if edge.metadata["relation_type"] == "note_references_highlight"] == [
+        "note_references_highlight"
+    ]
 
 
 def test_kindle_clippings_directory_discovers_txt_html_and_htm(tmp_path):
@@ -232,3 +235,44 @@ def test_kindle_clippings_adapter_is_registered():
     adapter = get_adapter("kindle_clippings", path="/tmp/My Clippings.txt")
     assert isinstance(adapter, KindleClippingsAdapter)
     assert adapter.name == "kindle_clippings"
+
+
+def test_kindle_clippings_links_notes_to_exact_and_nearby_highlights(tmp_path):
+    clippings = tmp_path / "My Clippings.txt"
+    clippings.write_text(
+        """Shared Book (Author)
+- Your Highlight at location 100-102 | Added on Monday, January 1, 2024 1:00:00 PM
+
+Highlight one.
+==========
+Shared Book (Author)
+- Your Note at location 100-102 | Added on Monday, January 1, 2024 1:01:00 PM
+
+Exact note.
+==========
+Shared Book (Author)
+- Your Highlight at location 200-202 | Added on Monday, January 1, 2024 2:00:00 PM
+
+Highlight two.
+==========
+Shared Book (Author)
+- Your Note at location 204 | Added on Monday, January 1, 2024 2:01:00 PM
+
+Nearby note.
+==========
+Shared Book (Author)
+- Your Note at location 400 | Added on Monday, January 1, 2024 3:01:00 PM
+
+Unmatched note.
+==========
+""",
+        encoding="utf-8",
+    )
+
+    result = KindleClippingsAdapter(path=str(clippings)).ingest(entity_types=["clipping"])
+
+    annotation_edges = [edge for edge in result.edges if edge.metadata["relation_type"] == "note_references_highlight"]
+    assert len(annotation_edges) == 2
+    assert {edge.metadata["match_strategy"] for edge in annotation_edges} == {"exact", "nearby"}
+    assert {edge.metadata["book_title"] for edge in annotation_edges} == {"Shared Book"}
+    assert len([unit for unit in result.units if unit.metadata["clipping_type"] == "note"]) == 3

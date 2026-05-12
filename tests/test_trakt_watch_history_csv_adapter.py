@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from graph.adapters.registry import get_adapter
 from graph.adapters.trakt_watch_history_csv import TraktWatchHistoryCsvAdapter
-from graph.types.enums import SourceProject
+from graph.types.enums import EdgeRelation, SourceProject
 from graph.types.models import SyncState
 
 
@@ -286,3 +286,66 @@ def test_trakt_watch_history_csv_rating_edges_follow_entity_filters(tmp_path):
     assert rating_only.edges == []
     assert {unit.source_entity_type for unit in media_and_rating.units} == {"media", "rating"}
     assert [edge.metadata["relation_type"] for edge in media_and_rating.edges] == ["media_contains_rating"]
+
+
+def test_trakt_watch_history_csv_ingests_show_and_season_aggregates(tmp_path):
+    export = tmp_path / "history.csv"
+    _write_csv(
+        export,
+        [
+            {
+                "watched_at": "2025-01-01T00:00:00Z",
+                "show_title": "Example Show",
+                "episode_title": "Pilot",
+                "year": "2025",
+                "type": "episode",
+                "season": "1",
+                "episode": "1",
+                "trakt_url": "https://trakt.tv/shows/example-show/seasons/1/episodes/1",
+            },
+            {
+                "watched_at": "2025-01-02T00:00:00Z",
+                "show_title": "Example Show",
+                "episode_title": "Second",
+                "year": "2025",
+                "type": "episode",
+                "season": "1",
+                "episode": "2",
+                "trakt_url": "https://trakt.tv/shows/example-show/seasons/1/episodes/2",
+            },
+            {
+                "watched_at": "2025-01-03T00:00:00Z",
+                "title": "Arrival",
+                "year": "2016",
+                "type": "movie",
+            },
+        ],
+    )
+
+    result = TraktWatchHistoryCsvAdapter(path=str(export)).ingest(entity_types=["show", "season", "watch"])
+
+    shows = [unit for unit in result.units if unit.source_entity_type == "show"]
+    seasons = [unit for unit in result.units if unit.source_entity_type == "season"]
+    assert len(shows) == 1
+    assert len(seasons) == 1
+    assert shows[0].metadata["show_title"] == "Example Show"
+    assert shows[0].metadata["show_url"] == "https://trakt.tv/shows/example-show"
+    assert shows[0].metadata["watch_count"] == 2
+    assert seasons[0].metadata["season"] == 1
+    assert seasons[0].metadata["episode_numbers"] == [1, 2]
+    assert {edge.metadata["relation_type"] for edge in result.edges} == {
+        "show_contains_season",
+        "season_contains_watch",
+    }
+    assert len([edge for edge in result.edges if edge.metadata["relation_type"] == "season_contains_watch"]) == 2
+    assert all(edge.relation == EdgeRelation.CONTAINS for edge in result.edges)
+
+
+def test_trakt_watch_history_csv_movie_rows_do_not_create_seasons(tmp_path):
+    export = tmp_path / "history.csv"
+    _write_csv(export, [{"watched_at": "2025-01-01T00:00:00Z", "title": "Arrival", "type": "movie"}])
+
+    result = TraktWatchHistoryCsvAdapter(path=str(export)).ingest(entity_types=["show", "season", "watch"])
+
+    assert [unit.source_entity_type for unit in result.units] == ["watch"]
+    assert result.edges == []

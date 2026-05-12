@@ -215,7 +215,7 @@ def test_spotify_streaming_history_entity_type_filtering(tmp_path):
         encoding="utf-8",
     )
 
-    result = SpotifyStreamingHistoryAdapter(path=str(export)).ingest(entity_types=["album"])
+    result = SpotifyStreamingHistoryAdapter(path=str(export)).ingest(entity_types=["genre"])
 
     assert result.units == []
     assert result.edges == []
@@ -328,6 +328,91 @@ def test_spotify_streaming_history_artist_and_track_aggregates(tmp_path):
         "track_contains_play",
     }
     assert len([edge for edge in result.edges if edge.metadata["relation_type"] == "track_contains_play"]) == 2
+
+
+def test_spotify_streaming_history_album_aggregates_and_edges(tmp_path):
+    export = tmp_path / "endsong_0.json"
+    export.write_text(
+        json.dumps(
+            [
+                {
+                    "ts": "2025-01-01T10:00:00Z",
+                    "master_metadata_track_name": "One",
+                    "master_metadata_album_artist_name": "Artist A",
+                    "master_metadata_album_album_name": "Album 1",
+                    "spotify_track_uri": "spotify:track:one",
+                    "spotify_album_uri": "spotify:album:album1",
+                    "ms_played": 100,
+                },
+                {
+                    "ts": "2025-01-02T10:00:00Z",
+                    "master_metadata_track_name": "Two",
+                    "master_metadata_album_artist_name": "Artist A",
+                    "master_metadata_album_album_name": "Album 1",
+                    "spotify_track_uri": "spotify:track:two",
+                    "spotify_album_uri": "spotify:album:album1",
+                    "ms_played": 200,
+                },
+                {
+                    "ts": "2025-01-03T10:00:00Z",
+                    "master_metadata_track_name": "One",
+                    "master_metadata_album_artist_name": "Artist A",
+                    "master_metadata_album_album_name": "Album 1",
+                    "spotify_track_uri": "spotify:track:one",
+                    "spotify_album_uri": "spotify:album:album1",
+                    "ms_played": 300,
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = SpotifyStreamingHistoryAdapter(path=str(export)).ingest(entity_types=["album", "track", "play"])
+
+    albums = [unit for unit in result.units if unit.source_entity_type == "album"]
+    assert len(albums) == 1
+    album = albums[0]
+    assert album.title == "Album 1 - Artist A"
+    assert album.source_id.startswith("spotify_streaming_history:album:")
+    assert album.metadata["spotify_album_uri"] == "spotify:album:album1"
+    assert album.metadata["play_count"] == 3
+    assert album.metadata["track_names"] == ["One", "Two"]
+    assert len([edge for edge in result.edges if edge.metadata["relation_type"] == "album_contains_track"]) == 2
+    assert len([edge for edge in result.edges if edge.metadata["relation_type"] == "album_contains_play"]) == 3
+
+
+def test_spotify_streaming_history_album_fallback_identity_uses_album_and_artist(tmp_path):
+    export = tmp_path / "endsong_0.json"
+    export.write_text(
+        json.dumps(
+            [
+                {
+                    "ts": "2025-01-01T10:00:00Z",
+                    "master_metadata_track_name": "One",
+                    "master_metadata_album_artist_name": "Artist A",
+                    "master_metadata_album_album_name": "Shared Name",
+                },
+                {
+                    "ts": "2025-01-02T10:00:00Z",
+                    "master_metadata_track_name": "Two",
+                    "master_metadata_album_artist_name": "Artist A",
+                    "master_metadata_album_album_name": "shared name",
+                },
+                {
+                    "ts": "2025-01-03T10:00:00Z",
+                    "master_metadata_track_name": "Other",
+                    "master_metadata_album_artist_name": "Artist B",
+                    "master_metadata_album_album_name": "Shared Name",
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    albums = SpotifyStreamingHistoryAdapter(path=str(export)).ingest(entity_types=["album"]).units
+
+    assert len(albums) == 2
+    assert sorted(unit.metadata["play_count"] for unit in albums) == [1, 2]
 
 
 def test_spotify_streaming_history_ingests_podcast_show_and_episode(tmp_path):
