@@ -95,6 +95,7 @@ from graph.export.unit_csv import export_units_to_csv
 from graph.export.unit_date_coverage_markdown import export_unit_date_coverage_markdown
 from graph.export.unit_evidence_markdown import export_unit_evidence_markdown
 from graph.export.unit_markdown_table import export_units_to_markdown_table
+from graph.export.unit_source_timeline_csv import export_unit_source_timeline_csv
 from graph.export.unit_source_diversity_csv import export_unit_source_diversity_csv
 from graph.export.unit_yaml import export_units_to_yaml
 from graph.export.units_jsonl import export_units_to_jsonl
@@ -211,6 +212,7 @@ __all__ = [
     "export_unit_evidence_markdown",
     "export_unit_schema_inventory",
     "export_unit_source_diversity_csv",
+    "export_unit_source_timeline_csv",
     "export_units_to_anki_tsv",
     "export_units_to_atom",
     "export_units_to_csv",
