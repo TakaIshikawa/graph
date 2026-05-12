@@ -345,6 +345,8 @@ class GoodreadsLibraryAdapter(SourceAdapter):
         units: list[KnowledgeUnit] = []
         for shelf, shelf_books in grouped.items():
             ratings = [rating for book in shelf_books if (rating := book.metadata.get("rating")) is not None]
+            book_source_ids = sorted(book.source_id for book in shelf_books)
+            authors = sorted({str(book.metadata.get("author") or "") for book in shelf_books if book.metadata.get("author")})
             date_added = [
                 parsed
                 for book in shelf_books
@@ -366,12 +368,16 @@ class GoodreadsLibraryAdapter(SourceAdapter):
                     metadata={
                         "shelf": shelf,
                         "book_count": len(shelf_books),
+                        "book_source_ids": book_source_ids,
+                        "authors": authors,
                         "rating_count": len(ratings),
                         "average_rating": round(sum(ratings) / len(ratings), 2) if ratings else None,
                         "read_count": self._shelf_status_count(shelf_books, "read"),
                         "to_read_count": self._shelf_status_count(shelf_books, "to-read"),
                         "currently_reading_count": self._shelf_status_count(shelf_books, "currently-reading"),
                         "reviewed_count": sum(1 for book in shelf_books if book.metadata.get("review")),
+                        "first_read_at": min(date_read).isoformat() if date_read else None,
+                        "latest_read_at": max(date_read).isoformat() if date_read else None,
                         "first_date_added": min(date_added).isoformat() if date_added else "",
                         "latest_date_read": max(date_read).isoformat() if date_read else "",
                         "top_authors": self._top_authors(shelf_books),
