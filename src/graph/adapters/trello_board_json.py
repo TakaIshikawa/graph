@@ -20,14 +20,17 @@ class TrelloBoardJsonAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["card"]
+        return ["card", "check_item"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
 
     def ingest(self, *, since: SyncState | None = None, entity_types: list[str] | None = None) -> IngestResult:
         result = IngestResult()
-        if entity_types and "card" not in entity_types:
+        requested_types = set(entity_types or self.entity_types)
+        include_cards = "card" in requested_types
+        include_check_items = "check_item" in requested_types
+        if not include_cards and not include_check_items:
             return result
         sync_at = self._ensure_utc(since.last_sync_at) if since else None
         for path in self._iter_paths():
@@ -46,8 +49,16 @@ class TrelloBoardJsonAdapter(SourceAdapter):
                     continue
                 if sync_at and unit.updated_at <= sync_at:
                     continue
-                result.units.append(unit)
-                result.edges.extend(self._edges_for_unit(unit))
+                check_item_units = self._check_item_units(card, context, path.name, unit)
+                if include_cards:
+                    result.units.append(unit)
+                    result.edges.extend(self._edges_for_unit(unit))
+                if include_check_items:
+                    result.units.extend(check_item_units)
+                if include_cards and include_check_items:
+                    result.edges.extend(
+                        self._check_item_edge(unit, check_item_unit) for check_item_unit in check_item_units
+                    )
         result.units.sort(key=lambda unit: unit.source_id)
         result.edges.sort(key=lambda edge: edge.id)
         return result
@@ -109,6 +120,68 @@ class TrelloBoardJsonAdapter(SourceAdapter):
             updated_at=updated or created or now,
         )
 
+    def _check_item_units(
+        self,
+        card: dict[str, Any],
+        context: dict[str, dict[str, Any]],
+        source_file: str,
+        card_unit: KnowledgeUnit,
+    ) -> list[KnowledgeUnit]:
+        card_id = self._text(card.get("id"))
+        card_name = self._text(card.get("name"))
+        card_url = self._text(card.get("url") or card.get("shortUrl"))
+        list_name = card_unit.metadata.get("list_name", "")
+        labels = card_unit.metadata.get("labels", [])
+        created = card_unit.created_at
+        updated = card_unit.updated_at
+        units: list[KnowledgeUnit] = []
+
+        for checklist in self._card_checklists(card.get("idChecklists", []), context["checklists"]):
+            checklist_id = self._text(checklist.get("id"))
+            checklist_name = self._lookup_name(checklist)
+            check_items = checklist.get("checkItems", [])
+            if not isinstance(check_items, list):
+                continue
+            for index, check_item in enumerate(check_items):
+                if not isinstance(check_item, dict):
+                    continue
+                item_id = self._text(check_item.get("id"))
+                item_name = self._text(check_item.get("name"))
+                if not item_id and not item_name:
+                    continue
+                member_ids = [self._text(member_id) for member_id in check_item.get("idMembers", [])]
+                metadata = {
+                    "checklist_id": checklist_id,
+                    "checklist_name": checklist_name,
+                    "item_id": item_id,
+                    "item_name": item_name,
+                    "state": self._text(check_item.get("state")),
+                    "due": self._text(check_item.get("due")),
+                    "dueReminder": self._text(check_item.get("dueReminder")),
+                    "member_ids": [member_id for member_id in member_ids if member_id],
+                    "card_id": card_id,
+                    "card_name": card_name,
+                    "card_url": card_url,
+                    "list_name": list_name,
+                    "labels": labels,
+                    "source_file": source_file,
+                }
+                units.append(
+                    KnowledgeUnit(
+                        source_project=SourceProject.TRELLO_BOARD_JSON,
+                        source_id=self._check_item_source_id(card_id, checklist_id, item_id, item_name, index),
+                        source_entity_type="check_item",
+                        title=item_name or f"Trello checklist item {item_id}",
+                        content=self._check_item_content(metadata),
+                        content_type=ContentType.ARTIFACT,
+                        metadata={key: value for key, value in metadata.items() if value not in ("", None, [])},
+                        tags=list(dict.fromkeys(["trello", "check_item", *labels])),
+                        created_at=created,
+                        updated_at=updated,
+                    )
+                )
+        return units
+
     def _edges_for_unit(self, unit: KnowledgeUnit) -> list[KnowledgeEdge]:
         edges: list[KnowledgeEdge] = []
         for kind, values in (
@@ -136,10 +209,7 @@ class TrelloBoardJsonAdapter(SourceAdapter):
 
     def _checklists(self, checklist_ids: list[Any], known_checklists: dict[str, Any]) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
-        for checklist_id in checklist_ids:
-            checklist = known_checklists.get(str(checklist_id))
-            if not isinstance(checklist, dict):
-                continue
+        for checklist in self._card_checklists(checklist_ids, known_checklists):
             checks = checklist.get("checkItems", [])
             items.append(
                 {
@@ -149,6 +219,16 @@ class TrelloBoardJsonAdapter(SourceAdapter):
                 }
             )
         return items
+
+    def _card_checklists(self, checklist_ids: list[Any], known_checklists: dict[str, Any]) -> list[dict[str, Any]]:
+        if not isinstance(checklist_ids, list):
+            return []
+        checklists: list[dict[str, Any]] = []
+        for checklist_id in checklist_ids:
+            checklist = known_checklists.get(str(checklist_id))
+            if isinstance(checklist, dict):
+                checklists.append(checklist)
+        return checklists
 
     def _content(self, name: str, metadata: dict[str, Any]) -> str:
         parts = [name, metadata.get("description", "")]
@@ -161,9 +241,48 @@ class TrelloBoardJsonAdapter(SourceAdapter):
             parts.append(f"Members: {', '.join(metadata['members'])}")
         return "\n".join(item for item in parts if item)
 
+    def _check_item_content(self, metadata: dict[str, Any]) -> str:
+        parts = [metadata.get("item_name", "")]
+        for key, label in (
+            ("state", "State"),
+            ("checklist_name", "Checklist"),
+            ("card_name", "Card"),
+            ("list_name", "List"),
+            ("due", "Due"),
+            ("card_url", "URL"),
+        ):
+            if metadata.get(key):
+                parts.append(f"{label}: {metadata[key]}")
+        if metadata.get("labels"):
+            parts.append(f"Labels: {', '.join(metadata['labels'])}")
+        if metadata.get("member_ids"):
+            parts.append(f"Member IDs: {', '.join(metadata['member_ids'])}")
+        return "\n".join(item for item in parts if item)
+
+    def _check_item_edge(self, card_unit: KnowledgeUnit, check_item_unit: KnowledgeUnit) -> KnowledgeEdge:
+        return KnowledgeEdge(
+            id=self._source_edge_id(card_unit.source_id, check_item_unit.source_id, "check_item"),
+            from_unit_id=card_unit.source_id,
+            to_unit_id=check_item_unit.source_id,
+            relation=EdgeRelation.CONTAINS,
+            source=EdgeSource.SOURCE,
+            metadata={
+                "kind": "check_item",
+                "value": check_item_unit.metadata.get("item_name", ""),
+                "relation_type": "trello_card_check_item",
+                "card_id": card_unit.metadata.get("card_id", ""),
+                "checklist_id": check_item_unit.metadata.get("checklist_id", ""),
+                "item_id": check_item_unit.metadata.get("item_id", ""),
+            },
+        )
+
     def _edge(self, source_id: str, target: str, relation: EdgeRelation, kind: str, value: str) -> KnowledgeEdge:
         digest = hashlib.sha256(f"{source_id}|{relation}|{target}".encode("utf-8")).hexdigest()[:24]
         return KnowledgeEdge(id=f"trello_board_json:{digest}", from_unit_id=source_id, to_unit_id=target, relation=relation, source=EdgeSource.SOURCE, metadata={"kind": kind, "value": value})
+
+    def _source_edge_id(self, source_id: str, target: str, kind: str) -> str:
+        digest = hashlib.sha256(f"{source_id}|{kind}|{target}".encode("utf-8")).hexdigest()[:24]
+        return f"trello_board_json:{digest}"
 
     def _lookup_name(self, item: Any) -> str:
         return self._text(item.get("name") if isinstance(item, dict) else item)
@@ -176,6 +295,18 @@ class TrelloBoardJsonAdapter(SourceAdapter):
     def _source_id(self, *parts: str) -> str:
         digest = hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:24]
         return f"trello_board_json:{digest}"
+
+    def _check_item_source_id(
+        self,
+        card_id: str,
+        checklist_id: str,
+        item_id: str,
+        item_name: str,
+        index: int,
+    ) -> str:
+        if card_id and checklist_id and item_id:
+            return f"trello_board_json:{card_id}:check_item:{checklist_id}:{item_id}"
+        return self._source_id(card_id, checklist_id, item_id, item_name, str(index))
 
     def _parse_datetime(self, value: Any) -> datetime | None:
         text = self._text(value)
