@@ -90,3 +90,77 @@ def test_storygraph_reading_history_csv_source_ids_are_deterministic(tmp_path):
     second = StoryGraphReadingHistoryCsvAdapter(path=str(path)).ingest().units[0]
 
     assert first.source_id == second.source_id
+
+
+def test_storygraph_reading_history_csv_adds_page_pace_metadata(tmp_path):
+    path = tmp_path / "storygraph.csv"
+    _write_csv(
+        path,
+        [
+            {
+                "Title": "Fast Book",
+                "Authors": "Ada",
+                "Date Started": "2026-05-01",
+                "Date Finished": "2026-05-07",
+                "Date Read": "2026-05-07",
+                "Pages": "350",
+            }
+        ],
+    )
+
+    unit = StoryGraphReadingHistoryCsvAdapter(path=str(path)).ingest().units[0]
+
+    assert unit.metadata["started_at"] == "2026-05-01T00:00:00+00:00"
+    assert unit.metadata["finished_at"] == "2026-05-07T00:00:00+00:00"
+    assert unit.metadata["reading_days"] == 7
+    assert unit.metadata["pages_per_day"] == 50.0
+    assert unit.metadata["completion_bucket"] == "week"
+
+
+def test_storygraph_reading_history_csv_adds_audio_pace_metadata(tmp_path):
+    path = tmp_path / "storygraph.csv"
+    _write_csv(
+        path,
+        [
+            {
+                "Title": "Audio Book",
+                "Started": "2026-05-01",
+                "Finished": "2026-05-01",
+                "Audiobook Duration": "10 hours",
+            }
+        ],
+    )
+
+    unit = StoryGraphReadingHistoryCsvAdapter(path=str(path)).ingest().units[0]
+
+    assert unit.metadata["duration_minutes"] == 600
+    assert unit.metadata["reading_days"] == 1
+    assert unit.metadata["minutes_per_day"] == 600.0
+    assert unit.metadata["completion_bucket"] == "same_day"
+
+
+def test_storygraph_reading_history_csv_pace_buckets_and_invalid_numbers(tmp_path):
+    path = tmp_path / "storygraph.csv"
+    _write_csv(
+        path,
+        [
+            {
+                "Title": "Long Book",
+                "Date Started": "2026-01-01",
+                "Date Finished": "2026-02-15",
+                "Pages": "not numeric",
+                "Duration": "unknown",
+            },
+            {"Title": "Unknown Pace", "Pages": "200"},
+        ],
+    )
+
+    result = StoryGraphReadingHistoryCsvAdapter(path=str(path)).ingest()
+    by_title = {unit.title: unit for unit in result.units}
+
+    assert by_title["Long Book"].metadata["reading_days"] == 46
+    assert by_title["Long Book"].metadata["completion_bucket"] == "long_read"
+    assert by_title["Long Book"].metadata["pages"] is None
+    assert "pages_per_day" not in by_title["Long Book"].metadata
+    assert by_title["Unknown Pace"].metadata["completion_bucket"] == "unknown"
+    assert "reading_days" not in by_title["Unknown Pace"].metadata

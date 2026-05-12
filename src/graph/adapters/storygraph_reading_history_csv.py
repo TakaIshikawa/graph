@@ -76,23 +76,41 @@ class StoryGraphReadingHistoryCsvAdapter(SourceAdapter):
         authors = self._split_people(self._first(row, "Authors", "Author", "authors", "author"))
         isbn = self._clean_isbn(self._first(row, "ISBN", "isbn"))
         isbn13 = self._clean_isbn(self._first(row, "ISBN13", "ISBN/UID", "isbn13", "isbn_13"))
+        started_text = self._first(row, "Date Started", "Started", "Started At", "started_at", "start_date")
+        finished_text = self._first(row, "Date Finished", "Finished", "Finished At", "finished_at", "finish_date")
         date_read_text = self._first(row, "Date Read", "Last Date Read", "Read Date", "date_read", "date read")
         updated_text = self._first(row, "Updated At", "Last Updated", "Date Added", "updated_at", "date_added")
+        started_at = self._parse_datetime(started_text)
+        finished_at = self._parse_datetime(finished_text) or self._parse_datetime(date_read_text)
         date_read = self._parse_datetime(date_read_text)
         updated_at = self._parse_datetime(updated_text) or date_read
         created_at = date_read or updated_at or datetime.now(timezone.utc)
         rating = self._parse_float(self._first(row, "Star Rating", "Rating", "My Rating", "star_rating", "rating"))
         pages = self._parse_int(self._first(row, "Pages", "Number of Pages", "pages"))
+        minutes = self._parse_duration_minutes(
+            self._first(
+                row,
+                "Audiobook Duration",
+                "Audio Duration",
+                "Duration",
+                "Duration Minutes",
+                "Minutes",
+                "audiobook_duration",
+            )
+        )
         read_count = self._parse_int(self._first(row, "Read Count", "read_count", "Times Read"))
         moods = self._split_list(self._first(row, "Moods", "moods"))
         shelves = self._split_list(self._first(row, "Tags", "Shelves", "Bookshelves", "tags", "shelves"))
         review = self._first(row, "Review", "My Review", "review", "review_text")
+        pace_metadata = self._pace_metadata(started_at, finished_at, pages, minutes)
 
         metadata = {
             "title": title,
             "authors": authors,
             "isbn": isbn,
             "isbn13": isbn13,
+            "started_at": started_at.isoformat() if started_at else "",
+            "finished_at": finished_at.isoformat() if finished_at else "",
             "date_read": date_read.isoformat() if date_read else "",
             "read_count": read_count,
             "rating": rating,
@@ -100,6 +118,8 @@ class StoryGraphReadingHistoryCsvAdapter(SourceAdapter):
             "tags": shelves,
             "shelves": shelves,
             "pages": pages,
+            "duration_minutes": minutes,
+            **pace_metadata,
             "review": review,
             "source_file": str(path),
             "row": dict(row),
@@ -204,6 +224,53 @@ class StoryGraphReadingHistoryCsvAdapter(SourceAdapter):
             return float(value)
         except ValueError:
             return None
+
+    def _parse_duration_minutes(self, value: str) -> int | None:
+        if not value:
+            return None
+        text = value.strip().lower().replace(",", "")
+        if re.fullmatch(r"\d+(?::\d{1,2}){1,2}", text):
+            parts = [int(part) for part in text.split(":")]
+            if len(parts) == 2:
+                return parts[0] * 60 + parts[1]
+            return parts[0] * 60 + parts[1] + round(parts[2] / 60)
+        match = re.search(r"\d+(?:\.\d+)?", text)
+        if not match:
+            return None
+        number = float(match.group(0))
+        if "hour" in text or re.search(r"\bhrs?\b", text):
+            return int(round(number * 60))
+        return int(round(number))
+
+    def _pace_metadata(
+        self,
+        started_at: datetime | None,
+        finished_at: datetime | None,
+        pages: int | None,
+        minutes: int | None,
+    ) -> dict[str, Any]:
+        reading_days = None
+        if started_at and finished_at:
+            reading_days = max(1, (finished_at.date() - started_at.date()).days + 1)
+        metadata: dict[str, Any] = {"completion_bucket": self._completion_bucket(reading_days)}
+        if reading_days is not None:
+            metadata["reading_days"] = reading_days
+            if pages is not None and pages > 0:
+                metadata["pages_per_day"] = round(pages / reading_days, 2)
+            if minutes is not None and minutes > 0:
+                metadata["minutes_per_day"] = round(minutes / reading_days, 2)
+        return metadata
+
+    def _completion_bucket(self, reading_days: int | None) -> str:
+        if reading_days is None:
+            return "unknown"
+        if reading_days <= 1:
+            return "same_day"
+        if reading_days <= 7:
+            return "week"
+        if reading_days <= 31:
+            return "month"
+        return "long_read"
 
     def _parse_datetime(self, value: str) -> datetime | None:
         if not value:
