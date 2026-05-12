@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class SteamLibraryCsvAdapter(SourceAdapter):
@@ -21,7 +21,7 @@ class SteamLibraryCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["game"]
+        return ["game", "genre"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -33,11 +33,12 @@ class SteamLibraryCsvAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        if entity_types and "game" not in entity_types:
+        allowed_types = set(entity_types or self.entity_types)
+        if not allowed_types.intersection(self.entity_types):
             return result
         sync_at = self._ensure_utc(since.last_sync_at) if since else None
 
-        units: list[KnowledgeUnit] = []
+        game_units: list[KnowledgeUnit] = []
         for path in self._iter_paths():
             try:
                 rows = self._read_rows(path)
@@ -49,9 +50,17 @@ class SteamLibraryCsvAdapter(SourceAdapter):
                     continue
                 if sync_at and unit.updated_at <= sync_at:
                     continue
-                units.append(unit)
+                game_units.append(unit)
 
-        result.units.extend(sorted(units, key=lambda unit: unit.source_id))
+        genre_units = self._genre_units(game_units)
+        if "game" in allowed_types:
+            result.units.extend(game_units)
+        if "genre" in allowed_types:
+            result.units.extend(genre_units)
+        if {"game", "genre"}.issubset(allowed_types):
+            result.edges.extend(self._genre_edges(genre_units, game_units))
+        result.units.sort(key=lambda unit: unit.source_id)
+        result.edges.sort(key=lambda edge: edge.id)
         return result
 
     def _iter_paths(self) -> list[Path]:
@@ -90,6 +99,7 @@ class SteamLibraryCsvAdapter(SourceAdapter):
             "last_played": last_played.isoformat() if last_played else last_played_text,
             "store_url": store_url,
             "platform": platform,
+            "genres": self._genre_values(row),
             "source_file": source_file,
             "row": dict(row),
         }
@@ -126,12 +136,82 @@ class SteamLibraryCsvAdapter(SourceAdapter):
 
     def _tags(self, row: dict[str, Any]) -> list[str]:
         tags = ["steam", "game"]
-        for key in ("tags", "Tags", "categories", "Categories", "genres", "Genres"):
-            for value in re.split(r"[,;|]", self._first(row, key)):
-                tag = value.strip().lower()
-                if tag and tag not in tags:
-                    tags.append(tag)
+        for tag in self._genre_values(row):
+            if tag not in tags:
+                tags.append(tag)
         return tags
+
+    def _genre_values(self, row: dict[str, Any]) -> list[str]:
+        values: list[str] = []
+        for key in ("Genres", "genres", "Categories", "categories", "Tags", "tags"):
+            for value in re.split(r"[,;|]", self._first(row, key)):
+                tag = " ".join(value.strip().casefold().split())
+                if tag and tag not in values:
+                    values.append(tag)
+        return values
+
+    def _genre_units(self, games: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        for game in games:
+            for genre in game.metadata.get("genres") or []:
+                grouped.setdefault(str(genre), []).append(game)
+
+        units: list[KnowledgeUnit] = []
+        for genre, genre_games in sorted(grouped.items()):
+            playtimes = [value for game in genre_games if (value := game.metadata.get("playtime_minutes")) is not None]
+            last_played = [
+                parsed
+                for game in genre_games
+                if (parsed := self._parse_datetime(game.metadata.get("last_played"))) is not None
+            ]
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.STEAM_LIBRARY_CSV,
+                    source_id=self._genre_source_id(genre),
+                    source_entity_type="genre",
+                    title=genre,
+                    content=f"Steam genre: {genre}\nGames: {len(genre_games)}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "genre": genre,
+                        "game_count": len(genre_games),
+                        "total_playtime_minutes": sum(playtimes),
+                        "game_source_ids": sorted(game.source_id for game in genre_games),
+                        "app_ids": sorted(str(game.metadata.get("app_id")) for game in genre_games if game.metadata.get("app_id")),
+                        "last_played_at": max(last_played).isoformat() if last_played else None,
+                        "source_files": sorted({str(game.metadata.get("source_file")) for game in genre_games if game.metadata.get("source_file")}),
+                    },
+                    tags=["steam", "genre", genre],
+                    created_at=min(game.created_at for game in genre_games),
+                    updated_at=max(game.updated_at for game in genre_games),
+                )
+            )
+        return units
+
+    def _genre_edges(self, genres: list[KnowledgeUnit], games: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        genre_ids = {str(genre.metadata.get("genre")): genre.source_id for genre in genres}
+        edges: list[KnowledgeEdge] = []
+        for game in games:
+            for genre in game.metadata.get("genres") or []:
+                genre_id = genre_ids.get(str(genre))
+                if not genre_id:
+                    continue
+                digest = hashlib.sha256("|".join((genre_id, game.source_id, "genre_contains_game")).encode("utf-8")).hexdigest()[:24]
+                edges.append(
+                    KnowledgeEdge(
+                        id=f"steam-library-csv-genre-contains-{digest}",
+                        from_unit_id=genre_id,
+                        to_unit_id=game.source_id,
+                        relation=EdgeRelation.CONTAINS,
+                        source=EdgeSource.SOURCE,
+                        metadata={"source_project": SourceProject.STEAM_LIBRARY_CSV.value, "relation_type": "genre_contains_game"},
+                    )
+                )
+        return edges
+
+    def _genre_source_id(self, genre: str) -> str:
+        digest = hashlib.sha256(genre.encode("utf-8")).hexdigest()[:24]
+        return f"steam_library_csv:genre:{digest}"
 
     def _first(self, row: dict[str, Any], *keys: str) -> str:
         lowered = {str(key).casefold(): value for key, value in row.items()}

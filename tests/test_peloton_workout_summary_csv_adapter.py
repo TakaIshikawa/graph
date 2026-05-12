@@ -40,7 +40,7 @@ def test_peloton_workout_summary_csv_filters_since_and_entity_types(tmp_path):
     )
 
     since = SyncState(source_project="peloton_workout_summary_csv", source_entity_type="workout", last_sync_at=datetime(2026, 5, 1, tzinfo=timezone.utc))
-    result = PelotonWorkoutSummaryCsvAdapter(path=str(export)).ingest(since=since)
+    result = PelotonWorkoutSummaryCsvAdapter(path=str(export)).ingest(since=since, entity_types=["workout"])
 
     assert [unit.title for unit in result.units] == ["New Ride"]
     assert PelotonWorkoutSummaryCsvAdapter(path=str(export)).ingest(entity_types=["class"]).units == []
@@ -58,3 +58,35 @@ def test_peloton_workout_summary_csv_fallback_source_id_is_stable(tmp_path):
 
     assert first.source_id == second.source_id
     assert first.source_id.startswith("peloton_workout_summary_csv:")
+
+
+def test_peloton_workout_summary_csv_emits_month_aggregates_and_edges(tmp_path):
+    export = tmp_path / "summary.csv"
+    export.write_text(
+        "Workout ID,Start Time,Class Title,Instructor,Discipline,Duration,Output,Distance,Calories\n"
+        "wo-1,2026-05-01T09:00:00Z,Ride,Ada,Cycling,30 min,0,10,0\n"
+        "wo-2,2026-05-03T09:00:00Z,Run,Bob,Running,20 min,,3,200\n"
+        "wo-3,2026-06-01T09:00:00Z,Yoga,Ada,Yoga,,,,\n",
+        encoding="utf-8",
+    )
+
+    result = PelotonWorkoutSummaryCsvAdapter(path=str(export)).ingest(entity_types=["workout", "workout_month"])
+
+    assert PelotonWorkoutSummaryCsvAdapter(path=str(export)).entity_types == ["workout", "workout_month"]
+    months = sorted((unit for unit in result.units if unit.source_entity_type == "workout_month"), key=lambda unit: unit.metadata["month"])
+    assert [month.metadata["month"] for month in months] == ["2026-05", "2026-06"]
+    may = months[0]
+    may_workouts = [unit for unit in result.units if unit.source_entity_type == "workout" and unit.created_at.month == 5]
+    assert may.metadata["workout_count"] == 2
+    assert may.metadata["total_duration_seconds"] == 3000
+    assert may.metadata["total_output"] == 0.0
+    assert may.metadata["total_distance"] == 13.0
+    assert may.metadata["total_calories"] == 200
+    assert may.metadata["disciplines"] == ["Cycling", "Running"]
+    assert may.metadata["instructors"] == ["Ada", "Bob"]
+    assert may.metadata["workout_source_ids"] == sorted(unit.source_id for unit in may_workouts)
+    assert len(result.edges) == 3
+
+    month_only = PelotonWorkoutSummaryCsvAdapter(path=str(export)).ingest(entity_types=["workout_month"])
+    assert {unit.source_entity_type for unit in month_only.units} == {"workout_month"}
+    assert month_only.edges == []

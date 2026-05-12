@@ -8,8 +8,8 @@ from typing import Any
 
 from graph.adapters._personal_exports import clean_metadata, digest_source_id, ensure_utc, first, iter_paths, parse_datetime, parse_duration_seconds, parse_float, parse_int, read_csv_rows
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class PelotonWorkoutSummaryCsvAdapter(SourceAdapter):
@@ -19,17 +19,19 @@ class PelotonWorkoutSummaryCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["workout"]
+        return ["workout", "workout_month"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
 
     def ingest(self, *, since: SyncState | None = None, entity_types: list[str] | None = None) -> IngestResult:
         result = IngestResult()
-        if entity_types and "workout" not in entity_types:
+        allowed_types = set(entity_types or self.entity_types)
+        if not allowed_types.intersection(self.entity_types):
             return result
 
         sync_at = ensure_utc(since.last_sync_at) if since else None
+        workout_units: list[KnowledgeUnit] = []
         for path in iter_paths(self.path, {".csv"}):
             try:
                 rows = read_csv_rows(path)
@@ -41,9 +43,17 @@ class PelotonWorkoutSummaryCsvAdapter(SourceAdapter):
                     continue
                 if sync_at and unit.created_at <= sync_at:
                     continue
-                result.units.append(unit)
+                workout_units.append(unit)
 
+        month_units = self._month_units(workout_units)
+        if "workout" in allowed_types:
+            result.units.extend(workout_units)
+        if "workout_month" in allowed_types:
+            result.units.extend(month_units)
+        if {"workout", "workout_month"}.issubset(allowed_types):
+            result.edges.extend(self._month_edges(month_units, workout_units))
         result.units.sort(key=lambda unit: unit.source_id)
+        result.edges.sort(key=lambda edge: edge.id)
         return result
 
     def _unit(self, row: dict[str, Any], source_file: str) -> KnowledgeUnit | None:
@@ -89,6 +99,66 @@ class PelotonWorkoutSummaryCsvAdapter(SourceAdapter):
         if workout_id:
             return digest_source_id("peloton_workout_summary_csv", workout_id)
         return digest_source_id("peloton_workout_summary_csv", start_time.isoformat() if start_time else "", class_title)
+
+    def _month_units(self, workouts: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        for workout in workouts:
+            month = workout.created_at.strftime("%Y-%m")
+            grouped.setdefault(month, []).append(workout)
+
+        units: list[KnowledgeUnit] = []
+        for month, month_workouts in sorted(grouped.items()):
+            durations = [value for workout in month_workouts if (value := workout.metadata.get("duration_seconds")) is not None]
+            outputs = [value for workout in month_workouts if (value := workout.metadata.get("output")) is not None]
+            distances = [value for workout in month_workouts if (value := workout.metadata.get("distance")) is not None]
+            calories = [value for workout in month_workouts if (value := workout.metadata.get("calories")) is not None]
+            metadata = {
+                "month": month,
+                "workout_count": len(month_workouts),
+                "total_duration_seconds": sum(durations),
+                "total_output": sum(outputs),
+                "total_distance": sum(distances),
+                "total_calories": sum(calories),
+                "disciplines": sorted({str(workout.metadata.get("discipline")) for workout in month_workouts if workout.metadata.get("discipline")}),
+                "instructors": sorted({str(workout.metadata.get("instructor")) for workout in month_workouts if workout.metadata.get("instructor")}),
+                "workout_source_ids": sorted(workout.source_id for workout in month_workouts),
+                "first_workout_at": min(workout.created_at for workout in month_workouts).isoformat(),
+                "latest_workout_at": max(workout.created_at for workout in month_workouts).isoformat(),
+            }
+            units.append(
+                KnowledgeUnit(
+                    source_project="peloton_workout_summary_csv",
+                    source_id=digest_source_id("peloton_workout_summary_csv_month", month),
+                    source_entity_type="workout_month",
+                    title=f"Peloton workouts {month}",
+                    content=f"Peloton workouts {month}\nWorkouts: {len(month_workouts)}",
+                    content_type=ContentType.METADATA,
+                    metadata=metadata,
+                    tags=["peloton", "workout-month", month],
+                    created_at=min(workout.created_at for workout in month_workouts),
+                    updated_at=max(workout.updated_at for workout in month_workouts),
+                )
+            )
+        return units
+
+    def _month_edges(self, months: list[KnowledgeUnit], workouts: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        month_ids = {str(month.metadata.get("month")): month.source_id for month in months}
+        edges: list[KnowledgeEdge] = []
+        for workout in workouts:
+            month_id = month_ids.get(workout.created_at.strftime("%Y-%m"))
+            if not month_id:
+                continue
+            edges.append(
+                KnowledgeEdge(
+                    id=digest_source_id("peloton_workout_summary_csv_month_edge", month_id, workout.source_id),
+                    from_unit_id=month_id,
+                    to_unit_id=workout.source_id,
+                    relation=EdgeRelation.CONTAINS,
+                    source=EdgeSource.SOURCE,
+                    metadata={"relation_type": "month_contains_workout", "month": workout.created_at.strftime("%Y-%m")},
+                )
+            )
+        return edges
 
     def _content(self, title: str, metadata: dict[str, Any]) -> str:
         parts = [title]

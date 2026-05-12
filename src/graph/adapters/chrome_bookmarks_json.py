@@ -35,17 +35,19 @@ class ChromeBookmarksJsonAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["bookmark"]
+        return ["bookmark", "domain"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
 
     def ingest(self, *, since: SyncState | None = None, entity_types: list[str] | None = None) -> IngestResult:
         result = IngestResult()
-        if entity_types and "bookmark" not in entity_types:
+        allowed_types = set(entity_types or self.entity_types)
+        if not allowed_types.intersection(self.entity_types):
             return result
 
         sync_at = ensure_utc(since.last_sync_at) if since else None
+        bookmark_units: list[KnowledgeUnit] = []
         for path in self._iter_paths():
             try:
                 parsed = json.loads(path.read_text(encoding="utf-8-sig"))
@@ -58,11 +60,19 @@ class ChromeBookmarksJsonAdapter(SourceAdapter):
                 if sync_at and comparable_at and comparable_at <= sync_at:
                     continue
                 unit = self._unit(bookmark, path.name, created_at, last_used_at)
-                result.units.append(unit)
-                edge = self._folder_edge(bookmark, unit.source_id)
-                if edge:
-                    result.edges.append(edge)
+                bookmark_units.append(unit)
+                if "bookmark" in allowed_types:
+                    edge = self._folder_edge(bookmark, unit.source_id)
+                    if edge:
+                        result.edges.append(edge)
 
+        domain_units = self._domain_units(bookmark_units)
+        if "bookmark" in allowed_types:
+            result.units.extend(bookmark_units)
+        if "domain" in allowed_types:
+            result.units.extend(domain_units)
+        if {"bookmark", "domain"}.issubset(allowed_types):
+            result.edges.extend(self._domain_edges(domain_units, bookmark_units))
         result.units.sort(key=lambda unit: unit.source_id)
         result.edges.sort(key=lambda edge: edge.id)
         return result
@@ -139,7 +149,7 @@ class ChromeBookmarksJsonAdapter(SourceAdapter):
         folder_path = "/".join(bookmark.folder_path)
         metadata = {
             "url": bookmark.url,
-            "domain": urlparse(bookmark.url).netloc,
+            "domain": self._domain(bookmark.url),
             "folder_path": folder_path,
             "root": bookmark.root,
             "root_name": bookmark.root_name,
@@ -166,6 +176,93 @@ class ChromeBookmarksJsonAdapter(SourceAdapter):
         if bookmark.guid:
             return digest_source_id("chrome_bookmarks_json", bookmark.guid)
         return digest_source_id("chrome_bookmarks_json", bookmark.url)
+
+    def _domain_units(self, bookmarks: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        for bookmark in bookmarks:
+            domain = str(bookmark.metadata.get("domain") or "").strip()
+            if domain:
+                grouped.setdefault(domain, []).append(bookmark)
+
+        units: list[KnowledgeUnit] = []
+        now = datetime.now(timezone.utc)
+        for domain, domain_bookmarks in sorted(grouped.items()):
+            source_ids = sorted(bookmark.source_id for bookmark in domain_bookmarks)
+            roots = sorted({str(bookmark.metadata.get("root")) for bookmark in domain_bookmarks if bookmark.metadata.get("root")})
+            folder_paths = sorted({str(bookmark.metadata.get("folder_path")) for bookmark in domain_bookmarks if bookmark.metadata.get("folder_path")})
+            added = [
+                parsed
+                for bookmark in domain_bookmarks
+                if (parsed := self._iso_datetime(bookmark.metadata.get("date_added"))) is not None
+            ]
+            last_used = [
+                parsed
+                for bookmark in domain_bookmarks
+                if (parsed := self._iso_datetime(bookmark.metadata.get("date_last_used"))) is not None
+            ]
+            created_at = min(added, default=min((bookmark.created_at for bookmark in domain_bookmarks), default=now))
+            updated_at = max(last_used or added, default=max((bookmark.updated_at for bookmark in domain_bookmarks), default=now))
+            units.append(
+                KnowledgeUnit(
+                    source_project="chrome_bookmarks_json",
+                    source_id=self._domain_source_id(domain),
+                    source_entity_type="domain",
+                    title=domain,
+                    content=f"Chrome bookmark domain: {domain}\nBookmarks: {len(domain_bookmarks)}",
+                    content_type=ContentType.METADATA,
+                    metadata=clean_metadata(
+                        {
+                            "domain": domain,
+                            "bookmark_count": len(domain_bookmarks),
+                            "roots": roots,
+                            "folder_paths": folder_paths,
+                            "bookmark_source_ids": source_ids,
+                            "first_added_at": min(added).isoformat() if added else "",
+                            "last_used_at": max(last_used).isoformat() if last_used else "",
+                        }
+                    ),
+                    tags=["chrome-bookmark-domain", domain],
+                    created_at=created_at,
+                    updated_at=updated_at,
+                )
+            )
+        return units
+
+    def _domain_edges(self, domains: list[KnowledgeUnit], bookmarks: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        domain_ids = {str(unit.metadata.get("domain")): unit.source_id for unit in domains}
+        edges: list[KnowledgeEdge] = []
+        for bookmark in bookmarks:
+            domain_id = domain_ids.get(str(bookmark.metadata.get("domain") or ""))
+            if not domain_id:
+                continue
+            edge_id = digest_source_id("chrome_bookmarks_json_domain_edge", domain_id, bookmark.source_id)
+            edges.append(
+                KnowledgeEdge(
+                    id=edge_id,
+                    from_unit_id=domain_id,
+                    to_unit_id=bookmark.source_id,
+                    relation=EdgeRelation.CONTAINS,
+                    source=EdgeSource.SOURCE,
+                    metadata={"relation_type": "domain_contains_bookmark", "domain": bookmark.metadata.get("domain")},
+                )
+            )
+        return edges
+
+    def _domain_source_id(self, domain: str) -> str:
+        return digest_source_id("chrome_bookmarks_json_domain", domain)
+
+    def _domain(self, url: str) -> str:
+        host = urlparse(url).hostname or urlparse(f"https://{url}").hostname or ""
+        return host.rstrip(".").casefold()
+
+    def _iso_datetime(self, value: Any) -> datetime | None:
+        text = self._text(value)
+        if not text:
+            return None
+        try:
+            return ensure_utc(datetime.fromisoformat(text.replace("Z", "+00:00")))
+        except ValueError:
+            return None
 
     def _folder_edge(self, bookmark: _Bookmark, unit_source_id: str) -> KnowledgeEdge | None:
         if not bookmark.folder_path:

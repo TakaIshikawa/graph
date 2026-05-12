@@ -32,7 +32,7 @@ def test_steam_library_csv_ingests_complete_rows_and_normalizes_playtime(tmp_pat
         ],
     )
 
-    result = SteamLibraryCsvAdapter(path=str(export)).ingest()
+    result = SteamLibraryCsvAdapter(path=str(export)).ingest(entity_types=["game"])
 
     assert len(result.units) == 1
     unit = result.units[0]
@@ -59,7 +59,7 @@ def test_steam_library_csv_supports_aliases_sparse_rows_and_registry(tmp_path):
         ],
     )
 
-    result = SteamLibraryCsvAdapter(path=str(export)).ingest()
+    result = SteamLibraryCsvAdapter(path=str(export)).ingest(entity_types=["game"])
 
     assert len(result.units) == 2
     first = result.units[0]
@@ -69,3 +69,33 @@ def test_steam_library_csv_supports_aliases_sparse_rows_and_registry(tmp_path):
     assert "last_played" not in first.metadata
     assert result.units[1].title == "No App Id Game"
     assert get_adapter("steam_library_csv", path=str(export)).name == "steam_library_csv"
+
+
+def test_steam_library_csv_emits_genre_units_and_edges(tmp_path):
+    export = tmp_path / "steam.csv"
+    _write_csv(
+        export,
+        [
+            {"App ID": "620", "Name": "Portal 2", "Hours Played": "12.5", "Last Played": "2025-01-02T03:04:05Z", "Genres": "Puzzle; Co-op"},
+            {"App ID": "400", "Name": "Portal", "Minutes Played": "30", "Last Played": "2024-01-02", "Tags": "Puzzle"},
+        ],
+    )
+
+    result = SteamLibraryCsvAdapter(path=str(export)).ingest(entity_types=["game", "genre"])
+
+    assert SteamLibraryCsvAdapter(path=str(export)).entity_types == ["game", "genre"]
+    genres = sorted((unit for unit in result.units if unit.source_entity_type == "genre"), key=lambda unit: unit.title)
+    assert [unit.title for unit in genres] == ["co-op", "puzzle"]
+    puzzle = next(unit for unit in genres if unit.title == "puzzle")
+    games = [unit for unit in result.units if unit.source_entity_type == "game"]
+    assert puzzle.metadata["game_count"] == 2
+    assert puzzle.metadata["total_playtime_minutes"] == 780
+    assert puzzle.metadata["game_source_ids"] == sorted(unit.source_id for unit in games)
+    assert puzzle.metadata["app_ids"] == ["400", "620"]
+    assert puzzle.metadata["last_played_at"] == "2025-01-02T03:04:05+00:00"
+    assert puzzle.metadata["source_files"] == ["steam.csv"]
+    assert {edge.to_unit_id for edge in result.edges if edge.from_unit_id == puzzle.source_id} == {unit.source_id for unit in games}
+
+    genre_only = SteamLibraryCsvAdapter(path=str(export)).ingest(entity_types=["genre"])
+    assert {unit.source_entity_type for unit in genre_only.units} == {"genre"}
+    assert genre_only.edges == []

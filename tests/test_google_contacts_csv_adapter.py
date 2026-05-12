@@ -114,3 +114,43 @@ def test_google_contacts_csv_emits_organization_units_and_edges(tmp_path):
     org_only = GoogleContactsCsvAdapter(path=str(export)).ingest(entity_types=["organization"])
     assert [unit.source_entity_type for unit in org_only.units] == ["organization"]
     assert org_only.edges == []
+
+
+def test_google_contacts_csv_emits_group_units_and_edges(tmp_path):
+    export = tmp_path / "contacts.csv"
+    _write_csv(
+        export,
+        [
+            {
+                "Name": "Ada Lovelace",
+                "E-mail 1 - Value": "ada@example.com",
+                "E-mail 2 - Value": "work@example.com",
+                "Organization Name": "Analytical Engines",
+                "Group Membership": "Friends, Research",
+            },
+            {
+                "Name": "Grace Hopper",
+                "E-mail 1 - Value": "grace@example.com",
+                "Company": "Navy",
+                "Groups": "Friends",
+            },
+        ],
+    )
+
+    result = GoogleContactsCsvAdapter(path=str(export)).ingest(entity_types=["contact", "group"])
+
+    assert GoogleContactsCsvAdapter(path=str(export)).entity_types == ["contact", "organization", "group"]
+    groups = sorted((unit for unit in result.units if unit.source_entity_type == "group"), key=lambda unit: unit.title)
+    assert [unit.title for unit in groups] == ["Friends", "Research"]
+    friends = groups[0]
+    contacts = [unit for unit in result.units if unit.source_entity_type == "contact"]
+    assert friends.metadata["contact_count"] == 2
+    assert friends.metadata["contact_source_ids"] == sorted(unit.source_id for unit in contacts)
+    assert friends.metadata["email_count"] == 3
+    assert friends.metadata["organization_names"] == ["Analytical Engines", "Navy"]
+    assert friends.metadata["source_files"] == ["contacts.csv"]
+    assert len(result.edges) == 3
+
+    group_only = GoogleContactsCsvAdapter(path=str(export)).ingest(entity_types=["group"])
+    assert {unit.source_entity_type for unit in group_only.units} == {"group"}
+    assert group_only.edges == []
