@@ -21,7 +21,7 @@ class GoodreadsLibraryAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["author", "book", "publisher", "series", "shelf"]
+        return ["author", "book", "copy", "publisher", "series", "shelf"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -39,6 +39,7 @@ class GoodreadsLibraryAdapter(SourceAdapter):
 
         sync_at = self._sync_datetime(since) if since else None
         books: list[KnowledgeUnit] = []
+        copies: list[KnowledgeUnit] = []
         for path in self._iter_paths():
             try:
                 rows = self._read_rows(path)
@@ -86,20 +87,22 @@ class GoodreadsLibraryAdapter(SourceAdapter):
                 }
                 if series:
                     metadata["series"] = series
-                books.append(
-                    KnowledgeUnit(
-                        source_project=SourceProject.GOODREADS_LIBRARY,
-                        source_id=self._source_id(book_id, isbn13 or isbn, title, author),
-                        source_entity_type="book",
-                        title=self._format_title(title, author),
-                        content=self._content(title, author, rating, shelves, review),
-                        content_type=ContentType.ARTIFACT,
-                        metadata=metadata,
-                        tags=shelves,
-                        created_at=date_added or date_read or now,
-                        updated_at=date_read or date_added or now,
-                    )
+                book = KnowledgeUnit(
+                    source_project=SourceProject.GOODREADS_LIBRARY,
+                    source_id=self._source_id(book_id, isbn13 or isbn, title, author),
+                    source_entity_type="book",
+                    title=self._format_title(title, author),
+                    content=self._content(title, author, rating, shelves, review),
+                    content_type=ContentType.ARTIFACT,
+                    metadata=metadata,
+                    tags=shelves,
+                    created_at=date_added or date_read or now,
+                    updated_at=date_read or date_added or now,
                 )
+                books.append(book)
+                copy_metadata = self._copy_metadata(row)
+                if copy_metadata:
+                    copies.append(self._copy_unit(book, copy_metadata, row, path, date_added or date_read or now))
 
         authors = self._author_units(books) if "author" in allowed_types else []
         publishers = self._publisher_units(books) if "publisher" in allowed_types else []
@@ -109,13 +112,15 @@ class GoodreadsLibraryAdapter(SourceAdapter):
             result.units.extend(authors)
         if "book" in allowed_types:
             result.units.extend(books)
+        if "copy" in allowed_types:
+            result.units.extend(copies)
         if "publisher" in allowed_types:
             result.units.extend(publishers)
         if "series" in allowed_types:
             result.units.extend(series)
         if "shelf" in allowed_types:
             result.units.extend(shelves)
-        result.edges.extend(self._edges(books, authors, publishers, series, shelves, allowed_types))
+        result.edges.extend(self._edges(books, copies, authors, publishers, series, shelves, allowed_types))
         result.units.sort(key=lambda unit: (unit.created_at, unit.source_id))
         result.edges.sort(key=lambda edge: edge.id)
         return result
@@ -165,6 +170,59 @@ class GoodreadsLibraryAdapter(SourceAdapter):
             parts.append(f"Shelves: {', '.join(shelves)}")
         if review:
             parts.append(f"\nReview:\n{review}")
+        return "\n".join(parts)
+
+    def _copy_metadata(self, row: dict[str, Any]) -> dict[str, str]:
+        fields = {
+            "condition": self._first(row, "Condition", "Owned Copy Condition", "Book Condition", "condition"),
+            "date_acquired": self._first(row, "Date Acquired", "Acquired Date", "Purchase Date", "date_acquired"),
+            "purchase_location": self._first(row, "Purchase Location", "Purchased From", "Store", "purchase_location"),
+            "format": self._first(row, "Format", "Binding", "Book Format", "format"),
+            "owned_copy_id": self._first(row, "Owned Copy Id", "Owned Copy ID", "Copy Id", "copy_id"),
+        }
+        return {key: value for key, value in fields.items() if value}
+
+    def _copy_unit(
+        self,
+        book: KnowledgeUnit,
+        copy_metadata: dict[str, str],
+        row: dict[str, Any],
+        path: Path,
+        fallback_at: datetime,
+    ) -> KnowledgeUnit:
+        acquired = self._parse_datetime(copy_metadata.get("date_acquired", ""))
+        metadata = {
+            **copy_metadata,
+            "book_source_id": book.source_id,
+            "book_id": book.metadata.get("book_id"),
+            "title": book.metadata.get("title"),
+            "author": book.metadata.get("author"),
+            "source_file": str(path),
+        }
+        return KnowledgeUnit(
+            source_project=SourceProject.GOODREADS_LIBRARY,
+            source_id=self._copy_source_id(book.source_id, copy_metadata, row),
+            source_entity_type="copy",
+            title=f"Owned copy of {book.title}",
+            content=self._copy_content(book, copy_metadata),
+            content_type=ContentType.METADATA,
+            metadata=metadata,
+            tags=["owned-copy"],
+            created_at=acquired or fallback_at,
+            updated_at=acquired or fallback_at,
+        )
+
+    def _copy_content(self, book: KnowledgeUnit, copy_metadata: dict[str, str]) -> str:
+        parts = [f"Book: {book.title}"]
+        labels = {
+            "condition": "Condition",
+            "date_acquired": "Date acquired",
+            "purchase_location": "Purchase location",
+            "format": "Format",
+        }
+        for key, label in labels.items():
+            if copy_metadata.get(key):
+                parts.append(f"{label}: {copy_metadata[key]}")
         return "\n".join(parts)
 
     def _shelves(self, row: dict[str, Any]) -> list[str]:
@@ -357,6 +415,7 @@ class GoodreadsLibraryAdapter(SourceAdapter):
     def _edges(
         self,
         books: list[KnowledgeUnit],
+        copies: list[KnowledgeUnit],
         authors: list[KnowledgeUnit],
         publishers: list[KnowledgeUnit],
         series: list[KnowledgeUnit],
@@ -368,6 +427,12 @@ class GoodreadsLibraryAdapter(SourceAdapter):
         publisher_ids = {str(publisher.metadata["publisher"]).casefold(): publisher.source_id for publisher in publishers}
         series_ids = {str(unit.metadata["series"]).casefold(): unit.source_id for unit in series}
         shelf_ids = {str(shelf.metadata["shelf"]): shelf.source_id for shelf in shelves}
+        if {"book", "copy"}.issubset(allowed_types):
+            book_ids = {book.source_id for book in books}
+            for copy in copies:
+                book_id = str(copy.metadata.get("book_source_id") or "")
+                if book_id in book_ids:
+                    edges.append(self._edge(book_id, copy.source_id, "book_contains_copy", EdgeRelation.CONTAINS))
         if {"book", "author"}.issubset(allowed_types):
             for book in books:
                 author_id = author_ids.get(str(book.metadata.get("author") or ""))
@@ -425,6 +490,20 @@ class GoodreadsLibraryAdapter(SourceAdapter):
     def _publisher_source_id(self, publisher: str) -> str:
         digest = hashlib.sha256(publisher.strip().casefold().encode("utf-8")).hexdigest()[:24]
         return f"goodreads_library:publisher:{digest}"
+
+    def _copy_source_id(self, book_source_id: str, copy_metadata: dict[str, str], row: dict[str, Any]) -> str:
+        explicit = copy_metadata.get("owned_copy_id") or self._first(row, "Owned Copy ID", "Copy ID")
+        raw = explicit or "|".join(
+            [
+                book_source_id,
+                copy_metadata.get("condition", ""),
+                copy_metadata.get("date_acquired", ""),
+                copy_metadata.get("purchase_location", ""),
+                copy_metadata.get("format", ""),
+            ]
+        )
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+        return f"goodreads_library:copy:{digest}"
 
     def _edge_id(self, from_id: str, to_id: str, relation_type: str) -> str:
         digest = hashlib.sha256("|".join((from_id, to_id, relation_type)).encode("utf-8")).hexdigest()[:24]

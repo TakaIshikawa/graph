@@ -176,6 +176,36 @@ def test_apple_reminders_csv_list_summaries_dedupe_normalized_names(tmp_path):
     assert len(result.edges) == 2
 
 
+def test_apple_reminders_csv_parses_recurrence_metadata(tmp_path):
+    export = tmp_path / "reminders.csv"
+    _write_csv(
+        export,
+        [
+            {
+                "Title": "Pay rent",
+                "List Name": "Admin",
+                "Repeat": "Monthly",
+                "Repeat Interval": "1",
+                "Repeat End": "2025-12-31",
+                "Priority": "High",
+                "Created Date": "2025-01-01",
+            }
+        ],
+    )
+
+    result = AppleRemindersCsvAdapter(path=str(export)).ingest(entity_types=["reminder"])
+
+    reminder = result.units[0]
+    assert reminder.metadata["recurrence"] == {
+        "repeat": "Monthly",
+        "repeat_interval": "1",
+        "repeat_end": "2025-12-31",
+    }
+    assert reminder.metadata["priority"] == "High"
+    assert "Priority: High" in reminder.content
+    assert "Recurrence: repeat Monthly, every 1, until 2025-12-31" in reminder.content
+
+
 def test_apple_reminders_csv_directory_and_registry(tmp_path):
     _write_csv(tmp_path / "one.csv", [{"Title": "One", "Created Date": "2025-01-01"}])
     _write_csv(tmp_path / "two.csv", [{"Title": "Two", "Created Date": "2025-01-02"}])

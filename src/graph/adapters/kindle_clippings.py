@@ -58,6 +58,8 @@ class KindleClippingsAdapter(SourceAdapter):
             result.units.extend(clippings)
         if "book" in allowed_types and "clipping" in allowed_types:
             result.edges.extend(self._contains_edges(books, clippings))
+        if "clipping" in allowed_types:
+            result.edges.extend(self._note_highlight_edges(clippings))
         result.units.sort(key=lambda unit: unit.source_id)
         result.edges.sort(key=lambda edge: edge.id)
         return result
@@ -282,6 +284,66 @@ class KindleClippingsAdapter(SourceAdapter):
             )
         return edges
 
+    def _note_highlight_edges(self, clippings: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        highlights = [unit for unit in clippings if unit.metadata.get("clipping_type") == "highlight"]
+        notes = [unit for unit in clippings if unit.metadata.get("clipping_type") == "note"]
+        edges: list[KnowledgeEdge] = []
+        seen: set[str] = set()
+        for note in notes:
+            match = self._matching_highlight(note, highlights)
+            if match is None:
+                continue
+            highlight, strategy = match
+            edge_id = self._annotation_edge_id(note.source_id, highlight.source_id, strategy)
+            if edge_id in seen:
+                continue
+            seen.add(edge_id)
+            edges.append(
+                KnowledgeEdge(
+                    id=edge_id,
+                    from_unit_id=note.source_id,
+                    to_unit_id=highlight.source_id,
+                    relation=EdgeRelation.RELATES_TO,
+                    source=EdgeSource.SOURCE,
+                    metadata={
+                        "source_project": SourceProject.KINDLE.value,
+                        "relation_type": "note_references_highlight",
+                        "book_title": note.metadata.get("book_title"),
+                        "location": note.metadata.get("location"),
+                        "matched_location": highlight.metadata.get("location"),
+                        "match_strategy": strategy,
+                    },
+                )
+            )
+        return edges
+
+    def _matching_highlight(
+        self, note: KnowledgeUnit, highlights: list[KnowledgeUnit]
+    ) -> tuple[KnowledgeUnit, str] | None:
+        note_key = (str(note.metadata.get("book_title") or ""), str(note.metadata.get("author") or ""))
+        note_range = self._location_range(note.metadata.get("location"))
+        if note_range is None:
+            return None
+        candidates: list[tuple[int, str, KnowledgeUnit]] = []
+        for highlight in highlights:
+            highlight_key = (str(highlight.metadata.get("book_title") or ""), str(highlight.metadata.get("author") or ""))
+            if highlight_key != note_key:
+                continue
+            highlight_range = self._location_range(highlight.metadata.get("location"))
+            if highlight_range is None:
+                continue
+            distance = self._location_distance(note_range, highlight_range)
+            if distance == 0:
+                strategy = "exact" if note_range == highlight_range else "overlap"
+                candidates.append((0, strategy, highlight))
+            elif distance <= 5:
+                candidates.append((distance, "nearby", highlight))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: (item[0], item[2].source_id))
+        _, strategy, highlight = candidates[0]
+        return highlight, strategy
+
     def _book_source_id(self, title: str, author: str) -> str:
         return f"kindle_clippings:book:{self._digest(title, author, '', '')}"
 
@@ -289,9 +351,28 @@ class KindleClippingsAdapter(SourceAdapter):
         digest = self._digest(book_source_id, clipping_source_id, "contains", "")
         return f"kindle-clippings-contains-{digest}"
 
+    def _annotation_edge_id(self, note_source_id: str, highlight_source_id: str, strategy: str) -> str:
+        digest = self._digest(note_source_id, highlight_source_id, strategy, "annotation")
+        return f"kindle-clippings-note-highlight-{digest}"
+
     def _location_start(self, value: object) -> int | None:
         match = re.search(r"\d+", str(value or ""))
         return int(match.group(0)) if match else None
+
+    def _location_range(self, value: object) -> tuple[int, int] | None:
+        numbers = [int(match.group(0)) for match in re.finditer(r"\d+", str(value or ""))]
+        if not numbers:
+            return None
+        if len(numbers) == 1:
+            return (numbers[0], numbers[0])
+        return (min(numbers[0], numbers[1]), max(numbers[0], numbers[1]))
+
+    def _location_distance(self, left: tuple[int, int], right: tuple[int, int]) -> int:
+        if left[0] <= right[1] and right[0] <= left[1]:
+            return 0
+        if left[1] < right[0]:
+            return right[0] - left[1]
+        return left[0] - right[1]
 
     def _digest(self, title: str, author: str, details: str, text: str) -> str:
         payload = "\n".join((title, author, details, text))
