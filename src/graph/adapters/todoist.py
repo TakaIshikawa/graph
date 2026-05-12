@@ -180,6 +180,8 @@ class TodoistAdapter(SourceAdapter):
                     if not value:
                         continue
                     person_unit = self._person_unit(value)
+                    if person_unit is None:
+                        continue
                     person_units.setdefault(person_unit.source_id, person_unit)
                     if emitted:
                         edge = self._person_edge(source_id, person_unit.source_id, entity_type, content, field_name, row_number)
@@ -209,24 +211,29 @@ class TodoistAdapter(SourceAdapter):
         digest = hashlib.sha1(f"{parent_source_id}|{child_source_id}|contains".encode("utf-8")).hexdigest()[:16]
         return f"todoist:contains:{digest}"
 
-    def _person_unit(self, value: str) -> KnowledgeUnit:
+    def _person_unit(self, value: str) -> KnowledgeUnit | None:
         normalized = self._normalize_person(value)
+        if not normalized:
+            return None
         digest = hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:16]
         email_match = re.search(r"[\w.!#$%&'*+/=?^`{|}~-]+@[\w.-]+\.[A-Za-z]{2,}", value)
         email = email_match.group(0).casefold() if email_match else ""
+        title = value.strip()
         return KnowledgeUnit(
             source_project=SourceProject.TODOIST,
             source_id=f"todoist:person:{digest}",
             source_entity_type="person",
-            title=value.strip(),
-            content=value.strip(),
+            title=title,
+            content=title,
             content_type=ContentType.METADATA,
             metadata={
-                "name": value.strip(),
+                "name": title,
                 "email": email or None,
                 "normalized": normalized,
+                "normalized_name": normalized,
+                "source": "todoist_collaborator",
             },
-            tags=["todoist", "person"],
+            tags=["person", "todoist"],
         )
 
     def _person_edge(
@@ -251,6 +258,7 @@ class TodoistAdapter(SourceAdapter):
                 "from_entity_type": entity_type,
                 "to_entity_type": "person",
                 "field": field_name,
+                "role": field_name,
                 "title": title,
                 "source_row_number": row_number,
             },

@@ -33,7 +33,7 @@ class ReadwiseCsvAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        allowed = set(entity_types or ["highlight"])
+        allowed = set(entity_types) if entity_types else {"highlight"}
         if not allowed.intersection(self.entity_types):
             return result
 
@@ -68,7 +68,6 @@ class ReadwiseCsvAdapter(SourceAdapter):
             for document_id in sorted(document_rows):
                 result.units.append(self._document_unit(document_id, document_rows[document_id], document_counts[document_id], sorted(document_files[document_id])))
         result.edges.extend(edge_candidates)
-
         result.units.sort(key=lambda unit: unit.source_id)
         result.edges.sort(key=lambda edge: edge.id)
         return result

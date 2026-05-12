@@ -69,15 +69,16 @@ class AmazonOrdersCsvAdapter(SourceAdapter):
                 for item in items:
                     if not item.metadata.get("shipment_source_id"):
                         result.edges.append(self._edge(order.source_id, item.source_id))
-            if {"order", "return"}.issubset(allowed):
-                for return_unit in returns:
-                    result.edges.append(self._edge(order.source_id, return_unit.source_id))
-            if {"item", "return"}.issubset(allowed):
-                item_ids = {item.source_id for item in items}
-                for return_unit in returns:
-                    item_source_id = return_unit.metadata.get("item_source_id")
-                    if item_source_id in item_ids:
-                        result.edges.append(self._edge(str(item_source_id), return_unit.source_id))
+            if "return" in allowed:
+                if "order" in allowed:
+                    for return_unit in returns:
+                        result.edges.append(self._edge(order.source_id, return_unit.source_id))
+                if "item" in allowed:
+                    item_ids = {item.source_id for item in items}
+                    for return_unit in returns:
+                        item_source_id = return_unit.metadata.get("item_source_id")
+                        if item_source_id in item_ids:
+                            result.edges.append(self._edge(str(item_source_id), return_unit.source_id))
         result.units.sort(key=lambda unit: unit.source_id)
         result.edges.sort(key=lambda edge: edge.id)
         return result
@@ -128,8 +129,7 @@ class AmazonOrdersCsvAdapter(SourceAdapter):
                 shipment_item_counts[shipment_key] += 1
             title = item_metadata["title"] or f"Amazon item {index + 1}"
             item_source_id = digest_source_id("amazon_orders_csv:item", order_id, item_metadata.get("asin"), title, index)
-            items.append(
-                KnowledgeUnit(
+            item_unit = KnowledgeUnit(
                     source_project=SourceProject.AMAZON_ORDERS_CSV,
                     source_id=item_source_id,
                     source_entity_type="item",
@@ -141,8 +141,8 @@ class AmazonOrdersCsvAdapter(SourceAdapter):
                     created_at=order_date or now,
                     updated_at=shipment_date or order_date or now,
                 )
-            )
-            return_unit = self._return_unit(order_id, row, item_metadata, item_source_id, index, source_files, order_date, now)
+            items.append(item_unit)
+            return_unit = self._return_unit(order_id, row, index, item_unit, order_date, now, source_files)
             if return_unit is not None:
                 returns.append(return_unit)
         shipments = [
@@ -168,43 +168,38 @@ class AmazonOrdersCsvAdapter(SourceAdapter):
         self,
         order_id: str,
         row: dict[str, Any],
-        item_metadata: dict[str, Any],
-        item_source_id: str,
         index: int,
-        source_files: list[str],
+        item_unit: KnowledgeUnit,
         order_date: datetime | None,
         now: datetime,
+        source_files: list[str],
     ) -> KnowledgeUnit | None:
-        return_date_text = first(row, "Return Date", "Returned Date")
-        reason = first(row, "Return Reason", "Reason")
+        return_date_text = first(row, "Return Date", "Returned Date", "Refund Date")
+        reason = first(row, "Return Reason", "Refund Reason")
+        status = first(row, "Return Status", "Refund Status")
         refund_amount = parse_money(first(row, "Refund Amount", "Refunded Amount", "Refund"))
-        status = first(row, "Return Status", "Refund Status", "Status")
-        if not any([return_date_text, reason, refund_amount is not None, status]):
+        if not any([return_date_text, reason, status, refund_amount is not None]):
             return None
-
         return_date = parse_datetime(return_date_text)
-        title = f"Amazon return {order_id}"
-        item_title = item_metadata.get("title")
-        if item_title:
-            title = f"{title}: {item_title}"
+        title = f"Amazon return for {item_unit.title}"
         metadata = clean_metadata(
             {
                 "order_id": order_id,
-                "order_date": item_metadata.get("order_date"),
-                "item_source_id": item_source_id,
-                "item_title": item_title,
-                "asin": item_metadata.get("asin"),
+                "order_date": order_date.isoformat() if order_date else first(row, "Order Date"),
+                "item_source_id": item_unit.source_id,
+                "item_title": item_unit.title,
+                "asin": item_unit.metadata.get("asin"),
+                "position": index + 1,
                 "return_date": return_date.isoformat() if return_date else return_date_text,
                 "return_reason": reason,
                 "return_status": status,
                 "refund_amount": refund_amount,
-                "position": index + 1,
                 "source_files": source_files,
             }
         )
         return KnowledgeUnit(
             source_project=SourceProject.AMAZON_ORDERS_CSV,
-            source_id=digest_source_id("amazon_orders_csv:return", order_id, item_metadata.get("asin"), item_title, index, return_date_text, refund_amount, status),
+            source_id=digest_source_id("amazon_orders_csv:return", order_id, item_unit.source_id, return_date_text, reason, status, refund_amount),
             source_entity_type="return",
             title=title,
             content=title,

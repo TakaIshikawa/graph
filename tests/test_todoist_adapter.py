@@ -334,3 +334,53 @@ def test_person_entity_type_filtering(tmp_path):
     assert people_only.edges == []
     assert {unit.source_entity_type for unit in tasks_projects.units} == {"task", "project"}
     assert all(edge.relation == EdgeRelation.CONTAINS for edge in tasks_projects.edges)
+
+
+def test_todoist_reports_person_entity_type():
+    assert TodoistAdapter().entity_types == ["task", "project", "person"]
+
+
+def test_todoist_imports_deduplicated_people_and_edges_when_requested(tmp_path):
+    csv_path = _write_csv(
+        tmp_path / "tasks.csv",
+        [
+            {
+                "TYPE": "project",
+                "CONTENT": "Launch",
+                "INDENT": "1",
+                "AUTHOR": "Ada Lovelace",
+                "RESPONSIBLE": "Grace Hopper",
+            },
+            {
+                "TYPE": "task",
+                "CONTENT": "Plan",
+                "INDENT": "2",
+                "AUTHOR": " ada   lovelace ",
+                "RESPONSIBLE": "Grace Hopper",
+            },
+        ],
+    )
+
+    result = TodoistAdapter(path=str(csv_path)).ingest(entity_types=["project", "task", "person"])
+
+    people = {unit.metadata["normalized_name"]: unit for unit in result.units if unit.source_entity_type == "person"}
+    assert sorted(people) == ["ada lovelace", "grace hopper"]
+    assert all(unit.source_id.startswith("todoist:person:") for unit in people.values())
+    reference_edges = [edge for edge in result.edges if edge.relation == EdgeRelation.REFERENCES]
+    assert len(reference_edges) == 4
+    assert {edge.to_unit_id for edge in reference_edges} == {unit.source_id for unit in people.values()}
+    assert {edge.metadata["role"] for edge in reference_edges} == {"author", "responsible"}
+
+
+def test_todoist_person_filtering(tmp_path):
+    csv_path = _write_csv(
+        tmp_path / "tasks.csv",
+        [{"TYPE": "task", "CONTENT": "Plan", "INDENT": "1", "AUTHOR": "Ada Lovelace"}],
+    )
+
+    default_result = TodoistAdapter(path=str(csv_path)).ingest()
+    person_only = TodoistAdapter(path=str(csv_path)).ingest(entity_types=["person"])
+
+    assert [unit.source_entity_type for unit in default_result.units] == ["task"]
+    assert [unit.source_entity_type for unit in person_only.units] == ["person"]
+    assert person_only.edges == []

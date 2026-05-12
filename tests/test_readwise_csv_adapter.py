@@ -126,12 +126,16 @@ def test_readwise_csv_adapter_is_registered():
     assert adapter.name == "readwise_csv"
 
 
-def test_readwise_csv_emits_documents_and_links_highlights(tmp_path):
+def test_readwise_csv_reports_document_entity_type():
+    assert ReadwiseCsvAdapter().entity_types == ["highlight", "document"]
+
+
+def test_readwise_csv_emits_deduplicated_documents_and_edges(tmp_path):
     export = tmp_path / "readwise.csv"
     export.write_text(
-        "Highlight,Book Title,Book Author,URL,Category\n"
-        "One,Deep Work,Cal Newport,https://example.com/deep,books\n"
-        "Two,Deep Work,Cal Newport,https://example.com/deep,books\n",
+        "Highlight,Book Title,Book Author,URL,Category,Highlighted at\n"
+        "First,Deep Work,Cal Newport,https://example.com/deep,books,2025-01-02T10:30:00Z\n"
+        "Second,Deep Work,Cal Newport,https://example.com/deep,books,2025-01-03T10:30:00Z\n",
         encoding="utf-8",
     )
 
@@ -149,15 +153,18 @@ def test_readwise_csv_emits_documents_and_links_highlights(tmp_path):
     assert document.metadata["category"] == "books"
     assert document.metadata["source_files"] == ["readwise.csv"]
     assert document.metadata["highlight_count"] == 2
-    assert {(edge.from_unit_id, edge.to_unit_id) for edge in result.edges} == {
-        (document.source_id, highlight.source_id) for highlight in highlights
-    }
+    assert len(result.edges) == 2
+    assert {edge.from_unit_id for edge in result.edges} == {document.source_id}
+    assert {edge.to_unit_id for edge in result.edges} == {unit.source_id for unit in highlights}
     assert {edge.relation for edge in result.edges} == {EdgeRelation.CONTAINS}
 
 
-def test_readwise_csv_document_filtering_preserves_default_highlight_behavior(tmp_path):
+def test_readwise_csv_document_filtering(tmp_path):
     export = tmp_path / "readwise.csv"
-    export.write_text("Highlight,Book Title\nA passage,Book\n", encoding="utf-8")
+    export.write_text(
+        "Highlight,Book Title,Book Author\nA useful passage,The Book,The Author\n",
+        encoding="utf-8",
+    )
 
     default_result = ReadwiseCsvAdapter(path=str(export)).ingest()
     document_only = ReadwiseCsvAdapter(path=str(export)).ingest(entity_types=["document"])

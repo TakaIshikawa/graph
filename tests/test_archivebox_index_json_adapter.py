@@ -168,14 +168,22 @@ def test_archivebox_index_json_emits_outbound_url_references(tmp_path):
     assert {edge.to_unit_id for edge in result.edges} == {unit.source_id for unit in references}
 
 
-def test_archivebox_index_json_emits_deduplicated_domains(tmp_path):
+def test_archivebox_index_json_emits_deduplicated_domain_units_and_edges(tmp_path):
     export = tmp_path / "index.json"
     export.write_text(
         json.dumps(
             {
                 "entries": [
-                    {"url": "https://www.Example.com/a", "title": "A", "timestamp": "2025-01-01T00:00:00Z"},
-                    {"url": "https://example.com/b", "title": "B", "timestamp": "2025-01-02T00:00:00Z"},
+                    {
+                        "url": "https://www.example.com/article",
+                        "title": "Example A",
+                        "timestamp": "2025-01-02T03:04:05Z",
+                    },
+                    {
+                        "url": "https://example.com/other",
+                        "title": "Example B",
+                        "timestamp": "2025-01-03T03:04:05Z",
+                    },
                 ]
             }
         ),
@@ -184,11 +192,13 @@ def test_archivebox_index_json_emits_deduplicated_domains(tmp_path):
 
     result = ArchiveBoxIndexJsonAdapter(path=str(export)).ingest(entity_types=["archive", "domain"])
 
-    domains = [unit for unit in result.units if unit.source_entity_type == "domain"]
     archives = [unit for unit in result.units if unit.source_entity_type == "archive"]
+    domains = [unit for unit in result.units if unit.source_entity_type == "domain"]
+    assert len(archives) == 2
     assert len(domains) == 1
     assert domains[0].source_id.startswith("archivebox_index_json:domain:")
     assert domains[0].metadata["domain"] == "example.com"
+    assert domains[0].title == "example.com"
     assert len(result.edges) == 2
     assert {edge.from_unit_id for edge in result.edges} == {unit.source_id for unit in archives}
     assert {edge.to_unit_id for edge in result.edges} == {domains[0].source_id}
@@ -197,11 +207,24 @@ def test_archivebox_index_json_emits_deduplicated_domains(tmp_path):
 def test_archivebox_index_json_domain_filtering(tmp_path):
     export = tmp_path / "index.json"
     export.write_text(
-        json.dumps({"entries": [{"url": "https://www.example.com/a", "title": "A"}]}),
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "url": "https://www.example.com/article",
+                        "title": "Example",
+                        "timestamp": "2025-01-02T03:04:05Z",
+                    }
+                ]
+            }
+        ),
         encoding="utf-8",
     )
 
     domain_only = ArchiveBoxIndexJsonAdapter(path=str(export)).ingest(entity_types=["domain"])
+    archive_only = ArchiveBoxIndexJsonAdapter(path=str(export)).ingest(entity_types=["archive"])
 
     assert [unit.source_entity_type for unit in domain_only.units] == ["domain"]
     assert domain_only.edges == []
+    assert [unit.source_entity_type for unit in archive_only.units] == ["archive"]
+    assert archive_only.edges == []

@@ -387,6 +387,155 @@ def test_google_calendar_takeout_uses_stable_source_ids_without_event_ids(tmp_pa
     assert first.source_id.startswith("google_calendar_takeout:event:")
 
 
+def test_google_calendar_takeout_imports_attachments_and_edges_when_requested(tmp_path):
+    export = _write_json(
+        tmp_path / "calendar.json",
+        {
+            "items": [
+                {
+                    "id": "event-1",
+                    "summary": "Design review",
+                    "start": {"dateTime": "2026-05-01T10:00:00Z"},
+                    "attachments": [
+                        {
+                            "fileId": "file-1",
+                            "title": "Design brief",
+                            "mimeType": "application/pdf",
+                            "fileUrl": "https://drive.google.com/file/d/file-1/view",
+                        },
+                        {
+                            "fileId": "file-1",
+                            "title": "Design brief",
+                            "mimeType": "application/pdf",
+                            "fileUrl": "https://drive.google.com/file/d/file-1/view",
+                        },
+                    ],
+                }
+            ]
+        },
+    )
+
+    result = GoogleCalendarTakeoutAdapter(path=str(export)).ingest(entity_types=["event", "attachment"])
+
+    attachment = next(unit for unit in result.units if unit.source_entity_type == "attachment")
+    event = next(unit for unit in result.units if unit.source_entity_type == "event")
+    assert sorted(unit.source_entity_type for unit in result.units) == ["attachment", "event"]
+    assert attachment.source_id.startswith("google_calendar_takeout:attachment:")
+    assert attachment.title == "Design brief"
+    assert attachment.metadata["file_id"] == "file-1"
+    assert attachment.metadata["mime_type"] == "application/pdf"
+    assert attachment.metadata["url"] == "https://drive.google.com/file/d/file-1/view"
+    assert len(result.edges) == 1
+    assert result.edges[0].from_unit_id == event.source_id
+    assert result.edges[0].to_unit_id == attachment.source_id
+    assert result.edges[0].relation == EdgeRelation.REFERENCES
+
+
+def test_google_calendar_takeout_imports_google_meet_conference_data(tmp_path):
+    export = _write_json(
+        tmp_path / "calendar.json",
+        {
+            "items": [
+                {
+                    "id": "event-1",
+                    "summary": "Standup",
+                    "start": {"dateTime": "2026-05-01T10:00:00Z"},
+                    "conferenceData": {
+                        "conferenceId": "abc-defg-hij",
+                        "conferenceSolution": {"name": "Google Meet", "key": {"type": "hangoutsMeet"}},
+                        "entryPoints": [
+                            {
+                                "entryPointType": "video",
+                                "uri": "https://meet.google.com/abc-defg-hij",
+                                "label": "meet.google.com/abc-defg-hij",
+                            }
+                        ],
+                    },
+                }
+            ]
+        },
+    )
+
+    result = GoogleCalendarTakeoutAdapter(path=str(export)).ingest(entity_types=["event", "conference"])
+
+    conference = next(unit for unit in result.units if unit.source_entity_type == "conference")
+    assert conference.source_id.startswith("google_calendar_takeout:conference:")
+    assert conference.metadata["provider"] == "Google Meet"
+    assert conference.metadata["provider_type"] == "hangoutsMeet"
+    assert conference.metadata["meeting_code"] == "abc-defg-hij"
+    assert conference.metadata["url"] == "https://meet.google.com/abc-defg-hij"
+    assert conference.metadata["entry_points"] == [
+        {
+            "entryPointType": "video",
+            "uri": "https://meet.google.com/abc-defg-hij",
+            "label": "meet.google.com/abc-defg-hij",
+        }
+    ]
+    assert len(result.edges) == 1
+
+
+def test_google_calendar_takeout_imports_hangout_and_location_url_conferences(tmp_path):
+    export = _write_json(
+        tmp_path / "calendar.json",
+        {
+            "items": [
+                {
+                    "id": "hangout",
+                    "summary": "Meet",
+                    "start": {"dateTime": "2026-05-01T10:00:00Z"},
+                    "hangoutLink": "https://meet.google.com/aaa-bbbb-ccc",
+                },
+                {
+                    "id": "location-url",
+                    "summary": "Zoom",
+                    "location": "https://zoom.us/j/123456789",
+                    "start": {"dateTime": "2026-05-02T10:00:00Z"},
+                },
+            ]
+        },
+    )
+
+    result = GoogleCalendarTakeoutAdapter(path=str(export)).ingest(entity_types=["conference"])
+
+    assert sorted(unit.metadata["provider"] for unit in result.units) == ["Google Meet", "Zoom"]
+    assert result.edges == []
+
+
+def test_google_calendar_takeout_attachment_and_conference_entity_type_filters(tmp_path):
+    export = _write_json(
+        tmp_path / "calendar.json",
+        {
+            "items": [
+                {
+                    "id": "event-1",
+                    "summary": "Design review",
+                    "start": {"dateTime": "2026-05-01T10:00:00Z"},
+                    "attachments": [{"fileId": "file-1", "title": "Brief"}],
+                    "hangoutLink": "https://meet.google.com/aaa-bbbb-ccc",
+                }
+            ]
+        },
+    )
+    adapter = GoogleCalendarTakeoutAdapter(path=str(export))
+
+    default_result = adapter.ingest()
+    attachment_result = adapter.ingest(entity_types=["attachment"])
+    conference_result = adapter.ingest(entity_types=["conference"])
+    combined_result = adapter.ingest(entity_types=["event", "attachment", "conference"])
+
+    assert [unit.source_entity_type for unit in default_result.units] == ["event"]
+    assert [unit.source_entity_type for unit in attachment_result.units] == ["attachment"]
+    assert attachment_result.edges == []
+    assert [unit.source_entity_type for unit in conference_result.units] == ["conference"]
+    assert conference_result.edges == []
+    assert sorted(unit.source_entity_type for unit in combined_result.units) == [
+        "attachment",
+        "conference",
+        "event",
+    ]
+    assert len(combined_result.edges) == 2
+
+
 def test_google_calendar_takeout_adapter_is_registered():
     assert isinstance(
         get_adapter("google_calendar_takeout", path="/tmp/calendar.json"),
