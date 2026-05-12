@@ -20,7 +20,7 @@ class DiscordJsonAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["discord_message"]
+        return ["discord_message", "discord_attachment"]
 
     def __init__(self, path: str = "", *, root_path: str = "") -> None:
         self.path = path or root_path
@@ -32,7 +32,10 @@ class DiscordJsonAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        if entity_types and "discord_message" not in entity_types:
+        requested_types = set(entity_types or self.entity_types)
+        include_messages = "discord_message" in requested_types
+        include_attachments = "discord_attachment" in requested_types
+        if not include_messages and not include_attachments:
             return result
 
         root = Path(self.path).expanduser()
@@ -41,16 +44,24 @@ class DiscordJsonAdapter(SourceAdapter):
 
         sync_at = self._sync_datetime(since) if since else None
         references_by_source_id: dict[str, list[dict[str, str]]] = {}
+        attachment_edges: list[KnowledgeEdge] = []
 
         for path in self._json_files(root):
             for index, record in enumerate(self._read_message_records(path)):
                 unit = self._message_unit(record, path, root, index)
                 if unit is None:
                     continue
-                if sync_at and unit.updated_at <= sync_at:
-                    continue
-                result.units.append(unit)
-                references_by_source_id[unit.source_id] = self._references(record["message"])
+                include_record = not sync_at or unit.updated_at > sync_at
+                attachment_units = self._attachment_units(record, path, root, index, unit)
+                if include_record and include_messages:
+                    result.units.append(unit)
+                    references_by_source_id[unit.source_id] = self._references(record["message"])
+                if include_record and include_attachments:
+                    result.units.extend(attachment_units)
+                if include_record and include_messages and include_attachments:
+                    attachment_edges.extend(
+                        self._attachment_edge(unit, attachment_unit) for attachment_unit in attachment_units
+                    )
 
         result.units.sort(key=lambda unit: (unit.created_at, unit.source_id))
         included_source_ids = {unit.source_id for unit in result.units}
@@ -91,6 +102,10 @@ class DiscordJsonAdapter(SourceAdapter):
                         },
                     )
                 )
+
+        for edge in attachment_edges:
+            if edge.from_unit_id in included_source_ids and edge.to_unit_id in included_source_ids:
+                result.edges.append(edge)
 
         result.edges.sort(key=lambda edge: (edge.from_unit_id, edge.to_unit_id, edge.id))
         return result
@@ -207,6 +222,99 @@ class DiscordJsonAdapter(SourceAdapter):
             updated_at=updated_at,
         )
 
+    def _attachment_units(
+        self,
+        record: dict[str, Any],
+        path: Path,
+        root: Path,
+        message_index: int,
+        message_unit: KnowledgeUnit,
+    ) -> list[KnowledgeUnit]:
+        message = record["message"]
+        attachments = self._attachments(message.get("attachments") or message.get("Attachments"))
+        if not attachments:
+            return []
+
+        author = message_unit.metadata["author"]
+        timestamp_text = message_unit.metadata["timestamp"]
+        created_at = message_unit.created_at
+        updated_at = message_unit.updated_at
+        source_path = self._relative_path(path, root)
+        channel_id = message_unit.metadata["channel_id"]
+        channel_name = message_unit.metadata["channel_name"]
+        server_id = message_unit.metadata["server_id"]
+        server_name = message_unit.metadata["server_name"]
+        message_id = message_unit.metadata["message_id"]
+
+        units: list[KnowledgeUnit] = []
+        for attachment_index, attachment in enumerate(attachments):
+            if not self._has_attachment_identity(attachment):
+                continue
+            source_id = self._attachment_source_id(
+                channel_id or channel_name,
+                message_id,
+                attachment,
+                message_index,
+                attachment_index,
+            )
+            title = attachment.get("filename") or attachment.get("url") or f"Discord attachment {attachment.get('id')}"
+            metadata = {
+                "attachment_id": attachment.get("id", ""),
+                "filename": attachment.get("filename", ""),
+                "url": attachment.get("url", ""),
+                "content_type": attachment.get("content_type", ""),
+                "size": attachment.get("size"),
+                "message_id": message_id,
+                "message_source_id": message_unit.source_id,
+                "channel_id": channel_id,
+                "channel_name": channel_name,
+                "server_id": server_id,
+                "server_name": server_name,
+                "author": author,
+                "timestamp": timestamp_text,
+                "source_path": source_path,
+                "path": source_path,
+            }
+            content_parts = [
+                attachment.get("filename", ""),
+                attachment.get("url", ""),
+                attachment.get("content_type", ""),
+            ]
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.DISCORD_JSON,
+                    source_id=source_id,
+                    source_entity_type="discord_attachment",
+                    title=title,
+                    content=" ".join(part for part in content_parts if part),
+                    content_type=ContentType.ARTIFACT,
+                    metadata={key: value for key, value in metadata.items() if value != "" and value is not None},
+                    tags=self._attachment_tags(server_name, channel_name),
+                    created_at=created_at,
+                    updated_at=updated_at,
+                )
+            )
+        return units
+
+    def _attachment_edge(self, message_unit: KnowledgeUnit, attachment_unit: KnowledgeUnit) -> KnowledgeEdge:
+        return KnowledgeEdge(
+            id=self._edge_id(message_unit.source_id, attachment_unit.source_id, "discord_message_attachment"),
+            from_unit_id=message_unit.source_id,
+            to_unit_id=attachment_unit.source_id,
+            relation=EdgeRelation.CONTAINS,
+            source=EdgeSource.SOURCE,
+            metadata={
+                "source_project": SourceProject.DISCORD_JSON.value,
+                "from_entity_type": "discord_message",
+                "to_entity_type": "discord_attachment",
+                "relation_type": "discord_message_attachment",
+                "message_id": message_unit.metadata["message_id"],
+                "attachment_id": attachment_unit.metadata.get("attachment_id", ""),
+                "filename": attachment_unit.metadata.get("filename", ""),
+                "url": attachment_unit.metadata.get("url", ""),
+            },
+        )
+
     def _context_from_payload(self, payload: dict[str, Any]) -> dict[str, str]:
         guild = payload.get("guild") or payload.get("server") or {}
         channel = payload.get("channel") or {}
@@ -299,6 +407,9 @@ class DiscordJsonAdapter(SourceAdapter):
             attachments.append({key: value for key, value in attachment.items() if value not in {"", None}})
         return attachments
 
+    def _has_attachment_identity(self, attachment: dict[str, Any]) -> bool:
+        return bool(attachment.get("id") or attachment.get("url") or attachment.get("filename"))
+
     def _references(self, message: dict[str, Any]) -> list[dict[str, str]]:
         values = [
             message.get("message_reference"),
@@ -339,6 +450,41 @@ class DiscordJsonAdapter(SourceAdapter):
     def _source_id(self, channel: str, message_id: str) -> str:
         channel_part = channel or "unknown-channel"
         return f"discord_json:{channel_part}:{message_id}"
+
+    def _attachment_source_id(
+        self,
+        channel: str,
+        message_id: str,
+        attachment: dict[str, Any],
+        message_index: int,
+        attachment_index: int,
+    ) -> str:
+        channel_part = channel or "unknown-channel"
+        attachment_id = self._string(attachment.get("id"))
+        if attachment_id:
+            return f"discord_json:{channel_part}:{message_id}:attachment:{attachment_id}"
+        raw = "|".join(
+            [
+                SourceProject.DISCORD_JSON.value,
+                "discord_attachment",
+                channel_part,
+                message_id,
+                self._string(attachment.get("url")),
+                self._string(attachment.get("filename")),
+                str(message_index),
+                str(attachment_index),
+            ]
+        )
+        digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+        return f"discord_json:{channel_part}:{message_id}:attachment:{digest}"
+
+    def _attachment_tags(self, server_name: str, channel_name: str) -> list[str]:
+        tags = ["discord", "discord-attachment"]
+        if server_name:
+            tags.append(f"discord-server-{self._tag_value(server_name)}")
+        if channel_name:
+            tags.append(f"discord-channel-{self._tag_value(channel_name)}")
+        return tags
 
     def _edge_id(self, source_id: str, target_id: str, message_id: str) -> str:
         raw = "|".join([SourceProject.DISCORD_JSON.value, EdgeRelation.REFERENCES.value, source_id, target_id, message_id])
