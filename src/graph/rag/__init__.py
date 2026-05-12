@@ -25,6 +25,7 @@ from graph.rag.result_clusters import cluster_results_by_overlap
 from graph.rag.source_agreement import score_source_agreement
 from graph.rag.snippets import highlight_result_snippets
 from graph.rag.source_credibility import score_source_credibility
+from graph.rag.source_diversity_audit import audit_source_diversity
 from graph.rag.source_reliability import score_source_reliability
 from graph.rag.source_timeline import build_source_timeline
 from graph.rag.query_focus_terms import extract_query_focus_terms
@@ -40,6 +41,7 @@ __all__ = [
     "build_tag_hierarchy",
     "analyze_citation_coverage",
     "analyze_result_date_coverage",
+    "audit_source_diversity",
     "allocate_evidence_budget",
     "build_answer_outline",
     "build_evidence_pack",
