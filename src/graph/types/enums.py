@@ -114,6 +114,7 @@ class SourceProject(StrEnum):
     FITBIT_SLEEP_CSV = "fitbit_sleep_csv"
     SPOTIFY_STREAMING_HISTORY = "spotify_streaming_history"
     SPOTIFY_TAKEOUT = "spotify_takeout"
+    LASTFM_SCROBBLES_CSV = "lastfm_scrobbles_csv"
     TRAKT_WATCH_HISTORY_CSV = "trakt_watch_history_csv"
     STORYGRAPH_READING_HISTORY_CSV = "storygraph_reading_history_csv"
     MYANIMELIST_XML = "myanimelist_xml"
