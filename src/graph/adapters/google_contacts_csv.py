@@ -20,7 +20,7 @@ class GoogleContactsCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["contact", "organization"]
+        return ["contact", "organization", "group"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -40,6 +40,8 @@ class GoogleContactsCsvAdapter(SourceAdapter):
         units: list[KnowledgeUnit] = []
         organization_contacts: dict[str, list[KnowledgeUnit]] = {}
         organization_names: dict[str, str] = {}
+        group_contacts: dict[str, list[KnowledgeUnit]] = {}
+        group_names: dict[str, str] = {}
         for path in self._iter_paths():
             try:
                 rows = self._read_rows(path)
@@ -56,6 +58,11 @@ class GoogleContactsCsvAdapter(SourceAdapter):
                     org_key = self._organization_key(str(org_name))
                     organization_contacts.setdefault(org_key, []).append(unit)
                     organization_names.setdefault(org_key, str(org_name))
+                for group in unit.metadata.get("groups", []):
+                    group_key = self._group_key(str(group))
+                    if group_key:
+                        group_contacts.setdefault(group_key, []).append(unit)
+                        group_names.setdefault(group_key, str(group))
                 if "contact" in allowed:
                     units.append(unit)
 
@@ -65,6 +72,9 @@ class GoogleContactsCsvAdapter(SourceAdapter):
         ]
         if "organization" in allowed:
             units.extend(organization_units)
+        group_units = [self._group_unit(key, group_names[key], contacts) for key, contacts in sorted(group_contacts.items())]
+        if "group" in allowed:
+            units.extend(group_units)
         result.units.extend(sorted(units, key=lambda unit: unit.source_id))
         if {"contact", "organization"}.issubset(allowed):
             org_by_key = {self._organization_key(unit.title): unit for unit in organization_units}
@@ -72,6 +82,12 @@ class GoogleContactsCsvAdapter(SourceAdapter):
                 organization = org_by_key[contacts_key]
                 for contact in contacts:
                     result.edges.append(self._organization_edge(contact, organization))
+        if {"contact", "group"}.issubset(allowed):
+            group_by_key = {self._group_key(unit.title): unit for unit in group_units}
+            for group_key, contacts in group_contacts.items():
+                group = group_by_key[group_key]
+                for contact in contacts:
+                    result.edges.append(self._group_edge(contact, group))
         result.edges.sort(key=lambda edge: edge.id)
         return result
 
@@ -218,12 +234,67 @@ class GoogleContactsCsvAdapter(SourceAdapter):
             created_at=contact.created_at,
         )
 
+    def _group_unit(self, key: str, name: str, contacts: list[KnowledgeUnit]) -> KnowledgeUnit:
+        organization_names = sorted(
+            {
+                str(contact.metadata.get("organization", {}).get("name"))
+                for contact in contacts
+                if contact.metadata.get("organization", {}).get("name")
+            }
+        )
+        contact_ids = sorted(contact.source_id for contact in contacts)
+        source_files = sorted({str(contact.metadata.get("source_file")) for contact in contacts if contact.metadata.get("source_file")})
+        return KnowledgeUnit(
+            source_project=SourceProject.GOOGLE_CONTACTS_CSV,
+            source_id=f"google_contacts_csv:group:{key}",
+            source_entity_type="group",
+            title=name,
+            content=f"Contact group: {name}\nContacts: {len(contacts)}",
+            content_type=ContentType.METADATA,
+            metadata={
+                "name": name,
+                "normalized_name": key,
+                "contact_count": len(contacts),
+                "contact_source_ids": contact_ids,
+                "email_count": sum(len(contact.metadata.get("emails") or []) for contact in contacts),
+                "organization_names": organization_names,
+                "source_files": source_files,
+            },
+            tags=["contact-group", name],
+            created_at=min(contact.created_at for contact in contacts),
+            updated_at=max(contact.updated_at for contact in contacts),
+        )
+
+    def _group_edge(self, contact: KnowledgeUnit, group: KnowledgeUnit) -> KnowledgeEdge:
+        return KnowledgeEdge(
+            id=self._group_edge_id(contact.source_id, group.source_id),
+            from_unit_id=contact.source_id,
+            to_unit_id=group.source_id,
+            relation=EdgeRelation.REFERENCES,
+            source=EdgeSource.SOURCE,
+            metadata={
+                "source_project": SourceProject.GOOGLE_CONTACTS_CSV.value,
+                "from_entity_type": "contact",
+                "to_entity_type": "group",
+                "group": group.title,
+            },
+            created_at=contact.created_at,
+        )
+
     def _organization_key(self, name: str) -> str:
         return hashlib.sha256(" ".join(name.casefold().split()).encode("utf-8")).hexdigest()[:24]
+
+    def _group_key(self, name: str) -> str:
+        normalized = " ".join(name.casefold().split())
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:24] if normalized else ""
 
     def _edge_id(self, contact_id: str, organization_id: str) -> str:
         digest = hashlib.sha256(f"{contact_id}|{organization_id}|references".encode("utf-8")).hexdigest()[:24]
         return f"google-contacts-organization-references-{digest}"
+
+    def _group_edge_id(self, contact_id: str, group_id: str) -> str:
+        digest = hashlib.sha256(f"{contact_id}|{group_id}|references".encode("utf-8")).hexdigest()[:24]
+        return f"google-contacts-group-references-{digest}"
 
     def _content(
         self,

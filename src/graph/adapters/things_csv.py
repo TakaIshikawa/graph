@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class ThingsCsvAdapter(SourceAdapter):
@@ -21,7 +21,7 @@ class ThingsCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["task"]
+        return ["task", "project", "area"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -33,11 +33,12 @@ class ThingsCsvAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        if entity_types and "task" not in entity_types:
+        allowed_types = set(entity_types or self.entity_types)
+        if not allowed_types.intersection(self.entity_types):
             return result
 
         sync_at = self._ensure_utc(since.last_sync_at) if since else None
-        units: list[KnowledgeUnit] = []
+        task_units: list[KnowledgeUnit] = []
         for path in self._iter_paths():
             try:
                 rows = self._read_rows(path)
@@ -49,9 +50,22 @@ class ThingsCsvAdapter(SourceAdapter):
                     continue
                 if sync_at and unit.created_at <= sync_at:
                     continue
-                units.append(unit)
+                task_units.append(unit)
 
-        result.units.extend(sorted(units, key=lambda unit: (unit.created_at, unit.source_id)))
+        project_units = self._aggregate_units(task_units, "project") if "project" in allowed_types else []
+        area_units = self._aggregate_units(task_units, "area") if "area" in allowed_types else []
+        if "project" in allowed_types:
+            result.units.extend(project_units)
+        if "area" in allowed_types:
+            result.units.extend(area_units)
+        if "task" in allowed_types:
+            result.units.extend(task_units)
+        if "project" in allowed_types and "task" in allowed_types:
+            result.edges.extend(self._aggregate_edges(project_units, task_units, "project"))
+        if "area" in allowed_types and "task" in allowed_types:
+            result.edges.extend(self._aggregate_edges(area_units, task_units, "area"))
+        result.units.sort(key=lambda unit: (unit.created_at, unit.source_id))
+        result.edges.sort(key=lambda edge: edge.id)
         return result
 
     def _iter_paths(self) -> list[Path]:
@@ -126,6 +140,72 @@ class ThingsCsvAdapter(SourceAdapter):
         identifier = explicit or "|".join([title, created_at.isoformat(), self._first(row, "Project", "project")])
         digest = hashlib.sha256(identifier.encode("utf-8")).hexdigest()[:24]
         return f"things_csv:{digest}"
+
+    def _aggregate_units(self, tasks: list[KnowledgeUnit], field: str) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        names: dict[str, str] = {}
+        for task in tasks:
+            name = str(task.metadata.get(field) or "").strip()
+            if not name:
+                continue
+            key = self._aggregate_key(name)
+            grouped.setdefault(key, []).append(task)
+            names.setdefault(key, name)
+
+        units: list[KnowledgeUnit] = []
+        for key, field_tasks in sorted(grouped.items()):
+            name = names[key]
+            statuses = [str(task.metadata.get("status") or "") for task in field_tasks]
+            metadata = {
+                "name": name,
+                "normalized_name": key,
+                "task_count": len(field_tasks),
+                "open_count": sum(1 for status in statuses if status == "open"),
+                "completed_count": sum(1 for status in statuses if status == "completed"),
+                "canceled_count": sum(1 for status in statuses if status == "canceled"),
+                "task_source_ids": sorted(task.source_id for task in field_tasks),
+                "first_created_at": min(task.created_at for task in field_tasks).isoformat(),
+                "latest_updated_at": max(task.updated_at for task in field_tasks).isoformat(),
+            }
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.THINGS_CSV,
+                    source_id=f"things_csv:{field}:{hashlib.sha256(key.encode('utf-8')).hexdigest()[:24]}",
+                    source_entity_type=field,
+                    title=name,
+                    content=f"Things {field}: {name}\nTasks: {len(field_tasks)}",
+                    content_type=ContentType.METADATA,
+                    metadata=metadata,
+                    tags=["things", field, name],
+                    created_at=min(task.created_at for task in field_tasks),
+                    updated_at=max(task.updated_at for task in field_tasks),
+                )
+            )
+        return units
+
+    def _aggregate_edges(self, aggregates: list[KnowledgeUnit], tasks: list[KnowledgeUnit], field: str) -> list[KnowledgeEdge]:
+        aggregate_ids = {str(unit.metadata.get("normalized_name")): unit.source_id for unit in aggregates}
+        edges: list[KnowledgeEdge] = []
+        for task in tasks:
+            key = self._aggregate_key(str(task.metadata.get(field) or ""))
+            aggregate_id = aggregate_ids.get(key)
+            if not aggregate_id:
+                continue
+            digest = hashlib.sha256("|".join((aggregate_id, task.source_id, f"{field}_contains_task")).encode("utf-8")).hexdigest()[:24]
+            edges.append(
+                KnowledgeEdge(
+                    id=f"things-csv-{field}-contains-{digest}",
+                    from_unit_id=aggregate_id,
+                    to_unit_id=task.source_id,
+                    relation=EdgeRelation.CONTAINS,
+                    source=EdgeSource.SOURCE,
+                    metadata={"source_project": SourceProject.THINGS_CSV.value, "relation_type": f"{field}_contains_task"},
+                )
+            )
+        return edges
+
+    def _aggregate_key(self, name: str) -> str:
+        return " ".join(name.casefold().split())
 
     def _content(self, title: str, notes: str) -> str:
         return f"{title}\n\n{notes}".strip()

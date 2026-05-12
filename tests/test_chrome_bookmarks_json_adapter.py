@@ -47,7 +47,7 @@ def test_chrome_bookmarks_json_ingests_nested_bookmarks_dates_and_edges(tmp_path
         encoding="utf-8",
     )
 
-    result = ChromeBookmarksJsonAdapter(path=str(export)).ingest()
+    result = ChromeBookmarksJsonAdapter(path=str(export)).ingest(entity_types=["bookmark"])
 
     assert sorted(unit.title for unit in result.units) == ["Graph Notes", "Other"]
     unit = next(unit for unit in result.units if unit.title == "Graph Notes")
@@ -86,10 +86,11 @@ def test_chrome_bookmarks_json_filters_since_and_entity_types(tmp_path):
     )
 
     since = SyncState(source_project="chrome_bookmarks_json", source_entity_type="bookmark", last_sync_at=datetime(2022, 1, 1, tzinfo=timezone.utc))
-    result = ChromeBookmarksJsonAdapter(path=str(export)).ingest(since=since)
+    result = ChromeBookmarksJsonAdapter(path=str(export)).ingest(since=since, entity_types=["bookmark"])
 
     assert [unit.title for unit in result.units] == ["New"]
     assert ChromeBookmarksJsonAdapter(path=str(export)).ingest(entity_types=["history"]).units == []
+    assert ChromeBookmarksJsonAdapter(path=str(export)).entity_types == ["bookmark", "domain"]
 
 
 def test_chrome_bookmarks_json_source_id_fallback_is_stable(tmp_path):
@@ -104,3 +105,70 @@ def test_chrome_bookmarks_json_source_id_fallback_is_stable(tmp_path):
 
     assert first.source_id == second.source_id
     assert first.metadata["root_name"] == "Mobile Bookmarks"
+
+
+def test_chrome_bookmarks_json_emits_domain_aggregates_and_edges(tmp_path):
+    export = tmp_path / "Bookmarks.json"
+    export.write_text(
+        json.dumps(
+            {
+                "roots": {
+                    "bookmark_bar": {
+                        "name": "Bookmarks Bar",
+                        "type": "folder",
+                        "children": [
+                            {
+                                "name": "Research",
+                                "type": "folder",
+                                "children": [
+                                    {
+                                        "type": "url",
+                                        "name": "A",
+                                        "url": "https://Example.com/a",
+                                        "guid": "guid-a",
+                                        "date_added": "13253932800000000",
+                                        "date_last_used": "13317004800000000",
+                                    },
+                                    {
+                                        "type": "url",
+                                        "name": "B",
+                                        "url": "https://example.com/b",
+                                        "guid": "guid-b",
+                                        "date_added": "13285209600000000",
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+                    "other": {
+                        "type": "folder",
+                        "children": [{"type": "url", "name": "C", "url": "https://other.example/c", "guid": "guid-c"}],
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = ChromeBookmarksJsonAdapter(path=str(export)).ingest(entity_types=["bookmark", "domain"])
+    domains = sorted((unit for unit in result.units if unit.source_entity_type == "domain"), key=lambda unit: unit.metadata["domain"])
+    assert [unit.metadata["domain"] for unit in domains] == ["example.com", "other.example"]
+    domain = domains[0]
+    bookmarks = [unit for unit in result.units if unit.source_entity_type == "bookmark" and unit.metadata["domain"] == "example.com"]
+    assert domain.metadata["bookmark_count"] == 2
+    assert domain.metadata["roots"] == ["bookmark_bar"]
+    assert domain.metadata["folder_paths"] == ["Research"]
+    assert domain.metadata["bookmark_source_ids"] == sorted(unit.source_id for unit in bookmarks)
+    assert domain.metadata["first_added_at"] == "2021-01-01T00:00:00+00:00"
+    assert domain.metadata["last_used_at"] == "2023-01-01T00:00:00+00:00"
+    assert {
+        edge.to_unit_id
+        for edge in result.edges
+        if edge.from_unit_id == domain.source_id and edge.metadata.get("relation_type") == "domain_contains_bookmark"
+    } == {
+        unit.source_id for unit in bookmarks
+    }
+
+    domain_only = ChromeBookmarksJsonAdapter(path=str(export)).ingest(entity_types=["domain"])
+    assert {unit.source_entity_type for unit in domain_only.units} == {"domain"}
+    assert domain_only.edges == []
