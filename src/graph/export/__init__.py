@@ -28,6 +28,7 @@ from graph.export.edge_csv import export_edges_to_csv
 from graph.export.edge_adjacency_markdown import export_edge_adjacency_markdown
 from graph.export.edge_coverage_csv import export_edge_coverage_csv
 from graph.export.edge_type_matrix_csv import export_edge_type_matrix_csv
+from graph.export.external_domain_summary_markdown import export_external_domain_summary_markdown
 from graph.export.flashcards_markdown import export_units_to_flashcards_markdown
 from graph.export.geojson import export_units_to_geojson
 from graph.export.graphson import export_graphson
@@ -44,6 +45,8 @@ from graph.export.json_summary import export_graph_json_summary
 from graph.export.kindle_review_queue_markdown import export_units_to_kindle_review_queue_markdown
 from graph.export.llms_txt import export_units_to_llms_txt
 from graph.export.markdown_timeline import export_units_to_markdown_timeline
+from graph.export.metadata_date_histogram_markdown import export_metadata_date_histogram_markdown
+from graph.export.metadata_enum_candidates_markdown import export_metadata_enum_candidates_markdown
 from graph.export.metadata_key_matrix_csv import export_metadata_key_matrix_csv
 from graph.export.metadata_completeness import export_metadata_completeness_markdown
 from graph.export.mermaid_mindmap import export_units_to_mermaid_mindmap
@@ -59,6 +62,7 @@ from graph.export.ris import export_units_to_ris
 from graph.export.rss import export_units_to_rss
 from graph.export.schema_inventory import export_unit_schema_inventory
 from graph.export.source_coverage import export_source_coverage_markdown
+from graph.export.source_entity_activity_markdown import export_source_entity_activity_markdown
 from graph.export.source_entity_type_heatmap_csv import export_source_entity_type_heatmap_csv
 from graph.export.source_inventory import export_source_inventory_csv
 from graph.export.source_metadata_outliers_markdown import export_source_metadata_outliers_markdown
@@ -124,6 +128,7 @@ __all__ = [
     "export_edge_coverage_csv",
     "export_edge_type_matrix_csv",
     "export_edges_to_csv",
+    "export_external_domain_summary_markdown",
     "export_graph_edges_csv",
     "export_graph_adjacency_csv",
     "export_graph_adjacency_markdown",
@@ -145,6 +150,8 @@ __all__ = [
     "export_units_to_hugo_bundle",
     "export_units_to_kindle_review_queue_markdown",
     "export_metadata_completeness_markdown",
+    "export_metadata_date_histogram_markdown",
+    "export_metadata_enum_candidates_markdown",
     "export_metadata_key_matrix_csv",
     "export_graph_ndjson",
     "export_graph_neo4j_bulk_csv",
@@ -154,6 +161,7 @@ __all__ = [
     "export_units_to_ris",
     "export_units_to_rss",
     "export_source_coverage_markdown",
+    "export_source_entity_activity_markdown",
     "export_source_entity_type_heatmap_csv",
     "export_source_inventory_csv",
     "export_source_metadata_outliers_markdown",
