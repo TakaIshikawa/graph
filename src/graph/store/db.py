@@ -474,6 +474,31 @@ def _extract_content_external_urls(content: str) -> set[str]:
     return urls
 
 
+def _external_url_domain(value: Any) -> str | None:
+    normalized = _normalize_external_url(value)
+    if normalized is None:
+        return None
+    return urlsplit(normalized).netloc.casefold()
+
+
+def _iter_metadata_external_url_key_values(value: Any, path: str = ""):
+    if isinstance(value, Mapping):
+        for child_key, child_value in value.items():
+            child_path = f"{path}.{child_key}" if path else str(child_key)
+            yield from _iter_metadata_external_url_key_values(child_value, child_path)
+        return
+    if isinstance(value, list | tuple | set):
+        for child in value:
+            yield from _iter_metadata_external_url_key_values(child, path)
+        return
+    if path and path.rsplit(".", 1)[-1].casefold() in _DUPLICATE_EXTERNAL_URL_KEYS:
+        yield path, value
+
+
+def _is_metadata_enum_scalar(value: Any) -> bool:
+    return value is None or isinstance(value, str | int | float | bool)
+
+
 def _sorted_counter_dict(counter: Counter[str]) -> dict[str, int]:
     return dict(sorted(counter.items(), key=lambda item: (-item[1], item[0])))
 
@@ -1907,6 +1932,318 @@ class Store:
             }
             for row in rows
         ]
+
+    def source_content_type_mix(
+        self,
+        *,
+        source_project: SourceProject | str | None = None,
+        source_entity_type: str | None = None,
+        min_count: int = 1,
+    ) -> list[dict[str, Any]]:
+        """Return counts grouped by source project and content type."""
+        if not isinstance(min_count, int) or isinstance(min_count, bool) or min_count < 1:
+            raise ValueError("min_count must be a positive integer")
+
+        where_parts: list[str] = []
+        params: list[object] = []
+        if source_project is not None:
+            where_parts.append("source_project = ?")
+            params.append(str(_model_value(source_project)))
+        if source_entity_type is not None:
+            where_parts.append("source_entity_type = ?")
+            params.append(str(source_entity_type))
+
+        query = """SELECT source_project, content_type, COUNT(*) AS count
+                   FROM knowledge_units"""
+        if where_parts:
+            query += " WHERE " + " AND ".join(where_parts)
+        query += """
+                   GROUP BY source_project, content_type
+                   HAVING count >= ?
+                   ORDER BY source_project, count DESC, content_type"""
+        params.append(min_count)
+
+        rows = self.conn.execute(query, params).fetchall()
+        return [
+            {
+                "source_project": row["source_project"],
+                "content_type": row["content_type"],
+                "count": row["count"],
+            }
+            for row in rows
+        ]
+
+    def tag_adoption_summary(
+        self,
+        *,
+        tag_prefix: str | None = None,
+        source_project: SourceProject | str | None = None,
+        min_unit_count: int = 1,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Summarize distinct unit adoption for each tag."""
+        if (
+            not isinstance(min_unit_count, int)
+            or isinstance(min_unit_count, bool)
+            or min_unit_count < 1
+        ):
+            raise ValueError("min_unit_count must be a positive integer")
+        if limit is not None and (
+            not isinstance(limit, int) or isinstance(limit, bool) or limit < 1
+        ):
+            raise ValueError("limit must be a positive integer or None")
+
+        normalized_prefix = str(tag_prefix) if tag_prefix is not None else None
+        normalized_source = (
+            str(_model_value(source_project)) if source_project is not None else None
+        )
+
+        where_parts, params = self._unit_filter_parts(source_project=normalized_source)
+        query = """SELECT id, source_project, content_type, tags, created_at
+                   FROM knowledge_units"""
+        if where_parts:
+            query += " WHERE " + " AND ".join(where_parts)
+        query += " ORDER BY created_at, source_project, id"
+
+        unit_ids: dict[str, set[str]] = defaultdict(set)
+        first_seen: dict[str, datetime] = {}
+        last_seen: dict[str, datetime] = {}
+        source_project_counts: dict[str, Counter[str]] = defaultdict(Counter)
+        content_type_counts: dict[str, Counter[str]] = defaultdict(Counter)
+
+        for row in self.conn.execute(query, params).fetchall():
+            try:
+                tags = json.loads(row["tags"])
+            except json.JSONDecodeError:
+                tags = []
+            created_at = _parse_datetime(row["created_at"])
+            if created_at is None:
+                continue
+            distinct_tags = {
+                str(tag).strip()
+                for tag in tags
+                if isinstance(tag, str) and str(tag).strip()
+            }
+            for tag in sorted(distinct_tags):
+                if normalized_prefix is not None and not tag.startswith(normalized_prefix):
+                    continue
+                if row["id"] in unit_ids[tag]:
+                    continue
+                unit_ids[tag].add(row["id"])
+                first_seen[tag] = min(first_seen.get(tag, created_at), created_at)
+                last_seen[tag] = max(last_seen.get(tag, created_at), created_at)
+                source_project_counts[tag][str(row["source_project"])] += 1
+                content_type_counts[tag][str(row["content_type"])] += 1
+
+        rows = [
+            {
+                "tag": tag,
+                "unit_count": len(unit_ids[tag]),
+                "first_seen_at": first_seen[tag].isoformat(),
+                "last_seen_at": last_seen[tag].isoformat(),
+                "source_project_counts": _sorted_counter_dict(source_project_counts[tag]),
+                "content_type_counts": _sorted_counter_dict(content_type_counts[tag]),
+            }
+            for tag in unit_ids
+            if len(unit_ids[tag]) >= min_unit_count
+        ]
+        rows.sort(key=lambda row: (-row["unit_count"], row["tag"]))
+        return rows[:limit] if limit is not None else rows
+
+    def metadata_enum_candidates(
+        self,
+        *,
+        max_distinct_values: int = 10,
+        min_occurrence_count: int = 2,
+        prefix: str | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Identify scalar metadata paths that look like low-cardinality enums."""
+        if (
+            not isinstance(max_distinct_values, int)
+            or isinstance(max_distinct_values, bool)
+            or max_distinct_values < 1
+        ):
+            raise ValueError("max_distinct_values must be a positive integer")
+        if (
+            not isinstance(min_occurrence_count, int)
+            or isinstance(min_occurrence_count, bool)
+            or min_occurrence_count < 1
+        ):
+            raise ValueError("min_occurrence_count must be a positive integer")
+        if limit is not None and (
+            not isinstance(limit, int) or isinstance(limit, bool) or limit < 1
+        ):
+            raise ValueError("limit must be a positive integer or None")
+
+        normalized_prefix = str(prefix).strip() if prefix is not None else None
+        if normalized_prefix == "":
+            normalized_prefix = None
+
+        rows = self.conn.execute(
+            """SELECT metadata
+               FROM knowledge_units
+               ORDER BY source_project, source_id, id"""
+        ).fetchall()
+        total_units = len(rows)
+        counts: Counter[str] = Counter()
+        value_types: dict[str, Counter[str]] = defaultdict(Counter)
+        values: dict[str, Counter[tuple[str, str]]] = defaultdict(Counter)
+        value_payloads: dict[tuple[str, str], Any] = {}
+
+        for row in rows:
+            try:
+                metadata = json.loads(row["metadata"])
+            except json.JSONDecodeError:
+                metadata = {}
+            if not isinstance(metadata, Mapping):
+                continue
+            for path, value in _flatten_metadata_inventory(metadata):
+                if normalized_prefix is not None and not path.startswith(normalized_prefix):
+                    continue
+                if "[" in path:
+                    continue
+                if not _is_metadata_enum_scalar(value):
+                    continue
+                value_type = _metadata_inventory_value_type(value)
+                normalized_value = _metadata_inventory_normalized_value(value)
+                value_key = (
+                    value_type,
+                    json.dumps(normalized_value, sort_keys=True, ensure_ascii=False),
+                )
+                counts[path] += 1
+                value_types[path][value_type] += 1
+                values[path][value_key] += 1
+                value_payloads.setdefault(value_key, normalized_value)
+
+        candidate_rows = []
+        for path in counts:
+            distinct_value_count = len(values[path])
+            if counts[path] < min_occurrence_count or distinct_value_count > max_distinct_values:
+                continue
+            top_values = [
+                {
+                    "value": value_payloads[value_key],
+                    "value_type": value_key[0],
+                    "count": count,
+                }
+                for value_key, count in sorted(
+                    values[path].items(),
+                    key=lambda item: (-item[1], item[0][0], item[0][1]),
+                )
+            ]
+            candidate_rows.append(
+                {
+                    "key": path,
+                    "occurrence_count": counts[path],
+                    "distinct_value_count": distinct_value_count,
+                    "coverage_ratio": counts[path] / total_units if total_units else 0.0,
+                    "value_types": _metadata_inventory_counter_values(value_types[path]),
+                    "top_values": top_values,
+                }
+            )
+
+        candidate_rows.sort(
+            key=lambda row: (
+                row["distinct_value_count"],
+                -row["occurrence_count"],
+                row["key"],
+            )
+        )
+        return candidate_rows[:limit] if limit is not None else candidate_rows
+
+    def external_domain_summary(
+        self,
+        *,
+        metadata_keys: list[str] | tuple[str, ...] | None = None,
+        include_content_urls: bool = True,
+        limit: int | None = None,
+        min_unit_count: int = 1,
+    ) -> list[dict[str, Any]]:
+        """Summarize external URL domains found in metadata and content."""
+        if metadata_keys is not None:
+            if isinstance(metadata_keys, str) or not isinstance(metadata_keys, list | tuple):
+                raise ValueError("metadata_keys must be a sequence of non-empty strings or None")
+            normalized_keys = tuple(dict.fromkeys(str(key).strip() for key in metadata_keys))
+            if any(not key for key in normalized_keys):
+                raise ValueError("metadata_keys must be a sequence of non-empty strings or None")
+        else:
+            normalized_keys = None
+        if not isinstance(include_content_urls, bool):
+            raise ValueError("include_content_urls must be a boolean")
+        if limit is not None and (
+            not isinstance(limit, int) or isinstance(limit, bool) or limit < 1
+        ):
+            raise ValueError("limit must be a positive integer or None")
+        if (
+            not isinstance(min_unit_count, int)
+            or isinstance(min_unit_count, bool)
+            or min_unit_count < 1
+        ):
+            raise ValueError("min_unit_count must be a positive integer")
+
+        rows = self.conn.execute(
+            """SELECT id, source_project, metadata, content
+               FROM knowledge_units
+               ORDER BY source_project, source_id, id"""
+        ).fetchall()
+
+        unit_ids: dict[str, set[str]] = defaultdict(set)
+        source_project_counts: dict[str, Counter[str]] = defaultdict(Counter)
+        metadata_key_counts: dict[str, Counter[str]] = defaultdict(Counter)
+        example_unit_ids: dict[str, list[str]] = defaultdict(list)
+
+        for row in rows:
+            domains_for_unit: dict[str, set[str]] = defaultdict(set)
+            try:
+                metadata = json.loads(row["metadata"])
+            except json.JSONDecodeError:
+                metadata = {}
+            if isinstance(metadata, Mapping):
+                if normalized_keys is None:
+                    key_values = _iter_metadata_external_url_key_values(metadata)
+                else:
+                    key_values = (
+                        (key, metadata_path_value(metadata, key))
+                        for key in normalized_keys
+                        if metadata_path_value(metadata, key) is not None
+                    )
+                for key, value in key_values:
+                    values_to_scan = value if isinstance(value, list | tuple | set) else [value]
+                    for candidate in values_to_scan:
+                        domain = _external_url_domain(candidate)
+                        if domain is not None:
+                            domains_for_unit[domain].add(str(key))
+
+            if include_content_urls:
+                for url in _extract_content_external_urls(row["content"]):
+                    domain = _external_url_domain(url)
+                    if domain is not None:
+                        domains_for_unit[domain].add("content")
+
+            for domain, keys in sorted(domains_for_unit.items()):
+                if row["id"] in unit_ids[domain]:
+                    continue
+                unit_ids[domain].add(row["id"])
+                source_project_counts[domain][str(row["source_project"])] += 1
+                for key in keys:
+                    metadata_key_counts[domain][key] += 1
+                if len(example_unit_ids[domain]) < _MAX_METADATA_INVENTORY_EXAMPLES:
+                    example_unit_ids[domain].append(str(row["id"]))
+
+        summary_rows = [
+            {
+                "domain": domain,
+                "unit_count": len(unit_ids[domain]),
+                "source_project_counts": _sorted_counter_dict(source_project_counts[domain]),
+                "metadata_key_counts": _sorted_counter_dict(metadata_key_counts[domain]),
+                "example_unit_ids": sorted(example_unit_ids[domain]),
+            }
+            for domain in unit_ids
+            if len(unit_ids[domain]) >= min_unit_count
+        ]
+        summary_rows.sort(key=lambda row: (-row["unit_count"], row["domain"]))
+        return summary_rows[:limit] if limit is not None else summary_rows
 
     def tag_freshness_summary(
         self,
