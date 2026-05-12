@@ -53,6 +53,27 @@ _DUPLICATE_EXTERNAL_URL_KEYS = frozenset(
     }
 )
 _CONTENT_URL_RE = re.compile(r"https?://[^\s<>\[\]{}\"']+", re.IGNORECASE)
+_UNIT_TITLE_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "for",
+        "from",
+        "in",
+        "into",
+        "is",
+        "of",
+        "on",
+        "or",
+        "the",
+        "to",
+        "with",
+    }
+)
 
 if TYPE_CHECKING:
     from graph.adapters.base import IngestResult
@@ -2245,6 +2266,81 @@ class Store:
         summary_rows.sort(key=lambda row: (-row["unit_count"], row["domain"]))
         return summary_rows[:limit] if limit is not None else summary_rows
 
+    def unit_title_terms(
+        self,
+        *,
+        source_project: SourceProject | str | None = None,
+        content_type: str | None = None,
+        min_unit_count: int = 1,
+        limit: int | None = None,
+        min_term_length: int = 3,
+    ) -> list[dict[str, Any]]:
+        """Extract frequent normalized terms from unit titles."""
+        if (
+            not isinstance(min_unit_count, int)
+            or isinstance(min_unit_count, bool)
+            or min_unit_count < 1
+        ):
+            raise ValueError("min_unit_count must be a positive integer")
+        if limit is not None and (
+            not isinstance(limit, int) or isinstance(limit, bool) or limit < 1
+        ):
+            raise ValueError("limit must be a positive integer or None")
+        if (
+            not isinstance(min_term_length, int)
+            or isinstance(min_term_length, bool)
+            or min_term_length < 1
+        ):
+            raise ValueError("min_term_length must be a positive integer")
+
+        where_parts: list[str] = []
+        params: list[object] = []
+        if source_project is not None:
+            where_parts.append("source_project = ?")
+            params.append(str(_model_value(source_project)))
+        if content_type is not None:
+            where_parts.append("content_type = ?")
+            params.append(str(_model_value(content_type)))
+
+        query = """SELECT id, title, source_project
+                   FROM knowledge_units"""
+        if where_parts:
+            query += " WHERE " + " AND ".join(where_parts)
+        query += " ORDER BY source_project, id"
+
+        unit_ids: dict[str, set[str]] = defaultdict(set)
+        source_project_counts: dict[str, Counter[str]] = defaultdict(Counter)
+        example_unit_ids: dict[str, list[str]] = defaultdict(list)
+
+        for row in self.conn.execute(query, params).fetchall():
+            terms = {
+                term.casefold()
+                for term in re.findall(r"[A-Za-z0-9]+", row["title"] or "")
+                if len(term.casefold()) >= min_term_length
+                and term.casefold() not in _UNIT_TITLE_STOPWORDS
+            }
+            for term in sorted(terms):
+                unit_id = str(row["id"])
+                if unit_id in unit_ids[term]:
+                    continue
+                unit_ids[term].add(unit_id)
+                source_project_counts[term][str(row["source_project"])] += 1
+                if len(example_unit_ids[term]) < _MAX_METADATA_INVENTORY_EXAMPLES:
+                    example_unit_ids[term].append(unit_id)
+
+        rows = [
+            {
+                "term": term,
+                "unit_count": len(ids),
+                "source_project_counts": _sorted_counter_dict(source_project_counts[term]),
+                "example_unit_ids": example_unit_ids[term],
+            }
+            for term, ids in unit_ids.items()
+            if len(ids) >= min_unit_count
+        ]
+        rows.sort(key=lambda row: (-row["unit_count"], row["term"]))
+        return rows[:limit] if limit is not None else rows
+
     def tag_freshness_summary(
         self,
         limit: int = 50,
@@ -3837,6 +3933,71 @@ class Store:
                 }
                 for row in rows
             ],
+        }
+
+    def collection_member_sources(
+        self,
+        collection_name: str,
+        *,
+        min_count: int = 1,
+        include_empty: bool = False,
+    ) -> dict[str, Any]:
+        """Summarize source project and entity type mix for collection members."""
+        if not isinstance(min_count, int) or isinstance(min_count, bool) or min_count < 1:
+            raise ValueError("min_count must be a positive integer")
+        if not isinstance(include_empty, bool):
+            raise ValueError("include_empty must be a boolean")
+
+        collection = self.get_collection(collection_name)
+        if collection is None:
+            return {
+                "collection": collection_name,
+                "total_units": 0,
+                "source_project_counts": {},
+                "source_entity_type_counts": {},
+                "rows": [],
+                "error": "collection_not_found",
+                "message": f"Collection not found: {collection_name}",
+            }
+
+        rows = self.conn.execute(
+            """SELECT ku.source_project, ku.source_entity_type, COUNT(*) AS count
+               FROM collection_units cu
+               JOIN knowledge_units ku ON ku.id = cu.unit_id
+               WHERE cu.collection_id = ?
+               GROUP BY ku.source_project, ku.source_entity_type
+               ORDER BY ku.source_project, count DESC, ku.source_entity_type""",
+            (collection["id"],),
+        ).fetchall()
+
+        source_project_counts: Counter[str] = Counter()
+        source_entity_type_counts: Counter[str] = Counter()
+        result_rows: list[dict[str, Any]] = []
+        for row in rows:
+            count = int(row["count"])
+            source_project = str(row["source_project"])
+            source_entity_type = str(row["source_entity_type"])
+            source_project_counts[source_project] += count
+            source_entity_type_counts[source_entity_type] += count
+            if count >= min_count:
+                result_rows.append(
+                    {
+                        "source_project": source_project,
+                        "source_entity_type": source_entity_type,
+                        "count": count,
+                    }
+                )
+
+        total_units = sum(source_project_counts.values())
+        if total_units == 0 and not include_empty:
+            result_rows = []
+
+        return {
+            "collection": collection,
+            "total_units": total_units,
+            "source_project_counts": _sorted_counter_dict(source_project_counts),
+            "source_entity_type_counts": _sorted_counter_dict(source_entity_type_counts),
+            "rows": result_rows,
         }
 
     def collection_activity_summary(
@@ -5682,6 +5843,75 @@ class Store:
                 continue
 
         return dict(sorted(relation_counts.items(), key=lambda item: (-item[1], item[0].value)))
+
+    def edge_relation_age_profile(
+        self,
+        *,
+        relation: EdgeRelation | str | None = None,
+        source: EdgeSource | str | None = None,
+        min_edge_count: int = 1,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Summarize edge age, grouped by relation."""
+        if (
+            not isinstance(min_edge_count, int)
+            or isinstance(min_edge_count, bool)
+            or min_edge_count < 1
+        ):
+            raise ValueError("min_edge_count must be a positive integer")
+        if limit is not None and (
+            not isinstance(limit, int) or isinstance(limit, bool) or limit < 1
+        ):
+            raise ValueError("limit must be a positive integer or None")
+
+        where_parts: list[str] = []
+        params: list[object] = []
+        if relation is not None:
+            where_parts.append("e.relation = ?")
+            params.append(str(_model_value(relation)))
+        if source is not None:
+            where_parts.append("e.source = ?")
+            params.append(str(_model_value(source)))
+
+        query = """SELECT e.id, e.relation, e.created_at,
+                          from_unit.created_at AS from_created_at,
+                          to_unit.created_at AS to_created_at
+                   FROM edges e
+                   JOIN knowledge_units from_unit ON from_unit.id = e.from_unit_id
+                   JOIN knowledge_units to_unit ON to_unit.id = e.to_unit_id"""
+        if where_parts:
+            query += " WHERE " + " AND ".join(where_parts)
+        query += " ORDER BY e.relation, e.created_at, e.id"
+
+        ages_by_relation: dict[str, list[tuple[float, str]]] = defaultdict(list)
+        for row in self.conn.execute(query, params).fetchall():
+            edge_created = _parse_datetime(row["created_at"])
+            from_created = _parse_datetime(row["from_created_at"])
+            to_created = _parse_datetime(row["to_created_at"])
+            if edge_created is None or from_created is None or to_created is None:
+                continue
+            baseline = max(from_created, to_created)
+            age_days = (edge_created - baseline).total_seconds() / 86400
+            ages_by_relation[str(row["relation"])].append((age_days, str(row["id"])))
+
+        rows = []
+        for relation_key, age_rows in ages_by_relation.items():
+            if len(age_rows) < min_edge_count:
+                continue
+            ages = [age for age, _edge_id in age_rows]
+            rows.append(
+                {
+                    "relation": relation_key,
+                    "edge_count": len(age_rows),
+                    "average_age_days": sum(ages) / len(ages),
+                    "min_age_days": min(ages),
+                    "max_age_days": max(ages),
+                    "example_edge_ids": [edge_id for _age, edge_id in age_rows[:3]],
+                }
+            )
+
+        rows.sort(key=lambda row: (-row["edge_count"], row["relation"]))
+        return rows[:limit] if limit is not None else rows
 
     # --- Integrity audit helpers ---
 
