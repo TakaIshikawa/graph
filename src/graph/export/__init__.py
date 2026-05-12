@@ -14,6 +14,7 @@ from graph.export.concept_map import export_concept_map_markdown
 from graph.export.context_pack import export_context_pack
 from graph.export.csl_json import export_units_to_csl_json
 from graph.export.chatgpt_digest_markdown import export_units_to_chatgpt_digest_markdown
+from graph.export.collection_manifest_json import export_collection_manifest_json
 from graph.export.cytoscape import export_graph_cytoscape
 from graph.export.cytoscape_json import export_graph_cytoscape_json
 from graph.export.cypher import export_graph_cypher
@@ -23,6 +24,7 @@ from graph.export.duplicate_candidates import export_duplicate_candidates_markdo
 from graph.export.csv_edges import export_graph_edges_csv
 from graph.export.edge_csv import export_edges_to_csv
 from graph.export.edge_adjacency_markdown import export_edge_adjacency_markdown
+from graph.export.edge_type_matrix_csv import export_edge_type_matrix_csv
 from graph.export.flashcards_markdown import export_units_to_flashcards_markdown
 from graph.export.geojson import export_units_to_geojson
 from graph.export.graphson import export_graphson
@@ -46,6 +48,7 @@ from graph.export.neo4j_bulk_csv import export_graph_neo4j_bulk_csv
 from graph.export.node_edge_csv import export_graph_node_edge_csv
 from graph.export.opml import export_units_to_opml
 from graph.export.org import export_units_to_org
+from graph.export.orphan_units import export_orphan_units_markdown
 from graph.export.relation_evidence import export_relation_evidence_markdown
 from graph.export.rdf_turtle import export_graph_rdf_turtle
 from graph.export.ris import export_units_to_ris
@@ -53,6 +56,7 @@ from graph.export.rss import export_units_to_rss
 from graph.export.schema_inventory import export_unit_schema_inventory
 from graph.export.source_coverage import export_source_coverage_markdown
 from graph.export.source_inventory import export_source_inventory_csv
+from graph.export.source_tag_summary_markdown import export_source_tag_summary_markdown
 from graph.export.source_timeline_csv import export_source_timeline_csv
 from graph.export.slack_participation_csv import export_units_to_slack_participation_csv
 from graph.export.sqlite_snapshot import export_graph_sqlite
@@ -100,12 +104,14 @@ __all__ = [
     "export_units_to_bookmarks_html",
     "export_concept_map_markdown",
     "export_context_pack",
+    "export_collection_manifest_json",
     "export_units_to_csl_json",
     "export_graph_cytoscape",
     "export_graph_cytoscape_json",
     "export_units_to_dublin_core_xml",
     "export_duplicate_candidates_markdown",
     "export_edge_adjacency_markdown",
+    "export_edge_type_matrix_csv",
     "export_edges_to_csv",
     "export_graph_edges_csv",
     "export_graph_adjacency_csv",
@@ -131,11 +137,13 @@ __all__ = [
     "export_graph_ndjson",
     "export_graph_neo4j_bulk_csv",
     "export_graph_node_edge_csv",
+    "export_orphan_units_markdown",
     "export_relation_evidence_markdown",
     "export_units_to_ris",
     "export_units_to_rss",
     "export_source_coverage_markdown",
     "export_source_inventory_csv",
+    "export_source_tag_summary_markdown",
     "export_source_timeline_csv",
     "export_units_to_slack_participation_csv",
     "export_units_to_timelinejs",
