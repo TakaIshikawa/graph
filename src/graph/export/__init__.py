@@ -27,6 +27,7 @@ from graph.export.csv_edges import export_graph_edges_csv
 from graph.export.edge_csv import export_edges_to_csv
 from graph.export.edge_adjacency_markdown import export_edge_adjacency_markdown
 from graph.export.edge_coverage_csv import export_edge_coverage_csv
+from graph.export.edge_relation_summary_markdown import export_edge_relation_summary_markdown
 from graph.export.edge_type_matrix_csv import export_edge_type_matrix_csv
 from graph.export.external_domain_summary_markdown import export_external_domain_summary_markdown
 from graph.export.flashcards_markdown import export_units_to_flashcards_markdown
@@ -47,6 +48,7 @@ from graph.export.llms_txt import export_units_to_llms_txt
 from graph.export.markdown_timeline import export_units_to_markdown_timeline
 from graph.export.metadata_date_histogram_markdown import export_metadata_date_histogram_markdown
 from graph.export.metadata_enum_candidates_markdown import export_metadata_enum_candidates_markdown
+from graph.export.metadata_value_frequency_markdown import export_metadata_value_frequency_markdown
 from graph.export.metadata_key_matrix_csv import export_metadata_key_matrix_csv
 from graph.export.metadata_completeness import export_metadata_completeness_markdown
 from graph.export.mermaid_mindmap import export_units_to_mermaid_mindmap
@@ -64,6 +66,7 @@ from graph.export.schema_inventory import export_unit_schema_inventory
 from graph.export.source_coverage import export_source_coverage_markdown
 from graph.export.source_entity_activity_markdown import export_source_entity_activity_markdown
 from graph.export.source_entity_type_heatmap_csv import export_source_entity_type_heatmap_csv
+from graph.export.source_gap_markdown import export_source_gap_markdown
 from graph.export.source_inventory import export_source_inventory_csv
 from graph.export.source_metadata_outliers_markdown import export_source_metadata_outliers_markdown
 from graph.export.source_quality_markdown import export_source_quality_markdown
@@ -75,6 +78,7 @@ from graph.export.tag_activity_markdown import export_tag_activity_markdown
 from graph.export.tag_cooccurrence_csv import export_tag_cooccurrence_csv
 from graph.export.tag_cooccurrence_markdown import export_tag_cooccurrence_markdown
 from graph.export.tag_glossary import export_tag_glossary_markdown
+from graph.export.tag_momentum_markdown import export_tag_momentum_markdown
 from graph.export.tag_source_matrix_csv import export_tag_source_matrix_csv
 from graph.export.tag_timeline_csv import export_tag_timeline_csv
 from graph.export.task_board_markdown import export_task_board_markdown
@@ -127,6 +131,7 @@ __all__ = [
     "export_duplicate_candidates_markdown",
     "export_edge_adjacency_markdown",
     "export_edge_coverage_csv",
+    "export_edge_relation_summary_markdown",
     "export_edge_type_matrix_csv",
     "export_edges_to_csv",
     "export_external_domain_summary_markdown",
@@ -153,6 +158,7 @@ __all__ = [
     "export_metadata_completeness_markdown",
     "export_metadata_date_histogram_markdown",
     "export_metadata_enum_candidates_markdown",
+    "export_metadata_value_frequency_markdown",
     "export_metadata_key_matrix_csv",
     "export_graph_ndjson",
     "export_graph_neo4j_bulk_csv",
@@ -164,6 +170,7 @@ __all__ = [
     "export_source_coverage_markdown",
     "export_source_entity_activity_markdown",
     "export_source_entity_type_heatmap_csv",
+    "export_source_gap_markdown",
     "export_source_inventory_csv",
     "export_source_metadata_outliers_markdown",
     "export_source_quality_markdown",
@@ -178,6 +185,7 @@ __all__ = [
     "export_tag_cooccurrence_csv",
     "export_tag_cooccurrence_markdown",
     "export_tag_glossary_markdown",
+    "export_tag_momentum_markdown",
     "export_tag_source_matrix_csv",
     "export_tag_timeline_csv",
     "export_task_board_markdown",
