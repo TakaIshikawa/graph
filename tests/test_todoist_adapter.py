@@ -257,3 +257,35 @@ def test_labels_and_sections_populate_metadata_and_tags(tmp_path):
     assert unit.metadata["labels"] == ["Work", "Deep Focus", "p1", "Follow Up"]
     assert unit.metadata["section"] == "Next"
     assert unit.tags == ["deep-focus", "follow-up", "p1", "work"]
+
+
+def test_todoist_emits_deduplicated_people_and_reference_edges(tmp_path):
+    csv_path = _write_csv(tmp_path / "tasks.csv", [
+        {"TYPE": "project", "CONTENT": "Work", "INDENT": "1", "AUTHOR": "Ada", "RESPONSIBLE": ""},
+        {"TYPE": "task", "CONTENT": "Plan", "INDENT": "2", "AUTHOR": " ada ", "RESPONSIBLE": "Grace"},
+    ])
+
+    result = TodoistAdapter(path=str(csv_path)).ingest(entity_types=["project", "task", "person"])
+
+    people = {unit.title.strip(): unit for unit in result.units if unit.source_entity_type == "person"}
+    tasks = [unit for unit in result.units if unit.source_entity_type in {"project", "task"}]
+    assert set(people) == {"Ada", "Grace"}
+    assert all(unit.source_id.startswith("todoist:person:") for unit in people.values())
+    assert len([edge for edge in result.edges if edge.relation == EdgeRelation.REFERENCES]) == 3
+    assert {
+        edge.to_unit_id
+        for edge in result.edges
+        if edge.relation == EdgeRelation.REFERENCES
+    } == {person.source_id for person in people.values()}
+    assert {unit.title for unit in tasks} == {"Work", "Plan"}
+
+
+def test_todoist_person_filtering_supports_person_only(tmp_path):
+    csv_path = _write_csv(tmp_path / "tasks.csv", [
+        {"TYPE": "task", "CONTENT": "Plan", "INDENT": "1", "AUTHOR": "Ada", "RESPONSIBLE": "Grace"},
+    ])
+
+    result = TodoistAdapter(path=str(csv_path)).ingest(entity_types=["person"])
+
+    assert [unit.source_entity_type for unit in result.units] == ["person", "person"]
+    assert result.edges == []

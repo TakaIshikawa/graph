@@ -45,3 +45,39 @@ def test_amazon_orders_csv_groups_shipments_and_preserves_unshipped_item_edges(t
     assert (order.source_id, shipment.source_id) in {(edge.from_unit_id, edge.to_unit_id) for edge in result.edges}
     assert (shipment.source_id, unshipped.source_id) not in {(edge.from_unit_id, edge.to_unit_id) for edge in result.edges}
     assert (order.source_id, unshipped.source_id) in {(edge.from_unit_id, edge.to_unit_id) for edge in result.edges}
+
+
+def test_amazon_orders_csv_emits_returns_and_links_to_items(tmp_path):
+    export = tmp_path / "amazon.csv"
+    export.write_text(
+        "Order ID,Order Date,Title,ASIN,Return Date,Return Reason,Refund Amount,Return Status\n"
+        "A1,2026-05-01,Book,B001,2026-05-05,Damaged,$10.25,Completed\n",
+        encoding="utf-8",
+    )
+
+    result = AmazonOrdersCsvAdapter(path=str(export)).ingest()
+
+    item = next(unit for unit in result.units if unit.source_entity_type == "item")
+    returned = next(unit for unit in result.units if unit.source_entity_type == "return")
+    assert returned.metadata["order_id"] == "A1"
+    assert returned.metadata["item_source_id"] == item.source_id
+    assert returned.metadata["refund_amount"] == 10.25
+    assert returned.metadata["return_date"] == "2026-05-05T00:00:00+00:00"
+    assert returned.metadata["return_reason"] == "Damaged"
+    assert returned.metadata["return_status"] == "Completed"
+    assert (item.source_id, returned.source_id) in {
+        (edge.from_unit_id, edge.to_unit_id) for edge in result.edges
+    }
+
+
+def test_amazon_orders_csv_return_filtering(tmp_path):
+    export = tmp_path / "amazon.csv"
+    export.write_text(
+        "Order ID,Order Date,Title,Refunded Amount\nA1,2026-05-01,Book,5.00\n",
+        encoding="utf-8",
+    )
+
+    result = AmazonOrdersCsvAdapter(path=str(export)).ingest(entity_types=["return"])
+
+    assert [unit.source_entity_type for unit in result.units] == ["return"]
+    assert result.edges == []

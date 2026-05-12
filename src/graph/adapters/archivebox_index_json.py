@@ -7,6 +7,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from graph.adapters.base import IngestResult, SourceAdapter
 from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
@@ -24,7 +25,7 @@ class ArchiveBoxIndexJsonAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["archive", "artifact", "url_reference"]
+        return ["archive", "artifact", "url_reference", "domain"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -41,6 +42,7 @@ class ArchiveBoxIndexJsonAdapter(SourceAdapter):
         sync_at = self._ensure_utc(since.last_sync_at) if since else None
         units: list[KnowledgeUnit] = []
         edges: list[KnowledgeEdge] = []
+        domain_units: dict[str, KnowledgeUnit] = {}
         for path in self._iter_paths():
             try:
                 entries = self._read_entries(path)
@@ -55,6 +57,7 @@ class ArchiveBoxIndexJsonAdapter(SourceAdapter):
                 archive_emitted = allowed_types is None or "archive" in allowed_types
                 artifact_emitted = allowed_types is None or "artifact" in allowed_types
                 reference_emitted = allowed_types is None or "url_reference" in allowed_types
+                domain_emitted = allowed_types is None or "domain" in allowed_types
 
                 if archive_emitted:
                     units.append(archive_unit)
@@ -72,6 +75,14 @@ class ArchiveBoxIndexJsonAdapter(SourceAdapter):
                 if archive_emitted and reference_emitted:
                     edges.extend(self._url_reference_edges(archive_unit, references))
 
+                domain = self._domain_unit(archive_unit, path.name)
+                if domain is not None:
+                    if domain_emitted:
+                        domain_units.setdefault(domain.source_id, domain)
+                    if archive_emitted and domain_emitted:
+                        edges.append(self._domain_edge(archive_unit, domain))
+
+        units.extend(domain_units.values())
         result.units.extend(sorted(units, key=lambda unit: (unit.created_at, unit.source_id)))
         result.edges.extend(sorted(edges, key=lambda edge: edge.id))
         return result
@@ -371,6 +382,53 @@ class ArchiveBoxIndexJsonAdapter(SourceAdapter):
             f"{archive_source_id}|{reference_source_id}|references".encode("utf-8")
         ).hexdigest()[:24]
         return f"archivebox-index-json-references-{digest}"
+
+    def _domain_unit(self, archive_unit: KnowledgeUnit, source_file: str) -> KnowledgeUnit | None:
+        url = str(archive_unit.metadata.get("url") or "")
+        domain = self._normalize_domain(url)
+        if not domain:
+            return None
+        source_id = f"archivebox_index_json:domain:{domain}"
+        return KnowledgeUnit(
+            source_project=SourceProject.ARCHIVEBOX_INDEX_JSON,
+            source_id=source_id,
+            source_entity_type="domain",
+            title=domain,
+            content=f"Domain: {domain}",
+            content_type=ContentType.METADATA,
+            metadata={"domain": domain, "source_file": source_file},
+            tags=["archivebox", "domain"],
+            created_at=archive_unit.created_at,
+            updated_at=archive_unit.updated_at,
+        )
+
+    def _normalize_domain(self, url: str) -> str:
+        parsed = urlparse(url if "://" in url else f"//{url}")
+        host = (parsed.hostname or "").lower().strip(".")
+        if host.startswith("www."):
+            host = host[4:]
+        return host
+
+    def _domain_edge(self, archive_unit: KnowledgeUnit, domain_unit: KnowledgeUnit) -> KnowledgeEdge:
+        return KnowledgeEdge(
+            id=self._domain_edge_id(archive_unit.source_id, domain_unit.source_id),
+            from_unit_id=archive_unit.source_id,
+            to_unit_id=domain_unit.source_id,
+            relation=EdgeRelation.REFERENCES,
+            source=EdgeSource.SOURCE,
+            metadata={
+                "source_project": SourceProject.ARCHIVEBOX_INDEX_JSON.value,
+                "relation_type": "archive_references_domain",
+                "url": archive_unit.metadata.get("url"),
+                "domain": domain_unit.metadata.get("domain"),
+            },
+        )
+
+    def _domain_edge_id(self, archive_source_id: str, domain_source_id: str) -> str:
+        digest = hashlib.sha256(
+            f"{archive_source_id}|{domain_source_id}|domain".encode("utf-8")
+        ).hexdigest()[:24]
+        return f"archivebox-index-json-domain-{digest}"
 
     def _edge_id(self, archive_source_id: str, artifact_source_id: str) -> str:
         digest = hashlib.sha256(
