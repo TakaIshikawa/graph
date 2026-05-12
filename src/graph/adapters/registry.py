@@ -28,6 +28,7 @@ from graph.adapters.feed import FeedAdapter
 from graph.adapters.forty_two import FortyTwoAdapter
 from graph.adapters.git_adapter import GitAdapter
 from graph.adapters.github_issues_json import GithubIssuesJsonAdapter
+from graph.adapters.gitlab_issues_json import GitlabIssuesJsonAdapter
 from graph.adapters.github_stars_csv import GithubStarsCsvAdapter
 from graph.adapters.goodreads_library import GoodreadsLibraryAdapter
 from graph.adapters.google_calendar_json import GoogleCalendarJsonAdapter
@@ -41,11 +42,13 @@ from graph.adapters.ical import ICalAdapter
 from graph.adapters.instapaper import InstapaperAdapter
 from graph.adapters.ipynb import IpynbAdapter
 from graph.adapters.jats import JatsAdapter
+from graph.adapters.jira_issues_csv import JiraIssuesCsvAdapter
 from graph.adapters.jsonl_adapter import JsonlAdapter
 from graph.adapters.jsonl_notes import JsonlNotesAdapter
 from graph.adapters.kindle import KindleAdapter
 from graph.adapters.kindle_clippings import KindleClippingsAdapter
 from graph.adapters.logseq import LogseqAdapter
+from graph.adapters.google_maps_timeline_json import GoogleMapsTimelineJsonAdapter
 from graph.adapters.markdown import MarkdownAdapter
 from graph.adapters.markdown_callouts import MarkdownCalloutsAdapter
 from graph.adapters.markdown_definitions import MarkdownDefinitionsAdapter
@@ -111,7 +114,9 @@ from graph.adapters.sota import SOTAAdapter
 from graph.adapters.spotify_streaming_history import SpotifyStreamingHistoryAdapter
 from graph.adapters.spotify_takeout import SpotifyTakeoutAdapter
 from graph.adapters.steam_library_csv import SteamLibraryCsvAdapter
+from graph.adapters.trello_board_json import TrelloBoardJsonAdapter
 from graph.adapters.trakt_watch_history_csv import TraktWatchHistoryCsvAdapter
+from graph.adapters.libby_loans_csv import LibbyLoansCsvAdapter
 from graph.adapters.reddit_saved_csv import RedditSavedCsvAdapter
 from graph.adapters.reddit_saved_json import RedditSavedJsonAdapter
 from graph.adapters.sqlite_query_log import SqliteQueryLogAdapter
@@ -255,6 +260,11 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "trakt_watch_history_csv": TraktWatchHistoryCsvAdapter,
     "steam_library_csv": SteamLibraryCsvAdapter,
     "github_issues_json": GithubIssuesJsonAdapter,
+    "gitlab_issues_json": GitlabIssuesJsonAdapter,
+    "jira_issues_csv": JiraIssuesCsvAdapter,
+    "trello_board_json": TrelloBoardJsonAdapter,
+    "google_maps_timeline_json": GoogleMapsTimelineJsonAdapter,
+    "libby_loans_csv": LibbyLoansCsvAdapter,
     "boardgamegeek_collection_csv": BoardGameGeekCollectionCsvAdapter,
     "reddit_saved_csv": RedditSavedCsvAdapter,
     "reddit_saved_json": RedditSavedJsonAdapter,

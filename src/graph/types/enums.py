@@ -121,6 +121,11 @@ class SourceProject(StrEnum):
     REDDIT_SAVED_CSV = "reddit_saved_csv"
     STEAM_LIBRARY_CSV = "steam_library_csv"
     GITHUB_ISSUES_JSON = "github_issues_json"
+    GITLAB_ISSUES_JSON = "gitlab_issues_json"
+    JIRA_ISSUES_CSV = "jira_issues_csv"
+    TRELLO_BOARD_JSON = "trello_board_json"
+    GOOGLE_MAPS_TIMELINE_JSON = "google_maps_timeline_json"
+    LIBBY_LOANS_CSV = "libby_loans_csv"
     BOARDGAMEGEEK_COLLECTION_CSV = "boardgamegeek_collection_csv"
 
 
