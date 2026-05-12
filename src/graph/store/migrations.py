@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -120,6 +120,21 @@ CREATE INDEX IF NOT EXISTS idx_saved_query_runs_name_run_at
     ON saved_query_runs(saved_query_name, run_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_saved_query_runs_run_at
     ON saved_query_runs(run_at DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS saved_query_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    query_text TEXT NOT NULL DEFAULT '',
+    unit_ids TEXT NOT NULL DEFAULT '[]',
+    source_filters TEXT NOT NULL DEFAULT '{}',
+    parameters TEXT NOT NULL DEFAULT '{}',
+    metadata TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_saved_query_results_created
+    ON saved_query_results(created_at DESC, id DESC);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts
     USING fts5(unit_id UNINDEXED, title, content, tags);

@@ -965,6 +965,382 @@ def _metadata_path_value(metadata: Mapping | None, path: str) -> object:
     return current
 
 
+_GRAPH_TRAVERSAL_DIRECTIONS = {"incoming", "outgoing", "both"}
+_TEMPORAL_TIMESTAMP_FIELDS = {"created_at", "updated_at", "ingested_at"}
+
+
+def _graph_object_id(value: object) -> str | None:
+    raw_id = value if isinstance(value, str) else _object_value(value, "id")
+    if raw_id is None:
+        return None
+    return str(raw_id)
+
+
+def _graph_unit_brief(value: object) -> dict:
+    unit_id = _graph_object_id(value)
+    return {
+        "id": unit_id,
+        "title": str(_object_value(value, "title", default="")),
+        "source_project": str(_object_value(value, "source_project", default="")),
+    }
+
+
+def _graph_relation_value(edge: object) -> str:
+    return str(_object_value(edge, "relation", default=""))
+
+
+def _graph_edge_id(edge: object, index: int | None = None) -> str:
+    raw_id = _object_value(edge, "id")
+    if raw_id is not None and str(raw_id):
+        return str(raw_id)
+    return f"edge:{index}" if index is not None else ""
+
+
+def _timestamp_value(item: object, field: str) -> object:
+    if "." in field:
+        return _metadata_path_value(_object_value(item, "metadata", default={}), field)
+    return _object_value(item, field)
+
+
+def _parse_item_timestamp(
+    item: object,
+    field: str,
+    diagnostics: Counter[str],
+    missing_key: str,
+    invalid_key: str,
+) -> datetime | None:
+    raw_value = _timestamp_value(item, field)
+    if raw_value is None or (isinstance(raw_value, str) and not raw_value.strip()):
+        diagnostics[missing_key] += 1
+        return None
+    parsed = _parse_graph_datetime(raw_value)
+    if parsed is None:
+        diagnostics[invalid_key] += 1
+        return None
+    return parsed
+
+
+def temporal_reachability(
+    units,
+    edges,
+    *,
+    start_unit_id: str,
+    end_unit_id: str | None = None,
+    timestamp_field: str = "created_at",
+    direction: str = "outgoing",
+    max_depth: int = 3,
+    monotonic: bool = True,
+) -> dict:
+    """Return chronologically reachable paths through units and edges."""
+    if timestamp_field not in _TEMPORAL_TIMESTAMP_FIELDS and "." not in timestamp_field:
+        valid = ", ".join(sorted(_TEMPORAL_TIMESTAMP_FIELDS))
+        raise ValueError(
+            f"Unsupported timestamp field: {timestamp_field}. Use {valid} or a metadata path."
+        )
+    if direction not in _GRAPH_TRAVERSAL_DIRECTIONS:
+        raise ValueError("direction must be incoming, outgoing, or both.")
+    if isinstance(max_depth, bool):
+        raise ValueError("max_depth must be a non-negative integer.")
+    try:
+        capped_depth = int(max_depth)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("max_depth must be a non-negative integer.") from exc
+    if capped_depth < 0:
+        raise ValueError("max_depth must be a non-negative integer.")
+
+    unit_by_id = {
+        unit_id: unit
+        for unit in units
+        if (unit_id := _graph_object_id(unit)) is not None
+    }
+    start_id = str(start_unit_id)
+    end_id = str(end_unit_id) if end_unit_id is not None else None
+    diagnostics: Counter[str] = Counter()
+    diagnostics["missing_unit_timestamps"] = 0
+    diagnostics["invalid_unit_timestamps"] = 0
+    diagnostics["missing_edge_timestamps"] = 0
+    diagnostics["invalid_edge_timestamps"] = 0
+    diagnostics["skipped_non_monotonic"] = 0
+    diagnostics["skipped_cycles"] = 0
+    diagnostics["skipped_missing_units"] = 0
+
+    unit_timestamps: dict[str, datetime] = {}
+    for unit_id, unit in unit_by_id.items():
+        parsed = _parse_item_timestamp(
+            unit,
+            timestamp_field,
+            diagnostics,
+            "missing_unit_timestamps",
+            "invalid_unit_timestamps",
+        )
+        if parsed is not None:
+            unit_timestamps[unit_id] = parsed
+
+    adjacency: dict[str, list[tuple[object, str]]] = {unit_id: [] for unit_id in unit_by_id}
+    edge_timestamps: dict[str, datetime] = {}
+    edge_keys_by_object: dict[int, str] = {}
+    for index, edge in enumerate(edges):
+        from_id = _object_value(edge, "from_unit_id", "source", "from_id", "from")
+        to_id = _object_value(edge, "to_unit_id", "target", "to_id", "to")
+        if from_id is None or to_id is None:
+            diagnostics["skipped_missing_units"] += 1
+            continue
+        from_unit_id = str(from_id)
+        to_unit_id = str(to_id)
+        if from_unit_id not in unit_by_id or to_unit_id not in unit_by_id:
+            diagnostics["skipped_missing_units"] += 1
+            continue
+        parsed = _parse_item_timestamp(
+            edge,
+            timestamp_field,
+            diagnostics,
+            "missing_edge_timestamps",
+            "invalid_edge_timestamps",
+        )
+        if parsed is None:
+            continue
+        edge_id = _graph_edge_id(edge, index)
+        edge_keys_by_object[id(edge)] = edge_id
+        edge_timestamps[edge_id] = parsed
+        if direction in {"outgoing", "both"}:
+            adjacency.setdefault(from_unit_id, []).append((edge, to_unit_id))
+        if direction in {"incoming", "both"}:
+            adjacency.setdefault(to_unit_id, []).append((edge, from_unit_id))
+
+    for linked_edges in adjacency.values():
+        linked_edges.sort(
+            key=lambda item: (
+                edge_timestamps[edge_keys_by_object[id(item[0])]].isoformat(),
+                _graph_relation_value(item[0]),
+                item[1],
+                edge_keys_by_object[id(item[0])],
+            )
+        )
+
+    if start_id not in unit_by_id:
+        return {
+            "start_unit_id": start_id,
+            "end_unit_id": end_id,
+            "timestamp_field": timestamp_field,
+            "direction": direction,
+            "max_depth": capped_depth,
+            "monotonic": bool(monotonic),
+            "paths": [],
+            "path_count": 0,
+            "diagnostics": dict(diagnostics),
+        }
+    if start_id not in unit_timestamps:
+        return {
+            "start_unit_id": start_id,
+            "end_unit_id": end_id,
+            "timestamp_field": timestamp_field,
+            "direction": direction,
+            "max_depth": capped_depth,
+            "monotonic": bool(monotonic),
+            "paths": [],
+            "path_count": 0,
+            "diagnostics": dict(diagnostics),
+        }
+
+    paths: list[dict] = []
+    queue: list[tuple[str, list[str], list[object], list[datetime]]] = [
+        (start_id, [start_id], [], [unit_timestamps[start_id]])
+    ]
+    while queue:
+        current_id, unit_path, edge_path, timestamps = queue.pop(0)
+        depth = len(edge_path)
+        if depth > 0 and (end_id is None or current_id == end_id):
+            paths.append(
+                {
+                    "unit_ids": list(unit_path),
+                    "edge_ids": [edge_keys_by_object[id(edge)] for edge in edge_path],
+                    "relations": [_graph_relation_value(edge) for edge in edge_path],
+                    "timestamps": [value.isoformat() for value in timestamps],
+                    "depth": depth,
+                }
+            )
+        if depth >= capped_depth:
+            continue
+        for edge, next_id in adjacency.get(current_id, []):
+            if next_id in unit_path:
+                diagnostics["skipped_cycles"] += 1
+                continue
+            edge_id = edge_keys_by_object[id(edge)]
+            edge_timestamp = edge_timestamps[edge_id]
+            next_timestamp = unit_timestamps.get(next_id)
+            if next_timestamp is None:
+                continue
+            candidate_timestamps = [*timestamps, edge_timestamp, next_timestamp]
+            if monotonic and any(
+                later < earlier
+                for earlier, later in zip(candidate_timestamps, candidate_timestamps[1:])
+            ):
+                diagnostics["skipped_non_monotonic"] += 1
+                continue
+            queue.append(
+                (
+                    next_id,
+                    [*unit_path, next_id],
+                    [*edge_path, edge],
+                    candidate_timestamps,
+                )
+            )
+
+    paths.sort(key=lambda path: (path["depth"], path["unit_ids"], path["edge_ids"]))
+    return {
+        "start_unit_id": start_id,
+        "end_unit_id": end_id,
+        "timestamp_field": timestamp_field,
+        "direction": direction,
+        "max_depth": capped_depth,
+        "monotonic": bool(monotonic),
+        "paths": paths,
+        "path_count": len(paths),
+        "diagnostics": dict(diagnostics),
+    }
+
+
+def graph_neighborhood_expansion(
+    units,
+    edges,
+    *,
+    seed_unit_ids: list[str],
+    direction: str = "both",
+    max_depth: int = 1,
+    relations: list[str] | None = None,
+    limit: int | None = None,
+) -> dict:
+    """Expand a graph neighborhood from one or more seed units."""
+    if direction not in _GRAPH_TRAVERSAL_DIRECTIONS:
+        raise ValueError("direction must be incoming, outgoing, or both.")
+    if isinstance(max_depth, bool):
+        raise ValueError("max_depth must be a non-negative integer.")
+    try:
+        capped_depth = int(max_depth)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("max_depth must be a non-negative integer.") from exc
+    if capped_depth < 0:
+        raise ValueError("max_depth must be a non-negative integer.")
+    if limit is not None:
+        if isinstance(limit, bool):
+            raise ValueError("limit must be a non-negative integer.")
+        try:
+            capped_limit = int(limit)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("limit must be a non-negative integer.") from exc
+        if capped_limit < 0:
+            raise ValueError("limit must be a non-negative integer.")
+    else:
+        capped_limit = None
+
+    relation_filter = None if relations is None else {str(relation) for relation in relations}
+    unit_by_id = {
+        unit_id: unit
+        for unit in units
+        if (unit_id := _graph_object_id(unit)) is not None
+    }
+    seeds = [str(seed_id) for seed_id in seed_unit_ids]
+    adjacency: dict[str, list[tuple[object, str]]] = {unit_id: [] for unit_id in unit_by_id}
+    for edge in edges:
+        relation = _graph_relation_value(edge)
+        if relation_filter is not None and relation not in relation_filter:
+            continue
+        from_id = _object_value(edge, "from_unit_id", "source", "from_id", "from")
+        to_id = _object_value(edge, "to_unit_id", "target", "to_id", "to")
+        if from_id is None or to_id is None:
+            continue
+        from_unit_id = str(from_id)
+        to_unit_id = str(to_id)
+        if from_unit_id not in unit_by_id or to_unit_id not in unit_by_id:
+            continue
+        if direction in {"outgoing", "both"}:
+            adjacency.setdefault(from_unit_id, []).append((edge, to_unit_id))
+        if direction in {"incoming", "both"}:
+            adjacency.setdefault(to_unit_id, []).append((edge, from_unit_id))
+    for linked_edges in adjacency.values():
+        linked_edges.sort(
+            key=lambda item: (
+                item[1],
+                _graph_relation_value(item[0]),
+                _graph_edge_id(item[0]),
+            )
+        )
+
+    visited: dict[str, dict] = {}
+    queue: list[tuple[str, int, list[str], list[str], list[str]]] = []
+    for seed_id in seeds:
+        if seed_id in unit_by_id:
+            visited[seed_id] = {
+                "unit_id": seed_id,
+                "unit": _graph_unit_brief(unit_by_id[seed_id]),
+                "depth": 0,
+                "parent_unit_id": None,
+                "via_edge_id": None,
+                "via_relation": None,
+                "path_unit_ids": [seed_id],
+                "path_edge_ids": [],
+                "path_relations": [],
+            }
+            queue.append((seed_id, 0, [seed_id], [], []))
+
+    relation_counts: Counter[str] = Counter()
+    while queue:
+        current_id, depth, path_units, path_edges, path_relations = queue.pop(0)
+        if depth >= capped_depth:
+            continue
+        for edge, next_id in adjacency.get(current_id, []):
+            if next_id in visited:
+                continue
+            relation = _graph_relation_value(edge)
+            edge_id = _graph_edge_id(edge)
+            next_path_units = [*path_units, next_id]
+            next_path_edges = [*path_edges, edge_id]
+            next_path_relations = [*path_relations, relation]
+            visited[next_id] = {
+                "unit_id": next_id,
+                "unit": _graph_unit_brief(unit_by_id[next_id]),
+                "depth": depth + 1,
+                "parent_unit_id": current_id,
+                "via_edge_id": edge_id,
+                "via_relation": relation,
+                "path_unit_ids": next_path_units,
+                "path_edge_ids": next_path_edges,
+                "path_relations": next_path_relations,
+            }
+            relation_counts[relation] += 1
+            queue.append(
+                (next_id, depth + 1, next_path_units, next_path_edges, next_path_relations)
+            )
+            if capped_limit is not None and len(visited) - len(seeds) >= capped_limit:
+                queue.clear()
+                break
+
+    depth_groups: dict[int, list[dict]] = {}
+    for item in visited.values():
+        depth_groups.setdefault(item["depth"], []).append(item)
+    depths = [
+        {
+            "depth": depth,
+            "units": sorted(
+                items,
+                key=lambda item: (item["unit"]["title"].lower(), item["unit_id"]),
+            ),
+        }
+        for depth, items in sorted(depth_groups.items())
+    ]
+    return {
+        "seed_unit_ids": seeds,
+        "direction": direction,
+        "max_depth": capped_depth,
+        "relations": sorted(relation_filter) if relation_filter is not None else None,
+        "limit": capped_limit,
+        "depths": depths,
+        "unit_count": len(visited),
+        "expanded_count": max(0, len(visited) - len(seeds)),
+        "relation_counts": dict(sorted(relation_counts.items())),
+    }
+
+
 class GraphService:
     """In-memory NetworkX graph built from SQLite for graph algorithms."""
 
@@ -4603,6 +4979,48 @@ class GraphService:
             self.store.get_all_edges(),
             top_n=top_n,
             weight_key=weight_key,
+        )
+
+    def temporal_reachability(
+        self,
+        *,
+        start_unit_id: str,
+        end_unit_id: str | None = None,
+        timestamp_field: str = "created_at",
+        direction: str = "outgoing",
+        max_depth: int = 3,
+        monotonic: bool = True,
+    ) -> dict:
+        """Return chronologically reachable paths through stored units and edges."""
+        return temporal_reachability(
+            self.store.get_all_units(limit=1000000000),
+            self.store.get_all_edges(),
+            start_unit_id=start_unit_id,
+            end_unit_id=end_unit_id,
+            timestamp_field=timestamp_field,
+            direction=direction,
+            max_depth=max_depth,
+            monotonic=monotonic,
+        )
+
+    def neighborhood_expansion(
+        self,
+        *,
+        seed_unit_ids: list[str],
+        direction: str = "both",
+        max_depth: int = 1,
+        relations: list[str] | None = None,
+        limit: int | None = None,
+    ) -> dict:
+        """Return units reachable from seed units grouped by traversal depth."""
+        return graph_neighborhood_expansion(
+            self.store.get_all_units(limit=1000000000),
+            self.store.get_all_edges(),
+            seed_unit_ids=seed_unit_ids,
+            direction=direction,
+            max_depth=max_depth,
+            relations=relations,
+            limit=limit,
         )
 
     def isolated_units(
