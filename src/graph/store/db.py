@@ -890,6 +890,108 @@ class Store:
         ]
         return inventory_rows[:limit] if limit is not None else inventory_rows
 
+    def source_metadata_coverage(
+        self,
+        *,
+        source_project: str | None = None,
+        source_entity_type: str | None = None,
+        metadata_paths: list[str] | tuple[str, ...] | None = None,
+        sample_limit: int = _MAX_METADATA_INVENTORY_EXAMPLES,
+    ) -> list[dict]:
+        """Report flattened metadata path coverage by source project/entity type."""
+        if (
+            not isinstance(sample_limit, int)
+            or isinstance(sample_limit, bool)
+            or sample_limit < 0
+        ):
+            raise ValueError("sample_limit must be a non-negative integer.")
+        if metadata_paths is not None:
+            if isinstance(metadata_paths, str) or not isinstance(metadata_paths, list | tuple):
+                raise ValueError("metadata_paths must be a sequence of non-empty strings.")
+            normalized_paths = tuple(dict.fromkeys(str(path).strip() for path in metadata_paths))
+            if any(not path for path in normalized_paths):
+                raise ValueError("metadata_paths must be a sequence of non-empty strings.")
+        else:
+            normalized_paths = None
+
+        where_parts, params = self._unit_filter_parts(
+            source_project=source_project,
+            source_entity_type=source_entity_type,
+        )
+        query = """SELECT id, source_project, source_entity_type, metadata
+                   FROM knowledge_units"""
+        if where_parts:
+            query += " WHERE " + " AND ".join(where_parts)
+        query += " ORDER BY source_project, source_entity_type, id"
+
+        rows = self.conn.execute(query, params).fetchall()
+        totals: Counter[tuple[str, str]] = Counter()
+        observed_paths: dict[tuple[str, str], set[str]] = defaultdict(set)
+        present_counts: dict[tuple[str, str, str], int] = defaultdict(int)
+        value_types: dict[tuple[str, str, str], Counter[str]] = defaultdict(Counter)
+        sample_values: dict[tuple[str, str, str], dict[tuple[str, str], Any]] = defaultdict(dict)
+
+        for row in rows:
+            group = (str(row["source_project"]), str(row["source_entity_type"]))
+            totals[group] += 1
+            metadata = json.loads(row["metadata"])
+            if not isinstance(metadata, Mapping):
+                continue
+
+            flattened = dict(_flatten_metadata_inventory(metadata))
+            paths = normalized_paths if normalized_paths is not None else tuple(flattened)
+            for path in paths:
+                if path not in flattened:
+                    continue
+                value = flattened[path]
+                observed_paths[group].add(path)
+                key = (*group, path)
+                value_types[key][_metadata_inventory_value_type(value)] += 1
+                if _metadata_value_is_present(value):
+                    present_counts[key] += 1
+                    if len(sample_values[key]) < sample_limit:
+                        distinct_key = _metadata_inventory_distinct_key(value)
+                        sample_values[key].setdefault(
+                            distinct_key,
+                            _metadata_inventory_normalized_value(value),
+                        )
+
+        coverage_rows = []
+        for group in sorted(totals):
+            source, entity_type = group
+            paths = (
+                normalized_paths
+                if normalized_paths is not None
+                else tuple(sorted(observed_paths[group]))
+            )
+            for path in paths:
+                key = (source, entity_type, path)
+                total = totals[group]
+                present_count = present_counts[key]
+                samples = [
+                    value
+                    for _sort_key, value in sorted(
+                        sample_values[key].items(),
+                        key=lambda item: item[0],
+                    )[:sample_limit]
+                ]
+                coverage_rows.append(
+                    {
+                        "source_project": source,
+                        "source_entity_type": entity_type,
+                        "metadata_path": path,
+                        "present_count": present_count,
+                        "total_unit_count": total,
+                        "coverage_ratio": present_count / total if total else 0.0,
+                        "value_type_distribution": dict(
+                            sorted(value_types[key].items(), key=lambda item: item[0])
+                        ),
+                        "sample_values": samples,
+                    }
+                )
+
+        return coverage_rows
+
     def metadata_schema_conflicts(
         self,
         prefix: str | None = None,
