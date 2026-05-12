@@ -5683,6 +5683,75 @@ class Store:
 
         return dict(sorted(relation_counts.items(), key=lambda item: (-item[1], item[0].value)))
 
+    def edge_relation_age_profile(
+        self,
+        *,
+        relation: EdgeRelation | str | None = None,
+        source: EdgeSource | str | None = None,
+        min_edge_count: int = 1,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Summarize edge age, grouped by relation."""
+        if (
+            not isinstance(min_edge_count, int)
+            or isinstance(min_edge_count, bool)
+            or min_edge_count < 1
+        ):
+            raise ValueError("min_edge_count must be a positive integer")
+        if limit is not None and (
+            not isinstance(limit, int) or isinstance(limit, bool) or limit < 1
+        ):
+            raise ValueError("limit must be a positive integer or None")
+
+        where_parts: list[str] = []
+        params: list[object] = []
+        if relation is not None:
+            where_parts.append("e.relation = ?")
+            params.append(str(_model_value(relation)))
+        if source is not None:
+            where_parts.append("e.source = ?")
+            params.append(str(_model_value(source)))
+
+        query = """SELECT e.id, e.relation, e.created_at,
+                          from_unit.created_at AS from_created_at,
+                          to_unit.created_at AS to_created_at
+                   FROM edges e
+                   JOIN knowledge_units from_unit ON from_unit.id = e.from_unit_id
+                   JOIN knowledge_units to_unit ON to_unit.id = e.to_unit_id"""
+        if where_parts:
+            query += " WHERE " + " AND ".join(where_parts)
+        query += " ORDER BY e.relation, e.created_at, e.id"
+
+        ages_by_relation: dict[str, list[tuple[float, str]]] = defaultdict(list)
+        for row in self.conn.execute(query, params).fetchall():
+            edge_created = _parse_datetime(row["created_at"])
+            from_created = _parse_datetime(row["from_created_at"])
+            to_created = _parse_datetime(row["to_created_at"])
+            if edge_created is None or from_created is None or to_created is None:
+                continue
+            baseline = max(from_created, to_created)
+            age_days = (edge_created - baseline).total_seconds() / 86400
+            ages_by_relation[str(row["relation"])].append((age_days, str(row["id"])))
+
+        rows = []
+        for relation_key, age_rows in ages_by_relation.items():
+            if len(age_rows) < min_edge_count:
+                continue
+            ages = [age for age, _edge_id in age_rows]
+            rows.append(
+                {
+                    "relation": relation_key,
+                    "edge_count": len(age_rows),
+                    "average_age_days": sum(ages) / len(ages),
+                    "min_age_days": min(ages),
+                    "max_age_days": max(ages),
+                    "example_edge_ids": [edge_id for _age, edge_id in age_rows[:3]],
+                }
+            )
+
+        rows.sort(key=lambda row: (-row["edge_count"], row["relation"]))
+        return rows[:limit] if limit is not None else rows
+
     # --- Integrity audit helpers ---
 
     def find_dangling_edges(self, *, limit: int = 20) -> dict:
