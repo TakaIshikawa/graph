@@ -150,6 +150,30 @@ def test_apple_reminders_csv_list_metadata_uses_due_date_bounds_and_aliases(tmp_
     assert unit.metadata["open_count"] == 1
     assert unit.metadata["earliest_due_date"] == "2025-01-03T00:00:00+00:00"
     assert unit.metadata["latest_due_date"] == "2025-02-03T00:00:00+00:00"
+    assert unit.metadata["first_due_date"] == "2025-01-03T00:00:00+00:00"
+    assert unit.metadata["last_updated_date"] == "2025-02-03T00:00:00+00:00"
+
+
+def test_apple_reminders_csv_list_summaries_dedupe_normalized_names(tmp_path):
+    export = tmp_path / "reminders.csv"
+    _write_csv(
+        export,
+        [
+            {"Title": "One", "List": "Work", "list_name": "", "Completed": "No", "Due Date": "2025-01-02", "Completion Date": ""},
+            {"Title": "Two", "List": "", "list_name": " work ", "Completed": "Yes", "Due Date": "2025-01-03", "Completion Date": "2025-01-04"},
+            {"Title": "No list", "List": "", "list_name": "", "Completed": "No", "Due Date": "2025-01-05", "Completion Date": ""},
+        ],
+    )
+
+    result = AppleRemindersCsvAdapter(path=str(export)).ingest(entity_types=["list", "reminder"])
+
+    lists = [unit for unit in result.units if unit.source_entity_type == "list"]
+    assert len(lists) == 1
+    assert lists[0].metadata["list_name"] == "Work"
+    assert lists[0].metadata["reminder_count"] == 2
+    assert lists[0].metadata["completed_count"] == 1
+    assert lists[0].metadata["open_count"] == 1
+    assert len(result.edges) == 2
 
 
 def test_apple_reminders_csv_directory_and_registry(tmp_path):

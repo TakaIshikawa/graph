@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from pathlib import Path
 
 from graph.adapters.base import IngestResult, SourceAdapter
@@ -68,16 +69,53 @@ class KindleClippingsAdapter(SourceAdapter):
         if path.is_file():
             return [path]
         if path.is_dir():
-            return sorted(child for child in path.rglob("*.txt") if child.is_file())
+            return sorted(
+                child
+                for child in path.rglob("*")
+                if child.is_file() and child.suffix.lower() in {".txt", ".html", ".htm"}
+            )
         return []
 
     def _read_blocks(self, path: Path) -> list[list[str]]:
+        if path.suffix.lower() in {".html", ".htm"}:
+            return self._read_html_blocks(path)
         text = path.read_text(encoding="utf-8-sig")
         return [
             [line.rstrip() for line in block.strip().splitlines()]
             for block in re.split(r"\n=+\s*(?:\n|$)", text)
             if block.strip()
         ]
+
+    def _read_html_blocks(self, path: Path) -> list[list[str]]:
+        parser = _KindleNotebookHtmlParser()
+        parser.feed(path.read_text(encoding="utf-8-sig"))
+        parser.close()
+        parser.flush()
+        text = "\n".join(line for line in parser.lines if line)
+        title, author = self._parse_html_book_title(text)
+        blocks: list[list[str]] = []
+        for match in re.finditer(
+            r"(?P<type>Highlight|Note|Bookmark)\s*(?:\((?P<position>[^)]*)\))?\s*(?P<body>.*?)(?=\n(?:Highlight|Note|Bookmark)\b|\Z)",
+            text,
+            flags=re.IGNORECASE | re.DOTALL,
+        ):
+            clipping_type = match.group("type").lower()
+            position = (match.group("position") or "").strip()
+            body_lines = [line.strip() for line in match.group("body").splitlines() if line.strip()]
+            added_at = ""
+            content_lines: list[str] = []
+            for line in body_lines:
+                parsed_added = self._parse_html_added(line)
+                if parsed_added:
+                    added_at = parsed_added
+                    continue
+                if not self._is_html_book_heading(line, title):
+                    content_lines.append(line)
+            details = f"- Your {clipping_type.title()} {self._html_position_details(position)}"
+            if added_at:
+                details = f"{details} | Added on {added_at}"
+            blocks.append([self._html_title_line(title, author), details, "", *content_lines])
+        return blocks
 
     def _unit_from_block(self, lines: list[str], source_file: str) -> KnowledgeUnit | None:
         if len(lines) < 2:
@@ -144,7 +182,15 @@ class KindleClippingsAdapter(SourceAdapter):
     def _parse_datetime(self, value: str) -> datetime | None:
         if not value:
             return None
-        for fmt in ("%A, %B %d, %Y %I:%M:%S %p", "%A, %B %d, %Y %H:%M:%S"):
+        for fmt in (
+            "%A, %B %d, %Y %I:%M:%S %p",
+            "%A, %B %d, %Y %H:%M:%S",
+            "%B %d, %Y %I:%M:%S %p",
+            "%B %d, %Y %H:%M:%S",
+            "%b %d, %Y %I:%M:%S %p",
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d",
+        ):
             try:
                 return datetime.strptime(value, fmt).replace(tzinfo=timezone.utc)
             except ValueError:
@@ -255,3 +301,62 @@ class KindleClippingsAdapter(SourceAdapter):
         value = since.last_sync_at
         parsed = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
         return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+
+    def _parse_html_book_title(self, text: str) -> tuple[str, str]:
+        for line in text.splitlines():
+            cleaned = line.strip()
+            if cleaned and cleaned.lower() not in {"highlight", "note", "bookmark"}:
+                return self._parse_title(cleaned)
+        return "", ""
+
+    def _html_title_line(self, title: str, author: str) -> str:
+        return f"{title} ({author})" if author else title
+
+    def _html_position_details(self, position: str) -> str:
+        parts: list[str] = []
+        page = self._html_position_value(position, "page")
+        location = self._html_position_value(position, "location")
+        if page:
+            parts.append(f"on page {page}")
+        if location:
+            parts.append(f"at location {location}")
+        return " | ".join(parts)
+
+    def _html_position_value(self, position: str, name: str) -> str:
+        match = re.search(rf"\b{name}\s+([\w-]+)", position, flags=re.IGNORECASE)
+        return match.group(1).strip() if match else ""
+
+    def _parse_html_added(self, line: str) -> str:
+        match = re.search(r"(?:Added on|Created|Last annotated)\s*:?\s*(.+)", line, flags=re.IGNORECASE)
+        return match.group(1).strip() if match else ""
+
+    def _is_html_book_heading(self, line: str, title: str) -> bool:
+        return bool(title and line.strip().casefold() == title.casefold())
+
+
+class _KindleNotebookHtmlParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.lines: list[str] = []
+        self._current: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() in {"br", "p", "div", "section", "article", "h1", "h2", "h3", "li"}:
+            self._flush()
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() in {"p", "div", "section", "article", "h1", "h2", "h3", "li"}:
+            self._flush()
+
+    def handle_data(self, data: str) -> None:
+        text = " ".join(data.split())
+        if text:
+            self._current.append(text)
+
+    def _flush(self) -> None:
+        if self._current:
+            self.lines.append(" ".join(self._current).strip())
+            self._current = []
+
+    def flush(self) -> None:
+        self._flush()
