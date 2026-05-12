@@ -33,6 +33,7 @@ from graph.rag.source_diversity_audit import audit_source_diversity
 from graph.rag.source_reliability import score_source_reliability
 from graph.rag.source_timeline import build_source_timeline
 from graph.rag.query_focus_terms import extract_query_focus_terms
+from graph.rag.query_drift import analyze_query_drift
 from graph.rag.query_expansion import suggest_query_expansion_terms
 from graph.rag.evidence_tension_map import map_evidence_tensions
 from graph.rag.tag_cooccurrence import build_tag_cooccurrence_matrix
@@ -44,6 +45,7 @@ __all__ = [
     "build_tag_cooccurrence_matrix",
     "build_tag_hierarchy",
     "analyze_citation_coverage",
+    "analyze_query_drift",
     "analyze_result_date_coverage",
     "audit_source_diversity",
     "allocate_evidence_budget",
