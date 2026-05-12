@@ -45,8 +45,11 @@ def test_ingest_json_export_preserves_bookmark_metadata(tmp_path):
 
     result = RaindropJsonAdapter(path=str(export)).ingest()
 
-    assert len(result.units) == 1
-    unit = result.units[0]
+    bookmarks = [unit for unit in result.units if unit.source_entity_type == "bookmark"]
+    collections = [unit for unit in result.units if unit.source_entity_type == "collection"]
+    assert len(bookmarks) == 1
+    assert len(collections) == 1
+    unit = bookmarks[0]
     assert unit.source_project == "raindrop_json"
     assert unit.source_id == "raindrop_json:123"
     assert unit.source_entity_type == "bookmark"
@@ -78,6 +81,8 @@ def test_ingest_json_export_preserves_bookmark_metadata(tmp_path):
     }
     assert unit.created_at == datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
     assert unit.updated_at == datetime(2024, 1, 3, 4, 5, 6, tzinfo=timezone.utc)
+    assert collections[0].title == "Reading"
+    assert (unit.source_id, collections[0].source_id) in {(edge.from_unit_id, edge.to_unit_id) for edge in result.edges}
 
 
 def test_ingest_nested_exports_and_notes_arrays(tmp_path):
@@ -111,8 +116,7 @@ def test_ingest_nested_exports_and_notes_arrays(tmp_path):
 
     result = RaindropJsonAdapter(path=str(export)).ingest()
 
-    assert len(result.units) == 1
-    unit = result.units[0]
+    unit = next(unit for unit in result.units if unit.source_entity_type == "bookmark")
     assert unit.source_id == "raindrop_json:abc"
     assert unit.title == "Nested Export"
     assert unit.metadata["url"] == "https://example.com/nested"
@@ -122,6 +126,26 @@ def test_ingest_nested_exports_and_notes_arrays(tmp_path):
     assert unit.tags == ["alpha", "beta"]
     assert unit.created_at == datetime(2024, 1, 31, 15, 0, 0, tzinfo=timezone.utc)
     assert unit.updated_at == datetime(2024, 1, 31, 15, 0, 0, tzinfo=timezone.utc)
+
+
+def test_raindrop_json_collection_entities_cover_nested_and_missing_values(tmp_path):
+    export = tmp_path / "raindrop.json"
+    export.write_text(
+        json.dumps(
+            [
+                {"id": "1", "title": "Flat", "link": "https://example.com/flat", "collection": {"title": "Reading"}},
+                {"id": "2", "title": "Nested", "link": "https://example.com/nested", "folder": ["Archive", "Read Later"]},
+                {"id": "3", "title": "None", "link": "https://example.com/none"},
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = RaindropJsonAdapter(path=str(export)).ingest()
+
+    collections = [unit for unit in result.units if unit.source_entity_type == "collection"]
+    assert sorted(unit.title for unit in collections) == ["Archive / Read Later", "Reading"]
+    assert len(result.edges) == 2
 
 
 def test_invalid_records_are_skipped_predictably(tmp_path):

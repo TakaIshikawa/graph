@@ -259,6 +259,27 @@ def test_letterboxd_handles_rewatches(tmp_path):
     assert unit.metadata["rewatch"] == "Yes"
 
 
+def test_letterboxd_ingests_director_entities(tmp_path):
+    export = tmp_path / "letterboxd.csv"
+    export.write_text(
+        "\n".join(
+            [
+                "Name,Year,Director,Watched Date",
+                "Film,2020,Ada Lovelace,2025-01-15",
+                "Other Film,2021,\"Ada Lovelace; Grace Hopper\",2025-01-16",
+                "No Director,2022,,2025-01-17",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = LetterboxdAdapter(path=str(export)).ingest()
+
+    directors = [unit for unit in result.units if unit.source_entity_type == "director"]
+    assert sorted(unit.title for unit in directors) == ["Ada Lovelace", "Grace Hopper"]
+    assert len([edge for edge in result.edges if edge.metadata["relation_type"] == "film_director"]) == 3
+
+
 def test_letterboxd_extracts_slug_from_uri(tmp_path):
     export = tmp_path / "letterboxd.csv"
     export.write_text(

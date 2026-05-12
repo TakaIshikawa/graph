@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class RaindropJsonAdapter(SourceAdapter):
@@ -21,7 +21,7 @@ class RaindropJsonAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["bookmark"]
+        return ["bookmark", "collection"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -33,7 +33,8 @@ class RaindropJsonAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        if entity_types and "bookmark" not in entity_types:
+        allowed_types = set(entity_types or self.entity_types)
+        if not allowed_types.intersection(self.entity_types):
             return result
 
         path = Path(self.path).expanduser() if self.path else None
@@ -53,9 +54,16 @@ class RaindropJsonAdapter(SourceAdapter):
             comparable_at = unit.updated_at or unit.created_at
             if sync_at and comparable_at <= sync_at:
                 continue
-            result.units.append(unit)
+            collection = str(unit.metadata.get("collection") or "")
+            if "bookmark" in allowed_types:
+                result.units.append(unit)
+            if collection and "collection" in allowed_types:
+                result.units.append(self._collection_unit(collection, unit))
+            if collection and {"bookmark", "collection"}.issubset(allowed_types):
+                result.edges.append(self._edge(unit.source_id, self._collection_source_id(collection), "bookmark_collection"))
 
-        result.units.sort(key=lambda unit: unit.source_id)
+        result.units = sorted({unit.source_id: unit for unit in result.units}.values(), key=lambda unit: unit.source_id)
+        result.edges = sorted({edge.id: edge for edge in result.edges}.values(), key=lambda edge: edge.id)
         return result
 
     def _json_items(self, value: Any) -> list[dict[str, Any]]:
@@ -140,6 +148,35 @@ class RaindropJsonAdapter(SourceAdapter):
             return f"raindrop_json:{raindrop_id}"
         digest = hashlib.sha256(url.encode("utf-8")).hexdigest()
         return f"url:{digest[:24]}"
+
+    def _collection_unit(self, collection: str, bookmark: KnowledgeUnit) -> KnowledgeUnit:
+        return KnowledgeUnit(
+            source_project=SourceProject.RAINDROP_JSON,
+            source_id=self._collection_source_id(collection),
+            source_entity_type="collection",
+            title=collection,
+            content=f"Raindrop collection: {collection}",
+            content_type=ContentType.METADATA,
+            metadata={"name": collection, "path": collection, "bookmark_source_ids": [bookmark.source_id]},
+            tags=["raindrop", "collection"],
+            created_at=bookmark.created_at,
+            updated_at=bookmark.updated_at,
+        )
+
+    def _collection_source_id(self, collection: str) -> str:
+        digest = hashlib.sha256(collection.casefold().encode("utf-8")).hexdigest()[:24]
+        return f"raindrop_json:collection:{digest}"
+
+    def _edge(self, from_id: str, to_id: str, relation_type: str) -> KnowledgeEdge:
+        digest = hashlib.sha256(f"{from_id}|{relation_type}|{to_id}".encode("utf-8")).hexdigest()[:24]
+        return KnowledgeEdge(
+            id=f"raindrop_json:edge:{digest}",
+            from_unit_id=from_id,
+            to_unit_id=to_id,
+            relation=EdgeRelation.RELATES_TO,
+            source=EdgeSource.SOURCE,
+            metadata={"source_project": SourceProject.RAINDROP_JSON.value, "relation_type": relation_type},
+        )
 
     def _content(
         self,

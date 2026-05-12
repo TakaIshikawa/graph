@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class AppleHealthWorkoutsAdapter(SourceAdapter):
@@ -20,7 +20,7 @@ class AppleHealthWorkoutsAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["workout"]
+        return ["workout", "monthly_aggregate"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -32,7 +32,8 @@ class AppleHealthWorkoutsAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        if entity_types and "workout" not in entity_types:
+        allowed_types = set(entity_types or self.entity_types)
+        if not allowed_types.intersection(self.entity_types):
             return result
 
         sync_at = self._sync_datetime(since) if since else None
@@ -50,7 +51,16 @@ class AppleHealthWorkoutsAdapter(SourceAdapter):
             except (OSError, ET.ParseError, UnicodeDecodeError):
                 continue
 
-        result.units.extend(sorted(units, key=lambda unit: (unit.created_at, unit.source_id)))
+        workouts = sorted(units, key=lambda unit: (unit.created_at, unit.source_id))
+        aggregates = self._monthly_aggregate_units(workouts) if "monthly_aggregate" in allowed_types else []
+        if "monthly_aggregate" in allowed_types:
+            result.units.extend(aggregates)
+        if "workout" in allowed_types:
+            result.units.extend(workouts)
+        if {"workout", "monthly_aggregate"}.issubset(allowed_types):
+            result.edges.extend(self._monthly_aggregate_edges(workouts, aggregates))
+        result.units.sort(key=lambda unit: (unit.created_at, unit.source_id))
+        result.edges.sort(key=lambda edge: edge.id)
         return result
 
     def _iter_paths(self) -> list[Path]:
@@ -170,6 +180,74 @@ class AppleHealthWorkoutsAdapter(SourceAdapter):
             )
         digest = hashlib.sha256(identifier.encode("utf-8")).hexdigest()[:24]
         return f"apple_health_workouts:{digest}"
+
+    def _monthly_aggregate_units(self, workouts: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[tuple[str, str], list[KnowledgeUnit]] = {}
+        for workout in workouts:
+            month = workout.created_at.strftime("%Y-%m")
+            activity_type = str(workout.metadata.get("activity_type") or "").strip()
+            if not activity_type:
+                continue
+            grouped.setdefault((month, activity_type.casefold()), []).append(workout)
+
+        units: list[KnowledgeUnit] = []
+        for (month, _normalized_type), items in grouped.items():
+            activity_type = str(items[0].metadata.get("activity_type"))
+            total_duration = sum(float(item.metadata.get("duration") or 0) for item in items if item.metadata.get("duration") is not None)
+            total_distance = sum(float(item.metadata.get("distance") or 0) for item in items if item.metadata.get("distance") is not None)
+            metadata = {
+                "month": month,
+                "activity_type": activity_type,
+                "workout_count": len(items),
+                "total_duration": total_duration if total_duration else None,
+                "duration_unit": items[0].metadata.get("duration_unit"),
+                "total_distance": total_distance if total_distance else None,
+                "distance_unit": items[0].metadata.get("distance_unit"),
+                "workout_source_ids": [item.source_id for item in items],
+            }
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.APPLE_HEALTH_WORKOUTS,
+                    source_id=self._monthly_aggregate_source_id(month, activity_type),
+                    source_entity_type="monthly_aggregate",
+                    title=f"{activity_type} workouts in {month}",
+                    content=f"Apple Health {activity_type} workouts in {month}",
+                    content_type=ContentType.METADATA,
+                    metadata={key: value for key, value in metadata.items() if value not in ("", None, [])},
+                    tags=["apple_health", "workout", "monthly_aggregate", activity_type.lower()],
+                    created_at=min(item.created_at for item in items),
+                    updated_at=max(item.updated_at for item in items),
+                )
+            )
+        return units
+
+    def _monthly_aggregate_edges(self, workouts: list[KnowledgeUnit], aggregates: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        aggregate_ids = {
+            (unit.metadata.get("month"), str(unit.metadata.get("activity_type") or "").casefold()): unit.source_id
+            for unit in aggregates
+        }
+        edges: list[KnowledgeEdge] = []
+        for workout in workouts:
+            key = (workout.created_at.strftime("%Y-%m"), str(workout.metadata.get("activity_type") or "").casefold())
+            target = aggregate_ids.get(key)
+            if target:
+                edges.append(self._edge(workout.source_id, target, "workout_monthly_aggregate"))
+        return list({edge.id: edge for edge in edges}.values())
+
+    def _monthly_aggregate_source_id(self, month: str, activity_type: str) -> str:
+        digest = hashlib.sha256(f"{month}|{activity_type.casefold()}".encode("utf-8")).hexdigest()[:24]
+        return f"apple_health_workouts:monthly_aggregate:{digest}"
+
+    def _edge(self, from_id: str, to_id: str, relation_type: str) -> KnowledgeEdge:
+        digest = hashlib.sha256(f"{from_id}|{relation_type}|{to_id}".encode("utf-8")).hexdigest()[:24]
+        return KnowledgeEdge(
+            id=f"apple_health_workouts:edge:{digest}",
+            from_unit_id=from_id,
+            to_unit_id=to_id,
+            relation=EdgeRelation.RELATES_TO,
+            source=EdgeSource.SOURCE,
+            metadata={"source_project": SourceProject.APPLE_HEALTH_WORKOUTS.value, "relation_type": relation_type},
+        )
 
     def _title(self, activity_type: str, start_at: datetime | None) -> str:
         if start_at:
