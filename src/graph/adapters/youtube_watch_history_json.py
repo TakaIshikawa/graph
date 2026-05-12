@@ -134,10 +134,13 @@ class YouTubeWatchHistoryJsonAdapter(SourceAdapter):
                     content=f"YouTube channel: {name or url}",
                     content_type=ContentType.METADATA,
                     metadata={
+                        "channel": name or url,
                         "channel_name": name,
                         "channel_url": url,
                         "watch_count": len(channel_watches),
+                        "video_source_ids": [watch.source_id for watch in channel_watches],
                         "first_watched_at": created_at.isoformat(),
+                        "latest_watched_at": updated_at.isoformat(),
                         "last_watched_at": updated_at.isoformat(),
                         "source_files": sorted({str(watch.metadata.get("source_file")) for watch in channel_watches if watch.metadata.get("source_file")}),
                         "watched_video_source_ids": [watch.source_id for watch in channel_watches],

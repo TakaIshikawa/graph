@@ -4,7 +4,7 @@ import csv
 
 from graph.adapters.boardgamegeek_collection_csv import BoardGameGeekCollectionCsvAdapter
 from graph.adapters.registry import get_adapter
-from graph.types.enums import SourceProject
+from graph.types.enums import EdgeRelation, SourceProject
 
 
 def _write_csv(path, rows):
@@ -54,6 +54,7 @@ def test_boardgamegeek_collection_csv_ingests_export_rows(tmp_path):
     assert unit.metadata["designers"] == ["Isaac Childres"]
     assert unit.metadata["collection_comments"] == "Campaign box"
     assert "owned" in unit.tags
+    assert result.edges == []
 
 
 def test_boardgamegeek_collection_csv_aliases_booleans_and_registry(tmp_path):
@@ -84,3 +85,78 @@ def test_boardgamegeek_collection_csv_aliases_booleans_and_registry(tmp_path):
     assert unit.metadata["plays"] == 3
     assert unit.metadata["designers"] == ["Klaus Teuber", "Someone Else"]
     assert get_adapter("boardgamegeek_collection_csv", path=str(export)).name == "boardgamegeek_collection_csv"
+
+
+def test_boardgamegeek_collection_csv_emits_publisher_aggregates_and_edges(tmp_path):
+    export = tmp_path / "collection.csv"
+    _write_csv(
+        export,
+        [
+            {
+                "objectid": "1",
+                "objectname": "One",
+                "yearpublished": "2020",
+                "rating": "8",
+                "owned": "1",
+                "numplays": "2",
+                "publisher": "Cephalofair Games; Other Publisher",
+            },
+            {
+                "objectid": "2",
+                "objectname": "Two",
+                "yearpublished": "2022",
+                "rating": "10",
+                "owned": "0",
+                "numplays": "0",
+                "publisher": "cephalofair games",
+            },
+            {
+                "objectid": "3",
+                "objectname": "Three",
+                "yearpublished": "2019",
+                "rating": "N/A",
+                "owned": "yes",
+                "numplays": "5",
+                "publisher": "Other Publisher",
+            },
+        ],
+    )
+
+    result = BoardGameGeekCollectionCsvAdapter(path=str(export)).ingest(entity_types=["publisher", "board_game"])
+
+    publishers = [unit for unit in result.units if unit.source_entity_type == "publisher"]
+    games = [unit for unit in result.units if unit.source_entity_type == "board_game"]
+    assert BoardGameGeekCollectionCsvAdapter().entity_types == ["board_game", "publisher"]
+    assert len(publishers) == 2
+
+    cephalofair = next(unit for unit in publishers if unit.metadata["normalized_publisher"] == "cephalofair games")
+    cephalofair_games = [game for game in games if "Cephalofair Games" in game.metadata.get("publishers", []) or "cephalofair games" in game.metadata.get("publishers", [])]
+    assert cephalofair.source_id.startswith("boardgamegeek_collection_csv:publisher:")
+    assert cephalofair.metadata["publisher"] == "Cephalofair Games"
+    assert cephalofair.metadata["game_count"] == 2
+    assert cephalofair.metadata["game_source_ids"] == sorted(game.source_id for game in cephalofair_games)
+    assert cephalofair.metadata["owned_count"] == 1
+    assert cephalofair.metadata["played_count"] == 1
+    assert cephalofair.metadata["average_user_rating"] == 9.0
+    assert cephalofair.metadata["year_range"] == [2020, 2022]
+    assert {
+        (edge.from_unit_id, edge.to_unit_id, edge.relation, edge.metadata["relation_type"])
+        for edge in result.edges
+        if edge.from_unit_id == cephalofair.source_id
+    } == {
+        (cephalofair.source_id, game.source_id, EdgeRelation.CONTAINS, "publisher_contains_game")
+        for game in cephalofair_games
+    }
+
+
+def test_boardgamegeek_collection_csv_publisher_filtering(tmp_path):
+    export = tmp_path / "collection.csv"
+    _write_csv(export, [{"objectid": "1", "objectname": "One", "publisher": "Cephalofair Games"}])
+
+    publisher_only = BoardGameGeekCollectionCsvAdapter(path=str(export)).ingest(entity_types=["publisher"])
+    game_only = BoardGameGeekCollectionCsvAdapter(path=str(export)).ingest(entity_types=["board_game"])
+
+    assert [unit.source_entity_type for unit in publisher_only.units] == ["publisher"]
+    assert publisher_only.edges == []
+    assert [unit.source_entity_type for unit in game_only.units] == ["board_game"]
+    assert game_only.edges == []

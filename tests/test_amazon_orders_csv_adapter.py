@@ -14,10 +14,11 @@ def test_amazon_orders_csv_groups_orders_and_links_items(tmp_path):
     assert len([unit for unit in result.units if unit.source_entity_type == "order"]) == 1
     assert len([unit for unit in result.units if unit.source_entity_type == "shipment"]) == 1
     assert len([unit for unit in result.units if unit.source_entity_type == "item"]) == 2
+    assert len([unit for unit in result.units if unit.source_entity_type == "seller"]) == 2
     order = next(unit for unit in result.units if unit.source_entity_type == "order")
     assert order.metadata["total_owed"] == 20.0
     assert order.metadata["categories"] == {"Books": 1, "Electronics": 1}
-    assert len(result.edges) == 3
+    assert len(result.edges) == 5
     assert {edge.relation for edge in result.edges} == {EdgeRelation.CONTAINS}
     assert get_adapter("amazon_orders_csv", path=str(export)).name == "amazon_orders_csv"
 
@@ -92,5 +93,61 @@ def test_amazon_orders_csv_return_filtering(tmp_path):
     assert item_only.edges == []
 
 
+def test_amazon_orders_csv_emits_seller_aggregates_and_edges(tmp_path):
+    first_export = tmp_path / "amazon1.csv"
+    second_export = tmp_path / "amazon2.csv"
+    first_export.write_text(
+        "Order ID,Order Date,Title,Category,Total Owed,Seller\n"
+        "A1,2026-05-01,Book,Books,10.00,Amazon\n"
+        "A1,2026-05-01,Cable,Electronics,5.50,amazon\n",
+        encoding="utf-8",
+    )
+    second_export.write_text(
+        "Order ID,Order Date,Title,Category,Total Owed,Seller\n"
+        "A2,2026-05-03,Pen,Office,3.25,Amazon\n"
+        "A2,2026-05-03,Mug,Home,8.00,Shop\n",
+        encoding="utf-8",
+    )
+
+    result = AmazonOrdersCsvAdapter(path=str(tmp_path)).ingest(entity_types=["seller", "item"])
+
+    sellers = [unit for unit in result.units if unit.source_entity_type == "seller"]
+    items = [unit for unit in result.units if unit.source_entity_type == "item"]
+    assert len(sellers) == 2
+
+    amazon = next(unit for unit in sellers if unit.metadata["normalized_seller"] == "amazon")
+    amazon_items = [item for item in items if str(item.metadata.get("seller", "")).casefold() == "amazon"]
+    assert amazon.source_id.startswith("amazon_orders_csv:seller:")
+    assert amazon.metadata["seller"] == "Amazon"
+    assert amazon.metadata["item_count"] == 3
+    assert amazon.metadata["order_count"] == 2
+    assert amazon.metadata["total_owed"] == 18.75
+    assert amazon.metadata["categories"] == {"Books": 1, "Electronics": 1, "Office": 1}
+    assert amazon.metadata["order_source_ids"] == ["amazon_orders_csv:A1", "amazon_orders_csv:A2"]
+    assert amazon.metadata["item_source_ids"] == sorted(item.source_id for item in amazon_items)
+
+    seller_edges = [edge for edge in result.edges if edge.from_unit_id == amazon.source_id]
+    assert {edge.to_unit_id for edge in seller_edges} == {item.source_id for item in amazon_items}
+    assert all(edge.relation == EdgeRelation.CONTAINS for edge in seller_edges)
+    assert all(edge.metadata["relation_type"] == "seller_contains_item" for edge in seller_edges)
+
+
+def test_amazon_orders_csv_seller_filtering(tmp_path):
+    export = tmp_path / "amazon.csv"
+    export.write_text(
+        "Order ID,Order Date,Title,Seller\n"
+        "A1,2026-05-01,Book,Amazon\n",
+        encoding="utf-8",
+    )
+
+    seller_only = AmazonOrdersCsvAdapter(path=str(export)).ingest(entity_types=["seller"])
+    item_only = AmazonOrdersCsvAdapter(path=str(export)).ingest(entity_types=["item"])
+
+    assert [unit.source_entity_type for unit in seller_only.units] == ["seller"]
+    assert seller_only.edges == []
+    assert [unit.source_entity_type for unit in item_only.units] == ["item"]
+    assert item_only.edges == []
+
+
 def test_amazon_orders_csv_reports_return_entity_type():
-    assert AmazonOrdersCsvAdapter().entity_types == ["order", "shipment", "item", "return"]
+    assert AmazonOrdersCsvAdapter().entity_types == ["order", "shipment", "item", "return", "seller"]
