@@ -55,6 +55,10 @@ def test_chrome_bookmarks_json_ingests_nested_bookmarks_dates_and_edges(tmp_path
     assert unit.source_entity_type == "bookmark"
     assert unit.metadata["url"] == "https://example.com/graph"
     assert unit.metadata["domain"] == "example.com"
+    assert unit.metadata["url_scheme"] == "https"
+    assert unit.metadata["url_path"] == "/graph"
+    assert "query_param_keys" not in unit.metadata
+    assert unit.metadata["has_fragment"] == "false"
     assert unit.metadata["folder_path"] == "Research"
     assert unit.metadata["root"] == "bookmark_bar"
     assert unit.metadata["root_name"] == "Bookmarks Bar"
@@ -219,3 +223,45 @@ def test_chrome_bookmarks_json_emits_folder_units_and_filtered_edges(tmp_path):
     assert bookmark_only.edges == []
     assert {unit.source_entity_type for unit in folder_only.units} == {"folder"}
     assert folder_only.edges == []
+
+
+def test_chrome_bookmarks_json_bookmark_url_structure_metadata(tmp_path):
+    export = tmp_path / "Bookmarks.json"
+    export.write_text(
+        json.dumps(
+            {
+                "roots": {
+                    "bookmark_bar": {
+                        "type": "folder",
+                        "children": [
+                            {
+                                "type": "url",
+                                "name": "Filtered",
+                                "url": "https://Example.com/search?q=graph&tag=z&tag=a&empty=#section",
+                                "guid": "guid-filtered",
+                            },
+                            {
+                                "type": "url",
+                                "name": "Plain",
+                                "url": "http://plain.example",
+                                "guid": "guid-plain",
+                            },
+                        ],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = ChromeBookmarksJsonAdapter(path=str(export)).ingest(entity_types=["bookmark"])
+    units = {unit.title: unit for unit in result.units}
+
+    assert units["Filtered"].metadata["url_scheme"] == "https"
+    assert units["Filtered"].metadata["url_path"] == "/search"
+    assert units["Filtered"].metadata["query_param_keys"] == "empty,q,tag"
+    assert units["Filtered"].metadata["has_fragment"] == "true"
+    assert units["Plain"].metadata["url_scheme"] == "http"
+    assert "url_path" not in units["Plain"].metadata
+    assert "query_param_keys" not in units["Plain"].metadata
+    assert units["Plain"].metadata["has_fragment"] == "false"

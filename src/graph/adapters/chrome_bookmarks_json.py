@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse
 
 from graph.adapters._personal_exports import clean_metadata, digest_source_id, ensure_utc
 from graph.adapters.base import IngestResult, SourceAdapter
@@ -178,9 +178,11 @@ class ChromeBookmarksJsonAdapter(SourceAdapter):
     ) -> KnowledgeUnit:
         now = datetime.now(timezone.utc)
         folder_path = "/".join(bookmark.folder_path)
+        url_metadata = self._url_metadata(bookmark.url)
         metadata = {
             "url": bookmark.url,
             "domain": self._domain(bookmark.url),
+            **url_metadata,
             "folder_path": folder_path,
             "root": bookmark.root,
             "root_name": bookmark.root_name,
@@ -338,6 +340,18 @@ class ChromeBookmarksJsonAdapter(SourceAdapter):
     def _domain(self, url: str) -> str:
         host = urlparse(url).hostname or urlparse(f"https://{url}").hostname or ""
         return host.rstrip(".").casefold()
+
+    def _url_metadata(self, url: str) -> dict[str, str]:
+        parsed = urlparse(url)
+        if not parsed.scheme and not parsed.netloc:
+            parsed = urlparse(f"https://{url}")
+        query_param_keys = ",".join(sorted({key for key, _value in parse_qsl(parsed.query, keep_blank_values=True)}))
+        return {
+            "url_scheme": parsed.scheme.casefold(),
+            "url_path": parsed.path,
+            "query_param_keys": query_param_keys,
+            "has_fragment": "true" if parsed.fragment else "false",
+        }
 
     def _iso_datetime(self, value: Any) -> datetime | None:
         text = self._text(value)
