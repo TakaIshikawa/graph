@@ -8,10 +8,11 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class PocketExportCsvAdapter(SourceAdapter):
@@ -21,7 +22,7 @@ class PocketExportCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["saved_item"]
+        return ["saved_item", "domain"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -33,10 +34,12 @@ class PocketExportCsvAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        if entity_types and "saved_item" not in entity_types:
+        requested = set(entity_types or self.entity_types)
+        if not requested.intersection(self.entity_types):
             return result
 
         sync_at = self._sync_datetime(since) if since else None
+        saved_items: list[KnowledgeUnit] = []
         for path in self._iter_paths():
             try:
                 rows = self._read_rows(path)
@@ -49,9 +52,17 @@ class PocketExportCsvAdapter(SourceAdapter):
                     continue
                 if sync_at and unit.updated_at <= sync_at:
                     continue
-                result.units.append(unit)
+                saved_items.append(unit)
 
+        domain_units = self._domain_units(saved_items)
+        if "saved_item" in requested:
+            result.units.extend(saved_items)
+        if "domain" in requested:
+            result.units.extend(domain_units)
+        if {"saved_item", "domain"}.issubset(requested):
+            result.edges.extend(self._domain_edges(domain_units, saved_items))
         result.units.sort(key=lambda unit: (unit.created_at, unit.source_id))
+        result.edges.sort(key=lambda edge: edge.id)
         return result
 
     def _unit_from_row(self, row: dict[str, Any], path: Path) -> KnowledgeUnit | None:
@@ -67,6 +78,7 @@ class PocketExportCsvAdapter(SourceAdapter):
         )
         tags = self._parse_tags(self._first(row, "tags", "tag"))
         status = self._normalize_status(self._first(row, "status", "state"))
+        domain = self._domain(url)
         favorite = self._is_truthy(self._first(row, "favorite", "is_favorite", "favorited"))
         archived = self._is_archived(row, status)
         read = self._is_read(row, status)
@@ -91,6 +103,7 @@ class PocketExportCsvAdapter(SourceAdapter):
                 read=read,
                 tags=tags,
                 excerpt=excerpt,
+                domain=domain,
                 source_file=path.name,
             ),
             tags=tags,
@@ -134,6 +147,7 @@ class PocketExportCsvAdapter(SourceAdapter):
         read: bool,
         tags: list[str],
         excerpt: str,
+        domain: str,
         source_file: str,
     ) -> dict[str, Any]:
         metadata: dict[str, Any] = {
@@ -146,6 +160,7 @@ class PocketExportCsvAdapter(SourceAdapter):
             "archived": archived,
             "read": read,
             "tags": tags,
+            "domain": domain,
             "source_file": source_file,
         }
         if added_text:
@@ -179,6 +194,81 @@ class PocketExportCsvAdapter(SourceAdapter):
     def _source_id(self, url: str) -> str:
         digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:24]
         return f"pocket_export_csv:{digest}"
+
+    def _domain_units(self, saved_items: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        for item in saved_items:
+            domain = str(item.metadata.get("domain") or "")
+            if domain:
+                grouped.setdefault(domain, []).append(item)
+
+        units: list[KnowledgeUnit] = []
+        for domain, items in sorted(grouped.items()):
+            unique_items = sorted({item.source_id: item for item in items}.values(), key=lambda item: item.source_id)
+            tags = sorted({tag for item in unique_items for tag in item.metadata.get("tags", [])})
+            statuses = sorted({str(item.metadata.get("status")) for item in unique_items if item.metadata.get("status")})
+            units.append(
+                KnowledgeUnit(
+                    source_project="pocket_export_csv",
+                    source_id=self._domain_source_id(domain),
+                    source_entity_type="domain",
+                    title=domain,
+                    content=f"Pocket domain: {domain}\nSaved items: {len(unique_items)}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "domain": domain,
+                        "item_count": len(unique_items),
+                        "saved_item_source_ids": [item.source_id for item in unique_items],
+                        "statuses": statuses,
+                        "tags": tags,
+                        "source_files": sorted({str(item.metadata.get("source_file")) for item in unique_items if item.metadata.get("source_file")}),
+                    },
+                    tags=["pocket", "domain", domain],
+                    created_at=min(item.created_at for item in unique_items),
+                    updated_at=max(item.updated_at for item in unique_items),
+                )
+            )
+        return units
+
+    def _domain_edges(self, domains: list[KnowledgeUnit], saved_items: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        domain_ids = {str(domain.metadata.get("domain")): domain.source_id for domain in domains}
+        edges: list[KnowledgeEdge] = []
+        for item in saved_items:
+            domain = str(item.metadata.get("domain") or "")
+            domain_id = domain_ids.get(domain)
+            if not domain_id:
+                continue
+            digest = hashlib.sha256(f"{domain_id}|{item.source_id}|contains".encode("utf-8")).hexdigest()[:24]
+            edges.append(
+                KnowledgeEdge(
+                    id=f"pocket-export-csv-domain-contains-{digest}",
+                    from_unit_id=domain_id,
+                    to_unit_id=item.source_id,
+                    relation=EdgeRelation.CONTAINS,
+                    source=EdgeSource.SOURCE,
+                    metadata={
+                        "source_project": "pocket_export_csv",
+                        "from_entity_type": "domain",
+                        "to_entity_type": "saved_item",
+                        "domain": domain,
+                    },
+                    created_at=item.created_at,
+                )
+            )
+        return edges
+
+    def _domain_source_id(self, domain: str) -> str:
+        digest = hashlib.sha256(domain.encode("utf-8")).hexdigest()[:24]
+        return f"pocket_export_csv:domain:{digest}"
+
+    def _domain(self, url: str) -> str:
+        parsed = urlparse(url)
+        if not parsed.hostname and "://" not in url:
+            parsed = urlparse(f"https://{url}")
+        host = (parsed.hostname or "").rstrip(".").casefold()
+        if not host or any(char.isspace() for char in host):
+            return ""
+        return host.removeprefix("www.")
 
     def _parse_tags(self, value: str) -> list[str]:
         tags: list[str] = []
