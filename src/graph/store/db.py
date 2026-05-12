@@ -30,6 +30,7 @@ COLLECTION_ACTIVITY_BUCKETS = {"day", "week", "month", "year"}
 COLLECTION_ACTIVITY_FIELDS = {"created_at", "ingested_at", "updated_at"}
 UNIT_ACTIVITY_BUCKETS = {"day", "week", "month"}
 UNIT_ACTIVITY_FIELDS = {"created_at", "ingested_at", "updated_at"}
+METADATA_DATE_HISTOGRAM_BUCKETS = {"day", "month", "year"}
 REQUIRED_SQLITE_BACKUP_OBJECTS = {
     "schema_version",
     "knowledge_units",
@@ -380,6 +381,18 @@ def _unit_brief(unit: KnowledgeUnit) -> dict[str, Any]:
     }
 
 
+def _unit_source_summary(unit: KnowledgeUnit) -> dict[str, Any]:
+    return {
+        "id": unit.id,
+        "title": unit.title,
+        "source_project": _model_value(unit.source_project),
+        "source_id": unit.source_id,
+        "source_entity_type": unit.source_entity_type,
+        "content_type": _model_value(unit.content_type),
+        "tags": list(unit.tags),
+    }
+
+
 def _metadata_inventory_distinct_key(value: Any) -> tuple[str, str]:
     normalized = _metadata_inventory_normalized_value(value)
     value_type = _metadata_inventory_value_type(value)
@@ -459,6 +472,16 @@ def _activity_bucket_label(value: datetime, bucket: str) -> str:
     if bucket == "year":
         return f"{value.year:04d}"
     raise ValueError(f"Unsupported collection activity bucket: {bucket}")
+
+
+def _date_histogram_bucket_label(value: datetime, bucket: str) -> str:
+    if bucket == "day":
+        return value.date().isoformat()
+    if bucket == "month":
+        return f"{value.year:04d}-{value.month:02d}"
+    if bucket == "year":
+        return f"{value.year:04d}"
+    raise ValueError(f"Unsupported metadata date histogram bucket: {bucket}")
 
 
 def _activity_bucket_start(value: datetime, bucket: str) -> date:
@@ -1044,6 +1067,89 @@ class Store:
             ],
         }
 
+    def metadata_date_histogram(
+        self,
+        path: str,
+        *,
+        bucket: str = "month",
+        limit: int | None = None,
+    ) -> dict:
+        """Bucket ISO date/datetime metadata values at a dotted path."""
+        normalized_path = _format_metadata_path(_metadata_path_parts(path))
+        bucket = str(bucket).strip().lower()
+        if bucket not in METADATA_DATE_HISTOGRAM_BUCKETS:
+            valid = ", ".join(sorted(METADATA_DATE_HISTOGRAM_BUCKETS))
+            raise ValueError(
+                f"Unsupported metadata date histogram bucket: {bucket}. "
+                f"Use one of: {valid}."
+            )
+        if limit is not None and (
+            not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0
+        ):
+            raise ValueError("limit must be a positive integer.")
+
+        counts: Counter[str] = Counter()
+        valid_count = 0
+        missing_count = 0
+        invalid_count = 0
+        unit_count = 0
+
+        rows = self.conn.execute(
+            """SELECT metadata
+               FROM knowledge_units
+               ORDER BY source_project, source_id, title, id"""
+        ).fetchall()
+        for row in rows:
+            unit_count += 1
+            metadata = json.loads(row["metadata"])
+            found, raw_value = _metadata_path_lookup(metadata, normalized_path)
+            if not found or raw_value is None or (
+                isinstance(raw_value, str) and not raw_value.strip()
+            ):
+                missing_count += 1
+                continue
+
+            if isinstance(raw_value, datetime):
+                parsed = _parse_datetime(raw_value)
+            elif isinstance(raw_value, date):
+                parsed = datetime(
+                    raw_value.year,
+                    raw_value.month,
+                    raw_value.day,
+                    tzinfo=timezone.utc,
+                )
+            elif isinstance(raw_value, str):
+                try:
+                    parsed = _parse_datetime(raw_value)
+                except ValueError:
+                    parsed = None
+            else:
+                parsed = None
+
+            if parsed is None:
+                invalid_count += 1
+                continue
+
+            counts[_date_histogram_bucket_label(parsed, bucket)] += 1
+            valid_count += 1
+
+        bucket_rows = [
+            {"bucket": label, "count": counts[label]}
+            for label in sorted(counts)
+        ]
+        if limit is not None:
+            bucket_rows = bucket_rows[:limit]
+
+        return {
+            "path": normalized_path,
+            "bucket": bucket,
+            "unit_count": unit_count,
+            "valid_count": valid_count,
+            "missing_count": missing_count,
+            "invalid_count": invalid_count,
+            "buckets": bucket_rows,
+        }
+
     def metadata_completeness_summary(
         self,
         required_keys: list[str],
@@ -1490,6 +1596,71 @@ class Store:
             "total_tag_assignments": total_tag_assignments,
             "tags": tags,
         }
+
+    def source_entity_type_summary(self, *, sample_limit: int = 3) -> list[dict]:
+        """Summarize units grouped by source project and source entity type."""
+        if (
+            not isinstance(sample_limit, int)
+            or isinstance(sample_limit, bool)
+            or sample_limit < 0
+        ):
+            raise ValueError("sample_limit must be a non-negative integer.")
+
+        rows = self.conn.execute(
+            """SELECT *
+               FROM knowledge_units
+               ORDER BY source_project, source_entity_type, created_at, source_id, id"""
+        ).fetchall()
+        groups: dict[tuple[str, str], dict[str, Any]] = {}
+        for row in rows:
+            unit = _row_to_unit(row)
+            source_project = str(unit.source_project)
+            source_entity_type = str(unit.source_entity_type or "")
+            key = (source_project, source_entity_type)
+            group = groups.setdefault(
+                key,
+                {
+                    "source_project": source_project,
+                    "source_entity_type": source_entity_type,
+                    "count": 0,
+                    "earliest_created_at": None,
+                    "latest_created_at": None,
+                    "latest_updated_at": None,
+                    "sample_units": [],
+                },
+            )
+            group["count"] += 1
+            created_at = _parse_datetime(unit.created_at)
+            updated_at = _parse_datetime(unit.updated_at)
+            if created_at is not None:
+                created_iso = created_at.isoformat()
+                if (
+                    group["earliest_created_at"] is None
+                    or created_iso < group["earliest_created_at"]
+                ):
+                    group["earliest_created_at"] = created_iso
+                if (
+                    group["latest_created_at"] is None
+                    or created_iso > group["latest_created_at"]
+                ):
+                    group["latest_created_at"] = created_iso
+            if updated_at is not None:
+                updated_iso = updated_at.isoformat()
+                if (
+                    group["latest_updated_at"] is None
+                    or updated_iso > group["latest_updated_at"]
+                ):
+                    group["latest_updated_at"] = updated_iso
+            if len(group["sample_units"]) < sample_limit:
+                group["sample_units"].append(_unit_source_summary(unit))
+
+        return [
+            groups[key]
+            for key in sorted(
+                groups,
+                key=lambda item: (-groups[item]["count"], item[0], item[1]),
+            )
+        ]
 
     def tag_freshness_summary(
         self,
