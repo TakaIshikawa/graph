@@ -42,6 +42,7 @@ class GoogleContactsCsvAdapter(SourceAdapter):
         organization_names: dict[str, str] = {}
         group_contacts: dict[str, list[KnowledgeUnit]] = {}
         group_names: dict[str, str] = {}
+        contact_units: list[KnowledgeUnit] = []
         for path in self._iter_paths():
             try:
                 rows = self._read_rows(path)
@@ -53,6 +54,7 @@ class GoogleContactsCsvAdapter(SourceAdapter):
                     continue
                 if sync_at and unit.updated_at <= sync_at:
                     continue
+                contact_units.append(unit)
                 org_name = unit.metadata.get("organization", {}).get("name")
                 if org_name:
                     org_key = self._organization_key(str(org_name))
@@ -88,6 +90,8 @@ class GoogleContactsCsvAdapter(SourceAdapter):
                 group = group_by_key[group_key]
                 for contact in contacts:
                     result.edges.append(self._group_edge(contact, group))
+        if "contact" in allowed:
+            result.edges.extend(self._relationship_edges(contact_units))
         result.edges.sort(key=lambda edge: edge.id)
         return result
 
@@ -114,6 +118,7 @@ class GoogleContactsCsvAdapter(SourceAdapter):
         phones = self._repeated(row, "Phone")
         addresses = self._repeated(row, "Address")
         websites = self._repeated(row, "Website")
+        relationships = self._relationships(row)
         groups = self._split_groups(self._first(row, "Group Membership", "Groups"))
         organization = self._organization(row)
         birthday = self._first(row, "Birthday", "Birthdate")
@@ -133,6 +138,7 @@ class GoogleContactsCsvAdapter(SourceAdapter):
             "phones": phones,
             "addresses": addresses,
             "websites": websites,
+            "relationships": relationships,
             "organization": organization,
             "birthday": birthday,
             "groups": groups,
@@ -146,7 +152,17 @@ class GoogleContactsCsvAdapter(SourceAdapter):
             source_id=self._source_id(row, name, emails, phones, source_file, index),
             source_entity_type="contact",
             title=name,
-            content=self._content(name, notes, emails, phones, organization, addresses, birthday, groups),
+            content=self._content(
+                name,
+                notes,
+                emails,
+                phones,
+                organization,
+                addresses,
+                birthday,
+                groups,
+                relationships,
+            ),
             content_type=ContentType.METADATA,
             metadata=metadata,
             tags=["contact", *groups],
@@ -178,6 +194,36 @@ class GoogleContactsCsvAdapter(SourceAdapter):
             "title": self._first(row, "Organization 1 - Title", "Job Title", "Title"),
             "department": self._first(row, "Organization 1 - Department", "Department"),
         }
+
+    def _relationships(self, row: dict[str, Any]) -> list[dict[str, str]]:
+        relations: dict[str, dict[str, str]] = {}
+        for key, value in row.items():
+            parts = [part.strip() for part in str(key).split(" - ")]
+            if len(parts) != 2 or parts[1].lower() not in {"type", "value"}:
+                continue
+            prefix, index = parts[0].rsplit(" ", 1) if " " in parts[0] else (parts[0], "")
+            if prefix.lower() != "relation" or not index.isdigit():
+                continue
+            text = str(value or "").strip()
+            if not text:
+                continue
+            relation = relations.setdefault(index, {"type": "", "value": ""})
+            relation[parts[1].lower()] = " ".join(text.split())
+
+        normalized: list[dict[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for index in sorted(relations, key=int):
+            relation = relations[index]
+            value = relation.get("value", "")
+            if not value:
+                continue
+            item = {"type": relation.get("type", ""), "value": value}
+            identity = (item["type"].casefold(), item["value"].casefold())
+            if identity in seen:
+                continue
+            seen.add(identity)
+            normalized.append(item)
+        return normalized
 
     def _organization_unit(self, key: str, name: str, contacts: list[KnowledgeUnit]) -> KnowledgeUnit:
         departments = sorted(
@@ -296,6 +342,74 @@ class GoogleContactsCsvAdapter(SourceAdapter):
         digest = hashlib.sha256(f"{contact_id}|{group_id}|references".encode("utf-8")).hexdigest()[:24]
         return f"google-contacts-group-references-{digest}"
 
+    def _relationship_edges(self, contacts: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        contact_index: dict[str, list[KnowledgeUnit]] = {}
+        for contact in contacts:
+            keys = [
+                self._relationship_match_key(contact.title),
+                *[self._relationship_match_key(email) for email in contact.metadata.get("emails", [])],
+            ]
+            for key in keys:
+                if key:
+                    contact_index.setdefault(key, []).append(contact)
+
+        edges: list[KnowledgeEdge] = []
+        seen: set[str] = set()
+        for contact in sorted(contacts, key=lambda unit: unit.source_id):
+            for relationship in contact.metadata.get("relationships", []):
+                value = str(relationship.get("value", "")).strip()
+                match_key = self._relationship_match_key(value)
+                if not match_key:
+                    continue
+                for related in sorted(contact_index.get(match_key, []), key=lambda unit: unit.source_id):
+                    if related.source_id == contact.source_id:
+                        continue
+                    edge = self._relationship_edge(contact, related, str(relationship.get("type", "")), value)
+                    if edge.id in seen:
+                        continue
+                    seen.add(edge.id)
+                    edges.append(edge)
+        return edges
+
+    def _relationship_edge(
+        self,
+        contact: KnowledgeUnit,
+        related: KnowledgeUnit,
+        relationship_type: str,
+        relationship_value: str,
+    ) -> KnowledgeEdge:
+        return KnowledgeEdge(
+            id=self._relationship_edge_id(contact.source_id, related.source_id, relationship_type, relationship_value),
+            from_unit_id=contact.source_id,
+            to_unit_id=related.source_id,
+            relation=EdgeRelation.REFERENCES,
+            source=EdgeSource.SOURCE,
+            metadata={
+                "source_project": SourceProject.GOOGLE_CONTACTS_CSV.value,
+                "from_entity_type": "contact",
+                "to_entity_type": "contact",
+                "relationship_type": relationship_type,
+                "relationship_value": relationship_value,
+            },
+            created_at=contact.created_at,
+        )
+
+    def _relationship_edge_id(
+        self,
+        contact_id: str,
+        related_id: str,
+        relationship_type: str,
+        relationship_value: str,
+    ) -> str:
+        normalized_type = " ".join(relationship_type.casefold().split())
+        normalized_value = self._relationship_match_key(relationship_value)
+        raw = f"{contact_id}|{related_id}|{normalized_type}|{normalized_value}|references"
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+        return f"google-contacts-relationship-references-{digest}"
+
+    def _relationship_match_key(self, value: str) -> str:
+        return " ".join(value.casefold().split())
+
     def _content(
         self,
         name: str,
@@ -306,6 +420,7 @@ class GoogleContactsCsvAdapter(SourceAdapter):
         addresses: list[str],
         birthday: str,
         groups: list[str],
+        relationships: list[dict[str, str]],
     ) -> str:
         parts = [name]
         if notes:
@@ -322,7 +437,18 @@ class GoogleContactsCsvAdapter(SourceAdapter):
             parts.append(f"Birthday: {birthday}")
         if groups:
             parts.append(f"Groups: {', '.join(groups)}")
+        if relationships:
+            labels = [
+                self._relationship_content_label(relationship)
+                for relationship in relationships
+            ]
+            parts.append(f"Relationships: {', '.join(labels)}")
         return "\n".join(parts)
+
+    def _relationship_content_label(self, relationship: dict[str, str]) -> str:
+        if relationship.get("type"):
+            return f"{relationship['type']}: {relationship['value']}"
+        return relationship["value"]
 
     def _source_id(
         self,
