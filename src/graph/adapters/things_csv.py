@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -21,10 +21,11 @@ class ThingsCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["task", "project", "area"]
+        return ["task", "project", "area", "deadline_bucket"]
 
-    def __init__(self, path: str = "") -> None:
+    def __init__(self, path: str = "", now: datetime | None = None) -> None:
         self.path = path
+        self.now = self._ensure_utc(now) if now else None
 
     def ingest(
         self,
@@ -54,16 +55,21 @@ class ThingsCsvAdapter(SourceAdapter):
 
         project_units = self._aggregate_units(task_units, "project") if "project" in allowed_types else []
         area_units = self._aggregate_units(task_units, "area") if "area" in allowed_types else []
+        deadline_bucket_units = self._deadline_bucket_units(task_units) if "deadline_bucket" in allowed_types else []
         if "project" in allowed_types:
             result.units.extend(project_units)
         if "area" in allowed_types:
             result.units.extend(area_units)
+        if "deadline_bucket" in allowed_types:
+            result.units.extend(deadline_bucket_units)
         if "task" in allowed_types:
             result.units.extend(task_units)
         if "project" in allowed_types and "task" in allowed_types:
             result.edges.extend(self._aggregate_edges(project_units, task_units, "project"))
         if "area" in allowed_types and "task" in allowed_types:
             result.edges.extend(self._aggregate_edges(area_units, task_units, "area"))
+        if "deadline_bucket" in allowed_types and "task" in allowed_types:
+            result.edges.extend(self._deadline_bucket_edges(deadline_bucket_units))
         result.units.sort(key=lambda unit: (unit.created_at, unit.source_id))
         result.edges.sort(key=lambda edge: edge.id)
         return result
@@ -203,6 +209,86 @@ class ThingsCsvAdapter(SourceAdapter):
                 )
             )
         return edges
+
+    def _deadline_bucket_units(self, tasks: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {bucket: [] for bucket in self._deadline_bucket_names()}
+        for task in tasks:
+            grouped[self._deadline_bucket(task)].append(task)
+
+        units: list[KnowledgeUnit] = []
+        for bucket in self._deadline_bucket_names():
+            bucket_tasks = grouped[bucket]
+            if not bucket_tasks:
+                continue
+            statuses = [str(task.metadata.get("status") or "") for task in bucket_tasks]
+            deadlines = [
+                parsed
+                for task in bucket_tasks
+                if (parsed := self._parse_datetime(str(task.metadata.get("deadline") or ""))) is not None
+            ]
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.THINGS_CSV,
+                    source_id=f"things_csv:deadline_bucket:{bucket}",
+                    source_entity_type="deadline_bucket",
+                    title=bucket.replace("_", " ").title(),
+                    content=f"Things deadline bucket: {bucket}\nTasks: {len(bucket_tasks)}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "bucket": bucket,
+                        "task_count": len(bucket_tasks),
+                        "open_count": sum(1 for status in statuses if status not in {"completed", "canceled"}),
+                        "completed_count": sum(1 for status in statuses if status == "completed"),
+                        "first_deadline": min(deadlines).isoformat() if deadlines else None,
+                        "latest_deadline": max(deadlines).isoformat() if deadlines else None,
+                        "task_source_ids": sorted(task.source_id for task in bucket_tasks),
+                    },
+                    tags=["things", "deadline-bucket", bucket],
+                    created_at=min(task.created_at for task in bucket_tasks),
+                    updated_at=max(task.updated_at for task in bucket_tasks),
+                )
+            )
+        return units
+
+    def _deadline_bucket_edges(self, buckets: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        edges: list[KnowledgeEdge] = []
+        for bucket in buckets:
+            for task_source_id in bucket.metadata.get("task_source_ids") or []:
+                digest = hashlib.sha256("|".join((bucket.source_id, str(task_source_id), "deadline_bucket_contains_task")).encode("utf-8")).hexdigest()[:24]
+                edges.append(
+                    KnowledgeEdge(
+                        id=f"things-csv-deadline-bucket-contains-{digest}",
+                        from_unit_id=bucket.source_id,
+                        to_unit_id=str(task_source_id),
+                        relation=EdgeRelation.CONTAINS,
+                        source=EdgeSource.SOURCE,
+                        metadata={
+                            "source_project": SourceProject.THINGS_CSV.value,
+                            "relation_type": "deadline_bucket_contains_task",
+                        },
+                    )
+                )
+        return edges
+
+    def _deadline_bucket(self, task: KnowledgeUnit) -> str:
+        deadline = self._parse_datetime(str(task.metadata.get("deadline") or ""))
+        if deadline is None:
+            return "no_deadline"
+        today = self._now().date()
+        deadline_date = deadline.date()
+        if deadline_date < today:
+            return "overdue"
+        if deadline_date == today:
+            return "today"
+        if deadline_date <= today + timedelta(days=7):
+            return "upcoming"
+        return "later"
+
+    def _deadline_bucket_names(self) -> tuple[str, ...]:
+        return ("overdue", "today", "upcoming", "later", "no_deadline")
+
+    def _now(self) -> datetime:
+        return self.now or datetime.now(timezone.utc)
 
     def _aggregate_key(self, name: str) -> str:
         return " ".join(name.casefold().split())
