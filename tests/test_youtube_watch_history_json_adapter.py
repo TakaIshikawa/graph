@@ -100,7 +100,38 @@ def test_youtube_watch_history_json_channel_aggregates_and_edges(tmp_path):
     channel = next(unit for unit in result.units if unit.source_entity_type == "channel")
     watches = [unit for unit in result.units if unit.source_entity_type == "watch"]
 
+    assert YouTubeWatchHistoryJsonAdapter().entity_types == ["channel", "watch"]
+    assert channel.metadata["channel"] == "Useful Channel"
+    assert channel.metadata["channel_url"] == "https://www.youtube.com/channel/1"
     assert channel.metadata["watch_count"] == 2
+    assert channel.metadata["video_source_ids"] == [watch.source_id for watch in watches]
     assert channel.metadata["watched_video_source_ids"] == [watch.source_id for watch in watches]
+    assert channel.metadata["first_watched_at"] == "2026-05-01T00:00:00+00:00"
+    assert channel.metadata["latest_watched_at"] == "2026-05-02T00:00:00+00:00"
     assert len(result.edges) == 2
     assert all(edge.from_unit_id == channel.source_id for edge in result.edges)
+
+
+def test_youtube_watch_history_json_channel_dedupes_by_url_then_name_and_filters_edges(tmp_path):
+    export = tmp_path / "watch-history.json"
+    export.write_text(
+        """[
+          {"title": "Watched One", "titleUrl": "https://youtu.be/1", "time": "2026-05-01T00:00:00Z", "subtitles": [{"name": "First Name", "url": "https://www.youtube.com/channel/1"}]},
+          {"title": "Watched Two", "titleUrl": "https://youtu.be/2", "time": "2026-05-02T00:00:00Z", "subtitles": [{"name": "Second Name", "url": "https://www.youtube.com/channel/1"}]},
+          {"title": "Watched Three", "titleUrl": "https://youtu.be/3", "time": "2026-05-03T00:00:00Z", "subtitles": [{"name": "Name Only"}]},
+          {"title": "Watched Four", "titleUrl": "https://youtu.be/4", "time": "2026-05-04T00:00:00Z", "subtitles": [{"name": " name only "}]}
+        ]""",
+        encoding="utf-8",
+    )
+
+    result = YouTubeWatchHistoryJsonAdapter(path=str(export)).ingest(entity_types=["channel", "watch"])
+    channel_only = YouTubeWatchHistoryJsonAdapter(path=str(export)).ingest(entity_types=["channel"])
+    watch_only = YouTubeWatchHistoryJsonAdapter(path=str(export)).ingest(entity_types=["watch"])
+
+    channels = [unit for unit in result.units if unit.source_entity_type == "channel"]
+    assert len(channels) == 2
+    assert sorted(channel.metadata["watch_count"] for channel in channels) == [2, 2]
+    assert all(channel.source_id.startswith("youtube_watch_history_json:channel:") for channel in channels)
+    assert len(result.edges) == 4
+    assert channel_only.edges == []
+    assert watch_only.edges == []
