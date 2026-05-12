@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from graph.adapters.kobo_highlights_csv import KoboHighlightsCsvAdapter
 from graph.adapters.registry import get_adapter
-from graph.types.enums import SourceProject
+from graph.types.enums import EdgeRelation, EdgeSource, SourceProject
 from graph.types.models import SyncState
 
 
@@ -40,8 +40,9 @@ def test_kobo_highlights_csv_ingests_highlights_and_notes(tmp_path):
 
     result = KoboHighlightsCsvAdapter(path=str(path)).ingest()
 
-    assert len(result.units) == 1
-    unit = result.units[0]
+    annotations = [unit for unit in result.units if unit.source_entity_type == "highlight"]
+    assert len(annotations) == 1
+    unit = annotations[0]
     assert unit.source_project == SourceProject.KOBO_HIGHLIGHTS_CSV
     assert unit.source_entity_type == "highlight"
     assert unit.metadata["book_title"] == "The Left Hand of Darkness"
@@ -66,8 +67,9 @@ def test_kobo_highlights_csv_tolerates_missing_optional_columns(tmp_path):
 
     result = KoboHighlightsCsvAdapter(path=str(path)).ingest()
 
-    assert len(result.units) == 1
-    unit = result.units[0]
+    annotations = [unit for unit in result.units if unit.source_entity_type == "highlight"]
+    assert len(annotations) == 1
+    unit = annotations[0]
     assert unit.title == "Kobo highlight: Sparse Book"
     assert unit.metadata["highlight"] == "Sparse highlight"
     assert unit.metadata["note"] == ""
@@ -84,8 +86,7 @@ def test_kobo_highlights_csv_directory_since_filter_and_blank_skip(tmp_path):
 
     result = KoboHighlightsCsvAdapter(path=str(tmp_path)).ingest(since=since)
 
-    assert [unit.title for unit in result.units] == ["Kobo note: New"]
-    assert result.units[0].source_entity_type == "note"
+    assert [unit.title for unit in result.units if unit.source_entity_type == "note"] == ["Kobo note: New"]
     assert get_adapter("kobo_highlights_csv", path=str(tmp_path)).name == "kobo_highlights_csv"
 
 
@@ -93,8 +94,73 @@ def test_kobo_highlights_csv_filters_entity_types_and_stable_ids(tmp_path):
     path = tmp_path / "kobo.csv"
     _write_csv(path, [{"Book Title": "Book", "Annotation": "highlight", "Date Created": "2026-05-01"}])
 
-    first = KoboHighlightsCsvAdapter(path=str(path)).ingest().units[0]
-    second = KoboHighlightsCsvAdapter(path=str(path)).ingest().units[0]
+    first = KoboHighlightsCsvAdapter(path=str(path)).ingest(entity_types=["highlight"]).units[0]
+    second = KoboHighlightsCsvAdapter(path=str(path)).ingest(entity_types=["highlight"]).units[0]
 
     assert first.source_id == second.source_id
     assert KoboHighlightsCsvAdapter(path=str(path)).ingest(entity_types=["note"]).units == []
+
+
+def test_kobo_highlights_csv_emits_book_units_and_edges(tmp_path):
+    path = tmp_path / "kobo.csv"
+    _write_csv(
+        path,
+        [
+            {
+                "Book Title": "The Dispossessed",
+                "Author": "Ursula K. Le Guin",
+                "ISBN": "9780061054884",
+                "Annotation": "It was a bright morning.",
+                "Chapter": "1",
+            },
+            {
+                "Book Title": "Alternate Title",
+                "Author": "Ursula K. Le Guin",
+                "ISBN": "978-0-06-105488-4",
+                "Note": "Same ISBN groups this note.",
+                "Chapter": "2",
+            },
+        ],
+    )
+
+    result = KoboHighlightsCsvAdapter(path=str(path)).ingest()
+
+    annotations = [unit for unit in result.units if unit.source_entity_type in {"highlight", "note"}]
+    books = [unit for unit in result.units if unit.source_entity_type == "book"]
+    assert len(annotations) == 2
+    assert len(books) == 1
+    book = books[0]
+    assert book.title == "The Dispossessed"
+    assert book.metadata["book_title"] == "The Dispossessed"
+    assert book.metadata["author"] == "Ursula K. Le Guin"
+    assert book.metadata["isbn"] == "9780061054884"
+    assert book.metadata["annotation_count"] == 2
+    assert book.metadata["highlight_count"] == 1
+    assert book.metadata["note_count"] == 1
+    assert book.metadata["annotation_source_ids"] == sorted(annotation.source_id for annotation in annotations)
+    assert book.metadata["chapters"] == ["1", "2"]
+    assert len(result.edges) == 2
+    assert {edge.from_unit_id for edge in result.edges} == {book.source_id}
+    assert {edge.to_unit_id for edge in result.edges} == {annotation.source_id for annotation in annotations}
+    assert {edge.relation for edge in result.edges} == {EdgeRelation.CONTAINS}
+    assert {edge.source for edge in result.edges} == {EdgeSource.SOURCE}
+
+
+def test_kobo_highlights_csv_book_filtering_and_title_author_fallback(tmp_path):
+    path = tmp_path / "kobo.csv"
+    _write_csv(
+        path,
+        [
+            {"Book Title": "Book", "Author": "Ada", "Annotation": "one"},
+            {"Book Title": " book ", "Author": "ADA", "Note": "two"},
+        ],
+    )
+
+    book_only = KoboHighlightsCsvAdapter(path=str(path)).ingest(entity_types=["book"])
+    highlight_and_book = KoboHighlightsCsvAdapter(path=str(path)).ingest(entity_types=["highlight", "book"])
+
+    assert [unit.source_entity_type for unit in book_only.units] == ["book"]
+    assert book_only.units[0].metadata["annotation_count"] == 2
+    assert book_only.edges == []
+    assert {unit.source_entity_type for unit in highlight_and_book.units} == {"highlight", "book"}
+    assert len(highlight_and_book.edges) == 1

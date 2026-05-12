@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class KoboHighlightsCsvAdapter(SourceAdapter):
@@ -20,7 +20,7 @@ class KoboHighlightsCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["highlight", "note"]
+        return ["highlight", "note", "book"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -37,6 +37,7 @@ class KoboHighlightsCsvAdapter(SourceAdapter):
             return result
 
         sync_at = self._ensure_utc(since.last_sync_at) if since else None
+        annotation_units: list[KnowledgeUnit] = []
         for path in self._iter_paths():
             try:
                 rows = self._read_rows(path)
@@ -44,13 +45,20 @@ class KoboHighlightsCsvAdapter(SourceAdapter):
                 continue
             for row in rows:
                 unit = self._unit_from_row(row, path)
-                if unit is None or unit.source_entity_type not in requested:
+                if unit is None:
                     continue
                 if sync_at and unit.updated_at <= sync_at:
                     continue
-                result.units.append(unit)
+                annotation_units.append(unit)
 
+        book_units = self._book_units(annotation_units)
+        result.units.extend(unit for unit in annotation_units if unit.source_entity_type in requested)
+        if "book" in requested:
+            result.units.extend(book_units)
+        if "book" in requested and requested.intersection({"highlight", "note"}):
+            result.edges.extend(self._book_edges(book_units, annotation_units, requested))
         result.units.sort(key=lambda unit: (unit.updated_at, unit.source_id))
+        result.edges.sort(key=lambda edge: edge.id)
         return result
 
     def _iter_paths(self) -> list[Path]:
@@ -148,6 +156,122 @@ class KoboHighlightsCsvAdapter(SourceAdapter):
         if note:
             parts.append(f"\nNote:\n{note}")
         return "\n".join(parts)
+
+    def _book_units(self, annotations: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        display: dict[str, tuple[str, str, str]] = {}
+        for annotation in annotations:
+            key = self._book_key(annotation)
+            if not key:
+                continue
+            grouped.setdefault(key, []).append(annotation)
+            display.setdefault(
+                key,
+                (
+                    str(annotation.metadata.get("book_title") or ""),
+                    str(annotation.metadata.get("author") or ""),
+                    str(annotation.metadata.get("isbn") or ""),
+                ),
+            )
+
+        books: list[KnowledgeUnit] = []
+        for key, book_annotations in sorted(grouped.items()):
+            unique_annotations = sorted(
+                {annotation.source_id: annotation for annotation in book_annotations}.values(),
+                key=lambda annotation: annotation.source_id,
+            )
+            book_title, author, isbn = display[key]
+            chapters = sorted(
+                {str(annotation.metadata.get("chapter")) for annotation in unique_annotations if annotation.metadata.get("chapter")}
+            )
+            annotation_source_ids = [annotation.source_id for annotation in unique_annotations]
+            highlight_count = sum(1 for annotation in unique_annotations if annotation.source_entity_type == "highlight")
+            note_count = sum(1 for annotation in unique_annotations if annotation.source_entity_type == "note")
+            source_files = sorted(
+                {str(annotation.metadata.get("source_file")) for annotation in unique_annotations if annotation.metadata.get("source_file")}
+            )
+            title = book_title or author or "Kobo book"
+            content = [f"Book: {title}", f"Annotations: {len(unique_annotations)}"]
+            if author:
+                content.append(f"Author: {author}")
+            books.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.KOBO_HIGHLIGHTS_CSV,
+                    source_id=f"kobo_highlights_csv:book:{key}",
+                    source_entity_type="book",
+                    title=title,
+                    content="\n".join(content),
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "book_title": book_title,
+                        "author": author,
+                        "isbn": isbn,
+                        "annotation_count": len(unique_annotations),
+                        "highlight_count": highlight_count,
+                        "note_count": note_count,
+                        "annotation_source_ids": annotation_source_ids,
+                        "chapters": chapters,
+                        "source_files": source_files,
+                    },
+                    tags=self._dedupe(["kobo", "book", author]),
+                    created_at=min(annotation.created_at for annotation in unique_annotations),
+                    updated_at=max(annotation.updated_at for annotation in unique_annotations),
+                )
+            )
+        return books
+
+    def _book_edges(
+        self,
+        books: list[KnowledgeUnit],
+        annotations: list[KnowledgeUnit],
+        requested: set[str],
+    ) -> list[KnowledgeEdge]:
+        book_ids = {self._book_key_from_metadata(book.metadata): book.source_id for book in books}
+        edges: list[KnowledgeEdge] = []
+        seen: set[tuple[str, str]] = set()
+        for annotation in annotations:
+            if annotation.source_entity_type not in requested:
+                continue
+            book_id = book_ids.get(self._book_key(annotation))
+            if not book_id or (book_id, annotation.source_id) in seen:
+                continue
+            seen.add((book_id, annotation.source_id))
+            edges.append(
+                KnowledgeEdge(
+                    id=self._edge_id(book_id, annotation.source_id),
+                    from_unit_id=book_id,
+                    to_unit_id=annotation.source_id,
+                    relation=EdgeRelation.CONTAINS,
+                    source=EdgeSource.SOURCE,
+                    metadata={
+                        "source_project": SourceProject.KOBO_HIGHLIGHTS_CSV.value,
+                        "from_entity_type": "book",
+                        "to_entity_type": annotation.source_entity_type,
+                        "book_title": annotation.metadata.get("book_title"),
+                    },
+                    created_at=annotation.created_at,
+                )
+            )
+        return edges
+
+    def _book_key(self, annotation: KnowledgeUnit) -> str:
+        return self._book_key_from_metadata(annotation.metadata)
+
+    def _book_key_from_metadata(self, metadata: dict[str, Any]) -> str:
+        isbn = str(metadata.get("isbn") or "").strip()
+        if isbn:
+            raw = f"isbn:{isbn}"
+        else:
+            title = " ".join(str(metadata.get("book_title") or "").casefold().split())
+            author = " ".join(str(metadata.get("author") or "").casefold().split())
+            if not title and not author:
+                return ""
+            raw = f"title-author:{title}|{author}"
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+
+    def _edge_id(self, book_id: str, annotation_id: str) -> str:
+        digest = hashlib.sha256(f"{book_id}|{annotation_id}|contains".encode("utf-8")).hexdigest()[:24]
+        return f"kobo-highlights-book-contains-{digest}"
 
     def _first(self, row: dict[str, Any], *keys: str) -> str:
         lowered = {str(key).lower(): value for key, value in row.items()}
