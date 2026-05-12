@@ -30,6 +30,7 @@ from graph.adapters.git_adapter import GitAdapter
 from graph.adapters.github_issues_json import GithubIssuesJsonAdapter
 from graph.adapters.github_stars_csv import GithubStarsCsvAdapter
 from graph.adapters.goodreads_library import GoodreadsLibraryAdapter
+from graph.adapters.inaturalist_observations_csv import INaturalistObservationsCsvAdapter
 from graph.adapters.google_calendar_json import GoogleCalendarJsonAdapter
 from graph.adapters.google_calendar_takeout import GoogleCalendarTakeoutAdapter
 from graph.adapters.google_photos_takeout import GooglePhotosTakeoutAdapter
@@ -45,6 +46,7 @@ from graph.adapters.jsonl_adapter import JsonlAdapter
 from graph.adapters.jsonl_notes import JsonlNotesAdapter
 from graph.adapters.kindle import KindleAdapter
 from graph.adapters.kindle_clippings import KindleClippingsAdapter
+from graph.adapters.kobo_highlights_csv import KoboHighlightsCsvAdapter
 from graph.adapters.logseq import LogseqAdapter
 from graph.adapters.markdown import MarkdownAdapter
 from graph.adapters.markdown_callouts import MarkdownCalloutsAdapter
@@ -59,6 +61,7 @@ from graph.adapters.max_adapter import MaxAdapter
 from graph.adapters.mbox import MboxAdapter
 from graph.adapters.me import MeAdapter
 from graph.adapters.mediawiki import MediaWikiAdapter
+from graph.adapters.myanimelist_xml import MyAnimeListXmlAdapter
 from graph.adapters.notion_markdown import NotionMarkdownAdapter
 from graph.adapters.notion_export import NotionExportAdapter
 from graph.adapters.evernote_export import EvernoteExportAdapter
@@ -110,6 +113,7 @@ from graph.adapters.slack_json import SlackJsonAdapter
 from graph.adapters.sota import SOTAAdapter
 from graph.adapters.spotify_streaming_history import SpotifyStreamingHistoryAdapter
 from graph.adapters.spotify_takeout import SpotifyTakeoutAdapter
+from graph.adapters.storygraph_reading_history_csv import StoryGraphReadingHistoryCsvAdapter
 from graph.adapters.steam_library_csv import SteamLibraryCsvAdapter
 from graph.adapters.trakt_watch_history_csv import TraktWatchHistoryCsvAdapter
 from graph.adapters.reddit_saved_csv import RedditSavedCsvAdapter
@@ -253,6 +257,10 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "spotify_streaming_history": SpotifyStreamingHistoryAdapter,
     "spotify_takeout": SpotifyTakeoutAdapter,
     "trakt_watch_history_csv": TraktWatchHistoryCsvAdapter,
+    "storygraph_reading_history_csv": StoryGraphReadingHistoryCsvAdapter,
+    "myanimelist_xml": MyAnimeListXmlAdapter,
+    "kobo_highlights_csv": KoboHighlightsCsvAdapter,
+    "inaturalist_observations_csv": INaturalistObservationsCsvAdapter,
     "steam_library_csv": SteamLibraryCsvAdapter,
     "github_issues_json": GithubIssuesJsonAdapter,
     "boardgamegeek_collection_csv": BoardGameGeekCollectionCsvAdapter,
