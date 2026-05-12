@@ -33,8 +33,8 @@ The Book Title (Ada Author)
 
     result = KindleClippingsAdapter(path=str(clippings)).ingest()
 
-    assert len(result.units) == 5
-    assert len(result.edges) == 3
+    assert len(result.units) == 6
+    assert len(result.edges) == 4
     highlight = next(unit for unit in result.units if unit.metadata["clipping_type"] == "highlight")
     note = next(unit for unit in result.units if unit.metadata["clipping_type"] == "note")
     bookmark = next(unit for unit in result.units if unit.metadata["clipping_type"] == "bookmark")
@@ -81,6 +81,16 @@ The Book Title (Ada Author)
     edge = next(edge for edge in result.edges if edge.to_unit_id == highlight.source_id)
     assert edge.from_unit_id == book.source_id
     assert edge.relation == EdgeRelation.CONTAINS
+    author = next(unit for unit in result.units if unit.source_entity_type == "author")
+    assert author.metadata["author"] == "Ada Author"
+    assert author.metadata["book_count"] == 1
+    assert author.metadata["clipping_count"] == 2
+    assert author.metadata["highlight_count"] == 1
+    assert author.metadata["bookmark_count"] == 1
+    assert author.metadata["book_source_ids"] == [book.source_id]
+    author_edge = next(edge for edge in result.edges if edge.from_unit_id == author.source_id)
+    assert author_edge.to_unit_id == book.source_id
+    assert author_edge.metadata["relation_type"] == "author_contains_book"
 
 
 def test_kindle_clippings_skips_invalid_and_empty_non_bookmark_blocks(tmp_path):
@@ -134,12 +144,15 @@ New.
         entity_types=["clipping"],
     )
     books = KindleClippingsAdapter(path=str(clippings)).ingest(entity_types=["book"])
+    authors = KindleClippingsAdapter(path=str(clippings)).ingest(entity_types=["author"])
     clipping_only = KindleClippingsAdapter(path=str(clippings)).ingest(entity_types=["clipping"])
     wrong_entity = KindleClippingsAdapter(path=str(clippings)).ingest(entity_types=["bookcase"])
 
     assert [unit.content for unit in filtered.units] == ["New."]
     assert {unit.source_entity_type for unit in books.units} == {"book"}
     assert books.edges == []
+    assert {unit.source_entity_type for unit in authors.units} == {"author"}
+    assert authors.edges == []
     assert {unit.source_entity_type for unit in clipping_only.units} == {"clipping"}
     assert clipping_only.edges == []
     assert wrong_entity.units == []
@@ -171,6 +184,58 @@ Note.
     assert book.metadata["location_start"] == 10
     assert book.metadata["location_end"] == 30
     assert book.metadata["source_files"] == ["My Clippings.txt"]
+
+
+def test_kindle_clippings_author_aggregate_groups_books_and_edges_respect_filters(tmp_path):
+    clippings = tmp_path / "My Clippings.txt"
+    clippings.write_text(
+        """First Book (Ada Author)
+- Your Highlight at location 10 | Added on Monday, January 1, 2024 1:00:00 PM
+
+Highlight.
+==========
+Second Book (Ada Author)
+- Your Note at location 20 | Added on Tuesday, January 2, 2024 2:00:00 PM
+
+Note.
+==========
+Second Book (Ada Author)
+- Your Bookmark at location 25 | Added on Wednesday, January 3, 2024 3:00:00 PM
+
+==========
+Other Book (Other Author)
+- Your Highlight at location 30 | Added on Thursday, January 4, 2024 4:00:00 PM
+
+Other.
+==========
+""",
+        encoding="utf-8",
+    )
+
+    author_only = KindleClippingsAdapter(path=str(clippings)).ingest(entity_types=["author"])
+    combined = KindleClippingsAdapter(path=str(clippings)).ingest(entity_types=["author", "book"])
+
+    ada_author = next(unit for unit in author_only.units if unit.metadata["author"] == "Ada Author")
+    assert {unit.source_entity_type for unit in author_only.units} == {"author"}
+    assert ada_author.metadata["book_count"] == 2
+    assert ada_author.metadata["clipping_count"] == 3
+    assert ada_author.metadata["highlight_count"] == 1
+    assert ada_author.metadata["note_count"] == 1
+    assert ada_author.metadata["bookmark_count"] == 1
+    assert ada_author.metadata["first_clipped_at"] == "2024-01-01T13:00:00+00:00"
+    assert ada_author.metadata["last_clipped_at"] == "2024-01-03T15:00:00+00:00"
+    assert ada_author.metadata["source_files"] == ["My Clippings.txt"]
+    assert len(ada_author.metadata["book_source_ids"]) == 2
+    assert author_only.edges == []
+
+    ada_combined = next(unit for unit in combined.units if unit.source_entity_type == "author" and unit.title == "Ada Author")
+    ada_edges = [
+        edge
+        for edge in combined.edges
+        if edge.from_unit_id == ada_combined.source_id and edge.metadata["relation_type"] == "author_contains_book"
+    ]
+    assert len(ada_edges) == 2
+    assert {edge.to_unit_id for edge in ada_edges} == set(ada_combined.metadata["book_source_ids"])
 
 
 def test_kindle_clippings_ingests_notebook_html_exports(tmp_path):
@@ -206,7 +271,7 @@ def test_kindle_clippings_ingests_notebook_html_exports(tmp_path):
     book = next(unit for unit in result.units if unit.source_entity_type == "book")
     assert book.metadata["highlight_count"] == 1
     assert book.metadata["note_count"] == 1
-    assert len(result.edges) == 3
+    assert len(result.edges) == 4
     assert [edge.metadata["relation_type"] for edge in result.edges if edge.metadata["relation_type"] == "note_references_highlight"] == [
         "note_references_highlight"
     ]
