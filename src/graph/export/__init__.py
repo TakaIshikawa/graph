@@ -45,6 +45,7 @@ from graph.export.json_summary import export_graph_json_summary
 from graph.export.kindle_review_queue_markdown import export_units_to_kindle_review_queue_markdown
 from graph.export.llms_txt import export_units_to_llms_txt
 from graph.export.markdown_timeline import export_units_to_markdown_timeline
+from graph.export.metadata_date_histogram_markdown import export_metadata_date_histogram_markdown
 from graph.export.metadata_enum_candidates_markdown import export_metadata_enum_candidates_markdown
 from graph.export.metadata_key_matrix_csv import export_metadata_key_matrix_csv
 from graph.export.metadata_completeness import export_metadata_completeness_markdown
@@ -149,6 +150,7 @@ __all__ = [
     "export_units_to_hugo_bundle",
     "export_units_to_kindle_review_queue_markdown",
     "export_metadata_completeness_markdown",
+    "export_metadata_date_histogram_markdown",
     "export_metadata_enum_candidates_markdown",
     "export_metadata_key_matrix_csv",
     "export_graph_ndjson",
