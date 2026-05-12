@@ -93,6 +93,7 @@ from graph.export.timelinejs import export_units_to_timelinejs
 from graph.export.tiddlywiki_json import export_units_to_tiddlywiki_json
 from graph.export.unit_csv import export_units_to_csv
 from graph.export.unit_date_coverage_markdown import export_unit_date_coverage_markdown
+from graph.export.unit_content_length_csv import export_unit_content_length_csv
 from graph.export.unit_evidence_markdown import export_unit_evidence_markdown
 from graph.export.unit_markdown_table import export_units_to_markdown_table
 from graph.export.unit_source_timeline_csv import export_unit_source_timeline_csv
@@ -208,6 +209,7 @@ __all__ = [
     "export_tag_timeline_csv",
     "export_task_board_markdown",
     "export_unit_backlinks_markdown",
+    "export_unit_content_length_csv",
     "export_unit_date_coverage_markdown",
     "export_unit_evidence_markdown",
     "export_unit_schema_inventory",
