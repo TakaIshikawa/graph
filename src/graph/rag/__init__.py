@@ -13,6 +13,7 @@ from graph.rag.diversity import rerank_for_source_diversity
 from graph.rag.evidence_pack import build_evidence_pack
 from graph.rag.evidence_packets import build_evidence_packets
 from graph.rag.evidence_budget import allocate_evidence_budget
+from graph.rag.evidence_density import score_evidence_density
 from graph.rag.keywords import extract_keywords
 from graph.rag.query_intent import classify_query_intent
 from graph.rag.dedupe import rank_duplicate_candidates
@@ -78,6 +79,7 @@ __all__ = [
     "rerank_for_source_diversity",
     "score_source_agreement",
     "score_source_credibility",
+    "score_evidence_density",
     "score_source_reliability",
     "summarize_source_attribution",
     "suggest_tag_normalizations",
