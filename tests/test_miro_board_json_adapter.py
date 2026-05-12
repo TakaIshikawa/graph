@@ -148,3 +148,36 @@ def test_miro_board_json_skips_unsupported_and_missing_ids(tmp_path):
 
     assert [unit.source_id for unit in result.units] == ["miro_board_json:sticky-1"]
     assert result.units[0].source_entity_type == "sticky_note"
+
+
+def test_miro_board_json_emits_connector_edges_between_ingested_units(tmp_path):
+    export = tmp_path / "board.json"
+    export.write_text(
+        json.dumps(
+            {
+                "items": [
+                    {"id": "sticky-1", "type": "sticky_note", "data": {"content": "Start"}},
+                    {"id": "shape-1", "type": "shape", "data": {"content": "End"}},
+                    {"id": "text-1", "type": "text", "data": {"content": "Excluded"}},
+                    {"id": "connector-1", "type": "connector", "startItem": {"id": "sticky-1"}, "endItem": {"id": "shape-1"}},
+                    {"id": "connector-dup", "type": "connector", "startItemId": "sticky-1", "endItemId": "shape-1"},
+                    {"id": "connector-skip", "type": "line", "data": {"start": {"itemId": "shape-1"}, "end": {"itemId": "missing"}}},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = MiroBoardJsonAdapter(path=str(export)).ingest(entity_types=["sticky_note", "shape"])
+
+    assert [unit.source_id for unit in result.units] == ["miro_board_json:shape-1", "miro_board_json:sticky-1"]
+    assert len(result.edges) == 1
+    edge = result.edges[0]
+    assert edge.from_unit_id == "miro_board_json:sticky-1"
+    assert edge.to_unit_id == "miro_board_json:shape-1"
+    assert edge.relation == EdgeRelation.RELATES_TO
+    assert edge.source == EdgeSource.SOURCE
+    assert edge.metadata["relation_type"] == "miro_connector_connects_items"
+    assert edge.metadata["connector_type"] == "connector"
+    assert edge.metadata["start_item_id"] == "sticky-1"
+    assert edge.metadata["end_item_id"] == "shape-1"

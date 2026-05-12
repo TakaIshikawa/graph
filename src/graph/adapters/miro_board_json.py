@@ -71,9 +71,10 @@ class MiroBoardJsonAdapter(SourceAdapter):
                 result.units.append(unit)
                 included_source_ids.add(unit.source_id)
             result.edges.extend(self._frame_edges(items, source_ids, included_source_ids))
+            result.edges.extend(self._connector_edges(items, source_ids, included_source_ids))
 
         result.units.sort(key=lambda unit: (unit.source_entity_type, unit.source_id))
-        result.edges.sort(key=lambda edge: edge.id)
+        result.edges = sorted({edge.id: edge for edge in result.edges}.values(), key=lambda edge: edge.id)
         return result
 
     def _iter_paths(self) -> list[Path]:
@@ -207,10 +208,111 @@ class MiroBoardJsonAdapter(SourceAdapter):
             )
         return list({edge.id: edge for edge in edges}.values())
 
+    def _connector_edges(
+        self,
+        items: list[dict[str, Any]],
+        source_ids: dict[str, str],
+        included_source_ids: set[str],
+    ) -> list[KnowledgeEdge]:
+        edges: list[KnowledgeEdge] = []
+        for item in items:
+            connector_type = self._connector_type(item)
+            if connector_type is None:
+                continue
+            start_id = self._connector_endpoint_id(item, "start")
+            end_id = self._connector_endpoint_id(item, "end")
+            from_id = source_ids.get(start_id)
+            to_id = source_ids.get(end_id)
+            if not from_id or not to_id or from_id == to_id:
+                continue
+            if from_id not in included_source_ids or to_id not in included_source_ids:
+                continue
+            connector_id = self._item_id(item)
+            edges.append(
+                KnowledgeEdge(
+                    id=self._edge_id(from_id, to_id, f"{connector_type}_connects_items"),
+                    from_unit_id=from_id,
+                    to_unit_id=to_id,
+                    relation=EdgeRelation.RELATES_TO,
+                    source=EdgeSource.SOURCE,
+                    metadata={
+                        "source_project": SourceProject.MIRO_BOARD_JSON.value,
+                        "relation_type": "miro_connector_connects_items",
+                        "connector_type": connector_type,
+                        "connector_id": connector_id,
+                        "start_item_id": start_id,
+                        "end_item_id": end_id,
+                    },
+                )
+            )
+        return edges
+
     def _entity_type(self, item: dict[str, Any]) -> str | None:
         raw_type = self._text(item.get("type") or item.get("itemType") or item.get("widgetType"))
         normalized = raw_type.replace("-", "_").replace(" ", "_").casefold()
         return SUPPORTED_TYPES.get(normalized)
+
+    def _connector_type(self, item: dict[str, Any]) -> str | None:
+        raw_type = self._text(item.get("type") or item.get("itemType") or item.get("widgetType"))
+        normalized = raw_type.replace("-", "_").replace(" ", "_").casefold()
+        if normalized in {"connector", "line", "arrow"}:
+            return normalized
+        return None
+
+    def _connector_endpoint_id(self, item: dict[str, Any], side: str) -> str:
+        data = item.get("data") if isinstance(item.get("data"), dict) else {}
+        for container in (item, data):
+            value = self._endpoint_value(container, side)
+            if value:
+                return value
+        return ""
+
+    def _endpoint_value(self, container: dict[str, Any], side: str) -> str:
+        key_groups = {
+            "start": (
+                "startItem",
+                "start_item",
+                "startItemId",
+                "start_item_id",
+                "start",
+                "from",
+                "fromItem",
+                "from_item",
+                "fromItemId",
+                "from_item_id",
+                "source",
+                "sourceItem",
+                "source_item",
+                "sourceItemId",
+                "source_item_id",
+            ),
+            "end": (
+                "endItem",
+                "end_item",
+                "endItemId",
+                "end_item_id",
+                "end",
+                "to",
+                "toItem",
+                "to_item",
+                "toItemId",
+                "to_item_id",
+                "target",
+                "targetItem",
+                "target_item",
+                "targetItemId",
+                "target_item_id",
+            ),
+        }
+        for key in key_groups[side]:
+            value = container.get(key)
+            if isinstance(value, dict):
+                endpoint_id = self._first(value, "id", "itemId", "item_id", "widgetId")
+            else:
+                endpoint_id = self._text(value)
+            if endpoint_id:
+                return endpoint_id
+        return ""
 
     def _item_id(self, item: dict[str, Any]) -> str:
         return self._first(item, "id", "item_id", "widgetId")
