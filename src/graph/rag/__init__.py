@@ -25,6 +25,7 @@ from graph.rag.reading_time import estimate_reading_time
 from graph.rag.result_clusters import cluster_results_by_overlap
 from graph.rag.result_explanations import explain_rag_results
 from graph.rag.source_agreement import score_source_agreement
+from graph.rag.source_attribution import summarize_source_attribution
 from graph.rag.snippets import highlight_result_snippets
 from graph.rag.source_credibility import score_source_credibility
 from graph.rag.source_diversity_audit import audit_source_diversity
@@ -74,6 +75,7 @@ __all__ = [
     "score_source_agreement",
     "score_source_credibility",
     "score_source_reliability",
+    "summarize_source_attribution",
     "suggest_tag_normalizations",
     "suggest_query_expansion_terms",
 ]
