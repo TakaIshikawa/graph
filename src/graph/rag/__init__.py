@@ -5,6 +5,7 @@ from graph.rag.contradictions import detect_contradiction_cues
 from graph.rag.context_gaps import detect_context_gaps
 from graph.rag.coverage import build_result_coverage_checklist
 from graph.rag.citation_coverage import analyze_citation_coverage
+from graph.rag.citation_trails import build_citation_trails
 from graph.rag.date_coverage import analyze_result_date_coverage
 from graph.rag.diversity import rerank_for_source_diversity
 from graph.rag.keywords import extract_keywords
@@ -38,6 +39,7 @@ __all__ = [
     "build_result_coverage_checklist",
     "build_result_facets",
     "build_source_timeline",
+    "build_citation_trails",
     "classify_query_intent",
     "detect_contradiction_cues",
     "detect_context_gaps",

@@ -938,6 +938,33 @@ def _validate_non_negative_int(value: int, name: str) -> int:
     return normalized
 
 
+def _parse_graph_datetime(value: object) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _metadata_path_value(metadata: Mapping | None, path: str) -> object:
+    current: object = metadata or {}
+    for part in path.split("."):
+        if not part or not isinstance(current, Mapping) or part not in current:
+            return None
+        current = current[part]
+    return current
+
+
 class GraphService:
     """In-memory NetworkX graph built from SQLite for graph algorithms."""
 
@@ -4121,6 +4148,109 @@ class GraphService:
             }
             results.append({"unit": summary, "score": item["score"]})
         return results
+
+    def stale_hubs(
+        self,
+        cutoff: datetime | str,
+        *,
+        min_degree: int = 2,
+        limit: int = 20,
+        metadata_timestamp_path: str | None = None,
+        now: datetime | str | None = None,
+    ) -> list[dict]:
+        """Return high-degree units whose update timestamp is older than cutoff."""
+        capped_limit = _validate_non_negative_int(limit, "limit")
+        minimum_degree = _validate_non_negative_int(min_degree, "min_degree")
+        if capped_limit == 0:
+            return []
+
+        cutoff_at = _parse_graph_datetime(cutoff)
+        if cutoff_at is None:
+            raise ValueError("cutoff must be an ISO-8601 date or datetime.")
+        now_at = (
+            _parse_graph_datetime(now)
+            if now is not None
+            else datetime.now(timezone.utc)
+        )
+        if now_at is None:
+            raise ValueError("now must be an ISO-8601 date or datetime.")
+
+        timestamp_path = (
+            str(metadata_timestamp_path).strip()
+            if metadata_timestamp_path is not None
+            else None
+        )
+        if timestamp_path == "":
+            raise ValueError("metadata_timestamp_path must be a non-empty dotted path.")
+
+        if not self.G:
+            self.rebuild()
+        if not self.G.nodes:
+            return []
+
+        units = {unit.id: unit for unit in self.store.get_all_units(limit=1000000000)}
+        candidates: list[dict] = []
+        for unit_id in sorted(self.G.nodes):
+            unit = units.get(unit_id)
+            if unit is None:
+                continue
+
+            inbound_count = int(self.G.in_degree(unit_id))
+            outbound_count = int(self.G.out_degree(unit_id))
+            degree = inbound_count + outbound_count
+            if degree < minimum_degree:
+                continue
+
+            metadata_timestamp = None
+            if timestamp_path is not None:
+                metadata_timestamp = _parse_graph_datetime(
+                    _metadata_path_value(unit.metadata, timestamp_path)
+                )
+            stale_at = metadata_timestamp or _parse_graph_datetime(unit.updated_at)
+            if stale_at is None or stale_at > cutoff_at:
+                continue
+
+            age_days = max(0, int((now_at - stale_at).total_seconds() // 86400))
+            source = {
+                "project": str(unit.source_project),
+                "id": unit.source_id,
+                "entity_type": unit.source_entity_type,
+            }
+            candidates.append(
+                {
+                    "unit": self._unit_summary_data(unit),
+                    "degree": degree,
+                    "inbound_count": inbound_count,
+                    "outbound_count": outbound_count,
+                    "age_days": age_days,
+                    "stale_at": stale_at.isoformat(),
+                    "stale_source": "metadata"
+                    if metadata_timestamp is not None
+                    else "updated_at",
+                    "tags": list(unit.tags),
+                    "source": source,
+                    "metadata": {
+                        "timestamp_path": timestamp_path,
+                        "timestamp": metadata_timestamp.isoformat()
+                        if metadata_timestamp is not None
+                        else None,
+                    },
+                }
+            )
+
+        candidates.sort(
+            key=lambda row: (
+                -row["degree"],
+                -row["age_days"],
+                str(row["unit"]["title"]).casefold(),
+                row["unit"]["id"],
+            )
+        )
+        return candidates[:capped_limit]
+
+    def analyze_stale_hubs(self, *args, **kwargs) -> list[dict]:
+        """Alias for stale_hubs."""
+        return self.stale_hubs(*args, **kwargs)
 
     def get_betweenness_centrality(
         self,
