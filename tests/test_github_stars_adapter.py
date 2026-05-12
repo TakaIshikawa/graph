@@ -113,7 +113,7 @@ def test_github_stars_csv_emits_owner_aggregates_and_edges(tmp_path):
 
     owners = [unit for unit in result.units if unit.source_entity_type == "owner"]
     repositories = [unit for unit in result.units if unit.source_entity_type == "repository"]
-    assert GithubStarsCsvAdapter(path=str(path)).entity_types == ["repository", "owner"]
+    assert GithubStarsCsvAdapter(path=str(path)).entity_types == ["repository", "owner", "topic"]
     assert len(owners) == 2
 
     owner = next(unit for unit in owners if unit.metadata["normalized_owner"] == "owner")
@@ -144,6 +144,83 @@ def test_github_stars_csv_owner_filtering(tmp_path):
 
     assert [unit.source_entity_type for unit in owner_only.units] == ["owner"]
     assert owner_only.edges == []
+    assert [unit.source_entity_type for unit in repository_only.units] == ["repository"]
+    assert repository_only.edges == []
+
+
+def test_github_stars_csv_emits_topic_aggregates_and_edges(tmp_path):
+    path = tmp_path / "stars.csv"
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=[
+                "full_name",
+                "description",
+                "html_url",
+                "language",
+                "topics",
+                "owner",
+                "starred_at",
+            ],
+        )
+        writer.writeheader()
+        writer.writerows(
+            [
+                {
+                    "full_name": "owner/alpha",
+                    "description": "Alpha",
+                    "html_url": "https://github.com/owner/alpha",
+                    "language": "Python",
+                    "topics": "CLI,knowledge",
+                    "owner": "Owner",
+                    "starred_at": "2025-01-02T00:00:00Z",
+                },
+                {
+                    "full_name": "other/beta",
+                    "description": "Beta",
+                    "html_url": "https://github.com/other/beta",
+                    "language": "Go",
+                    "topics": '["cli", "server"]',
+                    "owner": "other",
+                    "starred_at": "2025-01-03T00:00:00Z",
+                },
+            ]
+        )
+
+    result = GithubStarsCsvAdapter(path=str(path)).ingest(entity_types=["repository", "topic"])
+
+    topics = [unit for unit in result.units if unit.source_entity_type == "topic"]
+    repositories = [unit for unit in result.units if unit.source_entity_type == "repository"]
+    assert len(topics) == 3
+
+    cli = next(unit for unit in topics if unit.metadata["normalized_topic"] == "cli")
+    assert cli.source_id.startswith("github_stars_csv:topic:")
+    assert cli.metadata["topic"] == "cli"
+    assert cli.metadata["repo_count"] == 2
+    assert cli.metadata["repository_source_ids"] == sorted(unit.source_id for unit in repositories)
+    assert cli.metadata["owners"] == ["other", "Owner"]
+    assert cli.metadata["languages"] == ["Go", "Python"]
+    assert cli.metadata["first_starred_at"] == "2025-01-02T00:00:00+00:00"
+    assert cli.metadata["latest_starred_at"] == "2025-01-03T00:00:00+00:00"
+
+    cli_edges = [edge for edge in result.edges if edge.from_unit_id == cli.source_id]
+    assert {edge.to_unit_id for edge in cli_edges} == {unit.source_id for unit in repositories}
+    assert all(edge.relation == EdgeRelation.CONTAINS for edge in cli_edges)
+    assert all(edge.metadata["relation_type"] == "topic_contains_repository" for edge in cli_edges)
+
+
+def test_github_stars_csv_topic_filtering(tmp_path):
+    path = tmp_path / "stars.csv"
+    path.write_text(
+        "full_name,topics,starred_at\nowner/repo,python,2025-01-02T00:00:00Z\n",
+        encoding="utf-8",
+    )
+
+    topic_only = GithubStarsCsvAdapter(path=str(path)).ingest(entity_types=["topic"])
+    repository_only = GithubStarsCsvAdapter(path=str(path)).ingest(entity_types=["repository"])
+
+    assert [unit.source_entity_type for unit in topic_only.units] == ["topic"]
+    assert topic_only.edges == []
     assert [unit.source_entity_type for unit in repository_only.units] == ["repository"]
     assert repository_only.edges == []
 

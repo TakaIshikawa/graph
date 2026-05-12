@@ -21,7 +21,7 @@ class GithubStarsCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["repository", "owner"]
+        return ["repository", "owner", "topic"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -53,12 +53,17 @@ class GithubStarsCsvAdapter(SourceAdapter):
                 repositories.append(unit)
 
         owners = self._owner_units(repositories) if "owner" in allowed_types else []
+        topics = self._topic_units(repositories) if "topic" in allowed_types else []
         if "repository" in allowed_types:
             result.units.extend(repositories)
         if "owner" in allowed_types:
             result.units.extend(owners)
+        if "topic" in allowed_types:
+            result.units.extend(topics)
         if "owner" in allowed_types and "repository" in allowed_types:
             result.edges.extend(self._owner_repository_edges(owners))
+        if "topic" in allowed_types and "repository" in allowed_types:
+            result.edges.extend(self._topic_repository_edges(topics))
         result.units.sort(key=lambda unit: unit.source_id)
         result.edges.sort(key=lambda edge: edge.id)
         return result
@@ -190,16 +195,109 @@ class GithubStarsCsvAdapter(SourceAdapter):
                 )
         return edges
 
+    def _topic_units(self, repositories: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        names: dict[str, str] = {}
+        for repository in repositories:
+            for topic in repository.metadata.get("topics", []) or []:
+                topic_text = str(topic).strip()
+                if not topic_text:
+                    continue
+                normalized = self._normalize_topic(topic_text)
+                grouped.setdefault(normalized, []).append(repository)
+                names.setdefault(normalized, topic_text)
+
+        units: list[KnowledgeUnit] = []
+        for normalized, topic_repositories in sorted(grouped.items()):
+            repository_source_ids = sorted({repository.source_id for repository in topic_repositories})
+            owners = sorted(
+                {
+                    str(repository.metadata.get("owner") or "")
+                    for repository in topic_repositories
+                    if repository.metadata.get("owner")
+                },
+                key=lambda value: value.casefold(),
+            )
+            languages = sorted(
+                {
+                    str(repository.metadata.get("language") or "")
+                    for repository in topic_repositories
+                    if repository.metadata.get("language")
+                }
+            )
+            starred_dates = [
+                parsed
+                for repository in topic_repositories
+                if (parsed := self._parse_datetime(str(repository.metadata.get("starred_at") or ""))) is not None
+            ]
+            first_starred = min(starred_dates).isoformat() if starred_dates else None
+            latest_starred = max(starred_dates).isoformat() if starred_dates else None
+            topic_name = names[normalized]
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.GITHUB_STARS_CSV,
+                    source_id=self._topic_source_id(normalized),
+                    source_entity_type="topic",
+                    title=topic_name,
+                    content=f"GitHub starred repository topic: {topic_name}\nRepositories: {len(repository_source_ids)}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "topic": topic_name,
+                        "normalized_topic": normalized,
+                        "repo_count": len(repository_source_ids),
+                        "repository_source_ids": repository_source_ids,
+                        "owners": owners,
+                        "languages": languages,
+                        "first_starred_at": first_starred,
+                        "latest_starred_at": latest_starred,
+                    },
+                    tags=["github", "topic", topic_name],
+                    created_at=min(repository.created_at for repository in topic_repositories),
+                    updated_at=max(repository.updated_at for repository in topic_repositories),
+                )
+            )
+        return units
+
+    def _topic_repository_edges(self, topics: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        edges: list[KnowledgeEdge] = []
+        for topic in topics:
+            for repository_source_id in topic.metadata.get("repository_source_ids") or []:
+                edges.append(
+                    KnowledgeEdge(
+                        id=self._topic_edge_id(topic.source_id, str(repository_source_id)),
+                        from_unit_id=topic.source_id,
+                        to_unit_id=str(repository_source_id),
+                        relation=EdgeRelation.CONTAINS,
+                        source=EdgeSource.SOURCE,
+                        metadata={
+                            "source_project": SourceProject.GITHUB_STARS_CSV.value,
+                            "relation_type": "topic_contains_repository",
+                        },
+                    )
+                )
+        return edges
+
     def _normalize_owner(self, owner: str) -> str:
         return owner.strip().casefold()
+
+    def _normalize_topic(self, topic: str) -> str:
+        return topic.strip().casefold()
 
     def _owner_source_id(self, normalized_owner: str) -> str:
         digest = hashlib.sha256(normalized_owner.encode("utf-8")).hexdigest()[:24]
         return f"github_stars_csv:owner:{digest}"
 
+    def _topic_source_id(self, normalized_topic: str) -> str:
+        digest = hashlib.sha256(normalized_topic.encode("utf-8")).hexdigest()[:24]
+        return f"github_stars_csv:topic:{digest}"
+
     def _edge_id(self, owner_source_id: str, repository_source_id: str) -> str:
         digest = hashlib.sha256("|".join((owner_source_id, repository_source_id, "owner_contains_repository")).encode("utf-8")).hexdigest()[:24]
         return f"github-stars-csv-owner-contains-{digest}"
+
+    def _topic_edge_id(self, topic_source_id: str, repository_source_id: str) -> str:
+        digest = hashlib.sha256("|".join((topic_source_id, repository_source_id, "topic_contains_repository")).encode("utf-8")).hexdigest()[:24]
+        return f"github-stars-csv-topic-contains-{digest}"
 
     def _parse_topics(self, value: str) -> list[str]:
         if not value:
