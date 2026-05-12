@@ -83,11 +83,24 @@ class LinearIssuesJsonAdapter(SourceAdapter):
             return None
         created = parse_datetime(record.get("createdAt") or record.get("created_at"))
         updated = parse_datetime(record.get("updatedAt") or record.get("updated_at")) or created
+        started = parse_datetime(record.get("startedAt") or record.get("started_at"))
+        triaged = parse_datetime(record.get("triagedAt") or record.get("triaged_at"))
         completed = parse_datetime(record.get("completedAt") or record.get("completed_at"))
+        canceled = parse_datetime(record.get("canceledAt") or record.get("canceled_at"))
+        archived = parse_datetime(record.get("archivedAt") or record.get("archived_at"))
         labels = self._names(record.get("labels"))
         team = self._name(record.get("team"))
         project = self._name(record.get("project"))
         parent_id = self._parent_id(record.get("parent"))
+        lifecycle_metadata = self._lifecycle_metadata(
+            created=created,
+            updated=updated,
+            started=started,
+            triaged=triaged,
+            completed=completed,
+            canceled=canceled,
+            archived=archived,
+        )
         metadata = {
             "issue_id": issue_id,
             "identifier": identifier,
@@ -104,6 +117,7 @@ class LinearIssuesJsonAdapter(SourceAdapter):
             "created_at": created.isoformat() if created else self._text(record.get("createdAt")),
             "updated_at": updated.isoformat() if updated else self._text(record.get("updatedAt")),
             "completed_at": completed.isoformat() if completed else self._text(record.get("completedAt")),
+            **lifecycle_metadata,
             "parent_id": parent_id,
             "related_issue_ids": [self._text(item) for item in record.get("relatedIssueIds", []) if self._text(item)],
             "source_file": record.get("_source_file"),
@@ -132,6 +146,41 @@ class LinearIssuesJsonAdapter(SourceAdapter):
             if metadata.get(key) not in ("", None):
                 parts.append(f"{label}: {metadata[key]}")
         return "\n".join(parts)
+
+    def _lifecycle_metadata(
+        self,
+        *,
+        created: datetime | None,
+        updated: datetime | None,
+        started: datetime | None,
+        triaged: datetime | None,
+        completed: datetime | None,
+        canceled: datetime | None,
+        archived: datetime | None,
+    ) -> dict[str, Any]:
+        terminal = completed or canceled or archived
+        metadata: dict[str, Any] = {
+            "started_at": started.isoformat() if started else None,
+            "triaged_at": triaged.isoformat() if triaged else None,
+            "canceled_at": canceled.isoformat() if canceled else None,
+            "archived_at": archived.isoformat() if archived else None,
+        }
+        if created and updated:
+            metadata["age_days"] = self._days_between(created, updated)
+        if created and triaged:
+            metadata["time_to_triage_days"] = self._days_between(created, triaged)
+        if created and started:
+            metadata["time_to_start_days"] = self._days_between(created, started)
+        if started and terminal:
+            metadata["cycle_time_days"] = self._days_between(started, terminal)
+        if created and terminal:
+            metadata["lead_time_days"] = self._days_between(created, terminal)
+        if terminal and updated:
+            metadata["terminal_state_age_days"] = self._days_between(terminal, updated)
+        return metadata
+
+    def _days_between(self, start: datetime, end: datetime) -> int:
+        return max(0, (end - start).days)
 
     def _parent_id(self, value: Any) -> str:
         if isinstance(value, dict):
