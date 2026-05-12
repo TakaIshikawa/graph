@@ -190,7 +190,7 @@ class GoogleContactsCsvAdapter(SourceAdapter):
 
     def _organization(self, row: dict[str, Any]) -> dict[str, str]:
         return {
-            "name": self._first(row, "Organization 1 - Name", "Organization Name", "Company"),
+            "name": self._first(row, "Organization 1 - Name", "Organization Name", "Organization", "Company"),
             "title": self._first(row, "Organization 1 - Title", "Job Title", "Title"),
             "department": self._first(row, "Organization 1 - Department", "Department"),
         }
@@ -241,6 +241,15 @@ class GoogleContactsCsvAdapter(SourceAdapter):
             }
         )
         contact_ids = sorted(contact.source_id for contact in contacts)
+        email_domains = sorted(
+            {
+                email.rsplit("@", 1)[1].casefold()
+                for contact in contacts
+                for email in contact.metadata.get("emails", [])
+                if "@" in email and email.rsplit("@", 1)[1].strip()
+            }
+        )
+        source_files = sorted({str(contact.metadata.get("source_file")) for contact in contacts if contact.metadata.get("source_file")})
         content = [name, f"Contacts: {len(contacts)}"]
         if departments:
             content.append(f"Departments: {', '.join(departments)}")
@@ -258,6 +267,8 @@ class GoogleContactsCsvAdapter(SourceAdapter):
                 "departments": departments,
                 "titles": titles,
                 "contact_source_ids": contact_ids,
+                "email_domains": email_domains,
+                "source_files": source_files,
             },
             tags=["organization"],
             created_at=min(contact.created_at for contact in contacts),
@@ -266,15 +277,15 @@ class GoogleContactsCsvAdapter(SourceAdapter):
 
     def _organization_edge(self, contact: KnowledgeUnit, organization: KnowledgeUnit) -> KnowledgeEdge:
         return KnowledgeEdge(
-            id=self._edge_id(contact.source_id, organization.source_id),
-            from_unit_id=contact.source_id,
-            to_unit_id=organization.source_id,
-            relation=EdgeRelation.REFERENCES,
+            id=self._edge_id(organization.source_id, contact.source_id),
+            from_unit_id=organization.source_id,
+            to_unit_id=contact.source_id,
+            relation=EdgeRelation.CONTAINS,
             source=EdgeSource.SOURCE,
             metadata={
                 "source_project": SourceProject.GOOGLE_CONTACTS_CSV.value,
-                "from_entity_type": "contact",
-                "to_entity_type": "organization",
+                "from_entity_type": "organization",
+                "to_entity_type": "contact",
                 "organization": organization.title,
             },
             created_at=contact.created_at,
@@ -334,9 +345,9 @@ class GoogleContactsCsvAdapter(SourceAdapter):
         normalized = " ".join(name.casefold().split())
         return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:24] if normalized else ""
 
-    def _edge_id(self, contact_id: str, organization_id: str) -> str:
-        digest = hashlib.sha256(f"{contact_id}|{organization_id}|references".encode("utf-8")).hexdigest()[:24]
-        return f"google-contacts-organization-references-{digest}"
+    def _edge_id(self, organization_id: str, contact_id: str) -> str:
+        digest = hashlib.sha256(f"{organization_id}|{contact_id}|contains".encode("utf-8")).hexdigest()[:24]
+        return f"google-contacts-organization-contains-{digest}"
 
     def _group_edge_id(self, contact_id: str, group_id: str) -> str:
         digest = hashlib.sha256(f"{contact_id}|{group_id}|references".encode("utf-8")).hexdigest()[:24]

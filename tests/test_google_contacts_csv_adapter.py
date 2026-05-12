@@ -83,12 +83,14 @@ def test_google_contacts_csv_emits_organization_units_and_edges(tmp_path):
         [
             {
                 "Name": "Ada Lovelace",
+                "E-mail 1 - Value": "ada@engine.test",
                 "Organization Name": "Analytical Engines",
                 "Department": "Research",
                 "Job Title": "Researcher",
             },
             {
                 "Name": "Charles Babbage",
+                "E-mail 1 - Value": "charles@engine.test",
                 "Company": "Analytical Engines",
                 "Department": "Engineering",
                 "Job Title": "Founder",
@@ -106,10 +108,13 @@ def test_google_contacts_csv_emits_organization_units_and_edges(tmp_path):
     assert organization.title == "Analytical Engines"
     assert organization.metadata["contact_count"] == 2
     assert organization.metadata["departments"] == ["Engineering", "Research"]
+    assert organization.metadata["contact_source_ids"] == sorted(contact.source_id for contact in contacts)
+    assert organization.metadata["email_domains"] == ["engine.test"]
+    assert organization.metadata["source_files"] == ["contacts.csv"]
     assert len(result.edges) == 2
-    assert {edge.relation for edge in result.edges} == {EdgeRelation.REFERENCES}
-    assert {edge.from_unit_id for edge in result.edges} == {contact.source_id for contact in contacts}
-    assert {edge.to_unit_id for edge in result.edges} == {organization.source_id}
+    assert {edge.relation for edge in result.edges} == {EdgeRelation.CONTAINS}
+    assert {edge.from_unit_id for edge in result.edges} == {organization.source_id}
+    assert {edge.to_unit_id for edge in result.edges} == {contact.source_id for contact in contacts}
 
     org_only = GoogleContactsCsvAdapter(path=str(export)).ingest(entity_types=["organization"])
     assert [unit.source_entity_type for unit in org_only.units] == ["organization"]
