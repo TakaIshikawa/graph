@@ -36,7 +36,7 @@ def test_trakt_watch_history_csv_ingests_movie_rows(tmp_path):
         ],
     )
 
-    result = TraktWatchHistoryCsvAdapter(path=str(export)).ingest()
+    result = TraktWatchHistoryCsvAdapter(path=str(export)).ingest(entity_types=["watch"])
 
     assert len(result.units) == 1
     unit = result.units[0]
@@ -83,7 +83,7 @@ def test_trakt_watch_history_csv_ingests_episode_rows_and_filters(tmp_path):
         last_sync_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
     )
 
-    result = TraktWatchHistoryCsvAdapter(path=str(export)).ingest(since=since)
+    result = TraktWatchHistoryCsvAdapter(path=str(export)).ingest(since=since, entity_types=["watch"])
 
     assert len(result.units) == 1
     unit = result.units[0]
@@ -99,7 +99,7 @@ def test_trakt_watch_history_csv_directory_and_registry(tmp_path):
     _write_csv(tmp_path / "one.csv", [{"watched_at": "2025-01-01T00:00:00Z", "title": "One", "type": "movie"}])
     _write_csv(tmp_path / "two.csv", [{"watched_at": "2025-01-02T00:00:00Z", "title": "Two", "type": "movie"}])
 
-    result = TraktWatchHistoryCsvAdapter(path=str(tmp_path)).ingest()
+    result = TraktWatchHistoryCsvAdapter(path=str(tmp_path)).ingest(entity_types=["watch"])
 
     assert len(result.units) == 2
     assert get_adapter("trakt_watch_history_csv", path=str(tmp_path)).name == "trakt_watch_history_csv"
@@ -134,7 +134,7 @@ def test_trakt_watch_history_csv_adds_rewatch_sequence_in_chronological_order(tm
         ],
     )
 
-    units = TraktWatchHistoryCsvAdapter(path=str(export)).ingest().units
+    units = TraktWatchHistoryCsvAdapter(path=str(export)).ingest(entity_types=["watch"]).units
 
     assert [unit.metadata["watch_sequence"] for unit in units] == [1, 2, 3]
     assert [unit.metadata["is_rewatch"] for unit in units] == [False, True, True]
@@ -175,7 +175,7 @@ def test_trakt_watch_history_csv_rewatch_identity_distinguishes_episodes(tmp_pat
         ],
     )
 
-    units = TraktWatchHistoryCsvAdapter(path=str(export)).ingest().units
+    units = TraktWatchHistoryCsvAdapter(path=str(export)).ingest(entity_types=["watch"]).units
 
     assert [unit.title for unit in units] == [
         "Example Show (2025) S01E01",
@@ -185,3 +185,44 @@ def test_trakt_watch_history_csv_rewatch_identity_distinguishes_episodes(tmp_pat
     assert [unit.metadata["watch_sequence"] for unit in units] == [1, 1, 2]
     assert [unit.metadata["is_rewatch"] for unit in units] == [False, False, True]
     assert units[2].metadata["previous_watch_at"] == "2025-01-01T00:00:00+00:00"
+
+
+def test_trakt_watch_history_csv_media_aggregates_repeated_watches(tmp_path):
+    export = tmp_path / "history.csv"
+    _write_csv(
+        export,
+        [
+            {
+                "watched_at": "2025-01-01T00:00:00Z",
+                "title": "Arrival",
+                "year": "2016",
+                "type": "movie",
+                "trakt_id": "movie-1",
+                "url": "https://trakt.tv/movies/arrival-2016",
+            },
+            {
+                "watched_at": "2025-02-01T00:00:00Z",
+                "title": "Arrival",
+                "year": "2016",
+                "type": "movie",
+                "trakt_id": "movie-1",
+                "url": "https://trakt.tv/movies/arrival-2016",
+            },
+        ],
+    )
+
+    result = TraktWatchHistoryCsvAdapter(path=str(export)).ingest(entity_types=["media", "watch"])
+
+    media = [unit for unit in result.units if unit.source_entity_type == "media"]
+    watches = [unit for unit in result.units if unit.source_entity_type == "watch"]
+    assert len(media) == 1
+    assert len(watches) == 2
+    unit = media[0]
+    assert unit.source_id.startswith("trakt_watch_history_csv:media:")
+    assert unit.metadata["watch_count"] == 2
+    assert unit.metadata["rewatch_count"] == 1
+    assert unit.metadata["first_watched_at"] == "2025-01-01T00:00:00+00:00"
+    assert unit.metadata["last_watched_at"] == "2025-02-01T00:00:00+00:00"
+    assert unit.metadata["identifiers"] == {"trakt_id": "movie-1"}
+    assert len(result.edges) == 2
+    assert all(edge.from_unit_id == unit.source_id for edge in result.edges)

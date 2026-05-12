@@ -21,7 +21,7 @@ class SpotifyStreamingHistoryAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["play", "session"]
+        return ["artist", "track", "play", "session"]
 
     def __init__(self, path: str = "", session_gap_minutes: int = 30) -> None:
         self.path = path
@@ -55,11 +55,21 @@ class SpotifyStreamingHistoryAdapter(SourceAdapter):
                 units.append(unit)
 
         units = sorted(units, key=lambda unit: (unit.created_at, unit.source_id))
+        artists = self._artist_units(units) if "artist" in allowed_types else []
+        tracks = self._track_units(units) if "track" in allowed_types else []
         sessions = self._session_units(units) if "session" in allowed_types else []
+        if "artist" in allowed_types:
+            result.units.extend(artists)
+        if "track" in allowed_types:
+            result.units.extend(tracks)
         if "play" in allowed_types:
             result.units.extend(units)
         if "session" in allowed_types:
             result.units.extend(sessions)
+        if "artist" in allowed_types and "track" in allowed_types:
+            result.edges.extend(self._artist_track_edges(artists, tracks))
+        if "track" in allowed_types and "play" in allowed_types:
+            result.edges.extend(self._track_play_edges(tracks, units))
         if "play" in allowed_types and "session" in allowed_types:
             result.edges.extend(self._contains_edges(sessions))
         result.units.sort(key=lambda unit: (unit.created_at, unit.source_id))
@@ -210,6 +220,95 @@ class SpotifyStreamingHistoryAdapter(SourceAdapter):
 
         return [self._session_unit(session) for session in sessions if session]
 
+    def _artist_units(self, plays: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        names: dict[str, str] = {}
+        for play in plays:
+            artist = str(play.metadata.get("artist_name") or "").strip()
+            if not artist:
+                continue
+            key = artist.casefold()
+            names.setdefault(key, artist)
+            grouped.setdefault(key, []).append(play)
+        return [
+            self._aggregate_unit(
+                "artist",
+                self._artist_source_id(names[key]),
+                names[key],
+                artist_plays,
+                {
+                    "artist_name": names[key],
+                    "track_names": sorted({str(play.metadata.get("track_name")) for play in artist_plays if play.metadata.get("track_name")}),
+                },
+                ["spotify", "music", "artist"],
+            )
+            for key, artist_plays in grouped.items()
+        ]
+
+    def _track_units(self, plays: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[tuple[str, str, str], list[KnowledgeUnit]] = {}
+        for play in plays:
+            key = self._track_key(play)
+            if key:
+                grouped.setdefault(key, []).append(play)
+        units: list[KnowledgeUnit] = []
+        for key, track_plays in grouped.items():
+            first = track_plays[0]
+            track_name = str(first.metadata.get("track_name") or "")
+            artist_name = str(first.metadata.get("artist_name") or "")
+            spotify_uri = str(first.metadata.get("spotify_uri") or "")
+            units.append(
+                self._aggregate_unit(
+                    "track",
+                    self._track_source_id(track_name, artist_name, spotify_uri),
+                    self._title(track_name, artist_name),
+                    track_plays,
+                    {
+                        "track_name": track_name,
+                        "artist_name": artist_name,
+                        "spotify_uri": spotify_uri,
+                    },
+                    ["spotify", "music", "track"],
+                )
+            )
+        return units
+
+    def _aggregate_unit(
+        self,
+        entity_type: str,
+        source_id: str,
+        title: str,
+        plays: list[KnowledgeUnit],
+        extra_metadata: dict[str, Any],
+        tags: list[str],
+    ) -> KnowledgeUnit:
+        total_ms = sum(int(play.metadata["ms_played"]) for play in plays if isinstance(play.metadata.get("ms_played"), int))
+        first_played = min(play.created_at for play in plays)
+        last_played = max(play.created_at for play in plays)
+        metadata = {
+            **extra_metadata,
+            "play_count": len(plays),
+            "total_ms_played": total_ms,
+            "first_played_at": first_played.isoformat(),
+            "last_played_at": last_played.isoformat(),
+            "albums": sorted({str(play.metadata.get("album_name")) for play in plays if play.metadata.get("album_name")}),
+            "countries": sorted({str(play.metadata.get("country")) for play in plays if play.metadata.get("country")}),
+            "source_files": sorted({str(play.metadata.get("source_file")) for play in plays if play.metadata.get("source_file")}),
+            "play_source_ids": [play.source_id for play in plays],
+        }
+        return KnowledgeUnit(
+            source_project=SourceProject.SPOTIFY_STREAMING_HISTORY,
+            source_id=source_id,
+            source_entity_type=entity_type,
+            title=title,
+            content=f"Spotify {entity_type}: {title}",
+            content_type=ContentType.METADATA,
+            metadata=metadata,
+            tags=tags,
+            created_at=first_played,
+            updated_at=last_played,
+        )
+
     def _session_unit(self, plays: list[KnowledgeUnit]) -> KnowledgeUnit:
         start = min(play.created_at for play in plays)
         end = max(play.created_at for play in plays)
@@ -259,14 +358,75 @@ class SpotifyStreamingHistoryAdapter(SourceAdapter):
                 )
         return edges
 
+    def _artist_track_edges(self, artists: list[KnowledgeUnit], tracks: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        artist_ids = {str(artist.metadata.get("artist_name") or "").casefold(): artist.source_id for artist in artists}
+        edges: list[KnowledgeEdge] = []
+        for track in tracks:
+            artist_id = artist_ids.get(str(track.metadata.get("artist_name") or "").casefold())
+            if artist_id:
+                edges.append(self._edge(artist_id, track.source_id, "artist_contains_track"))
+        return list({edge.id: edge for edge in edges}.values())
+
+    def _track_play_edges(self, tracks: list[KnowledgeUnit], plays: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        track_ids = {
+            self._track_source_id(
+                str(track.metadata.get("track_name") or ""),
+                str(track.metadata.get("artist_name") or ""),
+                str(track.metadata.get("spotify_uri") or ""),
+            ): track.source_id
+            for track in tracks
+        }
+        edges: list[KnowledgeEdge] = []
+        for play in plays:
+            track_id = track_ids.get(
+                self._track_source_id(
+                    str(play.metadata.get("track_name") or ""),
+                    str(play.metadata.get("artist_name") or ""),
+                    str(play.metadata.get("spotify_uri") or ""),
+                )
+            )
+            if track_id:
+                edges.append(self._edge(track_id, play.source_id, "track_contains_play"))
+        return list({edge.id: edge for edge in edges}.values())
+
+    def _edge(self, from_id: str, to_id: str, relation_type: str) -> KnowledgeEdge:
+        return KnowledgeEdge(
+            id=self._edge_id(from_id, to_id, relation_type),
+            from_unit_id=from_id,
+            to_unit_id=to_id,
+            relation=EdgeRelation.CONTAINS,
+            source=EdgeSource.SOURCE,
+            metadata={
+                "source_project": SourceProject.SPOTIFY_STREAMING_HISTORY.value,
+                "relation_type": relation_type,
+            },
+        )
+
     def _session_source_id(self, plays: list[KnowledgeUnit]) -> str:
         payload = "|".join(play.source_id for play in plays)
         digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
         return f"spotify_streaming_history:session:{digest}"
 
-    def _edge_id(self, session_source_id: str, play_source_id: str) -> str:
-        digest = hashlib.sha256("|".join((session_source_id, play_source_id, "contains")).encode("utf-8")).hexdigest()[:24]
-        return f"spotify-streaming-history-contains-{digest}"
+    def _artist_source_id(self, artist_name: str) -> str:
+        digest = hashlib.sha256(artist_name.strip().casefold().encode("utf-8")).hexdigest()[:24]
+        return f"spotify_streaming_history:artist:{digest}"
+
+    def _track_source_id(self, track_name: str, artist_name: str, spotify_uri: str) -> str:
+        raw = spotify_uri.strip().casefold() or "|".join((track_name.strip().casefold(), artist_name.strip().casefold()))
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+        return f"spotify_streaming_history:track:{digest}"
+
+    def _track_key(self, play: KnowledgeUnit) -> tuple[str, str, str] | None:
+        track_name = str(play.metadata.get("track_name") or "")
+        artist_name = str(play.metadata.get("artist_name") or "")
+        spotify_uri = str(play.metadata.get("spotify_uri") or "")
+        if not track_name and not spotify_uri:
+            return None
+        return (spotify_uri.casefold(), track_name.casefold(), artist_name.casefold())
+
+    def _edge_id(self, from_source_id: str, to_source_id: str, relation_type: str = "contains") -> str:
+        digest = hashlib.sha256("|".join((from_source_id, to_source_id, relation_type)).encode("utf-8")).hexdigest()[:24]
+        return f"spotify-streaming-history-{relation_type}-{digest}"
 
     def _first(self, item: dict[str, Any], *keys: str) -> str:
         value = self._value(item, *keys)

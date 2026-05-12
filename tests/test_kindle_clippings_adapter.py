@@ -69,6 +69,11 @@ The Book Title (Ada Author)
         "book_title": "The Book Title",
         "author": "Ada Author",
         "clipping_count": 2,
+        "highlight_count": 1,
+        "note_count": 0,
+        "location_start": 101,
+        "location_end": 101,
+        "source_files": ["My Clippings.txt"],
         "source_file": ["My Clippings.txt"],
     }
     edge = next(edge for edge in result.edges if edge.to_unit_id == highlight.source_id)
@@ -137,6 +142,33 @@ New.
     assert clipping_only.edges == []
     assert wrong_entity.units == []
     assert wrong_entity.edges == []
+
+
+def test_kindle_clippings_book_aggregate_summarizes_counts_and_locations(tmp_path):
+    clippings = tmp_path / "My Clippings.txt"
+    clippings.write_text(
+        """Shared Book (Author)
+- Your Highlight at location 10-12 | Added on Monday, January 1, 2024 1:00:00 PM
+
+Highlight.
+==========
+Shared Book (Author)
+- Your Note at location 30 | Added on Monday, January 1, 2024 2:00:00 PM
+
+Note.
+==========
+""",
+        encoding="utf-8",
+    )
+
+    book = KindleClippingsAdapter(path=str(clippings)).ingest(entity_types=["book"]).units[0]
+
+    assert book.metadata["clipping_count"] == 2
+    assert book.metadata["highlight_count"] == 1
+    assert book.metadata["note_count"] == 1
+    assert book.metadata["location_start"] == 10
+    assert book.metadata["location_end"] == 30
+    assert book.metadata["source_files"] == ["My Clippings.txt"]
 
 
 def test_kindle_clippings_adapter_is_registered():

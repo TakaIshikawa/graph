@@ -79,7 +79,7 @@ class AppleRemindersCsvAdapter(SourceAdapter):
     def _unit_from_row(self, row: dict[str, Any], source_file: str) -> KnowledgeUnit | None:
         title = self._first(row, "Title", "Name", "Reminder", "Task")
         notes = self._first(row, "Notes", "Note", "Body")
-        list_name = self._first(row, "List", "List Name", "Calendar", "Group")
+        list_name = self._first(row, "List", "list", "List Name", "Reminder List", "Calendar", "Group")
         if not title and not notes:
             return None
         title = title or "Untitled reminder"
@@ -162,6 +162,11 @@ class AppleRemindersCsvAdapter(SourceAdapter):
         for list_name, list_reminders in grouped.items():
             open_count = sum(1 for reminder in list_reminders if reminder.metadata.get("status") == "open")
             completed_count = sum(1 for reminder in list_reminders if reminder.metadata.get("status") == "completed")
+            due_dates = [
+                due
+                for reminder in list_reminders
+                if (due := self._parse_datetime(reminder.metadata.get("due_date"))) is not None
+            ]
             overdue_count = 0
             for reminder in list_reminders:
                 due = self._parse_datetime(reminder.metadata.get("due_date"))
@@ -177,9 +182,12 @@ class AppleRemindersCsvAdapter(SourceAdapter):
                     content_type=ContentType.METADATA,
                     metadata={
                         "list_name": list_name,
+                        "reminder_count": len(list_reminders),
                         "open_count": open_count,
                         "completed_count": completed_count,
                         "overdue_count": overdue_count,
+                        "earliest_due_date": min(due_dates).isoformat() if due_dates else None,
+                        "latest_due_date": max(due_dates).isoformat() if due_dates else None,
                         "source_files": sorted({str(reminder.metadata.get("source_file")) for reminder in list_reminders}),
                     },
                     tags=["reminder-list", list_name],

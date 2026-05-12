@@ -116,6 +116,73 @@ def test_goodreads_library_entity_filters_for_author_shelf_and_book(tmp_path):
     assert book_only.edges == []
 
 
+def test_goodreads_library_ingests_series_from_columns_and_titles(tmp_path):
+    path = tmp_path / "goodreads_library_export.csv"
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=["Book Id", "Title", "Author", "Series Name", "Series Number", "Date Added"],
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "Book Id": "1",
+                "Title": "First",
+                "Author": "Ada",
+                "Series Name": "Pattern Books",
+                "Series Number": "1",
+                "Date Added": "2025/01/01",
+            }
+        )
+        writer.writerow(
+            {
+                "Book Id": "2",
+                "Title": "Second (Pattern Books, #2)",
+                "Author": "Ada",
+                "Series Name": "",
+                "Series Number": "",
+                "Date Added": "2025/01/02",
+            }
+        )
+
+    result = GoodreadsLibraryAdapter(path=str(path)).ingest(entity_types=["book", "series"])
+
+    series_units = [unit for unit in result.units if unit.source_entity_type == "series"]
+    assert len(series_units) == 1
+    series = series_units[0]
+    assert series.source_id.startswith("goodreads_library:series:")
+    assert series.metadata["series"] == "Pattern Books"
+    assert series.metadata["book_count"] == 2
+    assert [book["sequence"] for book in series.metadata["books"]] == [1, 2]
+    assert [book["source_id"] for book in series.metadata["books"]] == [
+        "goodreads_library:1",
+        "goodreads_library:2",
+    ]
+    second = next(unit for unit in result.units if unit.metadata.get("book_id") == "2")
+    assert second.metadata["series"] == {"name": "Pattern Books", "source": "title", "sequence": 2}
+    series_edges = [edge for edge in result.edges if edge.metadata["relation_type"] == "series_contains_book"]
+    assert len(series_edges) == 2
+    assert all(edge.from_unit_id == series.source_id for edge in series_edges)
+    assert all(edge.relation == EdgeRelation.CONTAINS for edge in series_edges)
+
+
+def test_goodreads_library_series_edges_follow_entity_filter(tmp_path):
+    path = tmp_path / "goodreads_library_export.csv"
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["Book Id", "Title", "Author", "Book Series"])
+        writer.writeheader()
+        writer.writerow({"Book Id": "1", "Title": "One", "Author": "Ada", "Book Series": "Solo"})
+
+    series_only = GoodreadsLibraryAdapter(path=str(path)).ingest(entity_types=["series"])
+    book_only = GoodreadsLibraryAdapter(path=str(path)).ingest(entity_types=["book"])
+
+    assert [unit.source_entity_type for unit in series_only.units] == ["series"]
+    assert series_only.edges == []
+    assert [unit.source_entity_type for unit in book_only.units] == ["book"]
+    assert book_only.units[0].metadata["series"]["name"] == "Solo"
+    assert book_only.edges == []
+
+
 def test_goodreads_library_adapter_is_registered():
     assert "goodreads_library" in list_adapters()
     assert get_adapter("goodreads_library", path="/tmp/books.csv").name == "goodreads_library"

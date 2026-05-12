@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class TraktWatchHistoryCsvAdapter(SourceAdapter):
@@ -20,7 +20,7 @@ class TraktWatchHistoryCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["watch"]
+        return ["media", "watch"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -32,7 +32,8 @@ class TraktWatchHistoryCsvAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        if entity_types and "watch" not in entity_types:
+        allowed_types = set(entity_types or self.entity_types)
+        if not allowed_types.intersection(self.entity_types):
             return result
 
         sync_at = self._ensure_utc(since.last_sync_at) if since else None
@@ -52,7 +53,15 @@ class TraktWatchHistoryCsvAdapter(SourceAdapter):
 
         units = sorted(units, key=lambda unit: (unit.created_at, unit.source_id))
         self._add_rewatch_metadata(units)
-        result.units.extend(units)
+        media = self._media_units(units) if "media" in allowed_types else []
+        if "media" in allowed_types:
+            result.units.extend(media)
+        if "watch" in allowed_types:
+            result.units.extend(units)
+        if "media" in allowed_types and "watch" in allowed_types:
+            result.edges.extend(self._media_watch_edges(media, units))
+        result.units.sort(key=lambda unit: (unit.created_at, unit.source_id))
+        result.edges.sort(key=lambda edge: edge.id)
         return result
 
     def _iter_paths(self) -> list[Path]:
@@ -155,6 +164,101 @@ class TraktWatchHistoryCsvAdapter(SourceAdapter):
             metadata.get("season"),
             metadata.get("episode"),
         )
+
+    def _media_units(self, watches: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[tuple[Any, ...], list[KnowledgeUnit]] = {}
+        for watch in watches:
+            grouped.setdefault(self._watch_identity(watch.metadata), []).append(watch)
+
+        units: list[KnowledgeUnit] = []
+        for identity, media_watches in grouped.items():
+            first = media_watches[0]
+            identifiers = {
+                key: first.metadata.get(key)
+                for key in ("trakt_id", "imdb_id", "tmdb_id")
+                if first.metadata.get(key)
+            }
+            urls: dict[str, str] = {}
+            for watch in media_watches:
+                urls.update(watch.metadata.get("urls") or {})
+            first_watched = min(watch.created_at for watch in media_watches)
+            last_watched = max(watch.created_at for watch in media_watches)
+            rewatch_count = sum(1 for watch in media_watches if watch.metadata.get("is_rewatch"))
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.TRAKT_WATCH_HISTORY_CSV,
+                    source_id=self._media_source_id(identity),
+                    source_entity_type="media",
+                    title=first.title,
+                    content=f"Trakt media: {first.title}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "title": first.metadata.get("title"),
+                        "year": first.metadata.get("year"),
+                        "type": first.metadata.get("type"),
+                        "season": first.metadata.get("season"),
+                        "episode": first.metadata.get("episode"),
+                        "watch_count": len(media_watches),
+                        "rewatch_count": rewatch_count,
+                        "first_watched_at": first_watched.isoformat(),
+                        "last_watched_at": last_watched.isoformat(),
+                        "identifiers": identifiers,
+                        "urls": urls,
+                        "source_files": sorted({str(watch.metadata.get("source_file")) for watch in media_watches if watch.metadata.get("source_file")}),
+                        "watch_source_ids": [watch.source_id for watch in media_watches],
+                    },
+                    tags=["trakt", str(first.metadata.get("type") or "media").lower(), "media"],
+                    created_at=first_watched,
+                    updated_at=last_watched,
+                )
+            )
+        return units
+
+    def _media_watch_edges(self, media: list[KnowledgeUnit], watches: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        media_ids = {}
+        for unit in media:
+            identity = self._media_identity_from_metadata(unit.metadata)
+            media_ids[identity] = unit.source_id
+        edges: list[KnowledgeEdge] = []
+        for watch in watches:
+            media_id = media_ids.get(self._watch_identity(watch.metadata))
+            if not media_id:
+                continue
+            edges.append(
+                KnowledgeEdge(
+                    id=self._edge_id(media_id, watch.source_id),
+                    from_unit_id=media_id,
+                    to_unit_id=watch.source_id,
+                    relation=EdgeRelation.CONTAINS,
+                    source=EdgeSource.SOURCE,
+                    metadata={
+                        "source_project": SourceProject.TRAKT_WATCH_HISTORY_CSV.value,
+                        "relation_type": "media_contains_watch",
+                    },
+                )
+            )
+        return list({edge.id: edge for edge in edges}.values())
+
+    def _media_identity_from_metadata(self, metadata: dict[str, Any]) -> tuple[Any, ...]:
+        for key, value in (metadata.get("identifiers") or {}).items():
+            if value:
+                return (key, str(value).lower())
+        return (
+            "fallback",
+            self._normalize_identity_text(metadata.get("title")),
+            self._normalize_identity_text(metadata.get("year")),
+            self._normalize_identity_text(metadata.get("type")),
+            metadata.get("season"),
+            metadata.get("episode"),
+        )
+
+    def _media_source_id(self, identity: tuple[Any, ...]) -> str:
+        digest = hashlib.sha256("|".join(str(part) for part in identity).encode("utf-8")).hexdigest()[:24]
+        return f"trakt_watch_history_csv:media:{digest}"
+
+    def _edge_id(self, media_source_id: str, watch_source_id: str) -> str:
+        digest = hashlib.sha256("|".join((media_source_id, watch_source_id, "contains")).encode("utf-8")).hexdigest()[:24]
+        return f"trakt-watch-history-csv-contains-{digest}"
 
     def _normalize_identity_text(self, value: Any) -> str:
         return " ".join(str(value or "").strip().casefold().split())

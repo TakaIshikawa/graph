@@ -174,6 +174,11 @@ class KindleClippingsAdapter(SourceAdapter):
             source_files = sorted({str(unit.metadata.get("source_file", "")) for unit in book_clippings if unit.metadata.get("source_file")})
             created_at = min(unit.created_at for unit in book_clippings)
             updated_at = max(unit.updated_at for unit in book_clippings)
+            locations = [
+                location
+                for clipping in book_clippings
+                if (location := self._location_start(clipping.metadata.get("location"))) is not None
+            ]
             units.append(
                 KnowledgeUnit(
                     source_project=SourceProject.KINDLE,
@@ -186,6 +191,11 @@ class KindleClippingsAdapter(SourceAdapter):
                         "book_title": title,
                         "author": author,
                         "clipping_count": len(book_clippings),
+                        "highlight_count": sum(1 for unit in book_clippings if unit.metadata.get("clipping_type") == "highlight"),
+                        "note_count": sum(1 for unit in book_clippings if unit.metadata.get("clipping_type") == "note"),
+                        "location_start": min(locations) if locations else None,
+                        "location_end": max(locations) if locations else None,
+                        "source_files": source_files,
                         "source_file": source_files,
                     },
                     tags=[author] if author else [],
@@ -232,6 +242,10 @@ class KindleClippingsAdapter(SourceAdapter):
     def _edge_id(self, book_source_id: str, clipping_source_id: str) -> str:
         digest = self._digest(book_source_id, clipping_source_id, "contains", "")
         return f"kindle-clippings-contains-{digest}"
+
+    def _location_start(self, value: object) -> int | None:
+        match = re.search(r"\d+", str(value or ""))
+        return int(match.group(0)) if match else None
 
     def _digest(self, title: str, author: str, details: str, text: str) -> str:
         payload = "\n".join((title, author, details, text))

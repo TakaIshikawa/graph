@@ -68,8 +68,11 @@ def test_apple_reminders_csv_ingests_open_and_completed_reminders(tmp_path):
     assert "completed" in done.tags
 
     grocery = next(unit for unit in result.units if unit.source_entity_type == "list" and unit.title == "Groceries")
+    assert grocery.metadata["reminder_count"] == 1
     assert grocery.metadata["open_count"] == 1
     assert grocery.metadata["completed_count"] == 0
+    assert grocery.metadata["earliest_due_date"] == "2025-01-03T09:00:00+00:00"
+    assert grocery.metadata["latest_due_date"] == "2025-01-03T09:00:00+00:00"
     assert grocery.metadata["source_files"] == ["reminders.csv"]
     edge = next(edge for edge in result.edges if edge.to_unit_id == open_unit.source_id)
     assert edge.from_unit_id == grocery.source_id
@@ -125,6 +128,28 @@ def test_apple_reminders_csv_entity_filters_for_lists_and_reminders(tmp_path):
     assert {unit.source_entity_type for unit in reminder_only.units} == {"reminder"}
     assert reminder_only.edges == []
     assert len(combined.edges) == 2
+
+
+def test_apple_reminders_csv_list_metadata_uses_due_date_bounds_and_aliases(tmp_path):
+    export = tmp_path / "reminders.csv"
+    _write_csv(
+        export,
+        [
+            {"Title": "Later", "Reminder List": "Work", "Completed": "No", "Due Date": "2025-02-03"},
+            {"Title": "Earlier", "Reminder List": "Work", "Completed": "Yes", "Due Date": "2025-01-03"},
+        ],
+    )
+
+    result = AppleRemindersCsvAdapter(path=str(export)).ingest(entity_types=["list"])
+
+    assert len(result.units) == 1
+    unit = result.units[0]
+    assert unit.metadata["list_name"] == "Work"
+    assert unit.metadata["reminder_count"] == 2
+    assert unit.metadata["completed_count"] == 1
+    assert unit.metadata["open_count"] == 1
+    assert unit.metadata["earliest_due_date"] == "2025-01-03T00:00:00+00:00"
+    assert unit.metadata["latest_due_date"] == "2025-02-03T00:00:00+00:00"
 
 
 def test_apple_reminders_csv_directory_and_registry(tmp_path):
