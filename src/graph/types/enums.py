@@ -131,6 +131,14 @@ class SourceProject(StrEnum):
     GOOGLE_MAPS_TIMELINE_JSON = "google_maps_timeline_json"
     LIBBY_LOANS_CSV = "libby_loans_csv"
     BOARDGAMEGEEK_COLLECTION_CSV = "boardgamegeek_collection_csv"
+    ASANA_TASKS_CSV = "asana_tasks_csv"
+    STRAVA_ACTIVITIES_JSON = "strava_activities_json"
+    GARMIN_ACTIVITIES_CSV = "garmin_activities_csv"
+    INSTACART_ORDERS_CSV = "instacart_orders_csv"
+    AMAZON_ORDERS_CSV = "amazon_orders_csv"
+    LINEAR_ISSUES_JSON = "linear_issues_json"
+    PELOTON_WORKOUTS_CSV = "peloton_workouts_csv"
+    PODCASTS_OPML = "podcasts_opml"
 
 
 class ContentType(StrEnum):

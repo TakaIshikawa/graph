@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from graph.adapters.base import SourceAdapter
 from graph.adapters.activitywatch_json import ActivityWatchJsonAdapter
+from graph.adapters.amazon_orders_csv import AmazonOrdersCsvAdapter
+from graph.adapters.asana_tasks_csv import AsanaTasksCsvAdapter
 from graph.adapters.atom import AtomAdapter
 from graph.adapters.bibdesk import BibDeskAdapter
 from graph.adapters.bibtex import BibtexAdapter
@@ -30,8 +32,10 @@ from graph.adapters.git_adapter import GitAdapter
 from graph.adapters.github_issues_json import GithubIssuesJsonAdapter
 from graph.adapters.gitlab_issues_json import GitlabIssuesJsonAdapter
 from graph.adapters.github_stars_csv import GithubStarsCsvAdapter
+from graph.adapters.garmin_activities_csv import GarminActivitiesCsvAdapter
 from graph.adapters.goodreads_library import GoodreadsLibraryAdapter
 from graph.adapters.inaturalist_observations_csv import INaturalistObservationsCsvAdapter
+from graph.adapters.instacart_orders_csv import InstacartOrdersCsvAdapter
 from graph.adapters.google_calendar_json import GoogleCalendarJsonAdapter
 from graph.adapters.google_calendar_takeout import GoogleCalendarTakeoutAdapter
 from graph.adapters.google_photos_takeout import GooglePhotosTakeoutAdapter
@@ -44,6 +48,7 @@ from graph.adapters.instapaper import InstapaperAdapter
 from graph.adapters.ipynb import IpynbAdapter
 from graph.adapters.jats import JatsAdapter
 from graph.adapters.jira_issues_csv import JiraIssuesCsvAdapter
+from graph.adapters.linear_issues_json import LinearIssuesJsonAdapter
 from graph.adapters.jsonl_adapter import JsonlAdapter
 from graph.adapters.jsonl_notes import JsonlNotesAdapter
 from graph.adapters.kindle import KindleAdapter
@@ -94,10 +99,12 @@ from graph.adapters.org import OrgAdapter
 from graph.adapters.pdf import PdfAdapter
 from graph.adapters.pinboard import PinboardAdapter
 from graph.adapters.pinboard_html_export import PinboardHtmlExportAdapter
+from graph.adapters.peloton_workouts_csv import PelotonWorkoutsCsvAdapter
 from graph.adapters.plain_text import PlainTextAdapter
 from graph.adapters.pocket import PocketAdapter
 from graph.adapters.pocket_csv import PocketCsvAdapter
 from graph.adapters.pocket_export import PocketExportAdapter
+from graph.adapters.podcasts_opml import PodcastsOpmlAdapter
 from graph.adapters.presence import PresenceAdapter
 from graph.adapters.raindrop import RaindropAdapter
 from graph.adapters.raindrop_csv import RaindropCsvAdapter
@@ -116,6 +123,7 @@ from graph.adapters.slack_json import SlackJsonAdapter
 from graph.adapters.sota import SOTAAdapter
 from graph.adapters.spotify_streaming_history import SpotifyStreamingHistoryAdapter
 from graph.adapters.spotify_takeout import SpotifyTakeoutAdapter
+from graph.adapters.strava_activities_json import StravaActivitiesJsonAdapter
 from graph.adapters.storygraph_reading_history_csv import StoryGraphReadingHistoryCsvAdapter
 from graph.adapters.steam_library_csv import SteamLibraryCsvAdapter
 from graph.adapters.trello_board_json import TrelloBoardJsonAdapter
@@ -277,6 +285,14 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "reddit_saved_csv": RedditSavedCsvAdapter,
     "reddit_saved_json": RedditSavedJsonAdapter,
     "archivebox_index_json": ArchiveBoxIndexJsonAdapter,
+    "asana_tasks_csv": AsanaTasksCsvAdapter,
+    "strava_activities_json": StravaActivitiesJsonAdapter,
+    "garmin_activities_csv": GarminActivitiesCsvAdapter,
+    "instacart_orders_csv": InstacartOrdersCsvAdapter,
+    "amazon_orders_csv": AmazonOrdersCsvAdapter,
+    "linear_issues_json": LinearIssuesJsonAdapter,
+    "peloton_workouts_csv": PelotonWorkoutsCsvAdapter,
+    "podcasts_opml": PodcastsOpmlAdapter,
 }
 
 
