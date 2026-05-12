@@ -22,6 +22,7 @@ from graph.rag.reading_order import plan_reading_order
 from graph.rag.reading_queue import build_reading_queue
 from graph.rag.reading_time import estimate_reading_time
 from graph.rag.result_clusters import cluster_results_by_overlap
+from graph.rag.result_explanations import explain_rag_results
 from graph.rag.source_agreement import score_source_agreement
 from graph.rag.snippets import highlight_result_snippets
 from graph.rag.source_credibility import score_source_credibility
@@ -58,6 +59,7 @@ __all__ = [
     "extract_keywords",
     "extract_query_focus_terms",
     "estimate_reading_time",
+    "explain_rag_results",
     "format_result_citations",
     "cluster_results_by_overlap",
     "highlight_result_snippets",
