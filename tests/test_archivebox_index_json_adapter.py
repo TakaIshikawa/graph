@@ -81,7 +81,7 @@ def test_archivebox_index_json_emits_extractor_artifacts_and_edges(tmp_path):
     )
 
     adapter = ArchiveBoxIndexJsonAdapter(path=str(export))
-    assert adapter.entity_types == ["archive", "artifact"]
+    assert adapter.entity_types == ["archive", "artifact", "url_reference"]
 
     result = adapter.ingest(entity_types=["archive", "artifact"])
     archives = [unit for unit in result.units if unit.source_entity_type == "archive"]
@@ -123,3 +123,46 @@ def test_archivebox_index_json_artifact_edges_respect_entity_filtering(tmp_path)
     assert [unit.source_entity_type for unit in artifact_only.units] == ["artifact", "artifact"]
     assert {unit.metadata["extractor"] for unit in artifact_only.units} == {"pdf", "title"}
     assert artifact_only.edges == []
+
+
+def test_archivebox_index_json_emits_outbound_url_references(tmp_path):
+    export = tmp_path / "index.json"
+    export.write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "url": "https://example.com/article",
+                        "title": "Example Article",
+                        "timestamp": "2025-01-02T03:04:05Z",
+                        "outlinks": [
+                            {"url": "https://target.example/a", "title": "Target A"},
+                            {"href": "https://target.example/b", "text": "Target B"},
+                            {"url": "https://target.example/a", "title": "Duplicate"},
+                        ],
+                        "metadata": {"outlinks": ["https://target.example/c"]},
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = ArchiveBoxIndexJsonAdapter(path=str(export)).ingest(entity_types=["archive", "url_reference"])
+
+    archive = next(unit for unit in result.units if unit.source_entity_type == "archive")
+    references = sorted(
+        [unit for unit in result.units if unit.source_entity_type == "url_reference"],
+        key=lambda unit: unit.metadata["url"],
+    )
+    assert [unit.metadata["url"] for unit in references] == [
+        "https://target.example/a",
+        "https://target.example/b",
+        "https://target.example/c",
+    ]
+    assert references[0].metadata["title"] == "Target A"
+    assert references[1].metadata["text"] == "Target B"
+    assert all(unit.metadata["source_file"] == "index.json" for unit in references)
+    assert len(result.edges) == 3
+    assert {edge.from_unit_id for edge in result.edges} == {archive.source_id}
+    assert {edge.to_unit_id for edge in result.edges} == {unit.source_id for unit in references}

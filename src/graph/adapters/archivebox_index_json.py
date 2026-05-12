@@ -24,7 +24,7 @@ class ArchiveBoxIndexJsonAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["archive", "artifact"]
+        return ["archive", "artifact", "url_reference"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -54,6 +54,7 @@ class ArchiveBoxIndexJsonAdapter(SourceAdapter):
                     continue
                 archive_emitted = allowed_types is None or "archive" in allowed_types
                 artifact_emitted = allowed_types is None or "artifact" in allowed_types
+                reference_emitted = allowed_types is None or "url_reference" in allowed_types
 
                 if archive_emitted:
                     units.append(archive_unit)
@@ -64,6 +65,12 @@ class ArchiveBoxIndexJsonAdapter(SourceAdapter):
 
                 if archive_emitted and artifact_emitted:
                     edges.extend(self._artifact_edges(archive_unit, artifacts))
+
+                references = self._url_reference_units(entry, archive_unit, path.name)
+                if reference_emitted:
+                    units.extend(references)
+                if archive_emitted and reference_emitted:
+                    edges.extend(self._url_reference_edges(archive_unit, references))
 
         result.units.extend(sorted(units, key=lambda unit: (unit.created_at, unit.source_id)))
         result.edges.extend(sorted(edges, key=lambda edge: edge.id))
@@ -253,6 +260,117 @@ class ArchiveBoxIndexJsonAdapter(SourceAdapter):
             )
             for artifact in artifacts
         ]
+
+    def _url_reference_units(
+        self,
+        entry: dict[str, Any],
+        archive_unit: KnowledgeUnit,
+        source_file: str,
+    ) -> list[KnowledgeUnit]:
+        references: list[KnowledgeUnit] = []
+        for link in self._outbound_links(entry):
+            url = link["url"]
+            title = link.get("title") or link.get("text") or url
+            metadata = {
+                "url": url,
+                "title": link.get("title"),
+                "text": link.get("text"),
+                "parent_archive_source_id": archive_unit.source_id,
+                "source_file": source_file,
+                "original_url": archive_unit.metadata.get("url"),
+            }
+            references.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.ARCHIVEBOX_INDEX_JSON,
+                    source_id=self._url_reference_source_id(archive_unit.source_id, url),
+                    source_entity_type="url_reference",
+                    title=title,
+                    content=f"{title}\nURL: {url}",
+                    content_type=ContentType.METADATA,
+                    metadata={key: value for key, value in metadata.items() if value not in ("", None)},
+                    tags=["archivebox", "url_reference"],
+                    created_at=archive_unit.created_at,
+                    updated_at=archive_unit.updated_at,
+                )
+            )
+        return references
+
+    def _outbound_links(self, entry: dict[str, Any]) -> list[dict[str, str]]:
+        raw_values: list[Any] = []
+        for key in ("outlinks", "links", "extracted_links"):
+            raw_values.append(entry.get(key))
+        metadata = entry.get("metadata")
+        if isinstance(metadata, dict):
+            raw_values.append(metadata.get("outlinks"))
+
+        by_url: dict[str, dict[str, str]] = {}
+        for value in raw_values:
+            for link in self._coerce_links(value):
+                url = link.get("url", "").strip()
+                if not url:
+                    continue
+                by_url.setdefault(url, link)
+        return [by_url[url] for url in sorted(by_url)]
+
+    def _coerce_links(self, value: Any) -> list[dict[str, str]]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [{"url": item.strip()} for item in value.replace("\n", ",").split(",") if item.strip()]
+        if isinstance(value, list | tuple | set):
+            links: list[dict[str, str]] = []
+            for item in value:
+                links.extend(self._coerce_links(item))
+            return links
+        if isinstance(value, dict):
+            url = self._first(value, "url", "href", "link")
+            if not url and len(value) == 1:
+                only_key, only_value = next(iter(value.items()))
+                if str(only_key).startswith("http"):
+                    url = str(only_key)
+                    value = only_value if isinstance(only_value, dict) else {"text": only_value}
+            if not url:
+                return []
+            return [
+                {
+                    "url": url,
+                    "title": self._first(value, "title", "name") if isinstance(value, dict) else "",
+                    "text": self._first(value, "text", "label", "anchor") if isinstance(value, dict) else "",
+                }
+            ]
+        return []
+
+    def _url_reference_source_id(self, archive_source_id: str, url: str) -> str:
+        digest = hashlib.sha256(f"{archive_source_id}|url_reference|{url}".encode("utf-8")).hexdigest()[:24]
+        return f"{archive_source_id}:url_reference:{digest}"
+
+    def _url_reference_edges(
+        self,
+        archive_unit: KnowledgeUnit,
+        references: list[KnowledgeUnit],
+    ) -> list[KnowledgeEdge]:
+        return [
+            KnowledgeEdge(
+                id=self._reference_edge_id(archive_unit.source_id, reference.source_id),
+                from_unit_id=archive_unit.source_id,
+                to_unit_id=reference.source_id,
+                relation=EdgeRelation.REFERENCES,
+                source=EdgeSource.SOURCE,
+                metadata={
+                    "source_project": SourceProject.ARCHIVEBOX_INDEX_JSON.value,
+                    "relation_type": "archive_references_url",
+                    "original_url": archive_unit.metadata.get("url"),
+                    "url": reference.metadata.get("url"),
+                },
+            )
+            for reference in references
+        ]
+
+    def _reference_edge_id(self, archive_source_id: str, reference_source_id: str) -> str:
+        digest = hashlib.sha256(
+            f"{archive_source_id}|{reference_source_id}|references".encode("utf-8")
+        ).hexdigest()[:24]
+        return f"archivebox-index-json-references-{digest}"
 
     def _edge_id(self, archive_source_id: str, artifact_source_id: str) -> str:
         digest = hashlib.sha256(
