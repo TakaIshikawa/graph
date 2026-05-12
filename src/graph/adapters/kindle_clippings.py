@@ -20,7 +20,7 @@ class KindleClippingsAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["author", "book", "clipping"]
+        return ["author", "book", "clipping", "clipping_type"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -54,16 +54,21 @@ class KindleClippingsAdapter(SourceAdapter):
         books_for_author = self._book_units(clippings) if "author" in allowed_types and "book" not in allowed_types else []
         books = self._book_units(clippings) if "book" in allowed_types else books_for_author
         authors = self._author_units(books) if "author" in allowed_types else []
+        clipping_types = self._clipping_type_units(clippings) if "clipping_type" in allowed_types else []
         if "author" in allowed_types:
             result.units.extend(authors)
         if "book" in allowed_types:
             result.units.extend(books)
         if "clipping" in allowed_types:
             result.units.extend(clippings)
+        if "clipping_type" in allowed_types:
+            result.units.extend(clipping_types)
         if "book" in allowed_types and "clipping" in allowed_types:
             result.edges.extend(self._contains_edges(books, clippings))
         if "author" in allowed_types and "book" in allowed_types:
             result.edges.extend(self._author_book_edges(authors, books))
+        if "clipping_type" in allowed_types and "clipping" in allowed_types:
+            result.edges.extend(self._clipping_type_edges(clipping_types, clippings))
         if "clipping" in allowed_types:
             result.edges.extend(self._note_highlight_edges(clippings))
         result.units.sort(key=lambda unit: unit.source_id)
@@ -310,6 +315,49 @@ class KindleClippingsAdapter(SourceAdapter):
             )
         return units
 
+    def _clipping_type_units(self, clippings: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        for clipping in clippings:
+            clipping_type = str(clipping.metadata.get("clipping_type") or "").strip().lower()
+            if clipping_type:
+                grouped.setdefault(clipping_type, []).append(clipping)
+
+        units: list[KnowledgeUnit] = []
+        for clipping_type, type_clippings in sorted(grouped.items()):
+            authors = sorted({str(unit.metadata.get("author")) for unit in type_clippings if unit.metadata.get("author")})
+            source_files = sorted({str(unit.metadata.get("source_file")) for unit in type_clippings if unit.metadata.get("source_file")})
+            dates = [unit.created_at for unit in type_clippings]
+            locations = [
+                location
+                for clipping in type_clippings
+                if (location := self._location_start(clipping.metadata.get("location"))) is not None
+            ]
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.KINDLE,
+                    source_id=self._clipping_type_source_id(clipping_type),
+                    source_entity_type="clipping_type",
+                    title=f"Kindle {clipping_type}s",
+                    content=f"Kindle {clipping_type}s\nClippings: {len(type_clippings)}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "clipping_type": clipping_type,
+                        "clipping_count": len(type_clippings),
+                        "book_count": len({self._book_identity(unit.metadata) for unit in type_clippings if self._book_identity(unit.metadata)[0]}),
+                        "authors": authors,
+                        "source_files": source_files,
+                        "first_added_at": min(dates).isoformat() if dates else "",
+                        "latest_added_at": max(dates).isoformat() if dates else "",
+                        "location_start": min(locations) if locations else None,
+                        "location_end": max(locations) if locations else None,
+                    },
+                    tags=["kindle-clipping-type", clipping_type],
+                    created_at=min(dates),
+                    updated_at=max(dates),
+                )
+            )
+        return units
+
     def _contains_edges(self, books: list[KnowledgeUnit], clippings: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
         book_ids = {
             self._book_identity(book.metadata): book.source_id
@@ -363,6 +411,34 @@ class KindleClippingsAdapter(SourceAdapter):
                     metadata={
                         "source_project": SourceProject.KINDLE.value,
                         "relation_type": "author_contains_book",
+                    },
+                )
+            )
+        return edges
+
+    def _clipping_type_edges(self, clipping_types: list[KnowledgeUnit], clippings: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        type_ids = {str(unit.metadata.get("clipping_type") or ""): unit.source_id for unit in clipping_types}
+        edges: list[KnowledgeEdge] = []
+        seen: set[str] = set()
+        for clipping in clippings:
+            type_id = type_ids.get(str(clipping.metadata.get("clipping_type") or ""))
+            if not type_id:
+                continue
+            edge_id = self._clipping_type_edge_id(type_id, clipping.source_id)
+            if edge_id in seen:
+                continue
+            seen.add(edge_id)
+            edges.append(
+                KnowledgeEdge(
+                    id=edge_id,
+                    from_unit_id=type_id,
+                    to_unit_id=clipping.source_id,
+                    relation=EdgeRelation.CONTAINS,
+                    source=EdgeSource.SOURCE,
+                    metadata={
+                        "source_project": SourceProject.KINDLE.value,
+                        "relation_type": "clipping_type_contains_clipping",
+                        "clipping_type": clipping.metadata.get("clipping_type"),
                     },
                 )
             )
@@ -436,6 +512,10 @@ class KindleClippingsAdapter(SourceAdapter):
         normalized = " ".join(author.strip().casefold().split())
         return f"kindle_clippings:author:{self._digest(normalized, '', '', '')}"
 
+    def _clipping_type_source_id(self, clipping_type: str) -> str:
+        normalized = " ".join(clipping_type.strip().casefold().split())
+        return f"kindle_clippings:clipping_type:{self._digest(normalized, '', '', '')}"
+
     def _book_identity(self, metadata: dict) -> tuple[str, str]:
         title = " ".join(str(metadata.get("book_title", "")).strip().casefold().split())
         author = " ".join(str(metadata.get("author", "")).strip().casefold().split())
@@ -452,6 +532,10 @@ class KindleClippingsAdapter(SourceAdapter):
     def _author_book_edge_id(self, author_source_id: str, book_source_id: str) -> str:
         digest = self._digest(author_source_id, book_source_id, "contains", "author")
         return f"kindle-clippings-author-book-{digest}"
+
+    def _clipping_type_edge_id(self, type_source_id: str, clipping_source_id: str) -> str:
+        digest = self._digest(type_source_id, clipping_source_id, "contains", "clipping-type")
+        return f"kindle-clippings-type-clipping-{digest}"
 
     def _location_start(self, value: object) -> int | None:
         match = re.search(r"\d+", str(value or ""))

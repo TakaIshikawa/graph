@@ -47,9 +47,9 @@ def test_chrome_bookmarks_json_ingests_nested_bookmarks_dates_and_edges(tmp_path
         encoding="utf-8",
     )
 
-    result = ChromeBookmarksJsonAdapter(path=str(export)).ingest(entity_types=["bookmark"])
+    result = ChromeBookmarksJsonAdapter(path=str(export)).ingest(entity_types=["bookmark", "folder"])
 
-    assert sorted(unit.title for unit in result.units) == ["Graph Notes", "Other"]
+    assert sorted(unit.title for unit in result.units if unit.source_entity_type == "bookmark") == ["Graph Notes", "Other"]
     unit = next(unit for unit in result.units if unit.title == "Graph Notes")
     assert unit.source_project == "chrome_bookmarks_json"
     assert unit.source_entity_type == "bookmark"
@@ -61,9 +61,9 @@ def test_chrome_bookmarks_json_ingests_nested_bookmarks_dates_and_edges(tmp_path
     assert unit.metadata["date_added"] == "2021-01-01T00:00:00+00:00"
     assert unit.metadata["date_last_used"] == "2023-01-01T00:00:00+00:00"
     assert unit.content == "Graph Notes\nURL: https://example.com/graph\nRoot: Bookmarks Bar\nFolder: Research"
-    assert result.edges[0].to_unit_id == unit.source_id
-    assert result.edges[0].relation == "contains"
-    assert result.edges[0].metadata["folder_path"] == "Research"
+    folder_edge = next(edge for edge in result.edges if edge.to_unit_id == unit.source_id)
+    assert folder_edge.relation == "contains"
+    assert folder_edge.metadata["folder_path"] == "Research"
 
 
 def test_chrome_bookmarks_json_filters_since_and_entity_types(tmp_path):
@@ -90,7 +90,7 @@ def test_chrome_bookmarks_json_filters_since_and_entity_types(tmp_path):
 
     assert [unit.title for unit in result.units] == ["New"]
     assert ChromeBookmarksJsonAdapter(path=str(export)).ingest(entity_types=["history"]).units == []
-    assert ChromeBookmarksJsonAdapter(path=str(export)).entity_types == ["bookmark", "domain"]
+    assert ChromeBookmarksJsonAdapter(path=str(export)).entity_types == ["bookmark", "domain", "folder"]
 
 
 def test_chrome_bookmarks_json_source_id_fallback_is_stable(tmp_path):
@@ -172,3 +172,50 @@ def test_chrome_bookmarks_json_emits_domain_aggregates_and_edges(tmp_path):
     domain_only = ChromeBookmarksJsonAdapter(path=str(export)).ingest(entity_types=["domain"])
     assert {unit.source_entity_type for unit in domain_only.units} == {"domain"}
     assert domain_only.edges == []
+
+
+def test_chrome_bookmarks_json_emits_folder_units_and_filtered_edges(tmp_path):
+    export = tmp_path / "Bookmarks.json"
+    export.write_text(
+        json.dumps(
+            {
+                "roots": {
+                    "bookmark_bar": {
+                        "name": "Bookmarks Bar",
+                        "type": "folder",
+                        "children": [
+                            {
+                                "name": "Research",
+                                "type": "folder",
+                                "children": [
+                                    {"type": "url", "name": "A", "url": "https://example.com/a", "guid": "guid-a"},
+                                    {"name": "Deep", "type": "folder", "children": [{"type": "url", "name": "B", "url": "https://example.com/b", "guid": "guid-b"}]},
+                                ],
+                            }
+                        ],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = ChromeBookmarksJsonAdapter(path=str(export)).ingest(entity_types=["bookmark", "folder"])
+    folders = {unit.metadata["folder_path"]: unit for unit in result.units if unit.source_entity_type == "folder"}
+
+    assert set(folders) == {"", "Research", "Research/Deep"}
+    assert folders["Research"].metadata["root"] == "bookmark_bar"
+    assert folders["Research"].metadata["root_name"] == "Bookmarks Bar"
+    assert folders["Research"].metadata["parent_folder_path"] == ""
+    assert folders["Research"].metadata["child_bookmark_count"] == 1
+    assert folders["Research"].metadata["child_folder_count"] == 1
+    assert folders["Research"].metadata["bookmark_count"] == 2
+    assert len(result.edges) == 2
+    assert all(edge.from_unit_id in {folders["Research"].source_id, folders["Research/Deep"].source_id} for edge in result.edges)
+
+    bookmark_only = ChromeBookmarksJsonAdapter(path=str(export)).ingest(entity_types=["bookmark"])
+    folder_only = ChromeBookmarksJsonAdapter(path=str(export)).ingest(entity_types=["folder"])
+    assert {unit.source_entity_type for unit in bookmark_only.units} == {"bookmark"}
+    assert bookmark_only.edges == []
+    assert {unit.source_entity_type for unit in folder_only.units} == {"folder"}
+    assert folder_only.edges == []

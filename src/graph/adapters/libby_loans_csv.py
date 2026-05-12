@@ -21,17 +21,18 @@ class LibbyLoansCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["loan", "author"]
+        return ["loan", "author", "book"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
 
     def ingest(self, *, since: SyncState | None = None, entity_types: list[str] | None = None) -> IngestResult:
         result = IngestResult()
-        allowed_types = set(entity_types or self.entity_types)
+        allowed_types = set(entity_types) if entity_types is not None else {"loan", "author"}
         if not allowed_types.intersection(self.entity_types):
             return result
         sync_at = self._ensure_utc(since.last_sync_at) if since else None
+        loans: list[KnowledgeUnit] = []
         for path in self._iter_paths():
             try:
                 rows = self._read_rows(path)
@@ -43,6 +44,7 @@ class LibbyLoansCsvAdapter(SourceAdapter):
                     continue
                 if sync_at and unit.updated_at <= sync_at:
                     continue
+                loans.append(unit)
                 authors = self._authors(unit)
                 if "loan" in allowed_types:
                     result.units.append(unit)
@@ -52,11 +54,82 @@ class LibbyLoansCsvAdapter(SourceAdapter):
                     result.edges.extend(self._author_edges(unit, authors))
                 if "loan" in allowed_types:
                     result.edges.extend(self._edges_for_unit(unit))
+        book_units = self._book_units(loans) if "book" in allowed_types else []
+        if "book" in allowed_types:
+            result.units.extend(book_units)
+        if {"book", "loan"}.issubset(allowed_types):
+            result.edges.extend(self._book_edges(book_units, loans))
         result.units = list({unit.source_id: unit for unit in result.units}.values())
         result.edges = list({edge.id: edge for edge in result.edges}.values())
         result.units.sort(key=lambda unit: unit.source_id)
         result.edges.sort(key=lambda edge: edge.id)
         return result
+
+    def _book_units(self, loans: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[tuple[str, str, str], list[KnowledgeUnit]] = {}
+        for loan in loans:
+            key = self._book_key(loan)
+            if key[0] or key[1]:
+                grouped.setdefault(key, []).append(loan)
+
+        units: list[KnowledgeUnit] = []
+        for key, book_loans in grouped.items():
+            first = book_loans[0]
+            title = str(first.metadata.get("title") or key[1])
+            authors = sorted({author for loan in book_loans for author in self._authors(loan)})
+            isbn = str(first.metadata.get("isbn") or "")
+            borrowed = [self._parse_date(str(loan.metadata.get("borrowed_at") or "")) for loan in book_loans]
+            returned = [self._parse_date(str(loan.metadata.get("returned_at") or "")) for loan in book_loans]
+            borrowed_dates = [value for value in borrowed if value is not None]
+            returned_dates = [value for value in returned if value is not None]
+            metadata = {
+                "title": title,
+                "authors": authors,
+                "isbn": isbn,
+                "formats": sorted({str(loan.metadata.get("format")) for loan in book_loans if loan.metadata.get("format")}),
+                "libraries": sorted({str(loan.metadata.get("library")) for loan in book_loans if loan.metadata.get("library")}),
+                "loan_count": len(book_loans),
+                "first_borrowed_at": min(borrowed_dates).isoformat() if borrowed_dates else "",
+                "last_returned_at": max(returned_dates).isoformat() if returned_dates else "",
+                "subjects": sorted({subject for loan in book_loans for subject in (loan.metadata.get("subjects") or [])}),
+                "source_files": sorted({str(loan.metadata.get("source_file")) for loan in book_loans if loan.metadata.get("source_file")}),
+                "loan_source_ids": sorted(loan.source_id for loan in book_loans),
+            }
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.LIBBY_LOANS_CSV,
+                    source_id=self._book_source_id(key),
+                    source_entity_type="book",
+                    title=title,
+                    content=title if not authors else f"{title}\nAuthors: {', '.join(authors)}",
+                    content_type=ContentType.ARTIFACT,
+                    metadata={key: value for key, value in metadata.items() if value not in ("", None, [])},
+                    tags=list(dict.fromkeys(["libby", "book", *metadata["subjects"]])),
+                    created_at=min((loan.created_at for loan in book_loans)),
+                    updated_at=max((loan.updated_at for loan in book_loans)),
+                )
+            )
+        return units
+
+    def _book_edges(self, books: list[KnowledgeUnit], loans: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        book_ids = {book.source_id for book in books}
+        edges: list[KnowledgeEdge] = []
+        for loan in loans:
+            book_id = self._book_source_id(self._book_key(loan))
+            if book_id not in book_ids:
+                continue
+            if book_id:
+                edges.append(
+                    KnowledgeEdge(
+                        id=f"libby_loans_csv:book:{hashlib.sha256(f'{book_id}|{loan.source_id}|book_loan'.encode('utf-8')).hexdigest()[:24]}",
+                        from_unit_id=book_id,
+                        to_unit_id=loan.source_id,
+                        relation=EdgeRelation.CONTAINS,
+                        source=EdgeSource.SOURCE,
+                        metadata={"kind": "book", "relation_type": "book_contains_loan"},
+                    )
+                )
+        return edges
 
     def _iter_paths(self) -> list[Path]:
         if not self.path:
@@ -161,6 +234,16 @@ class LibbyLoansCsvAdapter(SourceAdapter):
         raw = isbn or "|".join([title, author, library, borrowed.isoformat() if borrowed else ""])
         digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
         return f"libby_loans_csv:{digest}"
+
+    def _book_key(self, loan: KnowledgeUnit) -> tuple[str, str, str]:
+        isbn = re.sub(r"[^0-9Xx]", "", str(loan.metadata.get("isbn") or "")).casefold()
+        title = " ".join(str(loan.metadata.get("title") or "").casefold().split())
+        author = " ".join(str(loan.metadata.get("author") or "").casefold().split())
+        return (isbn, "", "") if isbn else ("", title, author)
+
+    def _book_source_id(self, key: tuple[str, str, str]) -> str:
+        digest = hashlib.sha256("|".join(key).encode("utf-8")).hexdigest()[:24]
+        return f"libby_loans_csv:book:{digest}"
 
     def _first(self, row: dict[str, Any], *keys: str) -> str:
         compact = {self._normalize_key(key): value for key, value in row.items()}

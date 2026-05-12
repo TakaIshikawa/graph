@@ -28,6 +28,17 @@ class _Bookmark:
     source_id: str
 
 
+@dataclass
+class _Folder:
+    name: str
+    folder_path: tuple[str, ...]
+    parent_folder_path: tuple[str, ...]
+    root: str
+    root_name: str
+    child_bookmark_count: int
+    child_folder_count: int
+
+
 class ChromeBookmarksJsonAdapter(SourceAdapter):
     @property
     def name(self) -> str:
@@ -35,7 +46,7 @@ class ChromeBookmarksJsonAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["bookmark", "domain"]
+        return ["bookmark", "domain", "folder"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -48,12 +59,15 @@ class ChromeBookmarksJsonAdapter(SourceAdapter):
 
         sync_at = ensure_utc(since.last_sync_at) if since else None
         bookmark_units: list[KnowledgeUnit] = []
+        folder_records: list[tuple[_Folder, str]] = []
         for path in self._iter_paths():
             try:
                 parsed = json.loads(path.read_text(encoding="utf-8-sig"))
             except (OSError, UnicodeDecodeError, json.JSONDecodeError):
                 continue
-            for bookmark in self._bookmarks(parsed):
+            bookmarks, folders = self._bookmarks_and_folders(parsed)
+            folder_records.extend((folder, path.name) for folder in folders)
+            for bookmark in bookmarks:
                 created_at = self._chrome_datetime(bookmark.date_added)
                 last_used_at = self._chrome_datetime(bookmark.date_last_used)
                 comparable_at = last_used_at or created_at
@@ -61,16 +75,19 @@ class ChromeBookmarksJsonAdapter(SourceAdapter):
                     continue
                 unit = self._unit(bookmark, path.name, created_at, last_used_at)
                 bookmark_units.append(unit)
-                if "bookmark" in allowed_types:
+                if {"bookmark", "folder"}.issubset(allowed_types):
                     edge = self._folder_edge(bookmark, unit.source_id)
                     if edge:
                         result.edges.append(edge)
 
         domain_units = self._domain_units(bookmark_units)
+        folder_units = self._folder_units(folder_records, bookmark_units)
         if "bookmark" in allowed_types:
             result.units.extend(bookmark_units)
         if "domain" in allowed_types:
             result.units.extend(domain_units)
+        if "folder" in allowed_types:
+            result.units.extend(folder_units)
         if {"bookmark", "domain"}.issubset(allowed_types):
             result.edges.extend(self._domain_edges(domain_units, bookmark_units))
         result.units.sort(key=lambda unit: unit.source_id)
@@ -87,27 +104,30 @@ class ChromeBookmarksJsonAdapter(SourceAdapter):
             return []
         return sorted(child for child in root.rglob("*.json") if child.is_file())
 
-    def _bookmarks(self, parsed: Any) -> list[_Bookmark]:
+    def _bookmarks_and_folders(self, parsed: Any) -> tuple[list[_Bookmark], list[_Folder]]:
         if not isinstance(parsed, dict):
-            return []
+            return [], []
         roots = parsed.get("roots")
         if not isinstance(roots, dict):
             roots = parsed
         bookmarks: list[_Bookmark] = []
+        folders: list[_Folder] = []
         for root_key, node in roots.items():
             if not isinstance(node, dict):
                 continue
             root_name = self._root_name(str(root_key), node)
-            self._walk(node, (), str(root_key), root_name, bookmarks)
-        return bookmarks
+            self._walk(node, (), (), str(root_key), root_name, bookmarks, folders)
+        return bookmarks, folders
 
     def _walk(
         self,
         node: dict[str, Any],
         folder_path: tuple[str, ...],
+        parent_folder_path: tuple[str, ...],
         root: str,
         root_name: str,
         bookmarks: list[_Bookmark],
+        folders: list[_Folder],
     ) -> None:
         if node.get("type") == "url" or node.get("url"):
             url = self._text(node.get("url"))
@@ -134,9 +154,20 @@ class ChromeBookmarksJsonAdapter(SourceAdapter):
             next_path = (*folder_path, name)
         children = node.get("children")
         if isinstance(children, list):
+            folders.append(
+                _Folder(
+                    name=name or root_name,
+                    folder_path=next_path,
+                    parent_folder_path=parent_folder_path,
+                    root=root,
+                    root_name=root_name,
+                    child_bookmark_count=sum(1 for child in children if isinstance(child, dict) and (child.get("type") == "url" or child.get("url"))),
+                    child_folder_count=sum(1 for child in children if isinstance(child, dict) and not (child.get("type") == "url" or child.get("url"))),
+                )
+            )
             for child in children:
                 if isinstance(child, dict):
-                    self._walk(child, next_path, root, root_name, bookmarks)
+                    self._walk(child, next_path, next_path, root, root_name, bookmarks, folders)
 
     def _unit(
         self,
@@ -228,6 +259,59 @@ class ChromeBookmarksJsonAdapter(SourceAdapter):
             )
         return units
 
+    def _folder_units(self, folders: list[tuple[_Folder, str]], bookmarks: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        units: dict[str, KnowledgeUnit] = {}
+        now = datetime.now(timezone.utc)
+        for folder, source_file in folders:
+            folder_path = "/".join(folder.folder_path)
+            parent_path = "/".join(folder.parent_folder_path)
+            descendant_bookmarks = [
+                bookmark
+                for bookmark in bookmarks
+                if bookmark.metadata.get("root") == folder.root
+                and (
+                    str(bookmark.metadata.get("folder_path") or "") == folder_path
+                    or (folder_path and str(bookmark.metadata.get("folder_path") or "").startswith(f"{folder_path}/"))
+                    or (not folder_path and bookmark.metadata.get("root") == folder.root)
+                )
+            ]
+            added = [
+                parsed
+                for bookmark in descendant_bookmarks
+                if (parsed := self._iso_datetime(bookmark.metadata.get("date_added"))) is not None
+            ]
+            metadata = {
+                "root": folder.root,
+                "root_name": folder.root_name,
+                "folder_path": folder_path,
+                "parent_folder_path": parent_path,
+                "child_bookmark_count": folder.child_bookmark_count,
+                "child_folder_count": folder.child_folder_count,
+                "bookmark_count": len(descendant_bookmarks),
+                "source_files": [source_file],
+                "first_added_at": min(added).isoformat() if added else "",
+                "latest_added_at": max(added).isoformat() if added else "",
+            }
+            unit = KnowledgeUnit(
+                source_project="chrome_bookmarks_json",
+                source_id=self._folder_source_id(folder.root, folder_path),
+                source_entity_type="folder",
+                title=folder_path or folder.root_name,
+                content=f"Chrome bookmark folder: {folder_path or folder.root_name}",
+                content_type=ContentType.METADATA,
+                metadata=metadata,
+                tags=list(dict.fromkeys(tag for tag in ["chrome-bookmark-folder", folder.root_name, folder_path] if tag)),
+                created_at=min(added, default=now),
+                updated_at=max(added, default=now),
+            )
+            existing = units.get(unit.source_id)
+            if existing is None:
+                units[unit.source_id] = unit
+            else:
+                files = sorted({*(existing.metadata.get("source_files") or []), source_file})
+                existing.metadata["source_files"] = files
+        return list(units.values())
+
     def _domain_edges(self, domains: list[KnowledgeUnit], bookmarks: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
         domain_ids = {str(unit.metadata.get("domain")): unit.source_id for unit in domains}
         edges: list[KnowledgeEdge] = []
@@ -267,7 +351,7 @@ class ChromeBookmarksJsonAdapter(SourceAdapter):
     def _folder_edge(self, bookmark: _Bookmark, unit_source_id: str) -> KnowledgeEdge | None:
         if not bookmark.folder_path:
             return None
-        folder_source_id = digest_source_id("chrome_bookmarks_json_folder", bookmark.root, "/".join(bookmark.folder_path))
+        folder_source_id = self._folder_source_id(bookmark.root, "/".join(bookmark.folder_path))
         edge_id = digest_source_id("chrome_bookmarks_json_edge", folder_source_id, unit_source_id)
         return KnowledgeEdge(
             id=edge_id,
@@ -277,6 +361,9 @@ class ChromeBookmarksJsonAdapter(SourceAdapter):
             source=EdgeSource.SOURCE,
             metadata={"folder_path": "/".join(bookmark.folder_path), "root": bookmark.root, "root_name": bookmark.root_name},
         )
+
+    def _folder_source_id(self, root: str, folder_path: str) -> str:
+        return digest_source_id("chrome_bookmarks_json_folder", root, folder_path)
 
     def _content(self, bookmark: _Bookmark, folder_path: str) -> str:
         parts = [bookmark.title, f"URL: {bookmark.url}", f"Root: {bookmark.root_name}"]
