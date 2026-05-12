@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class BoardGameGeekCollectionCsvAdapter(SourceAdapter):
@@ -21,7 +21,7 @@ class BoardGameGeekCollectionCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["board_game"]
+        return ["board_game", "publisher"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -33,9 +33,11 @@ class BoardGameGeekCollectionCsvAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        if entity_types and "board_game" not in entity_types:
+        allowed = set(entity_types or ["board_game"])
+        if not allowed.intersection(self.entity_types):
             return result
         sync_at = self._ensure_utc(since.last_sync_at) if since else None
+        games: list[KnowledgeUnit] = []
         for path in self._iter_paths():
             try:
                 rows = self._read_rows(path)
@@ -47,8 +49,16 @@ class BoardGameGeekCollectionCsvAdapter(SourceAdapter):
                     continue
                 if sync_at and unit.updated_at <= sync_at:
                     continue
-                result.units.append(unit)
+                games.append(unit)
+        publishers = self._publisher_units(games) if "publisher" in allowed else []
+        if "board_game" in allowed:
+            result.units.extend(games)
+        if "publisher" in allowed:
+            result.units.extend(publishers)
+        if {"board_game", "publisher"}.issubset(allowed):
+            result.edges.extend(self._publisher_game_edges(publishers))
         result.units.sort(key=lambda unit: unit.source_id)
+        result.edges.sort(key=lambda edge: edge.id)
         return result
 
     def _iter_paths(self) -> list[Path]:
@@ -121,6 +131,80 @@ class BoardGameGeekCollectionCsvAdapter(SourceAdapter):
             return f"boardgamegeek_collection_csv:{bgg_id}"
         digest = hashlib.sha256(title.encode("utf-8")).hexdigest()[:24]
         return f"boardgamegeek_collection_csv:{digest}"
+
+    def _publisher_units(self, games: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        names: dict[str, str] = {}
+        for game in games:
+            for publisher in game.metadata.get("publishers", []) or []:
+                publisher_text = str(publisher).strip()
+                if not publisher_text:
+                    continue
+                normalized = self._normalize_publisher(publisher_text)
+                grouped.setdefault(normalized, []).append(game)
+                names.setdefault(normalized, publisher_text)
+
+        now = datetime.now(timezone.utc)
+        units: list[KnowledgeUnit] = []
+        for normalized, publisher_games in sorted(grouped.items()):
+            game_source_ids = sorted(game.source_id for game in publisher_games)
+            ratings = [rating for game in publisher_games if isinstance((rating := game.metadata.get("rating")), int | float)]
+            years = [year for game in publisher_games if isinstance((year := game.metadata.get("year_published")), int)]
+            publisher = names[normalized]
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.BOARDGAMEGEEK_COLLECTION_CSV,
+                    source_id=self._publisher_source_id(normalized),
+                    source_entity_type="publisher",
+                    title=publisher,
+                    content=f"BoardGameGeek publisher: {publisher}\nGames: {len(publisher_games)}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "publisher": publisher,
+                        "normalized_publisher": normalized,
+                        "game_count": len(publisher_games),
+                        "game_source_ids": game_source_ids,
+                        "owned_count": sum(1 for game in publisher_games if game.metadata.get("owned") is True),
+                        "played_count": sum(1 for game in publisher_games if int(game.metadata.get("plays") or 0) > 0),
+                        "average_user_rating": (sum(float(rating) for rating in ratings) / len(ratings)) if ratings else None,
+                        "year_range": [min(years), max(years)] if years else None,
+                    },
+                    tags=["boardgamegeek", "publisher", publisher],
+                    created_at=min((game.created_at for game in publisher_games), default=now),
+                    updated_at=max((game.updated_at for game in publisher_games), default=now),
+                )
+            )
+        return units
+
+    def _publisher_game_edges(self, publishers: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        edges: list[KnowledgeEdge] = []
+        for publisher in publishers:
+            for game_source_id in publisher.metadata.get("game_source_ids") or []:
+                edges.append(
+                    KnowledgeEdge(
+                        id=self._edge_id(publisher.source_id, str(game_source_id), "publisher_contains_game"),
+                        from_unit_id=publisher.source_id,
+                        to_unit_id=str(game_source_id),
+                        relation=EdgeRelation.CONTAINS,
+                        source=EdgeSource.SOURCE,
+                        metadata={
+                            "source_project": SourceProject.BOARDGAMEGEEK_COLLECTION_CSV.value,
+                            "relation_type": "publisher_contains_game",
+                        },
+                    )
+                )
+        return edges
+
+    def _normalize_publisher(self, publisher: str) -> str:
+        return " ".join(publisher.split()).casefold()
+
+    def _publisher_source_id(self, normalized_publisher: str) -> str:
+        digest = hashlib.sha256(normalized_publisher.encode("utf-8")).hexdigest()[:24]
+        return f"boardgamegeek_collection_csv:publisher:{digest}"
+
+    def _edge_id(self, from_id: str, to_id: str, relation_type: str) -> str:
+        digest = hashlib.sha256("|".join([from_id, to_id, relation_type]).encode("utf-8")).hexdigest()[:24]
+        return f"boardgamegeek-collection-csv-edge:{digest}"
 
     def _title(self, title: str, year: int | None) -> str:
         return f"{title} ({year})" if year else title
