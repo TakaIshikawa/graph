@@ -4,7 +4,7 @@ import csv
 
 from graph.adapters.google_contacts_csv import GoogleContactsCsvAdapter
 from graph.adapters.registry import get_adapter
-from graph.types.enums import EdgeRelation, SourceProject
+from graph.types.enums import EdgeRelation, EdgeSource, SourceProject
 
 
 def _write_csv(path, rows):
@@ -154,3 +154,108 @@ def test_google_contacts_csv_emits_group_units_and_edges(tmp_path):
     group_only = GoogleContactsCsvAdapter(path=str(export)).ingest(entity_types=["group"])
     assert {unit.source_entity_type for unit in group_only.units} == {"group"}
     assert group_only.edges == []
+
+
+def test_google_contacts_csv_parses_relationship_metadata_and_content(tmp_path):
+    export = tmp_path / "contacts.csv"
+    _write_csv(
+        export,
+        [
+            {
+                "Name": "Ada Lovelace",
+                "Relation 1 - Type": "Spouse",
+                "Relation 1 - Value": "Charles Babbage",
+                "Relation 2 - Type": "Colleague",
+                "Relation 2 - Value": "grace@example.com",
+                "Relation 3 - Type": "spouse",
+                "Relation 3 - Value": "Charles Babbage",
+            }
+        ],
+    )
+
+    result = GoogleContactsCsvAdapter(path=str(export)).ingest()
+
+    contact = next(unit for unit in result.units if unit.source_entity_type == "contact")
+    assert contact.metadata["relationships"] == [
+        {"type": "Spouse", "value": "Charles Babbage"},
+        {"type": "Colleague", "value": "grace@example.com"},
+    ]
+    assert "Relationships: Spouse: Charles Babbage, Colleague: grace@example.com" in contact.content
+
+
+def test_google_contacts_csv_emits_relationship_edges_by_name_and_email(tmp_path):
+    export = tmp_path / "contacts.csv"
+    _write_csv(
+        export,
+        [
+            {
+                "Name": "Ada Lovelace",
+                "E-mail 1 - Value": "ada@example.com",
+                "Relation 1 - Type": "Spouse",
+                "Relation 1 - Value": "charles babbage",
+                "Relation 2 - Type": "Colleague",
+                "Relation 2 - Value": "grace@example.com",
+            },
+            {"Name": "Charles Babbage", "E-mail 1 - Value": "charles@example.com"},
+            {"Name": "Grace Hopper", "E-mail 1 - Value": "grace@example.com"},
+        ],
+    )
+
+    first = GoogleContactsCsvAdapter(path=str(export)).ingest(entity_types=["contact"])
+    second = GoogleContactsCsvAdapter(path=str(export)).ingest(entity_types=["contact"])
+
+    contacts = {unit.title: unit for unit in first.units}
+    edges = sorted(first.edges, key=lambda edge: edge.metadata["relationship_type"])
+    assert len(edges) == 2
+    assert [edge.id for edge in first.edges] == [edge.id for edge in second.edges]
+    assert {edge.relation for edge in edges} == {EdgeRelation.REFERENCES}
+    assert {edge.source for edge in edges} == {EdgeSource.SOURCE}
+    assert {edge.from_unit_id for edge in edges} == {contacts["Ada Lovelace"].source_id}
+    assert {edge.to_unit_id for edge in edges} == {
+        contacts["Charles Babbage"].source_id,
+        contacts["Grace Hopper"].source_id,
+    }
+    assert [edge.metadata for edge in edges] == [
+        {
+            "source_project": SourceProject.GOOGLE_CONTACTS_CSV.value,
+            "from_entity_type": "contact",
+            "to_entity_type": "contact",
+            "relationship_type": "Colleague",
+            "relationship_value": "grace@example.com",
+        },
+        {
+            "source_project": SourceProject.GOOGLE_CONTACTS_CSV.value,
+            "from_entity_type": "contact",
+            "to_entity_type": "contact",
+            "relationship_type": "Spouse",
+            "relationship_value": "charles babbage",
+        },
+    ]
+
+
+def test_google_contacts_csv_relationship_edges_respect_filters_and_skip_self_or_no_match(tmp_path):
+    export = tmp_path / "contacts.csv"
+    _write_csv(
+        export,
+        [
+            {
+                "Name": "Ada Lovelace",
+                "E-mail 1 - Value": "ada@example.com",
+                "Relation 1 - Type": "Self",
+                "Relation 1 - Value": "ada@example.com",
+                "Relation 2 - Type": "Friend",
+                "Relation 2 - Value": "Unknown Person",
+            },
+            {"Name": "Grace Hopper", "E-mail 1 - Value": "grace@example.com"},
+        ],
+    )
+
+    result = GoogleContactsCsvAdapter(path=str(export)).ingest(entity_types=["contact"])
+    ada = next(unit for unit in result.units if unit.title == "Ada Lovelace")
+
+    assert ada.metadata["relationships"] == [
+        {"type": "Self", "value": "ada@example.com"},
+        {"type": "Friend", "value": "Unknown Person"},
+    ]
+    assert result.edges == []
+    assert GoogleContactsCsvAdapter(path=str(export)).ingest(entity_types=["group"]).edges == []
