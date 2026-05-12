@@ -53,6 +53,27 @@ _DUPLICATE_EXTERNAL_URL_KEYS = frozenset(
     }
 )
 _CONTENT_URL_RE = re.compile(r"https?://[^\s<>\[\]{}\"']+", re.IGNORECASE)
+_UNIT_TITLE_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "for",
+        "from",
+        "in",
+        "into",
+        "is",
+        "of",
+        "on",
+        "or",
+        "the",
+        "to",
+        "with",
+    }
+)
 
 if TYPE_CHECKING:
     from graph.adapters.base import IngestResult
@@ -2244,6 +2265,81 @@ class Store:
         ]
         summary_rows.sort(key=lambda row: (-row["unit_count"], row["domain"]))
         return summary_rows[:limit] if limit is not None else summary_rows
+
+    def unit_title_terms(
+        self,
+        *,
+        source_project: SourceProject | str | None = None,
+        content_type: str | None = None,
+        min_unit_count: int = 1,
+        limit: int | None = None,
+        min_term_length: int = 3,
+    ) -> list[dict[str, Any]]:
+        """Extract frequent normalized terms from unit titles."""
+        if (
+            not isinstance(min_unit_count, int)
+            or isinstance(min_unit_count, bool)
+            or min_unit_count < 1
+        ):
+            raise ValueError("min_unit_count must be a positive integer")
+        if limit is not None and (
+            not isinstance(limit, int) or isinstance(limit, bool) or limit < 1
+        ):
+            raise ValueError("limit must be a positive integer or None")
+        if (
+            not isinstance(min_term_length, int)
+            or isinstance(min_term_length, bool)
+            or min_term_length < 1
+        ):
+            raise ValueError("min_term_length must be a positive integer")
+
+        where_parts: list[str] = []
+        params: list[object] = []
+        if source_project is not None:
+            where_parts.append("source_project = ?")
+            params.append(str(_model_value(source_project)))
+        if content_type is not None:
+            where_parts.append("content_type = ?")
+            params.append(str(_model_value(content_type)))
+
+        query = """SELECT id, title, source_project
+                   FROM knowledge_units"""
+        if where_parts:
+            query += " WHERE " + " AND ".join(where_parts)
+        query += " ORDER BY source_project, id"
+
+        unit_ids: dict[str, set[str]] = defaultdict(set)
+        source_project_counts: dict[str, Counter[str]] = defaultdict(Counter)
+        example_unit_ids: dict[str, list[str]] = defaultdict(list)
+
+        for row in self.conn.execute(query, params).fetchall():
+            terms = {
+                term.casefold()
+                for term in re.findall(r"[A-Za-z0-9]+", row["title"] or "")
+                if len(term.casefold()) >= min_term_length
+                and term.casefold() not in _UNIT_TITLE_STOPWORDS
+            }
+            for term in sorted(terms):
+                unit_id = str(row["id"])
+                if unit_id in unit_ids[term]:
+                    continue
+                unit_ids[term].add(unit_id)
+                source_project_counts[term][str(row["source_project"])] += 1
+                if len(example_unit_ids[term]) < _MAX_METADATA_INVENTORY_EXAMPLES:
+                    example_unit_ids[term].append(unit_id)
+
+        rows = [
+            {
+                "term": term,
+                "unit_count": len(ids),
+                "source_project_counts": _sorted_counter_dict(source_project_counts[term]),
+                "example_unit_ids": example_unit_ids[term],
+            }
+            for term, ids in unit_ids.items()
+            if len(ids) >= min_unit_count
+        ]
+        rows.sort(key=lambda row: (-row["unit_count"], row["term"]))
+        return rows[:limit] if limit is not None else rows
 
     def tag_freshness_summary(
         self,
