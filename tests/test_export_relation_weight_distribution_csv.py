@@ -125,6 +125,7 @@ def test_relation_weight_distribution_csv_path_mode_writes_same_content_and_stat
     assert stats == {
         "path": str(path),
         "edge_count": 1,
+        "relation_source_count": 1,
         "rows_exported": 1,
         "strong_threshold": 1.5,
         "bytes_written": path.stat().st_size,

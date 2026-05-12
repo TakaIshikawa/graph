@@ -50,6 +50,7 @@ def export_relation_weight_distribution_csv(
     return {
         "path": str(output_path),
         "edge_count": len(edge_list),
+        "relation_source_count": len(rows),
         "rows_exported": len(rows),
         "strong_threshold": threshold,
         "bytes_written": output_path.stat().st_size,
