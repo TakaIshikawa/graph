@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
+
+
+URL_RE = re.compile(r"https?://[^\s<>)\]}\"']+")
 
 
 class GithubIssuesJsonAdapter(SourceAdapter):
@@ -46,7 +50,9 @@ class GithubIssuesJsonAdapter(SourceAdapter):
                 if sync_at and unit.updated_at <= sync_at:
                     continue
                 result.units.append(unit)
+                result.edges.extend(self._edges_from_unit(unit))
         result.units.sort(key=lambda unit: unit.source_id)
+        result.edges = sorted({edge.id: edge for edge in result.edges}.values(), key=lambda edge: edge.id)
         return result
 
     def _iter_paths(self) -> list[Path]:
@@ -84,6 +90,7 @@ class GithubIssuesJsonAdapter(SourceAdapter):
         closed_at = self._parse_datetime(record.get("closed_at"))
         labels = self._labels(record.get("labels"))
         author = self._author(record.get("user"))
+        assignees = self._assignees(record)
         milestone = self._milestone_metadata(record.get("milestone"))
         metadata = {
             "title": title,
@@ -92,6 +99,7 @@ class GithubIssuesJsonAdapter(SourceAdapter):
             "labels": labels,
             "repository": repository,
             "author": author,
+            "assignees": assignees,
             "url": url,
             "issue_number": number,
             "created_at": created_at.isoformat() if created_at else self._text(record.get("created_at")),
@@ -123,6 +131,50 @@ class GithubIssuesJsonAdapter(SourceAdapter):
         raw = url or f"{repository}|{number}|{title}"
         digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
         return f"github_issues_json:{digest}"
+
+    def _edges_from_unit(self, unit: KnowledgeUnit) -> list[KnowledgeEdge]:
+        edges: list[KnowledgeEdge] = []
+        metadata = unit.metadata
+        for kind, value in (("author", metadata.get("author")), ("milestone", metadata.get("milestone_title"))):
+            text = self._text(value)
+            if text:
+                edges.append(self._edge(unit.source_id, self._target_id(kind, text), kind, text, EdgeRelation.RELATES_TO))
+        for assignee in metadata.get("assignees", []):
+            text = self._text(assignee)
+            if text:
+                edges.append(self._edge(unit.source_id, self._target_id("assignee", text), "assignee", text, EdgeRelation.RELATES_TO))
+        for url in self._mentioned_urls(metadata.get("body", "")):
+            edges.append(self._edge(unit.source_id, self._target_id("url", url), "mentioned_url", url, EdgeRelation.REFERENCES))
+        return edges
+
+    def _edge(self, source_id: str, target_id: str, kind: str, value: str, relation: EdgeRelation) -> KnowledgeEdge:
+        digest = hashlib.sha256(f"{source_id}|{kind}|{target_id}".encode("utf-8")).hexdigest()[:24]
+        return KnowledgeEdge(
+            id=f"github_issues_json:{kind}:{digest}",
+            from_unit_id=source_id,
+            to_unit_id=target_id,
+            relation=relation,
+            source=EdgeSource.SOURCE,
+            metadata={
+                "kind": kind,
+                "value": value,
+                "source_project": SourceProject.GITHUB_ISSUES_JSON.value,
+            },
+        )
+
+    def _target_id(self, kind: str, value: str) -> str:
+        normalized = value.strip().casefold() if kind != "url" else value.strip()
+        digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:24]
+        prefix = "url" if kind == "url" else kind
+        return f"github:{prefix}:{digest}"
+
+    def _mentioned_urls(self, text: Any) -> list[str]:
+        urls: list[str] = []
+        for match in URL_RE.findall(self._text(text)):
+            url = match.rstrip(".,;:")
+            if url and url not in urls:
+                urls.append(url)
+        return urls
 
     def _content(self, title: str, body: str, state: str, repository: str, number: int | None, url: str, labels: list[str]) -> str:
         parts = [title] if title else []
@@ -159,6 +211,19 @@ class GithubIssuesJsonAdapter(SourceAdapter):
         if isinstance(value, dict):
             return self._text(value.get("login") or value.get("name"))
         return self._text(value)
+
+    def _assignees(self, record: dict[str, Any]) -> list[str]:
+        raw = record.get("assignees")
+        if raw is None and record.get("assignee") is not None:
+            raw = [record.get("assignee")]
+        if not isinstance(raw, list):
+            return []
+        assignees: list[str] = []
+        for item in raw:
+            name = self._author(item)
+            if name and name not in assignees:
+                assignees.append(name)
+        return assignees
 
     def _milestone_metadata(self, value: Any) -> dict[str, Any]:
         if not isinstance(value, dict):

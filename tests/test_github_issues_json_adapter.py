@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from graph.adapters.github_issues_json import GithubIssuesJsonAdapter
 from graph.adapters.registry import get_adapter
+from graph.types.enums import EdgeRelation, EdgeSource
 from graph.types.enums import SourceProject
 
 
@@ -115,3 +116,40 @@ def test_github_issues_json_preserves_milestone_metadata(tmp_path):
     assert units["Ship milestone"].metadata["milestone_number"] == 3
     assert "v1.0" in units["Ship milestone"].tags
     assert "milestone_title" not in units["No milestone"].metadata
+
+
+def test_github_issues_json_emits_relationship_edges_deterministically(tmp_path):
+    export = tmp_path / "issues.json"
+    export.write_text(
+        json.dumps(
+            [
+                {
+                    "number": 10,
+                    "title": "Link relationships",
+                    "body": "See https://example.com/spec and https://example.com/spec.",
+                    "repository_full_name": "acme/graph",
+                    "user": {"login": "ada"},
+                    "assignees": [{"login": "grace"}, {"login": "grace"}],
+                    "milestone": {"title": "v1.0"},
+                },
+                {
+                    "number": 11,
+                    "title": "Single assignee",
+                    "body": "See https://example.com/other.",
+                    "repository_full_name": "acme/graph",
+                    "assignee": {"login": "grace"},
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = GithubIssuesJsonAdapter(path=str(export)).ingest()
+
+    assert len(result.units) == 2
+    assert len(result.edges) == len({edge.id for edge in result.edges})
+    first_edges = [edge for edge in result.edges if edge.from_unit_id == "github_issues_json:acme/graph#10"]
+    assert [edge.metadata["kind"] for edge in first_edges] == ["assignee", "author", "mentioned_url", "milestone"]
+    assert {edge.metadata["value"] for edge in first_edges} == {"ada", "grace", "v1.0", "https://example.com/spec"}
+    assert {edge.relation for edge in first_edges} == {EdgeRelation.RELATES_TO, EdgeRelation.REFERENCES}
+    assert all(edge.source == EdgeSource.SOURCE for edge in first_edges)
