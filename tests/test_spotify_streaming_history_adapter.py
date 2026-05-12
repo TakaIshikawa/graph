@@ -83,7 +83,7 @@ def test_spotify_streaming_history_ingests_legacy_and_extended_formats(tmp_path)
     assert extended_unit.metadata["offline"] is False
     assert extended_unit.metadata["source_file"] == "endsong_0.json"
     assert len([unit for unit in result.units if unit.source_entity_type == "session"]) == 2
-    assert len(result.edges) == 2
+    assert len([edge for edge in result.edges if edge.metadata["relation_type"] == "session_contains_play"]) == 2
 
 
 def test_spotify_streaming_history_reads_matching_files_in_name_order(tmp_path):
@@ -271,7 +271,7 @@ def test_spotify_streaming_history_sessions_and_filters(tmp_path):
     assert sessions[0].metadata["total_ms_played"] == 300
     assert sessions[0].metadata["artist_count"] == 2
     assert sessions[0].metadata["track_count"] == 2
-    assert len(combined.edges) == 3
+    assert len([edge for edge in combined.edges if edge.metadata["relation_type"] == "session_contains_play"]) == 3
     assert all(edge.relation == EdgeRelation.CONTAINS for edge in combined.edges)
 
     session_only = SpotifyStreamingHistoryAdapter(path=str(export)).ingest(entity_types=["session"])
@@ -280,6 +280,54 @@ def test_spotify_streaming_history_sessions_and_filters(tmp_path):
     assert session_only.edges == []
     assert {unit.source_entity_type for unit in play_only.units} == {"play"}
     assert play_only.edges == []
+
+
+def test_spotify_streaming_history_artist_and_track_aggregates(tmp_path):
+    export = tmp_path / "endsong_0.json"
+    export.write_text(
+        json.dumps(
+            [
+                {
+                    "ts": "2025-01-01T10:00:00Z",
+                    "master_metadata_track_name": "Repeat",
+                    "master_metadata_album_artist_name": "Artist A",
+                    "master_metadata_album_album_name": "Album 1",
+                    "spotify_track_uri": "spotify:track:repeat",
+                    "ms_played": 100,
+                    "conn_country": "US",
+                },
+                {
+                    "ts": "2025-01-02T10:00:00Z",
+                    "master_metadata_track_name": "Repeat",
+                    "master_metadata_album_artist_name": "Artist A",
+                    "master_metadata_album_album_name": "Album 1",
+                    "spotify_track_uri": "spotify:track:repeat",
+                    "ms_played": 200,
+                    "conn_country": "JP",
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = SpotifyStreamingHistoryAdapter(path=str(export)).ingest(entity_types=["artist", "track", "play"])
+
+    artist = next(unit for unit in result.units if unit.source_entity_type == "artist")
+    track = next(unit for unit in result.units if unit.source_entity_type == "track")
+    assert artist.metadata["artist_name"] == "Artist A"
+    assert artist.metadata["play_count"] == 2
+    assert artist.metadata["total_ms_played"] == 300
+    assert artist.metadata["first_played_at"] == "2025-01-01T10:00:00+00:00"
+    assert artist.metadata["last_played_at"] == "2025-01-02T10:00:00+00:00"
+    assert artist.metadata["countries"] == ["JP", "US"]
+    assert track.metadata["track_name"] == "Repeat"
+    assert track.metadata["play_count"] == 2
+    assert track.metadata["albums"] == ["Album 1"]
+    assert {edge.metadata["relation_type"] for edge in result.edges} == {
+        "artist_contains_track",
+        "track_contains_play",
+    }
+    assert len([edge for edge in result.edges if edge.metadata["relation_type"] == "track_contains_play"]) == 2
 
 
 def test_spotify_streaming_history_adapter_is_registered():
