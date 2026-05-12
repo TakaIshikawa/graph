@@ -210,6 +210,130 @@ def test_firefox_places_uses_url_for_missing_title(tmp_path):
     assert result.units[0].title == "https://untitled.test/path"
 
 
+def test_firefox_places_emits_search_terms_from_search_urls(tmp_path):
+    db = tmp_path / "places.sqlite"
+    with sqlite3.connect(db) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE moz_places (
+                id INTEGER PRIMARY KEY,
+                url TEXT,
+                title TEXT,
+                visit_count INTEGER,
+                frecency INTEGER,
+                typed INTEGER,
+                last_visit_date INTEGER
+            );
+            CREATE TABLE moz_historyvisits (
+                id INTEGER PRIMARY KEY,
+                place_id INTEGER,
+                visit_date INTEGER
+            );
+            """
+        )
+        conn.executemany(
+            "INSERT INTO moz_places VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [
+                (1, "https://www.google.com/search?q=Solar+Storage", "Google", 2, 10, 0, 1_735_689_600_000_000),
+                (2, "https://duckduckgo.com/?q=solar%20storage", "DuckDuckGo", 4, 10, 0, 1_735_693_200_000_000),
+            ],
+        )
+        conn.executemany(
+            "INSERT INTO moz_historyvisits VALUES (?, ?, ?)",
+            [
+                (1, 1, 1_735_689_600_000_000),
+                (2, 2, 1_735_693_200_000_000),
+                (3, 2, 1_735_696_800_000_000),
+            ],
+        )
+
+    result = FirefoxPlacesAdapter(path=str(db)).ingest(entity_types=["search_term"])
+
+    assert len(result.units) == 1
+    unit = result.units[0]
+    assert unit.source_entity_type == "search_term"
+    assert unit.title == "solar storage"
+    assert unit.source_id.startswith("firefox_places:search:")
+    assert unit.metadata == {
+        "query": "solar storage",
+        "visit_count": 3,
+        "first_seen_at": "2025-01-01T00:00:00+00:00",
+        "last_seen_at": "2025-01-01T02:00:00+00:00",
+        "source_table": "moz_places",
+        "source_file": "places.sqlite",
+    }
+    assert unit.tags == ["firefox", "search"]
+
+
+def test_firefox_places_emits_search_terms_from_moz_keywords(tmp_path):
+    db = tmp_path / "places.sqlite"
+    with sqlite3.connect(db) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE moz_places (
+                id INTEGER PRIMARY KEY,
+                url TEXT,
+                title TEXT,
+                visit_count INTEGER,
+                frecency INTEGER,
+                typed INTEGER,
+                last_visit_date INTEGER
+            );
+            CREATE TABLE moz_historyvisits (
+                id INTEGER PRIMARY KEY,
+                place_id INTEGER,
+                visit_date INTEGER
+            );
+            CREATE TABLE moz_keywords (
+                id INTEGER PRIMARY KEY,
+                keyword TEXT,
+                place_id INTEGER
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO moz_places VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (1, "https://example.com/search?q=%s", "Search", 1, 10, 0, 1_735_689_600_000_000),
+        )
+        conn.execute(
+            "INSERT INTO moz_historyvisits VALUES (?, ?, ?)",
+            (1, 1, 1_735_689_600_000_000),
+        )
+        conn.execute("INSERT INTO moz_keywords VALUES (?, ?, ?)", (1, "Paper Search", 1))
+
+    unit = FirefoxPlacesAdapter(path=str(db)).ingest(entity_types=["search_term"]).units[0]
+
+    assert unit.title == "paper search"
+    assert unit.metadata["source_table"] == "moz_keywords"
+    assert unit.metadata["visit_count"] == 1
+
+
+def test_firefox_places_handles_missing_search_tables_gracefully(tmp_path):
+    db = tmp_path / "places.sqlite"
+    with sqlite3.connect(db) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE moz_places (
+                id INTEGER PRIMARY KEY,
+                url TEXT,
+                title TEXT,
+                visit_count INTEGER,
+                frecency INTEGER,
+                typed INTEGER,
+                last_visit_date INTEGER
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO moz_places VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (1, "https://example.com/page", "Page", 1, 10, 0, 1_735_689_600_000_000),
+        )
+
+    result = FirefoxPlacesAdapter(path=str(db)).ingest(entity_types=["search_term"])
+
+    assert result.units == []
+
+
 def test_firefox_places_adapter_is_registered():
     assert "firefox_places" in list_adapters()
     assert get_adapter("firefox_places", path="/tmp/places.sqlite").name == "firefox_places"
