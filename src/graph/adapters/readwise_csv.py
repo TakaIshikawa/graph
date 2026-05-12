@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class ReadwiseCsvAdapter(SourceAdapter):
@@ -21,7 +21,7 @@ class ReadwiseCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["highlight"]
+        return ["highlight", "document"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -33,10 +33,15 @@ class ReadwiseCsvAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        if entity_types and "highlight" not in entity_types:
+        allowed = set(entity_types or ["highlight"])
+        if not allowed.intersection(self.entity_types):
             return result
 
         sync_at = self._sync_datetime(since) if since else None
+        document_rows: dict[str, dict[str, Any]] = {}
+        document_counts: dict[str, int] = {}
+        document_files: dict[str, set[str]] = {}
+        edge_candidates: list[KnowledgeEdge] = []
         for path, source_file in self._iter_paths():
             try:
                 rows = self._read_rows(path)
@@ -49,9 +54,23 @@ class ReadwiseCsvAdapter(SourceAdapter):
                     continue
                 if sync_at and unit.updated_at <= sync_at:
                     continue
-                result.units.append(unit)
+                document_id = self._document_source_id_from_metadata(unit.metadata)
+                unit.metadata["document_source_id"] = document_id
+                document_rows.setdefault(document_id, unit.metadata)
+                document_counts[document_id] = document_counts.get(document_id, 0) + 1
+                document_files.setdefault(document_id, set()).add(source_file)
+                if "highlight" in allowed:
+                    result.units.append(unit)
+                if {"highlight", "document"}.issubset(allowed):
+                    edge_candidates.append(self._document_edge(document_id, unit.source_id))
+
+        if "document" in allowed:
+            for document_id in sorted(document_rows):
+                result.units.append(self._document_unit(document_id, document_rows[document_id], document_counts[document_id], sorted(document_files[document_id])))
+        result.edges.extend(edge_candidates)
 
         result.units.sort(key=lambda unit: unit.source_id)
+        result.edges.sort(key=lambda edge: edge.id)
         return result
 
     def _iter_paths(self) -> list[tuple[Path, str]]:
@@ -133,6 +152,73 @@ class ReadwiseCsvAdapter(SourceAdapter):
             created_at=highlighted_at or now,
             updated_at=highlighted_at or now,
         )
+
+    def _document_unit(
+        self,
+        source_id: str,
+        metadata: dict[str, Any],
+        highlight_count: int,
+        source_files: list[str],
+    ) -> KnowledgeUnit:
+        title = str(metadata.get("title") or "Readwise document")
+        author = str(metadata.get("author") or "")
+        url = str(metadata.get("url") or "")
+        category = str(metadata.get("category") or "")
+        document_metadata = {
+            "title": title if title != "Readwise document" else "",
+            "author": author,
+            "url": url,
+            "category": category,
+            "source_files": source_files,
+            "highlight_count": highlight_count,
+        }
+        return KnowledgeUnit(
+            source_project=SourceProject.READWISE_CSV,
+            source_id=source_id,
+            source_entity_type="document",
+            title=title,
+            content=self._document_content(title, author, url, category, highlight_count),
+            content_type=ContentType.METADATA,
+            metadata=document_metadata,
+            tags=[category] if category else [],
+        )
+
+    def _document_source_id_from_metadata(self, metadata: dict[str, Any]) -> str:
+        return self._document_source_id(
+            str(metadata.get("title") or ""),
+            str(metadata.get("author") or ""),
+            str(metadata.get("url") or ""),
+            str(metadata.get("category") or ""),
+        )
+
+    def _document_source_id(self, title: str, author: str, url: str, category: str) -> str:
+        digest = hashlib.sha256("\n".join([title, author, url, category]).encode("utf-8")).hexdigest()[:24]
+        return f"readwise_csv:document:{digest}"
+
+    def _document_edge(self, document_source_id: str, highlight_source_id: str) -> KnowledgeEdge:
+        digest = hashlib.sha256(f"{document_source_id}|{highlight_source_id}|contains".encode("utf-8")).hexdigest()[:24]
+        return KnowledgeEdge(
+            id=f"readwise-csv-document-contains-{digest}",
+            from_unit_id=document_source_id,
+            to_unit_id=highlight_source_id,
+            relation=EdgeRelation.CONTAINS,
+            source=EdgeSource.SOURCE,
+            metadata={
+                "source_project": SourceProject.READWISE_CSV.value,
+                "relation_type": "document_contains_highlight",
+            },
+        )
+
+    def _document_content(self, title: str, author: str, url: str, category: str, highlight_count: int) -> str:
+        parts = [title]
+        if author:
+            parts.append(f"Author: {author}")
+        if url:
+            parts.append(f"URL: {url}")
+        if category:
+            parts.append(f"Category: {category}")
+        parts.append(f"Highlights: {highlight_count}")
+        return "\n".join(parts)
 
     def _source_id(
         self,

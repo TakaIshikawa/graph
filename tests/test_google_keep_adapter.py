@@ -7,7 +7,7 @@ import pytest
 
 from graph.adapters.google_keep import GoogleKeepAdapter
 from graph.adapters.registry import get_adapter, list_adapters
-from graph.types.enums import ContentType, SourceProject
+from graph.types.enums import ContentType, EdgeRelation, SourceProject
 from graph.types.models import SyncState
 
 
@@ -63,8 +63,8 @@ def test_google_keep_ingests_note_with_labels_checklist_and_metadata(tmp_path):
     assert unit.metadata["createdTimestampUsec"] == 1_776_211_200_000_000
     assert unit.metadata["userEditedTimestampUsec"] == 1_776_297_600_000_000
     assert unit.metadata["checklist"] == [
-        {"text": "Reserve hotel", "checked": False},
-        {"text": "Pack adapter", "checked": True},
+        {"text": "Reserve hotel", "checked": False, "position": 1},
+        {"text": "Pack adapter", "checked": True, "position": 2},
     ]
 
 
@@ -141,3 +141,45 @@ def test_google_keep_adapter_is_registered():
     adapter = get_adapter("google_keep", path="/tmp/keep")
     assert isinstance(adapter, GoogleKeepAdapter)
     assert adapter.name == "google_keep"
+
+
+def test_google_keep_emits_checklist_items_and_contains_edges(tmp_path):
+    note_path = tmp_path / "note.json"
+    write_note(
+        note_path,
+        {
+            "id": "note-1",
+            "title": "Errands",
+            "listContent": [
+                {"text": "Buy milk", "isChecked": False},
+                {"text": "Mail form", "isChecked": True},
+            ],
+        },
+    )
+
+    result = GoogleKeepAdapter(path=str(note_path)).ingest(entity_types=["keep_note", "checklist_item"])
+
+    note = next(unit for unit in result.units if unit.source_entity_type == "keep_note")
+    items = [unit for unit in result.units if unit.source_entity_type == "checklist_item"]
+    assert len(items) == 2
+    assert [item.metadata["position"] for item in items] == [1, 2]
+    assert [item.metadata["checked"] for item in items] == [False, True]
+    assert all(item.metadata["parent_note_source_id"] == note.source_id for item in items)
+    assert {(edge.from_unit_id, edge.to_unit_id) for edge in result.edges} == {
+        (note.source_id, item.source_id) for item in items
+    }
+    assert {edge.relation for edge in result.edges} == {EdgeRelation.CONTAINS}
+
+
+def test_google_keep_checklist_item_filtering(tmp_path):
+    note_path = tmp_path / "note.json"
+    write_note(
+        note_path,
+        {"id": "note-1", "title": "Errands", "listContent": [{"text": "Buy milk", "isChecked": False}]},
+    )
+
+    result = GoogleKeepAdapter(path=str(note_path)).ingest(entity_types=["checklist_item"])
+
+    assert [unit.source_entity_type for unit in result.units] == ["checklist_item"]
+    assert result.units[0].source_id.startswith("google_keep:note-1:checklist_item:")
+    assert result.edges == []

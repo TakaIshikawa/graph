@@ -45,3 +45,43 @@ def test_amazon_orders_csv_groups_shipments_and_preserves_unshipped_item_edges(t
     assert (order.source_id, shipment.source_id) in {(edge.from_unit_id, edge.to_unit_id) for edge in result.edges}
     assert (shipment.source_id, unshipped.source_id) not in {(edge.from_unit_id, edge.to_unit_id) for edge in result.edges}
     assert (order.source_id, unshipped.source_id) in {(edge.from_unit_id, edge.to_unit_id) for edge in result.edges}
+
+
+def test_amazon_orders_csv_emits_return_units_and_edges(tmp_path):
+    export = tmp_path / "amazon.csv"
+    export.write_text(
+        "Order ID,Order Date,Title,ASIN,Return Date,Return Reason,Refund Amount,Return Status\n"
+        "A1,2026-05-01,Book,B001,2026-05-10,Damaged,$9.99,Refunded\n",
+        encoding="utf-8",
+    )
+
+    result = AmazonOrdersCsvAdapter(path=str(export)).ingest(entity_types=["order", "item", "return"])
+
+    order = next(unit for unit in result.units if unit.source_entity_type == "order")
+    item = next(unit for unit in result.units if unit.source_entity_type == "item")
+    return_unit = next(unit for unit in result.units if unit.source_entity_type == "return")
+    assert return_unit.source_id.startswith("amazon_orders_csv:return")
+    assert return_unit.metadata["refund_amount"] == 9.99
+    assert return_unit.metadata["return_date"] == "2026-05-10T00:00:00+00:00"
+    assert return_unit.metadata["return_reason"] == "Damaged"
+    assert return_unit.metadata["return_status"] == "Refunded"
+    assert return_unit.metadata["order_id"] == "A1"
+    assert return_unit.metadata["asin"] == "B001"
+    assert {(edge.from_unit_id, edge.to_unit_id) for edge in result.edges} == {
+        (order.source_id, item.source_id),
+        (order.source_id, return_unit.source_id),
+        (item.source_id, return_unit.source_id),
+    }
+
+
+def test_amazon_orders_csv_return_filtering(tmp_path):
+    export = tmp_path / "amazon.csv"
+    export.write_text(
+        "Order ID,Order Date,Title,Refunded Amount\nA1,2026-05-01,Book,4.50\n",
+        encoding="utf-8",
+    )
+
+    result = AmazonOrdersCsvAdapter(path=str(export)).ingest(entity_types=["return"])
+
+    assert [unit.source_entity_type for unit in result.units] == ["return"]
+    assert result.edges == []

@@ -173,7 +173,7 @@ def test_google_calendar_takeout_filters_entity_types_and_since(tmp_path):
 
 
 def test_google_calendar_takeout_reports_event_and_attendee_entity_types():
-    assert GoogleCalendarTakeoutAdapter().entity_types == ["event", "attendee"]
+    assert GoogleCalendarTakeoutAdapter().entity_types == ["event", "attendee", "attachment", "conference"]
 
 
 def test_google_calendar_takeout_imports_attendees_and_event_edges_when_requested(tmp_path):
@@ -302,6 +302,73 @@ def test_google_calendar_takeout_entity_type_filters_preserve_valid_edges(tmp_pa
     assert attendee_result.edges == []
     assert sorted(unit.source_entity_type for unit in combined_result.units) == ["attendee", "event"]
     assert len(combined_result.edges) == 1
+
+
+def test_google_calendar_takeout_imports_attachments_and_conferences(tmp_path):
+    export = _write_json(
+        tmp_path / "calendar.json",
+        {
+            "items": [
+                {
+                    "id": "event-1",
+                    "summary": "Design review",
+                    "start": {"dateTime": "2026-05-01T10:00:00Z"},
+                    "attachments": [
+                        {
+                            "fileUrl": "https://drive.google.com/file/d/abc",
+                            "title": "Spec",
+                            "mimeType": "application/pdf",
+                            "fileId": "abc",
+                        }
+                    ],
+                    "conferenceData": {
+                        "conferenceId": "aaa-bbbb-ccc",
+                        "conferenceSolution": {"name": "Google Meet"},
+                        "entryPoints": [{"entryPointType": "video", "uri": "https://meet.google.com/aaa-bbbb-ccc"}],
+                    },
+                }
+            ]
+        },
+    )
+
+    result = GoogleCalendarTakeoutAdapter(path=str(export)).ingest(
+        entity_types=["event", "attachment", "conference"]
+    )
+
+    event = next(unit for unit in result.units if unit.source_entity_type == "event")
+    attachment = next(unit for unit in result.units if unit.source_entity_type == "attachment")
+    conference = next(unit for unit in result.units if unit.source_entity_type == "conference")
+    assert attachment.metadata["url"] == "https://drive.google.com/file/d/abc"
+    assert attachment.metadata["mime_type"] == "application/pdf"
+    assert conference.metadata["provider"] == "google_meet"
+    assert conference.metadata["meeting_code"] == "aaa-bbbb-ccc"
+    assert len(result.edges) == 2
+    assert {(edge.from_unit_id, edge.to_unit_id) for edge in result.edges} == {
+        (event.source_id, attachment.source_id),
+        (event.source_id, conference.source_id),
+    }
+
+
+def test_google_calendar_takeout_attachment_and_conference_filtering(tmp_path):
+    export = _write_json(
+        tmp_path / "calendar.json",
+        {
+            "items": [
+                {
+                    "id": "event-1",
+                    "summary": "Call",
+                    "start": {"dateTime": "2026-05-01T10:00:00Z"},
+                    "hangoutLink": "https://meet.google.com/aaa-bbbb-ccc",
+                    "attachments": [{"fileUrl": "https://example.com/doc", "title": "Doc"}],
+                }
+            ]
+        },
+    )
+
+    result = GoogleCalendarTakeoutAdapter(path=str(export)).ingest(entity_types=["attachment", "conference"])
+
+    assert {unit.source_entity_type for unit in result.units} == {"attachment", "conference"}
+    assert result.edges == []
 
 
 def test_google_calendar_takeout_uses_stable_source_ids_without_event_ids(tmp_path):
