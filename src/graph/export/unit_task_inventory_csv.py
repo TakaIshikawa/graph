@@ -20,12 +20,11 @@ _FIELDNAMES = [
     "status",
     "priority",
     "due_date",
-    "completed",
-    "completed_at",
+    "completed_date",
     "assignee_count",
-    "assignees",
     "checklist_item_count",
     "checklist_completed_count",
+    "is_complete",
 ]
 _TASK_KEYS = {
     "status",
@@ -61,6 +60,7 @@ def export_unit_task_inventory_csv(
     return {
         "path": str(output_path),
         "unit_count": len(unit_list),
+        "task_unit_count": len(rows),
         "rows_exported": len(rows),
         "bytes_written": output_path.stat().st_size,
     }
@@ -80,6 +80,7 @@ def _task_rows(units: list[KnowledgeUnit]) -> list[dict[str, str | int]]:
 
         assignees = _assignees(metadata)
         completed_at = _date_value(metadata.get("completed_at"))
+        due_date = _date_text(_first_present(metadata, ("due_date", "due")))
         rows.append(
             {
                 "unit_id": _field_value(unit.id),
@@ -88,17 +89,25 @@ def _task_rows(units: list[KnowledgeUnit]) -> list[dict[str, str | int]]:
                 "source_entity_type": _field_value(unit.source_entity_type) or "Unknown",
                 "status": _normalized_text(_first_present(metadata, ("status", "state"))),
                 "priority": _normalized_text(metadata.get("priority")),
-                "due_date": _date_text(_first_present(metadata, ("due_date", "due"))),
-                "completed": _completed_text(metadata.get("completed"), completed_at),
-                "completed_at": completed_at.isoformat() if completed_at else "",
+                "due_date": due_date,
+                "completed_date": completed_at.isoformat() if completed_at else "",
                 "assignee_count": len(assignees),
-                "assignees": "; ".join(assignees),
                 "checklist_item_count": len(checklist_items),
                 "checklist_completed_count": checklist_completed_count,
+                "is_complete": _completed_text(metadata.get("completed"), completed_at),
             }
         )
 
-    return sorted(rows, key=lambda row: (_sort_key(row["unit_id"]), _sort_key(row["title"])))
+    return sorted(
+        rows,
+        key=lambda row: (
+            row["due_date"] == "",
+            _sort_key(row["due_date"]),
+            _sort_key(row["source_project"]),
+            _sort_key(row["unit_id"]),
+            _sort_key(row["title"]),
+        ),
+    )
 
 
 def _render_csv(rows: list[dict[str, str | int]]) -> str:

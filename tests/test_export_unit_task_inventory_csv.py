@@ -25,15 +25,15 @@ def rows(text: str) -> list[dict[str, str]]:
 
 def test_unit_task_inventory_csv_empty_input_has_header_only():
     assert export_unit_task_inventory_csv([]) == (
-        "unit_id,title,source_project,source_entity_type,status,priority,due_date,completed,"
-        "completed_at,assignee_count,assignees,checklist_item_count,checklist_completed_count\n"
+        "unit_id,title,source_project,source_entity_type,status,priority,due_date,completed_date,"
+        "assignee_count,checklist_item_count,checklist_completed_count,is_complete\n"
     )
 
 
 def test_unit_task_inventory_csv_units_without_task_metadata_have_header_only():
     assert export_unit_task_inventory_csv([unit("a", metadata={"topic": "planning"})]) == (
-        "unit_id,title,source_project,source_entity_type,status,priority,due_date,completed,"
-        "completed_at,assignee_count,assignees,checklist_item_count,checklist_completed_count\n"
+        "unit_id,title,source_project,source_entity_type,status,priority,due_date,completed_date,"
+        "assignee_count,checklist_item_count,checklist_completed_count,is_complete\n"
     )
 
 
@@ -67,12 +67,11 @@ def test_unit_task_inventory_csv_normalizes_core_task_fields():
             "status": "in progress",
             "priority": "high",
             "due_date": "2024-02-01",
-            "completed": "true",
-            "completed_at": "2024-02-02",
+            "completed_date": "2024-02-02",
             "assignee_count": "2",
-            "assignees": "alice; Bob",
             "checklist_item_count": "3",
             "checklist_completed_count": "2",
+            "is_complete": "true",
         }
     ]
 
@@ -104,23 +103,23 @@ def test_unit_task_inventory_csv_prefers_explicit_status_due_and_checklist_count
         "status": "done",
         "priority": "",
         "due_date": "tomorrow",
-        "completed": "true",
-        "completed_at": "",
         "assignee_count": "1",
-        "assignees": "Casey",
+        "completed_date": "",
         "checklist_item_count": "1",
         "checklist_completed_count": "7",
+        "is_complete": "true",
     }
 
 
-def test_unit_task_inventory_csv_sorts_by_unit_id_then_title():
+def test_unit_task_inventory_csv_sorts_by_due_date_source_and_unit_id_with_undated_last():
     units = [
         unit("b", metadata={"status": "open"}),
-        unit("a", metadata={"priority": "low"}),
+        unit("c", metadata={"due_date": "2024-02-01"}),
+        unit("a", metadata={"due_date": "2024-01-01"}),
     ]
 
     assert export_unit_task_inventory_csv(units) == export_unit_task_inventory_csv(reversed(units))
-    assert [row["unit_id"] for row in rows(export_unit_task_inventory_csv(units))] == ["a", "b"]
+    assert [row["unit_id"] for row in rows(export_unit_task_inventory_csv(units))] == ["a", "c", "b"]
 
 
 def test_unit_task_inventory_csv_path_mode_writes_same_content_and_stats(tmp_path):
@@ -134,6 +133,7 @@ def test_unit_task_inventory_csv_path_mode_writes_same_content_and_stats(tmp_pat
     assert stats == {
         "path": str(path),
         "unit_count": 1,
+        "task_unit_count": 1,
         "rows_exported": 1,
         "bytes_written": path.stat().st_size,
     }
