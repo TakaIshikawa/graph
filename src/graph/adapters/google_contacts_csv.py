@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class GoogleContactsCsvAdapter(SourceAdapter):
@@ -20,7 +20,7 @@ class GoogleContactsCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["contact"]
+        return ["contact", "organization"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -32,11 +32,14 @@ class GoogleContactsCsvAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        if entity_types and "contact" not in entity_types:
+        allowed = set(entity_types or self.entity_types)
+        if not allowed.intersection(self.entity_types):
             return result
 
         sync_at = self._ensure_utc(since.last_sync_at) if since else None
         units: list[KnowledgeUnit] = []
+        organization_contacts: dict[str, list[KnowledgeUnit]] = {}
+        organization_names: dict[str, str] = {}
         for path in self._iter_paths():
             try:
                 rows = self._read_rows(path)
@@ -48,9 +51,28 @@ class GoogleContactsCsvAdapter(SourceAdapter):
                     continue
                 if sync_at and unit.updated_at <= sync_at:
                     continue
-                units.append(unit)
+                org_name = unit.metadata.get("organization", {}).get("name")
+                if org_name:
+                    org_key = self._organization_key(str(org_name))
+                    organization_contacts.setdefault(org_key, []).append(unit)
+                    organization_names.setdefault(org_key, str(org_name))
+                if "contact" in allowed:
+                    units.append(unit)
 
+        organization_units = [
+            self._organization_unit(key, organization_names[key], contacts)
+            for key, contacts in sorted(organization_contacts.items())
+        ]
+        if "organization" in allowed:
+            units.extend(organization_units)
         result.units.extend(sorted(units, key=lambda unit: unit.source_id))
+        if {"contact", "organization"}.issubset(allowed):
+            org_by_key = {self._organization_key(unit.title): unit for unit in organization_units}
+            for contacts_key, contacts in organization_contacts.items():
+                organization = org_by_key[contacts_key]
+                for contact in contacts:
+                    result.edges.append(self._organization_edge(contact, organization))
+        result.edges.sort(key=lambda edge: edge.id)
         return result
 
     def _iter_paths(self) -> list[Path]:
@@ -140,6 +162,68 @@ class GoogleContactsCsvAdapter(SourceAdapter):
             "title": self._first(row, "Organization 1 - Title", "Job Title", "Title"),
             "department": self._first(row, "Organization 1 - Department", "Department"),
         }
+
+    def _organization_unit(self, key: str, name: str, contacts: list[KnowledgeUnit]) -> KnowledgeUnit:
+        departments = sorted(
+            {
+                str(contact.metadata.get("organization", {}).get("department"))
+                for contact in contacts
+                if contact.metadata.get("organization", {}).get("department")
+            }
+        )
+        titles = sorted(
+            {
+                str(contact.metadata.get("organization", {}).get("title"))
+                for contact in contacts
+                if contact.metadata.get("organization", {}).get("title")
+            }
+        )
+        contact_ids = sorted(contact.source_id for contact in contacts)
+        content = [name, f"Contacts: {len(contacts)}"]
+        if departments:
+            content.append(f"Departments: {', '.join(departments)}")
+        return KnowledgeUnit(
+            source_project=SourceProject.GOOGLE_CONTACTS_CSV,
+            source_id=f"google_contacts_csv:organization:{key}",
+            source_entity_type="organization",
+            title=name,
+            content="\n".join(content),
+            content_type=ContentType.METADATA,
+            metadata={
+                "name": name,
+                "normalized_name": key,
+                "contact_count": len(contacts),
+                "departments": departments,
+                "titles": titles,
+                "contact_source_ids": contact_ids,
+            },
+            tags=["organization"],
+            created_at=min(contact.created_at for contact in contacts),
+            updated_at=max(contact.updated_at for contact in contacts),
+        )
+
+    def _organization_edge(self, contact: KnowledgeUnit, organization: KnowledgeUnit) -> KnowledgeEdge:
+        return KnowledgeEdge(
+            id=self._edge_id(contact.source_id, organization.source_id),
+            from_unit_id=contact.source_id,
+            to_unit_id=organization.source_id,
+            relation=EdgeRelation.REFERENCES,
+            source=EdgeSource.SOURCE,
+            metadata={
+                "source_project": SourceProject.GOOGLE_CONTACTS_CSV.value,
+                "from_entity_type": "contact",
+                "to_entity_type": "organization",
+                "organization": organization.title,
+            },
+            created_at=contact.created_at,
+        )
+
+    def _organization_key(self, name: str) -> str:
+        return hashlib.sha256(" ".join(name.casefold().split()).encode("utf-8")).hexdigest()[:24]
+
+    def _edge_id(self, contact_id: str, organization_id: str) -> str:
+        digest = hashlib.sha256(f"{contact_id}|{organization_id}|references".encode("utf-8")).hexdigest()[:24]
+        return f"google-contacts-organization-references-{digest}"
 
     def _content(
         self,

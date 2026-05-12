@@ -261,7 +261,33 @@ def test_slack_json_emits_reaction_units_without_losing_message(tmp_path):
     assert reactions[0].metadata["message_ts"] == "1712345000.000100"
     assert reactions[0].metadata["reaction_count"] == 2
     assert reactions[0].metadata["reacting_users"] == ["U2", "U3"]
+    assert reactions[0].metadata["channel"] == "general"
+    assert reactions[0].metadata["source_file"] == "general.json"
     assert reactions[0].tags[:2] == ["slack", "reaction"]
+    reference_edges = [edge for edge in result.edges if edge.relation == EdgeRelation.REFERENCES]
+    assert len(reference_edges) == 2
+    assert {edge.from_unit_id for edge in reference_edges} == {unit.source_id for unit in reactions}
+    assert {edge.to_unit_id for edge in reference_edges} == {message.source_id}
+
+
+def test_slack_json_reaction_entity_filtering(tmp_path):
+    export = tmp_path / "general.json"
+    _write_json(
+        export,
+        [
+            {
+                "type": "message",
+                "user": "U1",
+                "text": "React to this",
+                "ts": "1712345000.000100",
+                "reactions": [{"name": "eyes", "count": 1, "users": ["U2"]}],
+            }
+        ],
+    )
+
+    reactions_only = SlackJsonAdapter(path=str(export)).ingest(entity_types=["reaction"])
+    assert [unit.source_entity_type for unit in reactions_only.units] == ["reaction"]
+    assert reactions_only.edges == []
 
 
 def test_slack_json_skips_deleted_and_empty_messages(tmp_path):

@@ -20,7 +20,7 @@ class AmazonOrdersCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["order", "item"]
+        return ["order", "shipment", "item"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -45,27 +45,43 @@ class AmazonOrdersCsvAdapter(SourceAdapter):
                 groups[order_id].append(row)
                 files[order_id].add(path.name)
         for order_id, rows in groups.items():
-            order, items = self._units(order_id, rows, sorted(files[order_id]))
+            order, shipments, items = self._units(order_id, rows, sorted(files[order_id]))
             if sync_at and order.updated_at <= sync_at:
                 continue
             if "order" in allowed:
                 result.units.append(order)
+            if "shipment" in allowed:
+                result.units.extend(shipments)
             if "item" in allowed:
                 result.units.extend(items)
+            if {"order", "shipment"}.issubset(allowed):
+                for shipment in shipments:
+                    result.edges.append(self._edge(order.source_id, shipment.source_id))
+            if {"shipment", "item"}.issubset(allowed):
+                shipment_ids = {shipment.source_id for shipment in shipments}
+                for item in items:
+                    shipment_id = item.metadata.get("shipment_source_id")
+                    if shipment_id in shipment_ids:
+                        result.edges.append(self._edge(str(shipment_id), item.source_id))
             if {"order", "item"}.issubset(allowed):
                 for item in items:
-                    result.edges.append(self._edge(order.source_id, item.source_id))
+                    if not item.metadata.get("shipment_source_id"):
+                        result.edges.append(self._edge(order.source_id, item.source_id))
         result.units.sort(key=lambda unit: unit.source_id)
         result.edges.sort(key=lambda edge: edge.id)
         return result
 
-    def _units(self, order_id: str, rows: list[dict[str, Any]], source_files: list[str]) -> tuple[KnowledgeUnit, list[KnowledgeUnit]]:
+    def _units(
+        self, order_id: str, rows: list[dict[str, Any]], source_files: list[str]
+    ) -> tuple[KnowledgeUnit, list[KnowledgeUnit], list[KnowledgeUnit]]:
         first_row = rows[0]
         order_date = parse_datetime(first(first_row, "Order Date", "order_date"))
         shipment_date = parse_datetime(first(first_row, "Shipment Date", "Ship Date"))
         categories: Counter[str] = Counter()
         total = 0.0
         items: list[KnowledgeUnit] = []
+        shipment_rows: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        shipment_item_counts: Counter[str] = Counter()
         now = datetime.now(timezone.utc)
         for index, row in enumerate(rows):
             category = first(row, "Category")
@@ -89,6 +105,15 @@ class AmazonOrdersCsvAdapter(SourceAdapter):
                 "product_url": first(row, "Product URL", "URL"),
                 "position": index + 1,
             }
+            shipment_key = self._shipment_key(order_id, row)
+            if shipment_key:
+                shipment_source_id = digest_source_id("amazon_orders_csv:shipment", order_id, shipment_key)
+                item_metadata["shipment_source_id"] = shipment_source_id
+                item_metadata["shipment_id"] = first(row, "Shipment ID", "Shipment Id", "shipment_id")
+                item_metadata["tracking_number"] = first(row, "Tracking Number", "Tracking")
+                item_metadata["carrier"] = first(row, "Carrier", "Shipping Carrier")
+                shipment_rows[shipment_key].append(row)
+                shipment_item_counts[shipment_key] += 1
             title = item_metadata["title"] or f"Amazon item {index + 1}"
             items.append(
                 KnowledgeUnit(
@@ -104,6 +129,10 @@ class AmazonOrdersCsvAdapter(SourceAdapter):
                     updated_at=shipment_date or order_date or now,
                 )
             )
+        shipments = [
+            self._shipment_unit(order_id, key, grouped_rows, shipment_item_counts[key], source_files, order_date, now)
+            for key, grouped_rows in sorted(shipment_rows.items())
+        ]
         title = f"Amazon order {order_id}"
         order = KnowledgeUnit(
             source_project=SourceProject.AMAZON_ORDERS_CSV,
@@ -117,7 +146,59 @@ class AmazonOrdersCsvAdapter(SourceAdapter):
             created_at=order_date or now,
             updated_at=shipment_date or order_date or now,
         )
-        return order, items
+        return order, shipments, items
+
+    def _shipment_key(self, order_id: str, row: dict[str, Any]) -> str:
+        explicit = first(row, "Shipment ID", "Shipment Id", "shipment_id")
+        if explicit:
+            return explicit
+        tracking = first(row, "Tracking Number", "Tracking")
+        carrier = first(row, "Carrier", "Shipping Carrier")
+        shipment_date = first(row, "Shipment Date", "Ship Date")
+        if tracking:
+            return f"tracking:{tracking}"
+        if carrier or shipment_date:
+            return "|".join([order_id, shipment_date, carrier])
+        return ""
+
+    def _shipment_unit(
+        self,
+        order_id: str,
+        shipment_key: str,
+        rows: list[dict[str, Any]],
+        item_count: int,
+        source_files: list[str],
+        order_date: datetime | None,
+        now: datetime,
+    ) -> KnowledgeUnit:
+        first_row = rows[0]
+        shipment_date = parse_datetime(first(first_row, "Shipment Date", "Ship Date"))
+        shipment_id = first(first_row, "Shipment ID", "Shipment Id", "shipment_id") or shipment_key
+        carrier = first(first_row, "Carrier", "Shipping Carrier")
+        tracking_number = first(first_row, "Tracking Number", "Tracking")
+        title = f"Amazon shipment {shipment_id}"
+        return KnowledgeUnit(
+            source_project=SourceProject.AMAZON_ORDERS_CSV,
+            source_id=digest_source_id("amazon_orders_csv:shipment", order_id, shipment_key),
+            source_entity_type="shipment",
+            title=title,
+            content=f"{title}\nItems: {item_count}",
+            content_type=ContentType.METADATA,
+            metadata=clean_metadata(
+                {
+                    "order_id": order_id,
+                    "shipment_id": shipment_id,
+                    "shipment_date": shipment_date.isoformat() if shipment_date else first(first_row, "Shipment Date", "Ship Date"),
+                    "carrier": carrier,
+                    "tracking_number": tracking_number,
+                    "item_count": item_count,
+                    "source_files": source_files,
+                }
+            ),
+            tags=list(dict.fromkeys(tag for tag in ["amazon", "shipment", carrier] if tag)),
+            created_at=shipment_date or order_date or now,
+            updated_at=shipment_date or order_date or now,
+        )
 
     def _edge(self, order_id: str, item_id: str) -> KnowledgeEdge:
         return KnowledgeEdge(id=digest_source_id("amazon_orders_csv:contains", order_id, item_id), from_unit_id=order_id, to_unit_id=item_id, relation=EdgeRelation.CONTAINS, source=EdgeSource.SOURCE, metadata={"source_project": SourceProject.AMAZON_ORDERS_CSV.value})

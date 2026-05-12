@@ -25,7 +25,7 @@ class SlackJsonAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["slack_message"]
+        return ["slack_message", "reaction", "slack_thread"]
 
     def __init__(self, path: str = "", *, root_path: str = "") -> None:
         self.path = path or root_path
@@ -37,7 +37,8 @@ class SlackJsonAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        if entity_types and "slack_message" not in entity_types:
+        allowed = set(entity_types or self.entity_types)
+        if not allowed.intersection(self.entity_types):
             return result
 
         root = Path(self.path).expanduser()
@@ -54,15 +55,22 @@ class SlackJsonAdapter(SourceAdapter):
                     continue
                 if sync_at and unit.updated_at <= sync_at:
                     continue
-                result.units.append(unit)
-                message_units.append(unit)
+                message_emitted = "slack_message" in allowed
+                if message_emitted:
+                    result.units.append(unit)
+                    message_units.append(unit)
                 reaction_units = self._reaction_units(message, unit)
-                result.units.extend(reaction_units)
+                if "reaction" in allowed:
+                    result.units.extend(reaction_units)
+                if message_emitted and "reaction" in allowed:
+                    result.edges.extend(self._reaction_edges(reaction_units, unit))
 
-        result.edges.extend(self._thread_edges(message_units))
-        summary_units, summary_edges = self._thread_summary_units(message_units)
-        result.units.extend(summary_units)
-        result.edges.extend(summary_edges)
+        if "slack_message" in allowed:
+            result.edges.extend(self._thread_edges(message_units))
+        if {"slack_message", "slack_thread"}.issubset(allowed):
+            summary_units, summary_edges = self._thread_summary_units(message_units)
+            result.units.extend(summary_units)
+            result.edges.extend(summary_edges)
         result.edges.sort(key=lambda edge: (edge.from_unit_id, edge.to_unit_id, edge.id))
         return result
 
@@ -195,7 +203,11 @@ class SlackJsonAdapter(SourceAdapter):
                 "reaction_count": count,
                 "reacting_users": users,
                 "parent_source_id": parent.source_id,
+                "source_file": self._string(parent.metadata.get("source_path")),
             }
+            thread_ts = self._string(parent.metadata.get("thread_ts"))
+            if thread_ts:
+                metadata["thread_ts"] = thread_ts
             units.append(
                 KnowledgeUnit(
                     source_project=SourceProject.SLACK_JSON,
@@ -211,6 +223,27 @@ class SlackJsonAdapter(SourceAdapter):
                 )
             )
         return units
+
+    def _reaction_edges(self, reactions: list[KnowledgeUnit], parent: KnowledgeUnit) -> list[KnowledgeEdge]:
+        return [
+            KnowledgeEdge(
+                id=self._reaction_edge_id(reaction.source_id, parent.source_id),
+                from_unit_id=reaction.source_id,
+                to_unit_id=parent.source_id,
+                relation=EdgeRelation.REFERENCES,
+                source=EdgeSource.SOURCE,
+                metadata={
+                    "source_project": SourceProject.SLACK_JSON.value,
+                    "from_entity_type": "reaction",
+                    "to_entity_type": "slack_message",
+                    "channel": parent.metadata.get("channel"),
+                    "message_ts": parent.metadata.get("ts"),
+                    "reaction_name": reaction.metadata.get("reaction_name"),
+                },
+                created_at=parent.created_at,
+            )
+            for reaction in reactions
+        ]
 
     def _channel_name(self, root: Path, path: Path) -> str:
         if root.is_file():
@@ -398,6 +431,13 @@ class SlackJsonAdapter(SourceAdapter):
         )
         digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
         return f"slack-json-replies-{digest[:16]}"
+
+    def _reaction_edge_id(self, from_id: str, to_id: str) -> str:
+        raw = "|".join(
+            [SourceProject.SLACK_JSON.value, EdgeRelation.REFERENCES.value, from_id, to_id]
+        )
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        return f"slack-json-reaction-references-{digest[:16]}"
 
     def _thread_summary_source_id(self, channel: str, thread_ts: str) -> str:
         return f"slack_json:{channel}:{thread_ts}:thread_summary"

@@ -233,3 +233,27 @@ def test_hierarchy_edges_are_omitted_when_filter_excludes_endpoint(tmp_path):
     assert tasks_only.edges == []
     assert [unit.source_entity_type for unit in projects_only.units] == ["project"]
     assert projects_only.edges == []
+
+
+def test_labels_and_sections_populate_metadata_and_tags(tmp_path):
+    csv_path = _write_csv(
+        tmp_path / "tasks.csv",
+        [
+            {
+                "TYPE": "task",
+                "CONTENT": "Plan launch",
+                "PRIORITY": "1",
+                "INDENT": "1",
+                "labels": "Work, Deep Focus; p1 | Follow Up",
+                "section": "Next",
+            }
+        ],
+        columns=["TYPE", "CONTENT", "PRIORITY", "INDENT", "labels", "section"],
+    )
+
+    result = TodoistAdapter(path=str(csv_path)).ingest()
+
+    unit = result.units[0]
+    assert unit.metadata["labels"] == ["Work", "Deep Focus", "p1", "Follow Up"]
+    assert unit.metadata["section"] == "Next"
+    assert unit.tags == ["deep-focus", "follow-up", "p1", "work"]

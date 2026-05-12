@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from graph.adapters.google_photos_takeout import GooglePhotosTakeoutAdapter
 from graph.adapters.registry import get_adapter, list_adapters
-from graph.types.enums import SourceProject
+from graph.types.enums import EdgeRelation, SourceProject
 
 
 def test_google_photos_takeout_ingests_photo_sidecar_with_metadata(tmp_path):
@@ -96,3 +96,47 @@ def test_google_photos_takeout_missing_optional_fields_do_not_fail(tmp_path):
 def test_google_photos_takeout_registry():
     assert "google_photos_takeout" in list_adapters()
     assert get_adapter("google_photos_takeout", path="/tmp/photos").name == "google_photos_takeout"
+
+
+def test_google_photos_takeout_ingests_album_metadata_and_membership(tmp_path):
+    album_dir = tmp_path / "Takeout Album"
+    library_dir = tmp_path / "Photos from 2024"
+    album_dir.mkdir()
+    library_dir.mkdir()
+    album_dir.joinpath("metadata.json").write_text(
+        json.dumps(
+            {
+                "title": "Takeout Album",
+                "description": "Trip photos",
+                "date": {"timestamp": "1710000000"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    sidecar_payload = {
+        "title": "IMG_0001.JPG",
+        "creationTime": {"timestamp": "1710000000"},
+        "photoTakenTime": {"timestamp": "1709996400"},
+    }
+    album_dir.joinpath("IMG_0001.JPG.json").write_text(json.dumps(sidecar_payload), encoding="utf-8")
+    library_dir.joinpath("IMG_0001.JPG.json").write_text(json.dumps(sidecar_payload), encoding="utf-8")
+
+    result = GooglePhotosTakeoutAdapter(path=str(tmp_path)).ingest()
+
+    albums = [unit for unit in result.units if unit.source_entity_type == "album"]
+    photos = [unit for unit in result.units if unit.source_entity_type == "photo"]
+    assert len(albums) == 1
+    assert len(photos) == 1
+    album = albums[0]
+    photo = photos[0]
+    assert album.metadata["date"] == "1710000000"
+    assert album.metadata["path"] == "Takeout Album"
+    assert album.metadata["item_count"] == 1
+    assert len(result.edges) == 1
+    assert result.edges[0].relation == EdgeRelation.CONTAINS
+    assert result.edges[0].from_unit_id == album.source_id
+    assert result.edges[0].to_unit_id == photo.source_id
+
+    media_only = GooglePhotosTakeoutAdapter(path=str(tmp_path)).ingest(entity_types=["photo", "video"])
+    assert [unit.source_entity_type for unit in media_only.units] == ["photo"]
+    assert media_only.edges == []

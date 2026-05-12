@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import re
 from pathlib import Path
 
 from graph.adapters.base import IngestResult, SourceAdapter
@@ -21,6 +22,8 @@ _COL_RESPONSIBLE = "RESPONSIBLE"
 _COL_DATE = "DATE"
 _COL_DATE_LANG = "DATE_LANG"
 _COL_TIMEZONE = "TIMEZONE"
+_COL_LABELS = "LABELS"
+_COL_SECTION = "SECTION"
 
 # Priority mapping: Todoist uses 1=highest, 4=lowest
 _PRIORITY_TAGS = {
@@ -69,12 +72,12 @@ class TodoistAdapter(SourceAdapter):
         latest_by_indent: dict[int, dict[str, object]] = {}
         reader = csv.DictReader(io.StringIO(text))
         for row_number, row in enumerate(reader, start=2):
-            content = (row.get(_COL_CONTENT) or "").strip()
+            content = self._row_value(row, _COL_CONTENT)
             if not content:
                 continue
 
-            row_type = (row.get(_COL_TYPE) or "").strip().lower()
-            indent_raw = row.get(_COL_INDENT, "").strip()
+            row_type = self._row_value(row, _COL_TYPE).lower()
+            indent_raw = self._row_value(row, _COL_INDENT)
             indent = int(indent_raw) if indent_raw.isdigit() else 1
 
             # Determine entity type: TYPE=task or indent>1 → task; otherwise project
@@ -86,8 +89,8 @@ class TodoistAdapter(SourceAdapter):
                 entity_type = "task"
 
             # Due date
-            priority_raw = (row.get(_COL_PRIORITY) or "").strip()
-            due_date = (row.get(_COL_DATE) or "").strip() or None
+            priority_raw = self._row_value(row, _COL_PRIORITY)
+            due_date = self._row_value(row, _COL_DATE) or None
 
             # Deterministic source ID
             id_input = f"{content}|{due_date or ''}"
@@ -102,11 +105,17 @@ class TodoistAdapter(SourceAdapter):
                 tags: list[str] = []
                 if priority_raw in _PRIORITY_TAGS:
                     tags.append(_PRIORITY_TAGS[priority_raw])
+                labels = self._labels(row)
+                for label in labels:
+                    normalized = self._label_tag(label)
+                    if normalized and normalized not in tags:
+                        tags.append(normalized)
 
-                author = (row.get(_COL_AUTHOR) or "").strip() or None
-                responsible = (row.get(_COL_RESPONSIBLE) or "").strip() or None
-                date_lang = (row.get(_COL_DATE_LANG) or "").strip() or None
-                tz = (row.get(_COL_TIMEZONE) or "").strip() or None
+                author = self._row_value(row, _COL_AUTHOR) or None
+                responsible = self._row_value(row, _COL_RESPONSIBLE) or None
+                date_lang = self._row_value(row, _COL_DATE_LANG) or None
+                tz = self._row_value(row, _COL_TIMEZONE) or None
+                section = self._row_value(row, _COL_SECTION) or None
 
                 metadata: dict = {
                     "indent": indent,
@@ -127,6 +136,10 @@ class TodoistAdapter(SourceAdapter):
                     metadata["date_lang"] = date_lang
                 if tz:
                     metadata["timezone"] = tz
+                if labels:
+                    metadata["labels"] = labels
+                if section:
+                    metadata["section"] = section
 
                 unit = KnowledgeUnit(
                     source_project=SourceProject.TODOIST,
@@ -180,3 +193,23 @@ class TodoistAdapter(SourceAdapter):
     def _edge_id(self, parent_source_id: str, child_source_id: str) -> str:
         digest = hashlib.sha1(f"{parent_source_id}|{child_source_id}|contains".encode("utf-8")).hexdigest()[:16]
         return f"todoist:contains:{digest}"
+
+    def _row_value(self, row: dict[str, str], column: str) -> str:
+        lowered = {str(key).casefold(): value for key, value in row.items()}
+        value = row.get(column)
+        if value is None:
+            value = lowered.get(column.casefold())
+        return str(value or "").strip()
+
+    def _labels(self, row: dict[str, str]) -> list[str]:
+        raw = self._row_value(row, _COL_LABELS)
+        labels: list[str] = []
+        for item in re.split(r"[,;|]", raw):
+            label = item.strip()
+            if label and label not in labels:
+                labels.append(label)
+        return labels
+
+    def _label_tag(self, label: str) -> str:
+        normalized = re.sub(r"[^a-z0-9]+", "-", label.casefold()).strip("-")
+        return normalized

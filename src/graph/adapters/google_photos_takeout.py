@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 VIDEO_EXTENSIONS = {".3gp", ".avi", ".m4v", ".mkv", ".mov", ".mp4", ".mpeg", ".mpg", ".webm", ".wmv"}
@@ -23,7 +23,7 @@ class GooglePhotosTakeoutAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["photo", "video"]
+        return ["album", "photo", "video"]
 
     def __init__(self, path: str = "", *, album: str = "", album_context: str = "") -> None:
         self.path = path
@@ -41,9 +41,14 @@ class GooglePhotosTakeoutAdapter(SourceAdapter):
             return result
 
         sync_at = self._ensure_utc(since.last_sync_at) if since else None
-        units: list[KnowledgeUnit] = []
+        units_by_source_id: dict[str, KnowledgeUnit] = {}
+        album_links: list[tuple[KnowledgeUnit, KnowledgeUnit]] = []
         root = Path(self.path).expanduser() if self.path else None
+        album_units = self._album_units(root)
+        album_by_dir = {album.metadata["album_dir"]: album for album in album_units}
         for path in self._iter_paths(root):
+            if path.name == "metadata.json":
+                continue
             try:
                 parsed = json.loads(path.read_text(encoding="utf-8-sig"))
             except (OSError, UnicodeDecodeError, json.JSONDecodeError):
@@ -51,13 +56,30 @@ class GooglePhotosTakeoutAdapter(SourceAdapter):
             if not isinstance(parsed, dict):
                 continue
             unit = self._unit_from_sidecar(parsed, path, root)
-            if unit is None or unit.source_entity_type not in requested:
+            if unit is None:
                 continue
             if sync_at and unit.updated_at <= sync_at:
                 continue
-            units.append(unit)
+            units_by_source_id.setdefault(unit.source_id, unit)
+            album_dir = path.parent.relative_to(root).as_posix() if root and root.is_dir() else ""
+            album = album_by_dir.get(album_dir)
+            if album is not None:
+                album_links.append((album, units_by_source_id[unit.source_id]))
 
-        result.units.extend(sorted(units, key=lambda unit: (unit.created_at, unit.source_id)))
+        if "album" in requested:
+            for album in album_units:
+                if not sync_at or album.updated_at > sync_at:
+                    result.units.append(album)
+        for unit in units_by_source_id.values():
+            if unit.source_entity_type in requested:
+                result.units.append(unit)
+        if "album" in requested:
+            for album, media in album_links:
+                if media.source_entity_type in requested:
+                    result.edges.append(self._album_edge(album, media))
+
+        result.units.sort(key=lambda unit: (unit.created_at, unit.source_id))
+        result.edges.sort(key=lambda edge: edge.id)
         return result
 
     def _iter_paths(self, root: Path | None) -> list[Path]:
@@ -134,7 +156,6 @@ class GooglePhotosTakeoutAdapter(SourceAdapter):
     ) -> str:
         stable = self._first(sidecar, "url") or json.dumps(
             {
-                "source_file": source_file,
                 "title": title,
                 "photoTakenTime": taken_time,
                 "creationTime": creation_time,
@@ -143,6 +164,79 @@ class GooglePhotosTakeoutAdapter(SourceAdapter):
         )
         digest = hashlib.sha256(stable.encode("utf-8")).hexdigest()[:24]
         return f"google_photos_takeout:{digest}"
+
+    def _album_units(self, root: Path | None) -> list[KnowledgeUnit]:
+        albums: list[KnowledgeUnit] = []
+        for path in self._album_metadata_paths(root):
+            try:
+                parsed = json.loads(path.read_text(encoding="utf-8-sig"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            if not isinstance(parsed, dict):
+                continue
+            album = self._album_unit(parsed, path, root)
+            if album is not None:
+                albums.append(album)
+        return sorted(albums, key=lambda unit: unit.source_id)
+
+    def _album_metadata_paths(self, root: Path | None) -> list[Path]:
+        if root is None or not root.exists() or not root.is_dir():
+            return []
+        return sorted(path for path in root.rglob("metadata.json") if path.is_file())
+
+    def _album_unit(self, metadata: dict[str, Any], path: Path, root: Path | None) -> KnowledgeUnit | None:
+        album_dir = path.parent.relative_to(root).as_posix() if root and root.is_dir() else path.parent.name
+        if album_dir in ("", "."):
+            return None
+        title = self._first(metadata, "title", "name") or Path(album_dir).name
+        description = self._first(metadata, "description")
+        date_text = self._time_value(metadata.get("date")) or self._time_value(metadata.get("creationTime"))
+        created_at = self._parse_datetime(date_text) or datetime.now(timezone.utc)
+        item_count = len([item for item in path.parent.glob("*.json") if item.name != "metadata.json"])
+        source_file = self._relative_path(path, root)
+        return KnowledgeUnit(
+            source_project=SourceProject.GOOGLE_PHOTOS_TAKEOUT,
+            source_id=self._album_source_id(album_dir, title, date_text),
+            source_entity_type="album",
+            title=title,
+            content=description or title,
+            content_type=ContentType.METADATA,
+            metadata={
+                "title": title,
+                "description": description,
+                "date": date_text,
+                "album_dir": album_dir,
+                "path": album_dir,
+                "item_count": item_count,
+                "source_file": source_file,
+            },
+            tags=["google_photos", "album"],
+            created_at=created_at,
+            updated_at=created_at,
+        )
+
+    def _album_source_id(self, album_dir: str, title: str, date_text: str) -> str:
+        digest = hashlib.sha256(
+            json.dumps({"album_dir": album_dir, "title": title, "date": date_text}, sort_keys=True).encode("utf-8")
+        ).hexdigest()[:24]
+        return f"google_photos_takeout:album:{digest}"
+
+    def _album_edge(self, album: KnowledgeUnit, media: KnowledgeUnit) -> KnowledgeEdge:
+        digest = hashlib.sha256(f"{album.source_id}|{media.source_id}|contains".encode("utf-8")).hexdigest()[:24]
+        return KnowledgeEdge(
+            id=f"google-photos-album-contains-{digest}",
+            from_unit_id=album.source_id,
+            to_unit_id=media.source_id,
+            relation=EdgeRelation.CONTAINS,
+            source=EdgeSource.SOURCE,
+            metadata={
+                "source_project": SourceProject.GOOGLE_PHOTOS_TAKEOUT.value,
+                "album": album.title,
+                "album_dir": album.metadata.get("album_dir"),
+                "media_title": media.title,
+            },
+            created_at=media.created_at,
+        )
 
     def _geo_metadata(self, sidecar: dict[str, Any]) -> dict[str, Any]:
         for source_key in ("geoData", "geoDataExif"):
