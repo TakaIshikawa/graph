@@ -45,6 +45,7 @@ def export_source_identifier_collisions_csv(
     return {
         "path": str(output_path),
         "unit_count": len(unit_list),
+        "collision_count": len(rows),
         "rows_exported": len(rows),
         "bytes_written": output_path.stat().st_size,
     }

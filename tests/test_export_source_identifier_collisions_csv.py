@@ -133,6 +133,7 @@ def test_source_identifier_collisions_csv_path_mode_writes_same_content_and_stat
     assert stats == {
         "path": str(path),
         "unit_count": 2,
+        "collision_count": 1,
         "rows_exported": 1,
         "bytes_written": path.stat().st_size,
     }
