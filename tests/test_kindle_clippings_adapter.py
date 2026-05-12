@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from graph.adapters.kindle_clippings import KindleClippingsAdapter
 from graph.adapters.registry import get_adapter, list_adapters
-from graph.types.enums import ContentType, SourceProject
+from graph.types.enums import ContentType, EdgeRelation, SourceProject
 from graph.types.models import SyncState
 
 
@@ -33,7 +33,8 @@ The Book Title (Ada Author)
 
     result = KindleClippingsAdapter(path=str(clippings)).ingest()
 
-    assert len(result.units) == 3
+    assert len(result.units) == 5
+    assert len(result.edges) == 3
     highlight = next(unit for unit in result.units if unit.metadata["clipping_type"] == "highlight")
     note = next(unit for unit in result.units if unit.metadata["clipping_type"] == "note")
     bookmark = next(unit for unit in result.units if unit.metadata["clipping_type"] == "bookmark")
@@ -63,6 +64,17 @@ The Book Title (Ada Author)
     assert bookmark.content_type == ContentType.METADATA
     assert bookmark.content == "The Book Title: Bookmark (Page 8)"
 
+    book = next(unit for unit in result.units if unit.source_entity_type == "book" and unit.metadata["author"] == "Ada Author")
+    assert book.metadata == {
+        "book_title": "The Book Title",
+        "author": "Ada Author",
+        "clipping_count": 2,
+        "source_file": ["My Clippings.txt"],
+    }
+    edge = next(edge for edge in result.edges if edge.to_unit_id == highlight.source_id)
+    assert edge.from_unit_id == book.source_id
+    assert edge.relation == EdgeRelation.CONTAINS
+
 
 def test_kindle_clippings_skips_invalid_and_empty_non_bookmark_blocks(tmp_path):
     clippings = tmp_path / "My Clippings.txt"
@@ -84,8 +96,9 @@ Valid highlight.
 
     result = KindleClippingsAdapter(path=str(clippings)).ingest()
 
-    assert len(result.units) == 1
-    assert result.units[0].content == "Valid highlight."
+    clippings = [unit for unit in result.units if unit.source_entity_type == "clipping"]
+    assert len(clippings) == 1
+    assert clippings[0].content == "Valid highlight."
 
 
 def test_kindle_clippings_since_filter_and_entity_filter(tmp_path):
@@ -110,11 +123,18 @@ New.
             source_project="kindle",
             source_entity_type="clipping",
             last_sync_at=datetime(2024, 1, 2, tzinfo=timezone.utc),
-        )
+        ),
+        entity_types=["clipping"],
     )
-    wrong_entity = KindleClippingsAdapter(path=str(clippings)).ingest(entity_types=["book"])
+    books = KindleClippingsAdapter(path=str(clippings)).ingest(entity_types=["book"])
+    clipping_only = KindleClippingsAdapter(path=str(clippings)).ingest(entity_types=["clipping"])
+    wrong_entity = KindleClippingsAdapter(path=str(clippings)).ingest(entity_types=["bookcase"])
 
     assert [unit.content for unit in filtered.units] == ["New."]
+    assert {unit.source_entity_type for unit in books.units} == {"book"}
+    assert books.edges == []
+    assert {unit.source_entity_type for unit in clipping_only.units} == {"clipping"}
+    assert clipping_only.edges == []
     assert wrong_entity.units == []
     assert wrong_entity.edges == []
 

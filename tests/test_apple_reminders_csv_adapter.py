@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from graph.adapters.apple_reminders_csv import AppleRemindersCsvAdapter
 from graph.adapters.registry import get_adapter, list_adapters
-from graph.types.enums import SourceProject
+from graph.types.enums import EdgeRelation, SourceProject
 from graph.types.models import SyncState
 
 
@@ -50,7 +50,7 @@ def test_apple_reminders_csv_ingests_open_and_completed_reminders(tmp_path):
 
     result = AppleRemindersCsvAdapter(path=str(export)).ingest()
 
-    assert len(result.units) == 2
+    assert len([unit for unit in result.units if unit.source_entity_type == "reminder"]) == 2
     by_title = {unit.title: unit for unit in result.units}
     open_unit = by_title["Buy milk"]
     assert open_unit.source_project == SourceProject.APPLE_REMINDERS_CSV
@@ -66,6 +66,14 @@ def test_apple_reminders_csv_ingests_open_and_completed_reminders(tmp_path):
     assert done.metadata["status"] == "completed"
     assert done.metadata["completion_date"] == "2025-01-05T15:30:00+00:00"
     assert "completed" in done.tags
+
+    grocery = next(unit for unit in result.units if unit.source_entity_type == "list" and unit.title == "Groceries")
+    assert grocery.metadata["open_count"] == 1
+    assert grocery.metadata["completed_count"] == 0
+    assert grocery.metadata["source_files"] == ["reminders.csv"]
+    edge = next(edge for edge in result.edges if edge.to_unit_id == open_unit.source_id)
+    assert edge.from_unit_id == grocery.source_id
+    assert edge.relation == EdgeRelation.CONTAINS
 
 
 def test_apple_reminders_csv_filters_and_missing_optional_fields(tmp_path):
@@ -84,7 +92,7 @@ def test_apple_reminders_csv_filters_and_missing_optional_fields(tmp_path):
         last_sync_at=datetime(2025, 1, 15, tzinfo=timezone.utc),
     )
 
-    result = AppleRemindersCsvAdapter(path=str(export)).ingest(since=since)
+    result = AppleRemindersCsvAdapter(path=str(export)).ingest(since=since, entity_types=["reminder"])
     titles = {unit.title for unit in result.units}
 
     assert titles == {"New due", "No optional fields"}
@@ -93,6 +101,30 @@ def test_apple_reminders_csv_filters_and_missing_optional_fields(tmp_path):
     assert missing.metadata["url"] == ""
     assert missing.tags == ["reminder", "open"]
     assert AppleRemindersCsvAdapter(path=str(export)).ingest(entity_types=["task"]).units == []
+
+
+def test_apple_reminders_csv_entity_filters_for_lists_and_reminders(tmp_path):
+    export = tmp_path / "reminders.csv"
+    _write_csv(
+        export,
+        [
+            {"Title": "Open", "List Name": "Work", "Completed": "No", "Created Date": "2025-01-01", "Due Date": "2025-01-02"},
+            {"Title": "Done", "List Name": "Work", "Completed": "Yes", "Created Date": "2025-01-03"},
+            {"Title": "Inbox item", "List Name": "", "Completed": "No", "Created Date": "2025-01-04"},
+        ],
+    )
+
+    list_only = AppleRemindersCsvAdapter(path=str(export)).ingest(entity_types=["list"])
+    reminder_only = AppleRemindersCsvAdapter(path=str(export)).ingest(entity_types=["reminder"])
+    combined = AppleRemindersCsvAdapter(path=str(export)).ingest(entity_types=["list", "reminder"])
+
+    assert [unit.source_entity_type for unit in list_only.units] == ["list"]
+    assert list_only.units[0].metadata["open_count"] == 1
+    assert list_only.units[0].metadata["completed_count"] == 1
+    assert list_only.edges == []
+    assert {unit.source_entity_type for unit in reminder_only.units} == {"reminder"}
+    assert reminder_only.edges == []
+    assert len(combined.edges) == 2
 
 
 def test_apple_reminders_csv_directory_and_registry(tmp_path):
