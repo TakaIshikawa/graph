@@ -1,0 +1,176 @@
+"""Adapter for Jira issue CSV exports."""
+
+from __future__ import annotations
+
+import csv
+import hashlib
+import re
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from graph.adapters.base import IngestResult, SourceAdapter
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
+
+
+class JiraIssuesCsvAdapter(SourceAdapter):
+    @property
+    def name(self) -> str:
+        return "jira_issues_csv"
+
+    @property
+    def entity_types(self) -> list[str]:
+        return ["issue"]
+
+    def __init__(self, path: str = "") -> None:
+        self.path = path
+
+    def ingest(self, *, since: SyncState | None = None, entity_types: list[str] | None = None) -> IngestResult:
+        result = IngestResult()
+        if entity_types and "issue" not in entity_types:
+            return result
+        sync_at = self._ensure_utc(since.last_sync_at) if since else None
+        for path in self._iter_paths():
+            try:
+                rows = self._read_rows(path)
+            except (OSError, UnicodeDecodeError, csv.Error):
+                continue
+            for row in rows:
+                unit = self._unit_from_row(row, path.name)
+                if unit is None:
+                    continue
+                if sync_at and unit.updated_at <= sync_at:
+                    continue
+                result.units.append(unit)
+                result.edges.extend(self._edges_for_unit(unit))
+        result.units.sort(key=lambda unit: unit.source_id)
+        result.edges.sort(key=lambda edge: edge.id)
+        return result
+
+    def _iter_paths(self) -> list[Path]:
+        if not self.path:
+            return []
+        root = Path(self.path).expanduser()
+        if root.is_file() and root.suffix.lower() == ".csv":
+            return [root]
+        if not root.is_dir():
+            return []
+        return sorted(child for child in root.rglob("*.csv") if child.is_file())
+
+    def _read_rows(self, path: Path) -> list[dict[str, str]]:
+        with path.open(encoding="utf-8-sig", newline="") as handle:
+            return [{str(key).strip(): value for key, value in row.items() if key is not None} for row in csv.DictReader(handle)]
+
+    def _unit_from_row(self, row: dict[str, Any], source_file: str) -> KnowledgeUnit | None:
+        key = self._first(row, "Issue key", "Key", "issue_key")
+        summary = self._first(row, "Summary", "Title")
+        description = self._first(row, "Description")
+        if not key and not summary:
+            return None
+        created = self._parse_datetime(self._first(row, "Created", "Created date"))
+        updated = self._parse_datetime(self._first(row, "Updated", "Updated date")) or created
+        resolved = self._parse_datetime(self._first(row, "Resolved", "Resolution date"))
+        labels = self._split(self._first(row, "Labels", "Label"))
+        components = self._split(self._first(row, "Components", "Component/s", "Component"))
+        fix_versions = self._split(self._first(row, "Fix versions", "Fix Version/s", "Fix version"))
+        metadata = {
+            "issue_key": key,
+            "summary": summary,
+            "description": description,
+            "issue_type": self._first(row, "Issue Type", "Type"),
+            "status": self._first(row, "Status"),
+            "priority": self._first(row, "Priority"),
+            "assignee": self._first(row, "Assignee"),
+            "reporter": self._first(row, "Reporter"),
+            "parent_key": self._first(row, "Parent key", "Parent"),
+            "labels": labels,
+            "components": components,
+            "fix_versions": fix_versions,
+            "created_at": created.isoformat() if created else self._first(row, "Created", "Created date"),
+            "updated_at": updated.isoformat() if updated else self._first(row, "Updated", "Updated date"),
+            "resolved_at": resolved.isoformat() if resolved else self._first(row, "Resolved", "Resolution date"),
+            "source_file": source_file,
+            "row": dict(row),
+        }
+        now = datetime.now(timezone.utc)
+        tags = ["jira", "issue", *labels, *[f"component:{item}" for item in components], *[f"fix_version:{item}" for item in fix_versions]]
+        return KnowledgeUnit(
+            source_project=SourceProject.JIRA_ISSUES_CSV,
+            source_id=f"jira_issues_csv:{key}" if key else self._source_id(summary, description),
+            source_entity_type="issue",
+            title=summary or key,
+            content=self._content(summary, description, metadata),
+            content_type=ContentType.INSIGHT,
+            metadata={item_key: value for item_key, value in metadata.items() if value not in ("", None, [])},
+            tags=list(dict.fromkeys(item for item in tags if item)),
+            created_at=created or now,
+            updated_at=updated or created or now,
+        )
+
+    def _edges_for_unit(self, unit: KnowledgeUnit) -> list[KnowledgeEdge]:
+        edges: list[KnowledgeEdge] = []
+        for kind in ("assignee", "reporter", "parent_key"):
+            value = unit.metadata.get(kind)
+            if value:
+                relation = EdgeRelation.REFERENCES if kind == "parent_key" else EdgeRelation.RELATES_TO
+                target = f"jira:{kind}:{value}"
+                edges.append(self._edge(unit.source_id, target, relation, kind, str(value)))
+        return edges
+
+    def _edge(self, source_id: str, target: str, relation: EdgeRelation, kind: str, value: str) -> KnowledgeEdge:
+        digest = hashlib.sha256(f"{source_id}|{relation}|{target}".encode("utf-8")).hexdigest()[:24]
+        return KnowledgeEdge(id=f"jira_issues_csv:{digest}", from_unit_id=source_id, to_unit_id=target, relation=relation, source=EdgeSource.SOURCE, metadata={"kind": kind, "value": value})
+
+    def _content(self, summary: str, description: str, metadata: dict[str, Any]) -> str:
+        parts = [item for item in (summary, description) if item]
+        for key, label in (("issue_key", "Key"), ("issue_type", "Type"), ("status", "Status"), ("priority", "Priority")):
+            if metadata.get(key):
+                parts.append(f"{label}: {metadata[key]}")
+        return "\n".join(parts)
+
+    def _source_id(self, *parts: str) -> str:
+        digest = hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:24]
+        return f"jira_issues_csv:{digest}"
+
+    def _first(self, row: dict[str, Any], *keys: str) -> str:
+        compact = {self._normalize_key(key): value for key, value in row.items()}
+        for key in keys:
+            value = row.get(key)
+            if value is None:
+                value = compact.get(self._normalize_key(key))
+            if value is not None and str(value).strip():
+                return str(value).strip()
+        return ""
+
+    def _split(self, value: str) -> list[str]:
+        items: list[str] = []
+        for item in re.split(r"[,;|]", value or ""):
+            text = item.strip()
+            if text and text not in items:
+                items.append(text)
+        return items
+
+    def _normalize_key(self, value: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "", str(value).casefold())
+
+    def _parse_datetime(self, value: Any) -> datetime | None:
+        text = "" if value is None else str(value).strip()
+        if not text:
+            return None
+        for candidate in (text, text.replace("Z", "+00:00")):
+            try:
+                return self._ensure_utc(datetime.fromisoformat(candidate))
+            except ValueError:
+                pass
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%m/%d/%Y %H:%M", "%m/%d/%Y"):
+            try:
+                return datetime.strptime(text, fmt).replace(tzinfo=timezone.utc)
+            except ValueError:
+                continue
+        return None
+
+    def _ensure_utc(self, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
