@@ -27,6 +27,7 @@ from graph.export.csv_edges import export_graph_edges_csv
 from graph.export.edge_csv import export_edges_to_csv
 from graph.export.edge_adjacency_markdown import export_edge_adjacency_markdown
 from graph.export.edge_coverage_csv import export_edge_coverage_csv
+from graph.export.edge_relation_source_csv import export_edge_relation_source_csv
 from graph.export.edge_relation_summary_markdown import export_edge_relation_summary_markdown
 from graph.export.edge_type_matrix_csv import export_edge_type_matrix_csv
 from graph.export.external_domain_summary_markdown import export_external_domain_summary_markdown
@@ -133,6 +134,7 @@ __all__ = [
     "export_duplicate_candidates_markdown",
     "export_edge_adjacency_markdown",
     "export_edge_coverage_csv",
+    "export_edge_relation_source_csv",
     "export_edge_relation_summary_markdown",
     "export_edge_type_matrix_csv",
     "export_edges_to_csv",
