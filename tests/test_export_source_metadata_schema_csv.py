@@ -138,6 +138,7 @@ def test_source_metadata_schema_csv_path_mode_writes_same_content_and_stats(tmp_
     assert stats == {
         "path": str(path),
         "unit_count": 1,
+        "schema_key_count": 1,
         "rows_exported": 1,
         "bytes_written": path.stat().st_size,
     }

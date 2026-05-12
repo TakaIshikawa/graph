@@ -45,6 +45,7 @@ def export_source_metadata_schema_csv(
     return {
         "path": str(output_path),
         "unit_count": len(unit_list),
+        "schema_key_count": len(rows),
         "rows_exported": len(rows),
         "bytes_written": output_path.stat().st_size,
     }
