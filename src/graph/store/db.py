@@ -227,6 +227,23 @@ def _row_to_saved_query_run(row: sqlite3.Row) -> dict:
     }
 
 
+def _row_to_saved_query_result(row: sqlite3.Row, *, summary: bool = False) -> dict:
+    data = {
+        "id": row["id"],
+        "name": row["name"],
+        "query_text": row["query_text"],
+        "unit_count": len(json.loads(row["unit_ids"])),
+        "source_filters": json.loads(row["source_filters"]),
+        "parameters": json.loads(row["parameters"]),
+        "metadata": json.loads(row["metadata"]),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+    if not summary:
+        data["unit_ids"] = json.loads(row["unit_ids"])
+    return data
+
+
 def _row_to_collection(row: sqlite3.Row) -> dict:
     data = {
         "id": row["id"],
@@ -4481,6 +4498,156 @@ class Store:
 
     def delete_saved_query(self, name: str) -> bool:
         cursor = self.conn.execute("DELETE FROM saved_queries WHERE name = ?", (name,))
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    # --- Saved query results ---
+
+    def save_query_results(
+        self,
+        *,
+        name: str,
+        unit_ids: list[str],
+        query_text: str = "",
+        source_filters: dict | None = None,
+        parameters: dict | None = None,
+        metadata: dict | None = None,
+        created_at: str | datetime | None = None,
+        replace: bool = False,
+    ) -> dict:
+        normalized_name = str(name).strip()
+        if not normalized_name:
+            raise ValueError("Saved query result name must be non-empty.")
+        if isinstance(unit_ids, str):
+            raise ValueError("unit_ids must be a sequence of unit ID strings.")
+        try:
+            normalized_unit_ids = [str(unit_id) for unit_id in unit_ids]
+        except TypeError as exc:
+            raise ValueError("unit_ids must be a sequence of unit ID strings.") from exc
+
+        normalized_source_filters = source_filters or {}
+        normalized_parameters = parameters or {}
+        normalized_metadata = metadata or {}
+        try:
+            unit_ids_json = json.dumps(normalized_unit_ids)
+            source_filters_json = json.dumps(normalized_source_filters, sort_keys=True)
+            parameters_json = json.dumps(normalized_parameters, sort_keys=True)
+            metadata_json = json.dumps(normalized_metadata, sort_keys=True)
+        except TypeError as exc:
+            raise ValueError("Saved query result metadata must be JSON-serializable.") from exc
+
+        if created_at is None:
+            normalized_created_at = _utcnow_iso()
+        elif isinstance(created_at, datetime):
+            normalized_created_at = (
+                created_at
+                if created_at.tzinfo is not None
+                else created_at.replace(tzinfo=timezone.utc)
+            ).astimezone(timezone.utc).isoformat()
+        else:
+            normalized_created_at = str(created_at)
+
+        existing = self.get_saved_query_result(name=normalized_name)
+        if existing is not None and not replace:
+            raise ValueError(f"Saved query result already exists: {normalized_name}")
+
+        now = _utcnow_iso()
+        if existing is None:
+            self.conn.execute(
+                """INSERT INTO saved_query_results
+                   (name, query_text, unit_ids, source_filters, parameters, metadata, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    normalized_name,
+                    str(query_text),
+                    unit_ids_json,
+                    source_filters_json,
+                    parameters_json,
+                    metadata_json,
+                    normalized_created_at,
+                    now,
+                ),
+            )
+        else:
+            self.conn.execute(
+                """UPDATE saved_query_results
+                   SET query_text = ?, unit_ids = ?, source_filters = ?,
+                       parameters = ?, metadata = ?, updated_at = ?
+                   WHERE name = ?""",
+                (
+                    str(query_text),
+                    unit_ids_json,
+                    source_filters_json,
+                    parameters_json,
+                    metadata_json,
+                    now,
+                    normalized_name,
+                ),
+            )
+        self.conn.commit()
+        saved = self.get_saved_query_result(name=normalized_name)
+        if saved is None:
+            raise RuntimeError(f"Saved query result was not written: {normalized_name}")
+        return saved
+
+    def list_saved_query_results(self, *, limit: int | None = None) -> list[dict]:
+        if limit is not None:
+            if isinstance(limit, bool):
+                raise ValueError("limit must be a non-negative integer.")
+            try:
+                capped_limit = int(limit)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("limit must be a non-negative integer.") from exc
+            if capped_limit < 0:
+                raise ValueError("limit must be a non-negative integer.")
+        else:
+            capped_limit = None
+        query = "SELECT * FROM saved_query_results ORDER BY created_at DESC, id DESC"
+        params: list[object] = []
+        if capped_limit is not None:
+            query += " LIMIT ?"
+            params.append(capped_limit)
+        rows = self.conn.execute(query, params).fetchall()
+        return [_row_to_saved_query_result(row, summary=True) for row in rows]
+
+    def get_saved_query_result(
+        self,
+        *,
+        name: str | None = None,
+        result_id: int | None = None,
+    ) -> dict | None:
+        if (name is None) == (result_id is None):
+            raise ValueError("Provide exactly one of name or result_id.")
+        if name is not None:
+            row = self.conn.execute(
+                "SELECT * FROM saved_query_results WHERE name = ?",
+                (str(name),),
+            ).fetchone()
+        else:
+            row = self.conn.execute(
+                "SELECT * FROM saved_query_results WHERE id = ?",
+                (result_id,),
+            ).fetchone()
+        return _row_to_saved_query_result(row) if row else None
+
+    def delete_saved_query_result(
+        self,
+        *,
+        name: str | None = None,
+        result_id: int | None = None,
+    ) -> bool:
+        if (name is None) == (result_id is None):
+            raise ValueError("Provide exactly one of name or result_id.")
+        if name is not None:
+            cursor = self.conn.execute(
+                "DELETE FROM saved_query_results WHERE name = ?",
+                (str(name),),
+            )
+        else:
+            cursor = self.conn.execute(
+                "DELETE FROM saved_query_results WHERE id = ?",
+                (result_id,),
+            )
         self.conn.commit()
         return cursor.rowcount > 0
 
