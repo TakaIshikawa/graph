@@ -24,7 +24,10 @@ from graph.rag.result_clusters import cluster_results_by_overlap
 from graph.rag.source_agreement import score_source_agreement
 from graph.rag.snippets import highlight_result_snippets
 from graph.rag.source_credibility import score_source_credibility
+from graph.rag.source_reliability import score_source_reliability
 from graph.rag.source_timeline import build_source_timeline
+from graph.rag.query_focus_terms import extract_query_focus_terms
+from graph.rag.evidence_tension_map import map_evidence_tensions
 from graph.rag.tag_cooccurrence import build_tag_cooccurrence_matrix
 from graph.rag.tag_hierarchy import build_tag_hierarchy
 from graph.rag.tag_normalization import suggest_tag_normalizations
@@ -48,10 +51,12 @@ __all__ = [
     "detect_contradiction_cues",
     "detect_context_gaps",
     "extract_keywords",
+    "extract_query_focus_terms",
     "estimate_reading_time",
     "format_result_citations",
     "cluster_results_by_overlap",
     "highlight_result_snippets",
+    "map_evidence_tensions",
     "plan_reading_order",
     "plan_tag_reading_path",
     "rank_duplicate_candidates",
@@ -59,5 +64,6 @@ __all__ = [
     "rerank_for_source_diversity",
     "score_source_agreement",
     "score_source_credibility",
+    "score_source_reliability",
     "suggest_tag_normalizations",
 ]
