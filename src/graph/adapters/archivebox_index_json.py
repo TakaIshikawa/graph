@@ -9,8 +9,12 @@ from pathlib import Path
 from typing import Any
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
+
+_ARTIFACT_EXTRACTORS = frozenset(
+    {"title", "readability", "media", "screenshot", "pdf", "wget", "dom"}
+)
 
 
 class ArchiveBoxIndexJsonAdapter(SourceAdapter):
@@ -20,7 +24,7 @@ class ArchiveBoxIndexJsonAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["archive"]
+        return ["archive", "artifact"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -32,25 +36,37 @@ class ArchiveBoxIndexJsonAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        if entity_types and "archive" not in entity_types:
-            return result
+        allowed_types = set(entity_types) if entity_types else {"archive"}
 
         sync_at = self._ensure_utc(since.last_sync_at) if since else None
         units: list[KnowledgeUnit] = []
+        edges: list[KnowledgeEdge] = []
         for path in self._iter_paths():
             try:
                 entries = self._read_entries(path)
             except (OSError, UnicodeDecodeError, json.JSONDecodeError):
                 continue
             for entry in entries:
-                unit = self._unit_from_entry(entry, path.name)
-                if unit is None:
+                archive_unit = self._unit_from_entry(entry, path.name)
+                if archive_unit is None:
                     continue
-                if sync_at and unit.created_at <= sync_at:
+                if sync_at and archive_unit.created_at <= sync_at:
                     continue
-                units.append(unit)
+                archive_emitted = allowed_types is None or "archive" in allowed_types
+                artifact_emitted = allowed_types is None or "artifact" in allowed_types
+
+                if archive_emitted:
+                    units.append(archive_unit)
+
+                artifacts = self._artifact_units(entry, archive_unit, path.name)
+                if artifact_emitted:
+                    units.extend(artifacts)
+
+                if archive_emitted and artifact_emitted:
+                    edges.extend(self._artifact_edges(archive_unit, artifacts))
 
         result.units.extend(sorted(units, key=lambda unit: (unit.created_at, unit.source_id)))
+        result.edges.extend(sorted(edges, key=lambda edge: edge.id))
         return result
 
     def _iter_paths(self) -> list[Path]:
@@ -129,6 +145,128 @@ class ArchiveBoxIndexJsonAdapter(SourceAdapter):
         raw = explicit or f"{url}|{timestamp.isoformat()}"
         digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
         return f"archivebox_index_json:{digest}"
+
+    def _artifact_units(
+        self,
+        entry: dict[str, Any],
+        archive_unit: KnowledgeUnit,
+        source_file: str,
+    ) -> list[KnowledgeUnit]:
+        artifacts: list[KnowledgeUnit] = []
+        url = str(archive_unit.metadata.get("url") or "")
+        for extractor, output in self._artifact_outputs(entry):
+            output_value = self._artifact_output_value(output)
+            source_id = self._artifact_source_id(archive_unit.source_id, extractor, output_value)
+            metadata = {
+                "extractor": extractor,
+                "output": output,
+                "output_path": output_value,
+                "parent_archive_source_id": archive_unit.source_id,
+                "source_file": source_file,
+                "original_url": url,
+            }
+            title = f"{archive_unit.title} [{extractor}]"
+            artifacts.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.ARCHIVEBOX_INDEX_JSON,
+                    source_id=source_id,
+                    source_entity_type="artifact",
+                    title=title,
+                    content=self._artifact_content(title, extractor, output_value, url),
+                    content_type=ContentType.ARTIFACT,
+                    metadata=metadata,
+                    tags=sorted({"archivebox", "artifact", extractor}),
+                    created_at=archive_unit.created_at,
+                    updated_at=archive_unit.updated_at,
+                )
+            )
+        return sorted(artifacts, key=lambda unit: unit.source_id)
+
+    def _artifact_outputs(self, entry: dict[str, Any]) -> list[tuple[str, Any]]:
+        outputs: list[tuple[str, Any]] = []
+        for key, value in entry.items():
+            extractor = str(key).lower()
+            if extractor in _ARTIFACT_EXTRACTORS and self._has_artifact_value(value):
+                outputs.append((extractor, value))
+        for container_key in ("history", "extractors", "outputs"):
+            container = entry.get(container_key)
+            if not isinstance(container, dict):
+                continue
+            for key, value in container.items():
+                extractor = str(key).lower()
+                if extractor in _ARTIFACT_EXTRACTORS and self._has_artifact_value(value):
+                    outputs.append((extractor, value))
+        deduped: dict[tuple[str, str], tuple[str, Any]] = {}
+        for extractor, value in outputs:
+            deduped[(extractor, self._artifact_output_value(value))] = (extractor, value)
+        return [deduped[key] for key in sorted(deduped)]
+
+    def _has_artifact_value(self, value: Any) -> bool:
+        if value is None or value is False:
+            return False
+        if isinstance(value, str):
+            return bool(value.strip())
+        if isinstance(value, list | tuple | dict):
+            return bool(value)
+        return True
+
+    def _artifact_output_value(self, value: Any) -> str:
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, dict):
+            for key in ("path", "output", "url", "href", "cmd", "filename"):
+                found = self._first(value, key)
+                if found:
+                    return found
+            if "result" in value:
+                return self._artifact_output_value(value["result"])
+            return json.dumps(value, sort_keys=True, default=str)
+        if isinstance(value, list | tuple):
+            parts = [self._artifact_output_value(item) for item in value]
+            return ", ".join(part for part in parts if part)
+        return str(value)
+
+    def _artifact_source_id(self, archive_source_id: str, extractor: str, output_value: str) -> str:
+        digest = hashlib.sha256(
+            f"{archive_source_id}|{extractor}|{output_value}".encode("utf-8")
+        ).hexdigest()[:24]
+        return f"{archive_source_id}:artifact:{extractor}:{digest}"
+
+    def _artifact_edges(
+        self,
+        archive_unit: KnowledgeUnit,
+        artifacts: list[KnowledgeUnit],
+    ) -> list[KnowledgeEdge]:
+        return [
+            KnowledgeEdge(
+                id=self._edge_id(archive_unit.source_id, artifact.source_id),
+                from_unit_id=archive_unit.source_id,
+                to_unit_id=artifact.source_id,
+                relation=EdgeRelation.CONTAINS,
+                source=EdgeSource.SOURCE,
+                metadata={
+                    "source_project": SourceProject.ARCHIVEBOX_INDEX_JSON.value,
+                    "relation_type": "archive_contains_artifact",
+                    "extractor": artifact.metadata["extractor"],
+                    "original_url": archive_unit.metadata.get("url"),
+                },
+            )
+            for artifact in artifacts
+        ]
+
+    def _edge_id(self, archive_source_id: str, artifact_source_id: str) -> str:
+        digest = hashlib.sha256(
+            f"{archive_source_id}|{artifact_source_id}|contains".encode("utf-8")
+        ).hexdigest()[:24]
+        return f"archivebox-index-json-contains-{digest}"
+
+    def _artifact_content(self, title: str, extractor: str, output_value: str, url: str) -> str:
+        parts = [title, f"Extractor: {extractor}"]
+        if output_value:
+            parts.append(f"Output: {output_value}")
+        if url:
+            parts.append(f"Original URL: {url}")
+        return "\n".join(parts)
 
     def _extractor_outputs(self, entry: dict[str, Any]) -> dict[str, Any]:
         outputs: dict[str, Any] = {}

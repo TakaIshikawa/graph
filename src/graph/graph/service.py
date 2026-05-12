@@ -1560,6 +1560,56 @@ class GraphService:
             "to_unit": self._unit_summary_data(self.store.get_unit(edge.to_unit_id)),
         }
 
+    def analyze_temporal_bridges(
+        self,
+        *,
+        min_gap_days: int | float = 365,
+        limit: int = 20,
+    ) -> list[dict]:
+        """Find edges connecting units with large created-at gaps."""
+        if isinstance(min_gap_days, bool):
+            raise ValueError("min_gap_days must be non-negative.")
+        try:
+            min_gap_value = float(min_gap_days)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("min_gap_days must be non-negative.") from exc
+        if min_gap_value < 0:
+            raise ValueError("min_gap_days must be non-negative.")
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
+            raise ValueError("limit must be a non-negative integer.")
+
+        records: list[dict] = []
+        for edge in self.store.get_all_edges():
+            from_unit = self.store.get_unit(edge.from_unit_id)
+            to_unit = self.store.get_unit(edge.to_unit_id)
+            if from_unit is None or to_unit is None:
+                continue
+            from_created = _parse_optional_datetime(from_unit.created_at)
+            to_created = _parse_optional_datetime(to_unit.created_at)
+            if from_created is None or to_created is None:
+                continue
+            gap_days = abs((to_created - from_created).total_seconds()) / 86400
+            if gap_days < min_gap_value:
+                continue
+            records.append(
+                {
+                    "edge_id": edge.id,
+                    "from_unit_id": edge.from_unit_id,
+                    "to_unit_id": edge.to_unit_id,
+                    "relation": str(edge.relation),
+                    "source": str(edge.source),
+                    "edge_created_at": _json_value(edge.created_at),
+                    "from_created_at": from_created.isoformat(),
+                    "to_created_at": to_created.isoformat(),
+                    "gap_days": round(gap_days, 6),
+                    "from_unit": self._unit_summary_data(from_unit),
+                    "to_unit": self._unit_summary_data(to_unit),
+                }
+            )
+
+        records.sort(key=lambda record: (-record["gap_days"], record["edge_id"]))
+        return records[:limit]
+
     def delete_edges_bulk(
         self,
         *,

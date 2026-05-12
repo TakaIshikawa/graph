@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from graph.adapters.todoist import TodoistAdapter
-from graph.types.enums import ContentType, SourceProject
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
 
 
 def _write_csv(path: Path, rows: list[dict[str, str]], columns: list[str] | None = None) -> Path:
@@ -180,3 +180,56 @@ def test_entity_type_filtering(tmp_path):
 
     assert len(result.units) == 1
     assert result.units[0].source_entity_type == "task"
+
+
+def test_indented_tasks_emit_nearest_parent_contains_edges(tmp_path):
+    csv_path = _write_csv(tmp_path / "tasks.csv", [
+        {"TYPE": "task", "CONTENT": "Parent", "PRIORITY": "", "INDENT": "1"},
+        {"TYPE": "task", "CONTENT": "Child", "PRIORITY": "", "INDENT": "2"},
+        {"TYPE": "task", "CONTENT": "Grandchild", "PRIORITY": "", "INDENT": "3"},
+        {"TYPE": "task", "CONTENT": "Sibling", "PRIORITY": "", "INDENT": "2"},
+    ])
+
+    result = TodoistAdapter(path=str(csv_path)).ingest()
+
+    by_title = {unit.title: unit for unit in result.units}
+    edge_pairs = {(edge.from_unit_id, edge.to_unit_id) for edge in result.edges}
+
+    assert edge_pairs == {
+        (by_title["Parent"].source_id, by_title["Child"].source_id),
+        (by_title["Child"].source_id, by_title["Grandchild"].source_id),
+        (by_title["Parent"].source_id, by_title["Sibling"].source_id),
+    }
+    assert {edge.relation for edge in result.edges} == {EdgeRelation.CONTAINS}
+    assert {edge.source for edge in result.edges} == {EdgeSource.SOURCE}
+    assert result.edges[0].metadata["child_indent"] in {2, 3}
+
+
+def test_top_level_project_can_contain_task_rows(tmp_path):
+    csv_path = _write_csv(tmp_path / "tasks.csv", [
+        {"TYPE": "project", "CONTENT": "Work", "PRIORITY": "", "INDENT": "1"},
+        {"TYPE": "task", "CONTENT": "Plan", "PRIORITY": "", "INDENT": "2"},
+    ])
+
+    result = TodoistAdapter(path=str(csv_path)).ingest()
+
+    project = next(unit for unit in result.units if unit.source_entity_type == "project")
+    task = next(unit for unit in result.units if unit.source_entity_type == "task")
+    assert len(result.edges) == 1
+    assert result.edges[0].from_unit_id == project.source_id
+    assert result.edges[0].to_unit_id == task.source_id
+
+
+def test_hierarchy_edges_are_omitted_when_filter_excludes_endpoint(tmp_path):
+    csv_path = _write_csv(tmp_path / "tasks.csv", [
+        {"TYPE": "project", "CONTENT": "Work", "PRIORITY": "", "INDENT": "1"},
+        {"TYPE": "task", "CONTENT": "Plan", "PRIORITY": "", "INDENT": "2"},
+    ])
+
+    tasks_only = TodoistAdapter(path=str(csv_path)).ingest(entity_types=["task"])
+    projects_only = TodoistAdapter(path=str(csv_path)).ingest(entity_types=["project"])
+
+    assert [unit.source_entity_type for unit in tasks_only.units] == ["task"]
+    assert tasks_only.edges == []
+    assert [unit.source_entity_type for unit in projects_only.units] == ["project"]
+    assert projects_only.edges == []

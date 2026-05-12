@@ -4148,6 +4148,13 @@ class Store:
         ).fetchone()
         return _row_to_saved_query_run(row)
 
+    def get_saved_query_run(self, run_id: int) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM saved_query_runs WHERE id = ?",
+            (run_id,),
+        ).fetchone()
+        return _row_to_saved_query_run(row) if row else None
+
     def list_saved_query_runs(
         self,
         *,
@@ -4163,6 +4170,47 @@ class Store:
         params.append(max(0, limit))
         rows = self.conn.execute(query, params).fetchall()
         return [_row_to_saved_query_run(row) for row in rows]
+
+    def compare_saved_query_runs(self, left_run_id: int, right_run_id: int) -> dict:
+        """Compare two saved query runs by their top result IDs."""
+        left = self.get_saved_query_run(left_run_id)
+        if left is None:
+            raise ValueError(f"Saved query run not found: {left_run_id}")
+        right = self.get_saved_query_run(right_run_id)
+        if right is None:
+            raise ValueError(f"Saved query run not found: {right_run_id}")
+        if left["saved_query_name"] != right["saved_query_name"]:
+            raise ValueError("Saved query runs must belong to the same saved query.")
+
+        left_ids = {str(unit_id) for unit_id in left["top_result_ids"]}
+        right_ids = {str(unit_id) for unit_id in right["top_result_ids"]}
+        added = sorted(right_ids - left_ids)
+        removed = sorted(left_ids - right_ids)
+        retained = sorted(left_ids & right_ids)
+
+        def run_metadata(run: dict) -> dict:
+            return {
+                "id": run["id"],
+                "run_at": run["run_at"],
+                "effective_limit": run["effective_limit"],
+                "mode": run["mode"],
+                "filters": run["filters"],
+                "result_count": run["result_count"],
+                "top_result_ids": run["top_result_ids"],
+            }
+
+        return {
+            "saved_query_name": left["saved_query_name"],
+            "left_run": run_metadata(left),
+            "right_run": run_metadata(right),
+            "added_count": len(added),
+            "removed_count": len(removed),
+            "retained_count": len(retained),
+            "unchanged_count": len(retained),
+            "added": added,
+            "removed": removed,
+            "retained": retained,
+        }
 
     def export_saved_queries(self) -> dict:
         """Return a JSON-serializable saved query backup."""

@@ -56,3 +56,70 @@ def test_archivebox_index_json_falls_back_to_url_and_registry(tmp_path):
     assert result.units[0].title == "https://example.com/untitled"
     assert result.units[0].metadata["timestamp"] == "2025-01-01T00:00:00+00:00"
     assert get_adapter("archivebox_index_json", path=str(export)).name == "archivebox_index_json"
+
+
+def test_archivebox_index_json_emits_extractor_artifacts_and_edges(tmp_path):
+    export = tmp_path / "index.json"
+    export.write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "url": "https://example.com/article",
+                        "title": "Example Article",
+                        "timestamp": "2025-01-02T03:04:05Z",
+                        "history": {
+                            "readability": {"path": "archive/123/readability/content.html"},
+                            "pdf": {"path": "archive/123/output.pdf"},
+                        },
+                        "screenshot": "archive/123/screenshot.png",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    adapter = ArchiveBoxIndexJsonAdapter(path=str(export))
+    assert adapter.entity_types == ["archive", "artifact"]
+
+    result = adapter.ingest(entity_types=["archive", "artifact"])
+    archives = [unit for unit in result.units if unit.source_entity_type == "archive"]
+    artifacts = [unit for unit in result.units if unit.source_entity_type == "artifact"]
+
+    assert len(archives) == 1
+    assert {unit.metadata["extractor"] for unit in artifacts} == {"pdf", "readability", "screenshot", "title"}
+    assert all(unit.metadata["parent_archive_source_id"] == archives[0].source_id for unit in artifacts)
+    assert all(unit.metadata["source_file"] == "index.json" for unit in artifacts)
+    assert all(unit.metadata["original_url"] == "https://example.com/article" for unit in artifacts)
+    assert len(result.edges) == 4
+    assert {edge.from_unit_id for edge in result.edges} == {archives[0].source_id}
+    assert {edge.to_unit_id for edge in result.edges} == {unit.source_id for unit in artifacts}
+
+
+def test_archivebox_index_json_artifact_edges_respect_entity_filtering(tmp_path):
+    export = tmp_path / "index.json"
+    export.write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "url": "https://example.com/article",
+                        "title": "Example Article",
+                        "timestamp": "2025-01-02T03:04:05Z",
+                        "pdf": "archive/123/output.pdf",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    archive_only = ArchiveBoxIndexJsonAdapter(path=str(export)).ingest(entity_types=["archive"])
+    artifact_only = ArchiveBoxIndexJsonAdapter(path=str(export)).ingest(entity_types=["artifact"])
+
+    assert [unit.source_entity_type for unit in archive_only.units] == ["archive"]
+    assert archive_only.edges == []
+    assert [unit.source_entity_type for unit in artifact_only.units] == ["artifact", "artifact"]
+    assert {unit.metadata["extractor"] for unit in artifact_only.units} == {"pdf", "title"}
+    assert artifact_only.edges == []
