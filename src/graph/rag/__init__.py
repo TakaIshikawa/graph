@@ -27,6 +27,7 @@ from graph.rag.source_credibility import score_source_credibility
 from graph.rag.source_reliability import score_source_reliability
 from graph.rag.source_timeline import build_source_timeline
 from graph.rag.query_focus_terms import extract_query_focus_terms
+from graph.rag.query_expansion import suggest_query_expansion_terms
 from graph.rag.evidence_tension_map import map_evidence_tensions
 from graph.rag.tag_cooccurrence import build_tag_cooccurrence_matrix
 from graph.rag.tag_hierarchy import build_tag_hierarchy
@@ -66,4 +67,5 @@ __all__ = [
     "score_source_credibility",
     "score_source_reliability",
     "suggest_tag_normalizations",
+    "suggest_query_expansion_terms",
 ]
