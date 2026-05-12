@@ -93,6 +93,7 @@ class LinearIssuesJsonAdapter(SourceAdapter):
         project = self._name(record.get("project"))
         priority_label = self._text(record.get("priorityLabel") or record.get("priority_label"))
         parent_id = self._parent_id(record.get("parent"))
+        comments = self._comments(record)
         lifecycle_metadata = self._lifecycle_metadata(
             created=created,
             updated=updated,
@@ -116,6 +117,7 @@ class LinearIssuesJsonAdapter(SourceAdapter):
             "team": team,
             "project": project,
             "labels": labels,
+            "comments": comments,
             "url": self._text(record.get("url")),
             "created_at": created.isoformat() if created else self._text(record.get("createdAt")),
             "updated_at": updated.isoformat() if updated else self._text(record.get("updatedAt")),
@@ -131,7 +133,7 @@ class LinearIssuesJsonAdapter(SourceAdapter):
             source_id=f"linear_issues_json:{issue_id or identifier}" if (issue_id or identifier) else digest_source_id("linear_issues_json", title, created),
             source_entity_type="issue",
             title=title or identifier or issue_id,
-            content=self._content(title, description, metadata),
+            content=self._content(title, description, metadata, comments),
             content_type=ContentType.INSIGHT,
             metadata=clean_metadata(metadata),
             tags=list(dict.fromkeys(tag for tag in ["linear", "issue", team, project, *labels, priority_label] if tag)),
@@ -143,11 +145,20 @@ class LinearIssuesJsonAdapter(SourceAdapter):
         digest = hashlib.sha256(f"{source_id}|{kind}|{target_id}".encode("utf-8")).hexdigest()[:24]
         return KnowledgeEdge(id=f"linear_issues_json:{kind}:{digest}", from_unit_id=source_id, to_unit_id=target_id, relation=relation, source=EdgeSource.SOURCE, metadata={"kind": kind, "source_project": SourceProject.LINEAR_ISSUES_JSON.value})
 
-    def _content(self, title: str, description: str, metadata: dict[str, Any]) -> str:
+    def _content(self, title: str, description: str, metadata: dict[str, Any], comments: list[dict[str, Any]] | None = None) -> str:
         parts = [item for item in (title, description) if item]
         for key, label in (("identifier", "Identifier"), ("state", "State"), ("priority", "Priority"), ("url", "URL")):
             if metadata.get(key) not in ("", None):
                 parts.append(f"{label}: {metadata[key]}")
+        for comment in comments or []:
+            author = comment.get("author")
+            created_at = comment.get("created_at")
+            prefix = "Comment"
+            if author:
+                prefix += f" by {author}"
+            if created_at:
+                prefix += f" at {created_at}"
+            parts.append(f"{prefix}: {comment['body']}")
         return "\n".join(parts)
 
     def _lifecycle_metadata(
@@ -189,6 +200,40 @@ class LinearIssuesJsonAdapter(SourceAdapter):
         if isinstance(value, dict):
             return self._text(value.get("id") or value.get("identifier"))
         return self._text(value)
+
+    def _comments(self, record: dict[str, Any]) -> list[dict[str, Any]]:
+        raw = self._comment_container(record)
+        if not isinstance(raw, list):
+            return []
+        comments: list[dict[str, Any]] = []
+        for index, item in enumerate(raw):
+            if not isinstance(item, dict):
+                continue
+            body = self._text(item.get("body") or item.get("description") or item.get("text") or item.get("content"))
+            if not body:
+                continue
+            created = parse_datetime(item.get("createdAt") or item.get("created_at"))
+            comment = {
+                "body": body,
+                "author": self._name(item.get("user") or item.get("author") or item.get("creator")),
+                "created_at": created.isoformat() if created else self._text(item.get("createdAt") or item.get("created_at")),
+                "comment_id": self._text(item.get("id")),
+                "_index": index,
+            }
+            comments.append(clean_metadata(comment))
+        comments.sort(key=lambda comment: (comment.get("created_at", ""), comment.get("comment_id", ""), comment.get("_index", 0)))
+        for comment in comments:
+            comment.pop("_index", None)
+        return comments
+
+    def _comment_container(self, record: dict[str, Any]) -> Any:
+        for key in ("comments", "commentData"):
+            value = record.get(key)
+            if isinstance(value, dict) and isinstance(value.get("nodes"), list):
+                return value["nodes"]
+            if isinstance(value, list):
+                return value
+        return []
 
     def _names(self, value: Any) -> list[str]:
         if isinstance(value, dict) and isinstance(value.get("nodes"), list):

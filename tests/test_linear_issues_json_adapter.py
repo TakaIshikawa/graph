@@ -113,3 +113,63 @@ def test_linear_issues_json_preserves_priority_label_and_estimate(tmp_path):
     assert "2" not in units["LIN-5"].tags
     assert "priorityLabel" not in units["LIN-6"].metadata
     assert "estimate" not in units["LIN-6"].metadata
+
+
+def test_linear_issues_json_captures_comments_in_metadata_and_content(tmp_path):
+    export = tmp_path / "linear.json"
+    export.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "comments-list",
+                    "identifier": "LIN-7",
+                    "title": "List comments",
+                    "comments": [
+                        {"body": "", "user": {"name": "Ignored"}},
+                        {"id": "b", "body": "Second comment", "user": {"name": "Grace"}, "createdAt": "2026-05-03T00:00:00Z"},
+                        {"id": "a", "body": "First comment", "author": {"displayName": "Ada"}, "createdAt": "2026-05-02T00:00:00Z"},
+                        "malformed",
+                    ],
+                },
+                {
+                    "id": "comments-nodes",
+                    "identifier": "LIN-8",
+                    "title": "Node comments",
+                    "comments": {
+                        "nodes": [
+                            {"content": "Node comment", "creator": {"name": "Lin"}, "created_at": "2026-05-04"},
+                        ]
+                    },
+                },
+                {
+                    "id": "comments-data",
+                    "identifier": "LIN-9",
+                    "title": "Data comments",
+                    "commentData": [{"text": "Data comment", "author": "Pat"}],
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    units = {unit.metadata["identifier"]: unit for unit in LinearIssuesJsonAdapter(path=str(export)).ingest().units}
+
+    assert units["LIN-7"].metadata["comments"] == [
+        {
+            "body": "First comment",
+            "author": "Ada",
+            "created_at": "2026-05-02T00:00:00+00:00",
+            "comment_id": "a",
+        },
+        {
+            "body": "Second comment",
+            "author": "Grace",
+            "created_at": "2026-05-03T00:00:00+00:00",
+            "comment_id": "b",
+        },
+    ]
+    assert "Comment by Ada at 2026-05-02T00:00:00+00:00: First comment" in units["LIN-7"].content
+    assert "Second comment" in units["LIN-7"].content
+    assert units["LIN-8"].metadata["comments"][0]["body"] == "Node comment"
+    assert units["LIN-8"].metadata["comments"][0]["created_at"] == "2026-05-04T00:00:00+00:00"
+    assert "Data comment" in units["LIN-9"].content
