@@ -41,6 +41,7 @@ def test_steam_library_csv_ingests_complete_rows_and_normalizes_playtime(tmp_pat
     assert unit.title == "Portal 2"
     assert unit.metadata["app_id"] == "620"
     assert unit.metadata["playtime_minutes"] == 750
+    assert unit.metadata["playtime_bucket"] == "deep_play"
     assert unit.metadata["last_played"] == "2025-01-02T03:04:05+00:00"
     assert unit.metadata["store_url"].endswith("/Portal_2/")
     assert unit.metadata["platform"] == "steam"
@@ -65,10 +66,38 @@ def test_steam_library_csv_supports_aliases_sparse_rows_and_registry(tmp_path):
     first = result.units[0]
     assert first.source_id == "steam_library_csv:400"
     assert first.metadata["playtime_minutes"] == 123
+    assert first.metadata["playtime_bucket"] == "played"
     assert first.metadata["store_url"] == "https://store.steampowered.com/app/400/"
     assert "last_played" not in first.metadata
     assert result.units[1].title == "No App Id Game"
     assert get_adapter("steam_library_csv", path=str(export)).name == "steam_library_csv"
+
+
+def test_steam_library_csv_playtime_buckets_and_invalid_values(tmp_path):
+    export = tmp_path / "steam.csv"
+    _write_csv(
+        export,
+        [
+            {"App ID": "1", "Name": "Zero", "Minutes Played": "0"},
+            {"App ID": "2", "Name": "Short", "Minutes Played": "59"},
+            {"App ID": "3", "Name": "Normal", "Minutes Played": "60"},
+            {"App ID": "4", "Name": "High", "Hours Played": "10"},
+            {"App ID": "5", "Name": "Malformed", "Minutes Played": "not tracked"},
+        ],
+    )
+
+    units = {unit.title: unit for unit in SteamLibraryCsvAdapter(path=str(export)).ingest(entity_types=["game"]).units}
+
+    assert units["Zero"].metadata["playtime_minutes"] == 0
+    assert units["Zero"].metadata["playtime_bucket"] == "unplayed"
+    assert units["Short"].metadata["playtime_minutes"] == 59
+    assert units["Short"].metadata["playtime_bucket"] == "sampled"
+    assert units["Normal"].metadata["playtime_minutes"] == 60
+    assert units["Normal"].metadata["playtime_bucket"] == "played"
+    assert units["High"].metadata["playtime_minutes"] == 600
+    assert units["High"].metadata["playtime_bucket"] == "deep_play"
+    assert "playtime_minutes" not in units["Malformed"].metadata
+    assert "playtime_bucket" not in units["Malformed"].metadata
 
 
 def test_steam_library_csv_emits_genre_units_and_edges(tmp_path):

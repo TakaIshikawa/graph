@@ -96,6 +96,7 @@ class SteamLibraryCsvAdapter(SourceAdapter):
         metadata = {
             "app_id": app_id,
             "playtime_minutes": playtime,
+            "playtime_bucket": self._playtime_bucket(playtime),
             "last_played": last_played.isoformat() if last_played else last_played_text,
             "store_url": store_url,
             "platform": platform,
@@ -237,6 +238,8 @@ class SteamLibraryCsvAdapter(SourceAdapter):
             number = float(re.search(r"-?\d+(?:\.\d+)?", text).group(0))  # type: ignore[union-attr]
         except (AttributeError, ValueError):
             return None
+        if number < 0:
+            return None
         if "hour" in text or re.search(r"\bhrs?\b", text):
             return int(round(number * 60))
         return int(round(number))
@@ -252,10 +255,24 @@ class SteamLibraryCsvAdapter(SourceAdapter):
                 return self._parse_playtime_minutes(hour_value)
             try:
                 match = re.search(r"-?\d+(?:\.\d+)?", text.replace(",", ""))
-                return int(round(float(match.group(0)) * 60)) if match else None
+                if not match:
+                    return None
+                number = float(match.group(0))
+                return int(round(number * 60)) if number >= 0 else None
             except ValueError:
                 return None
         return self._parse_playtime_minutes(self._first(row, "playtime", "Playtime"))
+
+    def _playtime_bucket(self, minutes: int | None) -> str | None:
+        if minutes is None:
+            return None
+        if minutes <= 0:
+            return "unplayed"
+        if minutes < 60:
+            return "sampled"
+        if minutes < 600:
+            return "played"
+        return "deep_play"
 
     def _parse_datetime(self, value: str) -> datetime | None:
         if not value:
