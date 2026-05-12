@@ -75,6 +75,7 @@ from graph.export.source_metadata_outliers_markdown import export_source_metadat
 from graph.export.source_quality_markdown import export_source_quality_markdown
 from graph.export.source_tag_summary_markdown import export_source_tag_summary_markdown
 from graph.export.source_timeline_csv import export_source_timeline_csv
+from graph.export.source_type_coverage_csv import export_source_type_coverage_csv
 from graph.export.slack_participation_csv import export_units_to_slack_participation_csv
 from graph.export.sqlite_snapshot import export_graph_sqlite
 from graph.export.tag_activity_markdown import export_tag_activity_markdown
@@ -184,6 +185,7 @@ __all__ = [
     "export_source_quality_markdown",
     "export_source_tag_summary_markdown",
     "export_source_timeline_csv",
+    "export_source_type_coverage_csv",
     "export_units_to_slack_participation_csv",
     "export_units_to_timelinejs",
     "export_units_to_tiddlywiki_json",
