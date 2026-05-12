@@ -5,6 +5,7 @@ from graph.rag.contradictions import detect_contradiction_cues
 from graph.rag.context_gaps import detect_context_gaps
 from graph.rag.coverage import build_result_coverage_checklist
 from graph.rag.citation_coverage import analyze_citation_coverage
+from graph.rag.citation_gap_detector import detect_citation_gaps
 from graph.rag.citation_trails import build_citation_trails
 from graph.rag.claim_support_matrix import build_claim_support_matrix
 from graph.rag.date_coverage import analyze_result_date_coverage
@@ -59,6 +60,7 @@ __all__ = [
     "classify_query_intent",
     "detect_contradiction_cues",
     "detect_context_gaps",
+    "detect_citation_gaps",
     "extract_keywords",
     "extract_query_focus_terms",
     "estimate_reading_time",
