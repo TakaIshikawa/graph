@@ -73,6 +73,7 @@ from graph.export.slack_participation_csv import export_units_to_slack_participa
 from graph.export.sqlite_snapshot import export_graph_sqlite
 from graph.export.tag_activity_markdown import export_tag_activity_markdown
 from graph.export.tag_cooccurrence_csv import export_tag_cooccurrence_csv
+from graph.export.tag_cooccurrence_markdown import export_tag_cooccurrence_markdown
 from graph.export.tag_glossary import export_tag_glossary_markdown
 from graph.export.tag_source_matrix_csv import export_tag_source_matrix_csv
 from graph.export.tag_timeline_csv import export_tag_timeline_csv
@@ -175,6 +176,7 @@ __all__ = [
     "render_graph_overview_html",
     "export_tag_activity_markdown",
     "export_tag_cooccurrence_csv",
+    "export_tag_cooccurrence_markdown",
     "export_tag_glossary_markdown",
     "export_tag_source_matrix_csv",
     "export_tag_timeline_csv",
