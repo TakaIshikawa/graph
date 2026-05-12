@@ -68,6 +68,7 @@ from graph.export.source_entity_activity_markdown import export_source_entity_ac
 from graph.export.source_entity_type_heatmap_csv import export_source_entity_type_heatmap_csv
 from graph.export.source_gap_markdown import export_source_gap_markdown
 from graph.export.source_inventory import export_source_inventory_csv
+from graph.export.source_metadata_density_csv import export_source_metadata_density_csv
 from graph.export.source_metadata_outliers_markdown import export_source_metadata_outliers_markdown
 from graph.export.source_quality_markdown import export_source_quality_markdown
 from graph.export.source_tag_summary_markdown import export_source_tag_summary_markdown
@@ -172,6 +173,7 @@ __all__ = [
     "export_source_entity_type_heatmap_csv",
     "export_source_gap_markdown",
     "export_source_inventory_csv",
+    "export_source_metadata_density_csv",
     "export_source_metadata_outliers_markdown",
     "export_source_quality_markdown",
     "export_source_tag_summary_markdown",
