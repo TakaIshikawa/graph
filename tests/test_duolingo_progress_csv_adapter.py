@@ -61,3 +61,24 @@ def test_duolingo_progress_csv_filters_since_and_entity_types(tmp_path):
 
     assert [unit.source_entity_type for unit in result.units] == ["practice"]
     assert [unit.source_entity_type for unit in lessons.units] == ["lesson"]
+
+
+def test_duolingo_progress_csv_course_and_skill_aggregates(tmp_path):
+    export = tmp_path / "duolingo.csv"
+    export.write_text(
+        "Timestamp,Language,Course,Skill,Lesson Type,XP,Score,Mistakes\n"
+        "2026-05-01T08:00:00Z,Spanish,Spanish from English,Basics,Lesson,15,90,1\n"
+        "2026-05-02T08:00:00Z,Spanish,Spanish from English,Basics,Practice,10,100,2\n",
+        encoding="utf-8",
+    )
+
+    result = DuolingoProgressCsvAdapter(path=str(export)).ingest(entity_types=["course", "skill", "lesson", "practice"])
+    course = next(unit for unit in result.units if unit.source_entity_type == "course")
+    skill = next(unit for unit in result.units if unit.source_entity_type == "skill")
+
+    assert course.metadata["lesson_count"] == 1
+    assert course.metadata["practice_count"] == 1
+    assert course.metadata["total_xp"] == 25
+    assert course.metadata["average_score"] == 95.0
+    assert skill.metadata["mistake_total"] == 3
+    assert {edge.metadata["relation_type"] for edge in result.edges} == {"course_contains_skill", "skill_contains_activity"}

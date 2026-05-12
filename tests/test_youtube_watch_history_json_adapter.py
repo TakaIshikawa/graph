@@ -84,3 +84,23 @@ def test_youtube_watch_history_json_filters_since_and_entity_types(tmp_path):
 
     assert [unit.title for unit in result.units] == ["New"]
     assert skipped.units == []
+
+
+def test_youtube_watch_history_json_channel_aggregates_and_edges(tmp_path):
+    export = tmp_path / "watch-history.json"
+    export.write_text(
+        """[
+          {"title": "Watched One", "titleUrl": "https://youtu.be/1", "time": "2026-05-01T00:00:00Z", "subtitles": [{"name": "Useful Channel", "url": "https://www.youtube.com/channel/1"}]},
+          {"title": "Watched Two", "titleUrl": "https://youtu.be/2", "time": "2026-05-02T00:00:00Z", "subtitles": [{"name": "Useful Channel", "url": "https://www.youtube.com/channel/1"}]}
+        ]""",
+        encoding="utf-8",
+    )
+
+    result = YouTubeWatchHistoryJsonAdapter(path=str(export)).ingest(entity_types=["channel", "watch"])
+    channel = next(unit for unit in result.units if unit.source_entity_type == "channel")
+    watches = [unit for unit in result.units if unit.source_entity_type == "watch"]
+
+    assert channel.metadata["watch_count"] == 2
+    assert channel.metadata["watched_video_source_ids"] == [watch.source_id for watch in watches]
+    assert len(result.edges) == 2
+    assert all(edge.from_unit_id == channel.source_id for edge in result.edges)

@@ -267,6 +267,38 @@ def test_goodreads_library_copy_edges_follow_entity_filters(tmp_path):
     assert copy_only.edges == []
 
 
+def test_goodreads_library_review_units_and_edges(tmp_path):
+    path = tmp_path / "goodreads_library_export.csv"
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["Book Id", "Title", "Author", "My Rating", "Date Read", "Date Added", "Bookshelves", "My Review"])
+        writer.writeheader()
+        writer.writerow(
+            {
+                "Book Id": "1",
+                "Title": "Reviewed Book",
+                "Author": "Ada",
+                "My Rating": "4",
+                "Date Read": "2025/01/03",
+                "Date Added": "2025/01/01",
+                "Bookshelves": "favorites",
+                "My Review": "Useful review",
+            }
+        )
+        writer.writerow({"Book Id": "2", "Title": "No Review", "Author": "Grace", "My Review": ""})
+
+    result = GoodreadsLibraryAdapter(path=str(path)).ingest(entity_types=["book", "review"])
+    review_only = GoodreadsLibraryAdapter(path=str(path)).ingest(entity_types=["review"])
+    review = next(unit for unit in result.units if unit.source_entity_type == "review")
+
+    assert review.metadata["review"] == "Useful review"
+    assert review.metadata["rating"] == 4
+    assert review.metadata["shelves"] == ["favorites"]
+    assert len([unit for unit in result.units if unit.source_entity_type == "review"]) == 1
+    assert [edge.metadata["relation_type"] for edge in result.edges] == ["book_contains_review"]
+    assert [unit.source_entity_type for unit in review_only.units] == ["review"]
+    assert review_only.edges == []
+
+
 def test_goodreads_library_adapter_is_registered():
     assert "goodreads_library" in list_adapters()
     assert get_adapter("goodreads_library", path="/tmp/books.csv").name == "goodreads_library"

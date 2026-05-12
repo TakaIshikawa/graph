@@ -278,3 +278,33 @@ Unmatched note.
     assert {edge.metadata["match_strategy"] for edge in annotation_edges} == {"exact", "nearby"}
     assert {edge.metadata["book_title"] for edge in annotation_edges} == {"Shared Book"}
     assert len([unit for unit in result.units if unit.metadata["clipping_type"] == "note"]) == 3
+
+
+def test_kindle_clippings_author_aggregates_and_edges(tmp_path):
+    clippings = tmp_path / "My Clippings.txt"
+    clippings.write_text(
+        """First Book (Ada Author)
+- Your Highlight at location 10 | Added on Monday, January 1, 2024 1:00:00 PM
+
+Highlight one.
+==========
+Second Book (Ada Author)
+- Your Note at location 20 | Added on Tuesday, January 2, 2024 2:00:00 PM
+
+Note one.
+==========
+""",
+        encoding="utf-8",
+    )
+
+    result = KindleClippingsAdapter(path=str(clippings)).ingest(entity_types=["author", "book"])
+    author = next(unit for unit in result.units if unit.source_entity_type == "author")
+    books = [unit for unit in result.units if unit.source_entity_type == "book"]
+
+    assert author.metadata["book_count"] == 2
+    assert author.metadata["clipping_count"] == 2
+    assert author.metadata["highlight_count"] == 1
+    assert author.metadata["note_count"] == 1
+    assert author.metadata["book_source_ids"] == [book.source_id for book in books]
+    assert len(result.edges) == 2
+    assert all(edge.metadata["relation_type"] == "author_contains_book" for edge in result.edges)

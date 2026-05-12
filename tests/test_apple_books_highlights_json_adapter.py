@@ -58,3 +58,23 @@ def test_apple_books_highlights_json_filters_since_by_modified_or_created(tmp_pa
 
     assert [unit.metadata["book_title"] for unit in result.units] == ["New"]
     assert notes.units == []
+
+
+def test_apple_books_highlights_json_book_aggregates_and_edges(tmp_path):
+    export = tmp_path / "books.json"
+    export.write_text(
+        """[
+          {"id": "h1", "assetId": "asset-1", "bookTitle": "Designing Data", "author": "Ada Reader", "selectedText": "Systems need feedback.", "location": "p. 42", "created": "2026-05-01T09:00:00Z"},
+          {"id": "n1", "assetId": "asset-1", "bookTitle": "Designing Data", "author": "Ada Reader", "note": "Connect this.", "location": "p. 43", "modified": "2026-05-02T09:00:00Z"}
+        ]""",
+        encoding="utf-8",
+    )
+
+    result = AppleBooksHighlightsJsonAdapter(path=str(export)).ingest(entity_types=["book", "highlight", "note"])
+    book = next(unit for unit in result.units if unit.source_entity_type == "book")
+
+    assert book.metadata["annotation_count"] == 2
+    assert book.metadata["highlight_count"] == 1
+    assert book.metadata["note_count"] == 1
+    assert book.metadata["locations"] == ["p. 42", "p. 43"]
+    assert {edge.metadata["relation_type"] for edge in result.edges} == {"book_contains_highlight", "book_contains_note"}

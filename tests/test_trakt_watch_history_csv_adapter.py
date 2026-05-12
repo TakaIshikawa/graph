@@ -381,3 +381,27 @@ def test_trakt_watch_history_csv_movie_rows_do_not_create_seasons(tmp_path):
 
     assert [unit.source_entity_type for unit in result.units] == ["watch"]
     assert result.edges == []
+
+
+def test_trakt_watch_history_csv_watch_day_aggregates_ratings_and_edges(tmp_path):
+    export = tmp_path / "history.csv"
+    _write_csv(
+        export,
+        [
+            {"watched_at": "2025-01-01T23:30:00-01:00", "title": "Arrival", "year": "2016", "type": "movie", "trakt_id": "movie-1"},
+            {"watched_at": "2025-01-02T02:00:00Z", "title": "Example", "type": "episode", "season": "1", "episode": "1"},
+            {"rated_at": "2025-01-02T03:00:00Z", "title": "Arrival", "year": "2016", "type": "movie", "trakt_id": "movie-1", "rating": "8"},
+        ],
+    )
+
+    result = TraktWatchHistoryCsvAdapter(path=str(export)).ingest(entity_types=["watch_day", "watch", "rating"])
+    day = next(unit for unit in result.units if unit.source_entity_type == "watch_day")
+    repeated = TraktWatchHistoryCsvAdapter(path=str(export)).ingest(entity_types=["watch_day"]).units[0]
+
+    assert day.source_id == repeated.source_id
+    assert day.metadata["date"] == "2025-01-02"
+    assert day.metadata["watch_count"] == 2
+    assert day.metadata["total_rated_count"] == 1
+    assert day.metadata["unique_media_count"] == 2
+    assert day.metadata["media_titles"] == ["Arrival (2016)", "Example S01E01"]
+    assert {edge.metadata["relation_type"] for edge in result.edges} == {"watch_day_contains_watch", "watch_day_contains_rating"}

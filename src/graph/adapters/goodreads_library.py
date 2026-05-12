@@ -21,7 +21,7 @@ class GoodreadsLibraryAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["author", "book", "copy", "publisher", "series", "shelf"]
+        return ["author", "book", "copy", "publisher", "review", "series", "shelf"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -33,13 +33,14 @@ class GoodreadsLibraryAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        allowed_types = set(entity_types or self.entity_types)
+        allowed_types = set(entity_types) if entity_types is not None else {"author", "book", "copy", "publisher", "series", "shelf"}
         if not allowed_types.intersection(self.entity_types):
             return result
 
         sync_at = self._sync_datetime(since) if since else None
         books: list[KnowledgeUnit] = []
         copies: list[KnowledgeUnit] = []
+        reviews: list[KnowledgeUnit] = []
         for path in self._iter_paths():
             try:
                 rows = self._read_rows(path)
@@ -100,6 +101,8 @@ class GoodreadsLibraryAdapter(SourceAdapter):
                     updated_at=date_read or date_added or now,
                 )
                 books.append(book)
+                if review:
+                    reviews.append(self._review_unit(book, row, review, rating, shelves, path, date_read or date_added or now))
                 copy_metadata = self._copy_metadata(row)
                 if copy_metadata:
                     copies.append(self._copy_unit(book, copy_metadata, row, path, date_added or date_read or now))
@@ -116,11 +119,13 @@ class GoodreadsLibraryAdapter(SourceAdapter):
             result.units.extend(copies)
         if "publisher" in allowed_types:
             result.units.extend(publishers)
+        if "review" in allowed_types:
+            result.units.extend(reviews)
         if "series" in allowed_types:
             result.units.extend(series)
         if "shelf" in allowed_types:
             result.units.extend(shelves)
-        result.edges.extend(self._edges(books, copies, authors, publishers, series, shelves, allowed_types))
+        result.edges.extend(self._edges(books, copies, reviews, authors, publishers, series, shelves, allowed_types))
         result.units.sort(key=lambda unit: (unit.created_at, unit.source_id))
         result.edges.sort(key=lambda edge: edge.id)
         return result
@@ -210,6 +215,43 @@ class GoodreadsLibraryAdapter(SourceAdapter):
             tags=["owned-copy"],
             created_at=acquired or fallback_at,
             updated_at=acquired or fallback_at,
+        )
+
+    def _review_unit(
+        self,
+        book: KnowledgeUnit,
+        row: dict[str, Any],
+        review: str,
+        rating: str,
+        shelves: list[str],
+        path: Path,
+        fallback_at: datetime,
+    ) -> KnowledgeUnit:
+        metadata = {
+            "book_source_id": book.source_id,
+            "book_id": book.metadata.get("book_id"),
+            "title": book.metadata.get("title"),
+            "author": book.metadata.get("author"),
+            "isbn": book.metadata.get("isbn"),
+            "isbn13": book.metadata.get("isbn13"),
+            "review": review,
+            "rating": self._int_or_none(rating),
+            "date_read": self._first(row, "Date Read", "date_read"),
+            "date_added": self._first(row, "Date Added", "date_added"),
+            "shelves": shelves,
+            "source_file": str(path),
+        }
+        return KnowledgeUnit(
+            source_project=SourceProject.GOODREADS_LIBRARY,
+            source_id=self._review_source_id(book.source_id, review),
+            source_entity_type="review",
+            title=f"Goodreads review: {book.title}",
+            content=review,
+            content_type=ContentType.ARTIFACT,
+            metadata=metadata,
+            tags=["review", *shelves],
+            created_at=fallback_at,
+            updated_at=fallback_at,
         )
 
     def _copy_content(self, book: KnowledgeUnit, copy_metadata: dict[str, str]) -> str:
@@ -416,6 +458,7 @@ class GoodreadsLibraryAdapter(SourceAdapter):
         self,
         books: list[KnowledgeUnit],
         copies: list[KnowledgeUnit],
+        reviews: list[KnowledgeUnit],
         authors: list[KnowledgeUnit],
         publishers: list[KnowledgeUnit],
         series: list[KnowledgeUnit],
@@ -433,6 +476,12 @@ class GoodreadsLibraryAdapter(SourceAdapter):
                 book_id = str(copy.metadata.get("book_source_id") or "")
                 if book_id in book_ids:
                     edges.append(self._edge(book_id, copy.source_id, "book_contains_copy", EdgeRelation.CONTAINS))
+        if {"book", "review"}.issubset(allowed_types):
+            book_ids = {book.source_id for book in books}
+            for review in reviews:
+                book_id = str(review.metadata.get("book_source_id") or "")
+                if book_id in book_ids:
+                    edges.append(self._edge(book_id, review.source_id, "book_contains_review", EdgeRelation.CONTAINS))
         if {"book", "author"}.issubset(allowed_types):
             for book in books:
                 author_id = author_ids.get(str(book.metadata.get("author") or ""))
@@ -504,6 +553,10 @@ class GoodreadsLibraryAdapter(SourceAdapter):
         )
         digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
         return f"goodreads_library:copy:{digest}"
+
+    def _review_source_id(self, book_source_id: str, review: str) -> str:
+        digest = hashlib.sha256(f"{book_source_id}|{review}".encode("utf-8")).hexdigest()[:24]
+        return f"goodreads_library:review:{digest}"
 
     def _edge_id(self, from_id: str, to_id: str, relation_type: str) -> str:
         digest = hashlib.sha256("|".join((from_id, to_id, relation_type)).encode("utf-8")).hexdigest()[:24]
