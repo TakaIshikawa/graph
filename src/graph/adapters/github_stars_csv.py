@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class GithubStarsCsvAdapter(SourceAdapter):
@@ -20,7 +21,7 @@ class GithubStarsCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["repository"]
+        return ["repository", "owner"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -32,9 +33,11 @@ class GithubStarsCsvAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        if entity_types and "repository" not in entity_types:
+        allowed_types = set(entity_types or self.entity_types)
+        if not allowed_types.intersection(self.entity_types):
             return result
         sync_at = self._sync_datetime(since) if since else None
+        repositories: list[KnowledgeUnit] = []
 
         for path in self._iter_paths(".csv"):
             try:
@@ -47,9 +50,17 @@ class GithubStarsCsvAdapter(SourceAdapter):
                     continue
                 if sync_at and unit.updated_at <= sync_at:
                     continue
-                result.units.append(unit)
+                repositories.append(unit)
 
+        owners = self._owner_units(repositories) if "owner" in allowed_types else []
+        if "repository" in allowed_types:
+            result.units.extend(repositories)
+        if "owner" in allowed_types:
+            result.units.extend(owners)
+        if "owner" in allowed_types and "repository" in allowed_types:
+            result.edges.extend(self._owner_repository_edges(owners))
         result.units.sort(key=lambda unit: unit.source_id)
+        result.edges.sort(key=lambda edge: edge.id)
         return result
 
     def _unit_from_row(self, row: dict[str, Any]) -> KnowledgeUnit | None:
@@ -96,6 +107,99 @@ class GithubStarsCsvAdapter(SourceAdapter):
         if topics:
             parts.append(f"Topics: {', '.join(topics)}")
         return "\n".join(parts)
+
+    def _owner_units(self, repositories: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        names: dict[str, str] = {}
+        for repository in repositories:
+            owner = str(repository.metadata.get("owner") or "").strip()
+            if not owner:
+                continue
+            normalized = self._normalize_owner(owner)
+            grouped.setdefault(normalized, []).append(repository)
+            names.setdefault(normalized, owner)
+
+        units: list[KnowledgeUnit] = []
+        for normalized, owner_repositories in sorted(grouped.items()):
+            languages = sorted(
+                {str(repository.metadata.get("language") or "") for repository in owner_repositories if repository.metadata.get("language")}
+            )
+            topics = sorted(
+                {
+                    topic
+                    for repository in owner_repositories
+                    for topic in repository.metadata.get("topics", [])
+                    if topic
+                }
+            )
+            stargazer_counts = [
+                repository.metadata.get("stargazers_count")
+                for repository in owner_repositories
+                if isinstance(repository.metadata.get("stargazers_count"), int)
+            ]
+            starred_dates = [
+                parsed
+                for repository in owner_repositories
+                if (parsed := self._parse_datetime(str(repository.metadata.get("starred_at") or ""))) is not None
+            ]
+            first_starred = min(starred_dates).isoformat() if starred_dates else None
+            latest_starred = max(starred_dates).isoformat() if starred_dates else None
+            repository_source_ids = sorted(repository.source_id for repository in owner_repositories)
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.GITHUB_STARS_CSV,
+                    source_id=self._owner_source_id(normalized),
+                    source_entity_type="owner",
+                    title=names[normalized],
+                    content=f"GitHub starred repository owner: {names[normalized]}\nRepositories: {len(owner_repositories)}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "owner": names[normalized],
+                        "normalized_owner": normalized,
+                        "repo_count": len(owner_repositories),
+                        "languages": languages,
+                        "topics": topics,
+                        "stargazers_count": sum(stargazer_counts) if stargazer_counts else None,
+                        "first_starred_at": first_starred,
+                        "latest_starred_at": latest_starred,
+                        "repository_source_ids": repository_source_ids,
+                    },
+                    tags=["github", "owner", names[normalized]],
+                    created_at=min(repository.created_at for repository in owner_repositories),
+                    updated_at=max(repository.updated_at for repository in owner_repositories),
+                )
+            )
+        return units
+
+    def _owner_repository_edges(self, owners: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        edges: list[KnowledgeEdge] = []
+        for owner in owners:
+            for repository_source_id in owner.metadata.get("repository_source_ids") or []:
+                edges.append(
+                    KnowledgeEdge(
+                        id=self._edge_id(owner.source_id, str(repository_source_id)),
+                        from_unit_id=owner.source_id,
+                        to_unit_id=str(repository_source_id),
+                        relation=EdgeRelation.CONTAINS,
+                        source=EdgeSource.SOURCE,
+                        metadata={
+                            "source_project": SourceProject.GITHUB_STARS_CSV.value,
+                            "relation_type": "owner_contains_repository",
+                        },
+                    )
+                )
+        return edges
+
+    def _normalize_owner(self, owner: str) -> str:
+        return owner.strip().casefold()
+
+    def _owner_source_id(self, normalized_owner: str) -> str:
+        digest = hashlib.sha256(normalized_owner.encode("utf-8")).hexdigest()[:24]
+        return f"github_stars_csv:owner:{digest}"
+
+    def _edge_id(self, owner_source_id: str, repository_source_id: str) -> str:
+        digest = hashlib.sha256("|".join((owner_source_id, repository_source_id, "owner_contains_repository")).encode("utf-8")).hexdigest()[:24]
+        return f"github-stars-csv-owner-contains-{digest}"
 
     def _parse_topics(self, value: str) -> list[str]:
         if not value:
