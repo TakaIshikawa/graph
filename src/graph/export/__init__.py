@@ -18,12 +18,14 @@ from graph.export.cypher import export_graph_cypher
 from graph.export.dot import export_graph_dot
 from graph.export.dublin_core_xml import export_units_to_dublin_core_xml
 from graph.export.duplicate_candidates import export_duplicate_candidates_markdown
+from graph.export.csv_edges import export_graph_edges_csv
 from graph.export.edge_csv import export_edges_to_csv
 from graph.export.edge_adjacency_markdown import export_edge_adjacency_markdown
 from graph.export.flashcards_markdown import export_units_to_flashcards_markdown
 from graph.export.geojson import export_units_to_geojson
 from graph.export.graphson import export_graphson
 from graph.export.graphviz_dot import export_graphviz_dot
+from graph.export.html_summary import export_graph_html_summary
 from graph.export.graph_overview_html import render_graph_overview_html
 from graph.export.html_report import render_search_html_report
 from graph.export.hugo_bundle import export_units_to_hugo_bundle
@@ -100,6 +102,7 @@ __all__ = [
     "export_duplicate_candidates_markdown",
     "export_edge_adjacency_markdown",
     "export_edges_to_csv",
+    "export_graph_edges_csv",
     "export_graph_adjacency_csv",
     "export_graph_adjacency_markdown",
     "export_units_to_activity_heatmap_csv",
@@ -113,6 +116,7 @@ __all__ = [
     "export_graph_rdf_turtle",
     "export_graphson",
     "export_graphviz_dot",
+    "export_graph_html_summary",
     "export_graph_sqlite",
     "export_units_to_hugo_bundle",
     "export_metadata_completeness_markdown",
