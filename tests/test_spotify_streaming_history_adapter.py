@@ -544,6 +544,101 @@ def test_spotify_streaming_history_podcast_edges_follow_entity_filters(tmp_path)
     assert play_only.edges == []
 
 
+def test_spotify_streaming_history_skip_reason_aggregates_music_and_podcasts(tmp_path):
+    export = tmp_path / "endsong_0.json"
+    export.write_text(
+        json.dumps(
+            [
+                {
+                    "ts": "2025-01-01T10:00:00Z",
+                    "master_metadata_track_name": "Skipped Track",
+                    "master_metadata_album_artist_name": "Artist A",
+                    "spotify_track_uri": "spotify:track:skipped",
+                    "ms_played": 100,
+                    "reason_end": "fwdbtn",
+                    "skipped": True,
+                    "offline": False,
+                },
+                {
+                    "ts": "2025-01-01T10:05:00Z",
+                    "master_metadata_track_name": "Skipped Track",
+                    "master_metadata_album_artist_name": "Artist A",
+                    "spotify_track_uri": "spotify:track:skipped",
+                    "ms_played": 200,
+                    "reason_end": "fwdbtn",
+                    "skipped": True,
+                    "offline": False,
+                },
+                {
+                    "ts": "2025-01-01T11:00:00Z",
+                    "episode_name": "Offline Episode",
+                    "episode_show_name": "Show A",
+                    "spotify_episode_uri": "spotify:episode:offline",
+                    "ms_played": 300,
+                    "reason_end": "trackdone",
+                    "skipped": False,
+                    "offline": True,
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = SpotifyStreamingHistoryAdapter(path=str(export)).ingest(entity_types=["skip_reason", "play"])
+
+    skip_reasons = [unit for unit in result.units if unit.source_entity_type == "skip_reason"]
+    plays = [unit for unit in result.units if unit.source_entity_type == "play"]
+    assert all(unit.source_id.startswith("spotify_streaming_history:skip_reason:") for unit in skip_reasons)
+    assert [unit.source_id for unit in skip_reasons] == [
+        unit.source_id
+        for unit in SpotifyStreamingHistoryAdapter(path=str(export)).ingest(entity_types=["skip_reason"]).units
+    ]
+
+    skipped = next(unit for unit in skip_reasons if unit.metadata["reason_end"] == "fwdbtn")
+    assert skipped.metadata["skipped"] is True
+    assert skipped.metadata["offline"] is False
+    assert skipped.metadata["play_count"] == 2
+    assert skipped.metadata["skipped_count"] == 2
+    assert skipped.metadata["offline_count"] == 0
+    assert skipped.metadata["total_ms_played"] == 300
+    assert skipped.metadata["distinct_item_count"] == 1
+    assert skipped.metadata["first_played_at"] == "2025-01-01T10:00:00+00:00"
+    assert skipped.metadata["latest_played_at"] == "2025-01-01T10:05:00+00:00"
+    assert skipped.metadata["play_source_ids"] == [plays[0].source_id, plays[1].source_id]
+
+    podcast = next(unit for unit in skip_reasons if unit.metadata["reason_end"] == "trackdone")
+    assert podcast.metadata["offline_count"] == 1
+    assert podcast.metadata["distinct_item_count"] == 1
+    assert len([edge for edge in result.edges if edge.metadata["relation_type"] == "skip_reason_contains_play"]) == 3
+    assert all(edge.relation == EdgeRelation.CONTAINS for edge in result.edges)
+
+
+def test_spotify_streaming_history_skip_reason_filtering(tmp_path):
+    export = tmp_path / "endsong_0.json"
+    export.write_text(
+        json.dumps(
+            [
+                {
+                    "ts": "2025-01-01T10:00:00Z",
+                    "master_metadata_track_name": "Track",
+                    "master_metadata_album_artist_name": "Artist",
+                    "reason_end": "logout",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert "skip_reason" in SpotifyStreamingHistoryAdapter(path=str(export)).entity_types
+    skip_reason_only = SpotifyStreamingHistoryAdapter(path=str(export)).ingest(entity_types=["skip_reason"])
+    play_only = SpotifyStreamingHistoryAdapter(path=str(export)).ingest(entity_types=["play"])
+
+    assert [unit.source_entity_type for unit in skip_reason_only.units] == ["skip_reason"]
+    assert skip_reason_only.edges == []
+    assert [unit.source_entity_type for unit in play_only.units] == ["play"]
+    assert play_only.edges == []
+
+
 def test_spotify_streaming_history_adapter_is_registered():
     assert "spotify_streaming_history" in list_adapters()
     adapter = get_adapter("spotify_streaming_history", path="/tmp/spotify")

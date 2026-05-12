@@ -21,7 +21,17 @@ class SpotifyStreamingHistoryAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["album", "artist", "track", "play", "session", "podcast_show", "podcast_episode", "listening_day"]
+        return [
+            "album",
+            "artist",
+            "track",
+            "play",
+            "session",
+            "podcast_show",
+            "podcast_episode",
+            "listening_day",
+            "skip_reason",
+        ]
 
     def __init__(self, path: str = "", session_gap_minutes: int = 30) -> None:
         self.path = path
@@ -62,6 +72,7 @@ class SpotifyStreamingHistoryAdapter(SourceAdapter):
         podcast_shows = self._podcast_show_units(units) if "podcast_show" in allowed_types else []
         podcast_episodes = self._podcast_episode_units(units) if "podcast_episode" in allowed_types else []
         listening_days = self._listening_day_units(units) if "listening_day" in allowed_types else []
+        skip_reasons = self._skip_reason_units(units) if "skip_reason" in allowed_types else []
         if "album" in allowed_types:
             result.units.extend(albums)
         if "artist" in allowed_types:
@@ -78,6 +89,8 @@ class SpotifyStreamingHistoryAdapter(SourceAdapter):
             result.units.extend(podcast_episodes)
         if "listening_day" in allowed_types:
             result.units.extend(listening_days)
+        if "skip_reason" in allowed_types:
+            result.units.extend(skip_reasons)
         if "artist" in allowed_types and "track" in allowed_types:
             result.edges.extend(self._artist_track_edges(artists, tracks))
         if "album" in allowed_types and "track" in allowed_types:
@@ -96,6 +109,8 @@ class SpotifyStreamingHistoryAdapter(SourceAdapter):
             result.edges.extend(self._podcast_show_play_edges(podcast_shows, units))
         if "listening_day" in allowed_types and "play" in allowed_types:
             result.edges.extend(self._listening_day_play_edges(listening_days))
+        if "skip_reason" in allowed_types and "play" in allowed_types:
+            result.edges.extend(self._skip_reason_play_edges(skip_reasons))
         result.units.sort(key=lambda unit: (unit.created_at, unit.source_id))
         result.edges.sort(key=lambda edge: edge.id)
         return result
@@ -498,6 +513,55 @@ class SpotifyStreamingHistoryAdapter(SourceAdapter):
             )
         return units
 
+    def _skip_reason_units(self, plays: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[tuple[str, bool | None, bool | None], list[KnowledgeUnit]] = {}
+        for play in plays:
+            key = self._skip_reason_key(play)
+            grouped.setdefault(key, []).append(play)
+
+        units: list[KnowledgeUnit] = []
+        for (reason_end, skipped, offline), reason_plays in sorted(
+            grouped.items(),
+            key=lambda item: (item[0][0], self._bool_sort_value(item[0][1]), self._bool_sort_value(item[0][2])),
+        ):
+            first_played = min(play.created_at for play in reason_plays)
+            latest_played = max(play.created_at for play in reason_plays)
+            total_ms = sum(
+                int(play.metadata["ms_played"])
+                for play in reason_plays
+                if isinstance(play.metadata.get("ms_played"), int)
+            )
+            item_keys = {self._play_item_key(play) for play in reason_plays}
+            item_keys.discard("")
+            title = f"Spotify skip reason: {reason_end}"
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.SPOTIFY_STREAMING_HISTORY,
+                    source_id=self._skip_reason_source_id(reason_end, skipped, offline),
+                    source_entity_type="skip_reason",
+                    title=title,
+                    content=f"{len(reason_plays)} Spotify plays ended by {reason_end}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "reason_end": reason_end,
+                        "skipped": skipped,
+                        "offline": offline,
+                        "play_count": len(reason_plays),
+                        "skipped_count": sum(1 for play in reason_plays if play.metadata.get("skipped") is True),
+                        "offline_count": sum(1 for play in reason_plays if play.metadata.get("offline") is True),
+                        "total_ms_played": total_ms,
+                        "distinct_item_count": len(item_keys),
+                        "first_played_at": first_played.isoformat(),
+                        "latest_played_at": latest_played.isoformat(),
+                        "play_source_ids": [play.source_id for play in reason_plays],
+                    },
+                    tags=["spotify", "skip-reason"],
+                    created_at=first_played,
+                    updated_at=latest_played,
+                )
+            )
+        return units
+
     def _aggregate_unit(
         self,
         entity_type: str,
@@ -633,6 +697,13 @@ class SpotifyStreamingHistoryAdapter(SourceAdapter):
                 edges.append(self._edge(day.source_id, str(play_source_id), "listening_day_contains_play"))
         return list({edge.id: edge for edge in edges}.values())
 
+    def _skip_reason_play_edges(self, skip_reasons: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        edges: list[KnowledgeEdge] = []
+        for skip_reason in skip_reasons:
+            for play_source_id in skip_reason.metadata.get("play_source_ids") or []:
+                edges.append(self._edge(skip_reason.source_id, str(play_source_id), "skip_reason_contains_play"))
+        return list({edge.id: edge for edge in edges}.values())
+
     def _track_play_edges(self, tracks: list[KnowledgeUnit], plays: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
         track_ids = {
             self._track_source_id(
@@ -741,6 +812,32 @@ class SpotifyStreamingHistoryAdapter(SourceAdapter):
     def _listening_day_source_id(self, date: str, media_kind: str) -> str:
         digest = hashlib.sha256("|".join((date, media_kind)).encode("utf-8")).hexdigest()[:24]
         return f"spotify_streaming_history:listening_day:{digest}"
+
+    def _skip_reason_source_id(self, reason_end: str, skipped: bool | None, offline: bool | None) -> str:
+        raw = "|".join((reason_end.strip().casefold(), str(skipped), str(offline)))
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+        return f"spotify_streaming_history:skip_reason:{digest}"
+
+    def _skip_reason_key(self, play: KnowledgeUnit) -> tuple[str, bool | None, bool | None]:
+        reason_end = str(play.metadata.get("reason_end") or "").strip().casefold() or "unknown"
+        skipped = play.metadata.get("skipped") if isinstance(play.metadata.get("skipped"), bool) else None
+        offline = play.metadata.get("offline") if isinstance(play.metadata.get("offline"), bool) else None
+        return (reason_end, skipped, offline)
+
+    def _bool_sort_value(self, value: bool | None) -> int:
+        if value is None:
+            return 0
+        return 2 if value else 1
+
+    def _play_item_key(self, play: KnowledgeUnit) -> str:
+        if play.metadata.get("media_kind") == "podcast":
+            episode_key = self._podcast_episode_key(play)
+            if episode_key:
+                return f"episode:{episode_key}"
+            show_key = self._podcast_show_key(play)
+            return f"show:{show_key}" if show_key else ""
+        track_key = self._track_key(play)
+        return "track:" + "|".join(track_key) if track_key else ""
 
     def _track_key(self, play: KnowledgeUnit) -> tuple[str, str, str] | None:
         if play.metadata.get("media_kind") == "podcast":

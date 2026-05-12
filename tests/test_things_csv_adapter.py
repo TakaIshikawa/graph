@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from graph.adapters.registry import get_adapter, list_adapters
 from graph.adapters.things_csv import ThingsCsvAdapter
-from graph.types.enums import SourceProject
+from graph.types.enums import EdgeRelation, SourceProject
 
 
 def test_things_csv_ingests_task_states_and_metadata(tmp_path):
@@ -120,7 +120,7 @@ def test_things_csv_emits_project_and_area_aggregates_and_edges(tmp_path):
 
     result = ThingsCsvAdapter(path=str(export)).ingest(entity_types=["task", "project", "area"])
 
-    assert ThingsCsvAdapter(path=str(export)).entity_types == ["task", "project", "area"]
+    assert ThingsCsvAdapter(path=str(export)).entity_types == ["task", "project", "area", "deadline_bucket"]
     launch = next(unit for unit in result.units if unit.source_entity_type == "project" and unit.title == "Launch")
     launch_tasks = [unit for unit in result.units if unit.source_entity_type == "task" and unit.metadata["project"] == "Launch"]
     assert launch.metadata["task_count"] == 2
@@ -135,3 +135,103 @@ def test_things_csv_emits_project_and_area_aggregates_and_edges(tmp_path):
     area_only = ThingsCsvAdapter(path=str(export)).ingest(entity_types=["area"])
     assert {unit.source_entity_type for unit in area_only.units} == {"area"}
     assert area_only.edges == []
+
+
+def test_things_csv_emits_deadline_bucket_aggregates_and_edges(tmp_path):
+    export = tmp_path / "things.csv"
+    rows = [
+        {
+            "Title": "Overdue task",
+            "Creation Date": "2025-01-01",
+            "Deadline": "2025-01-09",
+            "UUID": "overdue-1",
+        },
+        {
+            "Title": "Today task",
+            "Creation Date": "2025-01-02",
+            "Deadline": "2025-01-10",
+            "UUID": "today-1",
+        },
+        {
+            "Title": "Upcoming task",
+            "Creation Date": "2025-01-03",
+            "Deadline": "2025-01-15",
+            "UUID": "upcoming-1",
+        },
+        {
+            "Title": "Later task",
+            "Creation Date": "2025-01-04",
+            "Deadline": "2025-02-01",
+            "UUID": "later-1",
+        },
+        {
+            "Title": "No deadline task",
+            "Creation Date": "2025-01-05",
+            "Deadline": "",
+            "UUID": "none-1",
+        },
+        {
+            "Title": "Completed today task",
+            "Creation Date": "2025-01-06",
+            "Deadline": "2025-01-10",
+            "Completion Date": "2025-01-10",
+            "UUID": "done-today-1",
+        },
+    ]
+    with export.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list({key: None for row in rows for key in row.keys()}.keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+
+    result = ThingsCsvAdapter(
+        path=str(export),
+        now=datetime(2025, 1, 10, 12, 0, tzinfo=timezone.utc),
+    ).ingest(entity_types=["task", "deadline_bucket"])
+
+    buckets = [unit for unit in result.units if unit.source_entity_type == "deadline_bucket"]
+    tasks = [unit for unit in result.units if unit.source_entity_type == "task"]
+    assert [unit.metadata["bucket"] for unit in buckets] == [
+        "overdue",
+        "today",
+        "upcoming",
+        "later",
+        "no_deadline",
+    ]
+
+    today = next(unit for unit in buckets if unit.metadata["bucket"] == "today")
+    today_tasks = [unit for unit in tasks if unit.metadata["deadline"] == "2025-01-10T00:00:00+00:00"]
+    assert today.source_id == "things_csv:deadline_bucket:today"
+    assert today.metadata["task_count"] == 2
+    assert today.metadata["open_count"] == 1
+    assert today.metadata["completed_count"] == 1
+    assert today.metadata["first_deadline"] == "2025-01-10T00:00:00+00:00"
+    assert today.metadata["latest_deadline"] == "2025-01-10T00:00:00+00:00"
+    assert today.metadata["task_source_ids"] == sorted(unit.source_id for unit in today_tasks)
+
+    no_deadline = next(unit for unit in buckets if unit.metadata["bucket"] == "no_deadline")
+    assert no_deadline.metadata["first_deadline"] is None
+    assert no_deadline.metadata["latest_deadline"] is None
+    assert len([edge for edge in result.edges if edge.metadata["relation_type"] == "deadline_bucket_contains_task"]) == len(tasks)
+    assert all(edge.relation == EdgeRelation.CONTAINS for edge in result.edges)
+
+
+def test_things_csv_deadline_bucket_filtering(tmp_path):
+    export = tmp_path / "things.csv"
+    export.write_text(
+        "Title,Creation Date,Deadline,UUID\nTask,2025-01-01,2025-01-10,task-1\n",
+        encoding="utf-8",
+    )
+
+    bucket_only = ThingsCsvAdapter(
+        path=str(export),
+        now=datetime(2025, 1, 10, tzinfo=timezone.utc),
+    ).ingest(entity_types=["deadline_bucket"])
+    task_only = ThingsCsvAdapter(
+        path=str(export),
+        now=datetime(2025, 1, 10, tzinfo=timezone.utc),
+    ).ingest(entity_types=["task"])
+
+    assert [unit.source_entity_type for unit in bucket_only.units] == ["deadline_bucket"]
+    assert bucket_only.edges == []
+    assert [unit.source_entity_type for unit in task_only.units] == ["task"]
+    assert task_only.edges == []
