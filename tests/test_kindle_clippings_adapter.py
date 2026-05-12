@@ -65,17 +65,19 @@ The Book Title (Ada Author)
     assert bookmark.content == "The Book Title: Bookmark (Page 8)"
 
     book = next(unit for unit in result.units if unit.source_entity_type == "book" and unit.metadata["author"] == "Ada Author")
-    assert book.metadata == {
-        "book_title": "The Book Title",
-        "author": "Ada Author",
-        "clipping_count": 2,
-        "highlight_count": 1,
-        "note_count": 0,
-        "location_start": 101,
-        "location_end": 101,
-        "source_files": ["My Clippings.txt"],
-        "source_file": ["My Clippings.txt"],
-    }
+    assert book.metadata["book_title"] == "The Book Title"
+    assert book.metadata["author"] == "Ada Author"
+    assert book.metadata["clipping_count"] == 2
+    assert book.metadata["highlight_count"] == 1
+    assert book.metadata["note_count"] == 0
+    assert book.metadata["bookmark_count"] == 1
+    assert book.metadata["first_clipped_at"] == "2024-01-02T15:04:05+00:00"
+    assert book.metadata["last_clipped_at"] == "2024-01-04T17:06:07+00:00"
+    assert book.metadata["page_start"] == 7
+    assert book.metadata["page_end"] == 8
+    assert book.metadata["location_start"] == 101
+    assert book.metadata["location_end"] == 101
+    assert book.metadata["source_files"] == ["My Clippings.txt"]
     edge = next(edge for edge in result.edges if edge.to_unit_id == highlight.source_id)
     assert edge.from_unit_id == book.source_id
     assert edge.relation == EdgeRelation.CONTAINS

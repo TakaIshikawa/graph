@@ -213,12 +213,15 @@ class KindleClippingsAdapter(SourceAdapter):
     def _book_units(self, clippings: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
         grouped: dict[tuple[str, str], list[KnowledgeUnit]] = {}
         for clipping in clippings:
-            key = (str(clipping.metadata.get("book_title", "")), str(clipping.metadata.get("author", "")))
+            key = self._book_identity(clipping.metadata)
             if key[0]:
                 grouped.setdefault(key, []).append(clipping)
 
         units: list[KnowledgeUnit] = []
         for (title, author), book_clippings in grouped.items():
+            first = book_clippings[0]
+            display_title = str(first.metadata.get("book_title") or title)
+            display_author = str(first.metadata.get("author") or author)
             source_files = sorted({str(unit.metadata.get("source_file", "")) for unit in book_clippings if unit.metadata.get("source_file")})
             created_at = min(unit.created_at for unit in book_clippings)
             updated_at = max(unit.updated_at for unit in book_clippings)
@@ -227,26 +230,36 @@ class KindleClippingsAdapter(SourceAdapter):
                 for clipping in book_clippings
                 if (location := self._location_start(clipping.metadata.get("location"))) is not None
             ]
+            pages = [
+                page
+                for clipping in book_clippings
+                if (page := self._location_start(clipping.metadata.get("page"))) is not None
+            ]
             units.append(
                 KnowledgeUnit(
                     source_project=SourceProject.KINDLE,
-                    source_id=self._book_source_id(title, author),
+                    source_id=self._book_source_id(display_title, display_author),
                     source_entity_type="book",
-                    title=title if not author else f"{title} by {author}",
-                    content=title if not author else f"{title}\nAuthor: {author}",
+                    title=display_title if not display_author else f"{display_title} by {display_author}",
+                    content=display_title if not display_author else f"{display_title}\nAuthor: {display_author}",
                     content_type=ContentType.ARTIFACT,
                     metadata={
-                        "book_title": title,
-                        "author": author,
+                        "book_title": display_title,
+                        "author": display_author,
                         "clipping_count": len(book_clippings),
                         "highlight_count": sum(1 for unit in book_clippings if unit.metadata.get("clipping_type") == "highlight"),
                         "note_count": sum(1 for unit in book_clippings if unit.metadata.get("clipping_type") == "note"),
+                        "bookmark_count": sum(1 for unit in book_clippings if unit.metadata.get("clipping_type") == "bookmark"),
+                        "first_clipped_at": created_at.isoformat(),
+                        "last_clipped_at": updated_at.isoformat(),
+                        "page_start": min(pages) if pages else None,
+                        "page_end": max(pages) if pages else None,
                         "location_start": min(locations) if locations else None,
                         "location_end": max(locations) if locations else None,
                         "source_files": source_files,
                         "source_file": source_files,
                     },
-                    tags=[author] if author else [],
+                    tags=[display_author] if display_author else [],
                     created_at=created_at,
                     updated_at=updated_at,
                 )
@@ -255,13 +268,13 @@ class KindleClippingsAdapter(SourceAdapter):
 
     def _contains_edges(self, books: list[KnowledgeUnit], clippings: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
         book_ids = {
-            (str(book.metadata.get("book_title", "")), str(book.metadata.get("author", ""))): book.source_id
+            self._book_identity(book.metadata): book.source_id
             for book in books
         }
         edges: list[KnowledgeEdge] = []
         seen: set[str] = set()
         for clipping in clippings:
-            key = (str(clipping.metadata.get("book_title", "")), str(clipping.metadata.get("author", "")))
+            key = self._book_identity(clipping.metadata)
             book_source_id = book_ids.get(key)
             if not book_source_id:
                 continue
@@ -345,7 +358,13 @@ class KindleClippingsAdapter(SourceAdapter):
         return highlight, strategy
 
     def _book_source_id(self, title: str, author: str) -> str:
-        return f"kindle_clippings:book:{self._digest(title, author, '', '')}"
+        title_key, author_key = self._book_identity({"book_title": title, "author": author})
+        return f"kindle_clippings:book:{self._digest(title_key, author_key, '', '')}"
+
+    def _book_identity(self, metadata: dict) -> tuple[str, str]:
+        title = " ".join(str(metadata.get("book_title", "")).strip().casefold().split())
+        author = " ".join(str(metadata.get("author", "")).strip().casefold().split())
+        return title, author
 
     def _edge_id(self, book_source_id: str, clipping_source_id: str) -> str:
         digest = self._digest(book_source_id, clipping_source_id, "contains", "")

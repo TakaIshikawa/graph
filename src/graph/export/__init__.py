@@ -61,6 +61,7 @@ from graph.export.schema_inventory import export_unit_schema_inventory
 from graph.export.source_coverage import export_source_coverage_markdown
 from graph.export.source_entity_type_heatmap_csv import export_source_entity_type_heatmap_csv
 from graph.export.source_inventory import export_source_inventory_csv
+from graph.export.source_metadata_outliers_markdown import export_source_metadata_outliers_markdown
 from graph.export.source_quality_markdown import export_source_quality_markdown
 from graph.export.source_tag_summary_markdown import export_source_tag_summary_markdown
 from graph.export.source_timeline_csv import export_source_timeline_csv
@@ -154,6 +155,7 @@ __all__ = [
     "export_source_coverage_markdown",
     "export_source_entity_type_heatmap_csv",
     "export_source_inventory_csv",
+    "export_source_metadata_outliers_markdown",
     "export_source_quality_markdown",
     "export_source_tag_summary_markdown",
     "export_source_timeline_csv",
