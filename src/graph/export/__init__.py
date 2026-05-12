@@ -28,6 +28,7 @@ from graph.export.edge_csv import export_edges_to_csv
 from graph.export.edge_adjacency_markdown import export_edge_adjacency_markdown
 from graph.export.edge_coverage_csv import export_edge_coverage_csv
 from graph.export.edge_type_matrix_csv import export_edge_type_matrix_csv
+from graph.export.external_domain_summary_markdown import export_external_domain_summary_markdown
 from graph.export.flashcards_markdown import export_units_to_flashcards_markdown
 from graph.export.geojson import export_units_to_geojson
 from graph.export.graphson import export_graphson
@@ -124,6 +125,7 @@ __all__ = [
     "export_edge_coverage_csv",
     "export_edge_type_matrix_csv",
     "export_edges_to_csv",
+    "export_external_domain_summary_markdown",
     "export_graph_edges_csv",
     "export_graph_adjacency_csv",
     "export_graph_adjacency_markdown",
