@@ -76,7 +76,6 @@ def _lag_rows(edges: list[KnowledgeEdge]) -> list[dict[str, str | int]]:
     return sorted(
         rows,
         key=lambda row: (
-            _sort_key(row["relation"]),
             _sort_key(row["edge_id"]),
             _sort_key(row["from_unit_id"]),
             _sort_key(row["to_unit_id"]),
@@ -133,9 +132,7 @@ def _lag_bucket(lag_days: int | None) -> str:
         return "month"
     if absolute_days <= 92:
         return "quarter"
-    if absolute_days <= 366:
-        return "year"
-    return "over_year"
+    return "older"
 
 
 def _field_value(value: object) -> str:
