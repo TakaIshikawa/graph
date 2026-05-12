@@ -16,6 +16,7 @@ from graph.export.csl_json import export_units_to_csl_json
 from graph.export.chatgpt_digest_markdown import export_units_to_chatgpt_digest_markdown
 from graph.export.collection_manifest_json import export_collection_manifest_json
 from graph.export.collection_readme_markdown import export_collection_readme_markdown
+from graph.export.collection_tag_index_markdown import export_collection_tag_index_markdown
 from graph.export.cytoscape import export_graph_cytoscape
 from graph.export.cytoscape_json import export_graph_cytoscape_json
 from graph.export.cypher import export_graph_cypher
@@ -58,6 +59,7 @@ from graph.export.ris import export_units_to_ris
 from graph.export.rss import export_units_to_rss
 from graph.export.schema_inventory import export_unit_schema_inventory
 from graph.export.source_coverage import export_source_coverage_markdown
+from graph.export.source_entity_type_heatmap_csv import export_source_entity_type_heatmap_csv
 from graph.export.source_inventory import export_source_inventory_csv
 from graph.export.source_quality_markdown import export_source_quality_markdown
 from graph.export.source_tag_summary_markdown import export_source_tag_summary_markdown
@@ -110,6 +112,7 @@ __all__ = [
     "export_context_pack",
     "export_collection_manifest_json",
     "export_collection_readme_markdown",
+    "export_collection_tag_index_markdown",
     "export_units_to_csl_json",
     "export_graph_cytoscape",
     "export_graph_cytoscape_json",
@@ -149,6 +152,7 @@ __all__ = [
     "export_units_to_ris",
     "export_units_to_rss",
     "export_source_coverage_markdown",
+    "export_source_entity_type_heatmap_csv",
     "export_source_inventory_csv",
     "export_source_quality_markdown",
     "export_source_tag_summary_markdown",
