@@ -43,7 +43,7 @@ class TodoistAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["task", "project"]
+        return ["task", "project", "person"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -62,7 +62,7 @@ class TodoistAdapter(SourceAdapter):
         if not csv_path.exists():
             return result
 
-        allowed_types = set(entity_types) if entity_types else None
+        allowed_types = set(entity_types) if entity_types else {"task", "project"}
 
         try:
             text = csv_path.read_text(encoding="utf-8-sig")
@@ -70,6 +70,7 @@ class TodoistAdapter(SourceAdapter):
             return result
 
         latest_by_indent: dict[int, dict[str, object]] = {}
+        person_units: dict[str, KnowledgeUnit] = {}
         reader = csv.DictReader(io.StringIO(text))
         for row_number, row in enumerate(reader, start=2):
             content = self._row_value(row, _COL_CONTENT)
@@ -98,7 +99,7 @@ class TodoistAdapter(SourceAdapter):
             source_id = f"todoist:{entity_type}:{digest}"
 
             parent = self._nearest_parent(latest_by_indent, indent)
-            emitted = not allowed_types or entity_type in allowed_types
+            emitted = entity_type in allowed_types
 
             if emitted:
                 # Priority tag
@@ -172,6 +173,30 @@ class TodoistAdapter(SourceAdapter):
                         )
                     )
 
+            person_emitted = "person" in allowed_types
+            if person_emitted:
+                for role, value in (("author", self._row_value(row, _COL_AUTHOR)), ("responsible", self._row_value(row, _COL_RESPONSIBLE))):
+                    person = self._person_unit(value)
+                    if person is None:
+                        continue
+                    person_units.setdefault(person.source_id, person)
+                    if emitted:
+                        result.edges.append(
+                            KnowledgeEdge(
+                                id=self._person_edge_id(source_id, person.source_id, role),
+                                from_unit_id=source_id,
+                                to_unit_id=person.source_id,
+                                relation=EdgeRelation.REFERENCES,
+                                source=EdgeSource.SOURCE,
+                                metadata={
+                                    "source_project": SourceProject.TODOIST.value,
+                                    "relation_type": f"todoist_{role}",
+                                    "role": role,
+                                    "source_row_number": row_number,
+                                },
+                            )
+                        )
+
             latest_by_indent[indent] = {
                 "source_id": source_id,
                 "title": content,
@@ -181,6 +206,7 @@ class TodoistAdapter(SourceAdapter):
             for stale_indent in [level for level in latest_by_indent if level > indent]:
                 del latest_by_indent[stale_indent]
 
+        result.units.extend(person_units.values())
         result.units.sort(key=lambda u: (u.source_entity_type, u.source_id))
         result.edges.sort(key=lambda e: e.id)
         return result
@@ -193,6 +219,33 @@ class TodoistAdapter(SourceAdapter):
     def _edge_id(self, parent_source_id: str, child_source_id: str) -> str:
         digest = hashlib.sha1(f"{parent_source_id}|{child_source_id}|contains".encode("utf-8")).hexdigest()[:16]
         return f"todoist:contains:{digest}"
+
+    def _person_unit(self, value: str) -> KnowledgeUnit | None:
+        normalized = self._normalize_person(value)
+        if not normalized:
+            return None
+        title = value.strip()
+        return KnowledgeUnit(
+            source_project=SourceProject.TODOIST,
+            source_id=self._person_source_id(normalized),
+            source_entity_type="person",
+            title=title,
+            content=title,
+            content_type=ContentType.METADATA,
+            metadata={"name": title, "normalized_name": normalized, "source": "todoist_collaborator"},
+            tags=["person", "todoist"],
+        )
+
+    def _person_source_id(self, normalized: str) -> str:
+        digest = hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:16]
+        return f"todoist:person:{digest}"
+
+    def _person_edge_id(self, source_id: str, person_source_id: str, role: str) -> str:
+        digest = hashlib.sha1(f"{source_id}|{person_source_id}|{role}".encode("utf-8")).hexdigest()[:16]
+        return f"todoist:references:{digest}"
+
+    def _normalize_person(self, value: str) -> str:
+        return re.sub(r"\s+", " ", value.strip().casefold())
 
     def _row_value(self, row: dict[str, str], column: str) -> str:
         lowered = {str(key).casefold(): value for key, value in row.items()}

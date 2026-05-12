@@ -7,6 +7,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from graph.adapters.base import IngestResult, SourceAdapter
 from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
@@ -20,7 +21,7 @@ class GoogleCalendarTakeoutAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["event", "attendee"]
+        return ["event", "attendee", "attachment", "conference"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -39,6 +40,8 @@ class GoogleCalendarTakeoutAdapter(SourceAdapter):
         sync_at = self._ensure_utc(since.last_sync_at) if since else None
         units: list[KnowledgeUnit] = []
         attendee_units: dict[str, KnowledgeUnit] = {}
+        attachment_units: dict[str, KnowledgeUnit] = {}
+        conference_units: dict[str, KnowledgeUnit] = {}
         edge_candidates: list[KnowledgeEdge] = []
         for path in self._iter_paths():
             try:
@@ -61,8 +64,30 @@ class GoogleCalendarTakeoutAdapter(SourceAdapter):
                         attendee_units.setdefault(attendee_unit.source_id, attendee_unit)
                         if "event" in allowed_types:
                             edge_candidates.append(self._edge_from_event_attendee(unit, attendee_unit, attendee))
+                if "attachment" in allowed_types:
+                    for attachment in self._attachments(event):
+                        attachment_unit = self._unit_from_attachment(attachment, unit, path.name)
+                        if attachment_unit is None:
+                            continue
+                        attachment_units.setdefault(attachment_unit.source_id, attachment_unit)
+                        if "event" in allowed_types:
+                            edge_candidates.append(
+                                self._edge_from_event_resource(unit, attachment_unit, "attachment", attachment)
+                            )
+                if "conference" in allowed_types:
+                    for conference in self._conferences(event):
+                        conference_unit = self._unit_from_conference(conference, unit, path.name)
+                        if conference_unit is None:
+                            continue
+                        conference_units.setdefault(conference_unit.source_id, conference_unit)
+                        if "event" in allowed_types:
+                            edge_candidates.append(
+                                self._edge_from_event_resource(unit, conference_unit, "conference", conference)
+                            )
 
         units.extend(attendee_units.values())
+        units.extend(attachment_units.values())
+        units.extend(conference_units.values())
         result.units.extend(sorted(units, key=lambda unit: (unit.created_at, unit.source_id)))
         result.edges.extend(sorted(edge_candidates, key=lambda edge: (edge.from_unit_id, edge.to_unit_id, edge.id)))
         return result
@@ -208,6 +233,104 @@ class GoogleCalendarTakeoutAdapter(SourceAdapter):
             )
         return attendees
 
+    def _attachments(self, value: dict[str, Any]) -> list[dict[str, Any]]:
+        raw = value.get("attachments")
+        if not isinstance(raw, list):
+            return []
+        attachments: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            url = self._first(item, "fileUrl", "url", "alternateLink")
+            file_id = self._first(item, "fileId", "id")
+            title = self._first(item, "title", "name") or url or file_id
+            stable = file_id or url or title
+            if not stable or stable in seen:
+                continue
+            seen.add(stable)
+            attachments.append(
+                {
+                    "file_id": file_id,
+                    "title": title,
+                    "mime_type": self._first(item, "mimeType", "mime_type"),
+                    "url": url,
+                    "icon_link": self._first(item, "iconLink", "icon"),
+                }
+            )
+        return attachments
+
+    def _conferences(self, event: dict[str, Any]) -> list[dict[str, Any]]:
+        conferences: list[dict[str, Any]] = []
+        data = event.get("conferenceData")
+        if isinstance(data, dict):
+            solution = data.get("conferenceSolution")
+            solution_name = ""
+            solution_key = ""
+            if isinstance(solution, dict):
+                solution_name = self._first(solution, "name")
+                key = solution.get("key")
+                if isinstance(key, dict):
+                    solution_key = self._first(key, "type")
+            entry_points = self._entry_points(data.get("entryPoints"))
+            conference_id = self._first(data, "conferenceId", "id", "signature")
+            url = self._first(data, "hangoutLink")
+            if not url:
+                url = next((entry["uri"] for entry in entry_points if entry.get("uri")), "")
+            if conference_id or url or entry_points:
+                conferences.append(
+                    {
+                        "provider": solution_name or solution_key,
+                        "provider_type": solution_key,
+                        "meeting_code": conference_id,
+                        "url": url,
+                        "entry_points": entry_points,
+                    }
+                )
+
+        hangout_link = self._first(event, "hangoutLink")
+        if hangout_link and all(item.get("url") != hangout_link for item in conferences):
+            conferences.append(
+                {
+                    "provider": self._conference_provider(hangout_link),
+                    "provider_type": "",
+                    "meeting_code": self._meeting_code(hangout_link),
+                    "url": hangout_link,
+                    "entry_points": [{"entryPointType": "video", "uri": hangout_link}],
+                }
+            )
+
+        location = self._first(event, "location")
+        if self._is_url(location) and all(item.get("url") != location for item in conferences):
+            conferences.append(
+                {
+                    "provider": self._conference_provider(location),
+                    "provider_type": "",
+                    "meeting_code": self._meeting_code(location),
+                    "url": location,
+                    "entry_points": [{"entryPointType": "location_url", "uri": location}],
+                }
+            )
+        return conferences
+
+    def _entry_points(self, value: Any) -> list[dict[str, str]]:
+        if not isinstance(value, list):
+            return []
+        entries: list[dict[str, str]] = []
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            entry = {
+                "entryPointType": self._first(item, "entryPointType"),
+                "uri": self._first(item, "uri"),
+                "label": self._first(item, "label"),
+                "meetingCode": self._first(item, "meetingCode"),
+                "passcode": self._first(item, "passcode", "password"),
+            }
+            if any(entry.values()):
+                entries.append({key: value for key, value in entry.items() if value})
+        return entries
+
     def _unit_from_attendee(
         self,
         attendee: dict[str, Any],
@@ -238,6 +361,66 @@ class GoogleCalendarTakeoutAdapter(SourceAdapter):
             updated_at=event_updated_at,
         )
 
+    def _unit_from_attachment(
+        self,
+        attachment: dict[str, Any],
+        event_unit: KnowledgeUnit,
+        source_file: str,
+    ) -> KnowledgeUnit | None:
+        stable = attachment.get("file_id") or attachment.get("url") or attachment.get("title")
+        if not stable:
+            return None
+        title = str(attachment.get("title") or attachment.get("url") or "Calendar attachment")
+        metadata = {
+            **attachment,
+            "parent_event_source_id": event_unit.source_id,
+            "parent_event_title": event_unit.title,
+            "source_file": source_file,
+        }
+        return KnowledgeUnit(
+            source_project=SourceProject.GOOGLE_CALENDAR_TAKEOUT,
+            source_id=self._resource_source_id("attachment", str(stable)),
+            source_entity_type="attachment",
+            title=title,
+            content=self._resource_content(title, attachment.get("url"), attachment.get("mime_type")),
+            content_type=ContentType.ARTIFACT,
+            metadata={key: value for key, value in metadata.items() if value not in ("", None, [])},
+            tags=["google_calendar", "calendar_attachment"],
+            created_at=event_unit.created_at,
+            updated_at=event_unit.updated_at,
+        )
+
+    def _unit_from_conference(
+        self,
+        conference: dict[str, Any],
+        event_unit: KnowledgeUnit,
+        source_file: str,
+    ) -> KnowledgeUnit | None:
+        stable = conference.get("meeting_code") or conference.get("url") or json.dumps(conference, sort_keys=True)
+        if not stable:
+            return None
+        provider = str(conference.get("provider") or "Conference")
+        meeting_code = str(conference.get("meeting_code") or "")
+        title = f"{provider} {meeting_code}".strip()
+        metadata = {
+            **conference,
+            "parent_event_source_id": event_unit.source_id,
+            "parent_event_title": event_unit.title,
+            "source_file": source_file,
+        }
+        return KnowledgeUnit(
+            source_project=SourceProject.GOOGLE_CALENDAR_TAKEOUT,
+            source_id=self._resource_source_id("conference", str(stable)),
+            source_entity_type="conference",
+            title=title,
+            content=self._resource_content(title, conference.get("url"), meeting_code),
+            content_type=ContentType.METADATA,
+            metadata={key: value for key, value in metadata.items() if value not in ("", None, [])},
+            tags=["google_calendar", "calendar_conference"],
+            created_at=event_unit.created_at,
+            updated_at=event_unit.updated_at,
+        )
+
     def _edge_from_event_attendee(
         self,
         event_unit: KnowledgeUnit,
@@ -259,6 +442,29 @@ class GoogleCalendarTakeoutAdapter(SourceAdapter):
                 "self": attendee.get("self"),
                 "attendee_email": self._normalize_email(attendee.get("email")),
                 "attendee_display_name": self._string(attendee.get("displayName")),
+            },
+            created_at=event_unit.updated_at,
+        )
+
+    def _edge_from_event_resource(
+        self,
+        event_unit: KnowledgeUnit,
+        target_unit: KnowledgeUnit,
+        target_type: str,
+        raw: dict[str, Any],
+    ) -> KnowledgeEdge:
+        return KnowledgeEdge(
+            id=self._resource_edge_id(event_unit.source_id, target_unit.source_id, target_type),
+            from_unit_id=event_unit.source_id,
+            to_unit_id=target_unit.source_id,
+            relation=EdgeRelation.REFERENCES,
+            source=EdgeSource.SOURCE,
+            metadata={
+                "source_project": SourceProject.GOOGLE_CALENDAR_TAKEOUT.value,
+                "from_entity_type": "event",
+                "to_entity_type": target_type,
+                "url": raw.get("url"),
+                "meeting_code": raw.get("meeting_code"),
             },
             created_at=event_unit.updated_at,
         )
@@ -285,6 +491,41 @@ class GoogleCalendarTakeoutAdapter(SourceAdapter):
         )
         digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
         return f"google-calendar-attendee-references-{digest}"
+
+    def _resource_source_id(self, entity_type: str, stable: str) -> str:
+        digest = hashlib.sha256(stable.encode("utf-8")).hexdigest()[:24]
+        return f"google_calendar_takeout:{entity_type}:{digest}"
+
+    def _resource_edge_id(self, event_source_id: str, target_source_id: str, target_type: str) -> str:
+        raw = "|".join([event_source_id, target_source_id, target_type, EdgeRelation.REFERENCES.value])
+        digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+        return f"google-calendar-{target_type}-references-{digest}"
+
+    def _resource_content(self, title: str, url: Any, detail: Any) -> str:
+        parts = [title]
+        if detail:
+            parts.append(str(detail))
+        if url:
+            parts.append(f"URL: {url}")
+        return "\n".join(parts)
+
+    def _is_url(self, value: str) -> bool:
+        parsed = urlparse(value)
+        return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+    def _conference_provider(self, url: str) -> str:
+        host = urlparse(url).netloc.lower()
+        if "meet.google" in host or "hangouts.google" in host:
+            return "Google Meet"
+        if "zoom.us" in host:
+            return "Zoom"
+        if "teams.microsoft" in host:
+            return "Microsoft Teams"
+        return host or "Conference"
+
+    def _meeting_code(self, url: str) -> str:
+        path = urlparse(url).path.strip("/")
+        return path.rsplit("/", 1)[-1] if path else ""
 
     def _content(
         self,
