@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class StoryGraphReadingHistoryCsvAdapter(SourceAdapter):
@@ -21,7 +21,7 @@ class StoryGraphReadingHistoryCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["book", "read"]
+        return ["book", "read", "author"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -33,10 +33,12 @@ class StoryGraphReadingHistoryCsvAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        if entity_types and not set(entity_types).intersection(self.entity_types):
+        allowed = set(entity_types or self.entity_types)
+        if not allowed.intersection(self.entity_types):
             return result
 
         sync_at = self._ensure_utc(since.last_sync_at) if since else None
+        read_units: list[KnowledgeUnit] = []
         for path in self._iter_paths():
             try:
                 rows = self._read_rows(path)
@@ -48,9 +50,18 @@ class StoryGraphReadingHistoryCsvAdapter(SourceAdapter):
                     continue
                 if sync_at and unit.updated_at <= sync_at:
                     continue
-                result.units.append(unit)
+                read_units.append(unit)
+
+        author_units = self._author_units(read_units)
+        if "read" in allowed:
+            result.units.extend(read_units)
+        if "author" in allowed:
+            result.units.extend(author_units)
+        if {"author", "read"}.issubset(allowed):
+            result.edges.extend(self._author_edges(author_units, read_units))
 
         result.units.sort(key=lambda unit: (unit.updated_at, unit.source_id))
+        result.edges.sort(key=lambda edge: edge.id)
         return result
 
     def _iter_paths(self) -> list[Path]:
@@ -181,6 +192,86 @@ class StoryGraphReadingHistoryCsvAdapter(SourceAdapter):
 
     def _format_title(self, title: str, authors: list[str]) -> str:
         return f"{title} by {', '.join(authors)}" if authors else title
+
+    def _author_units(self, reads: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        names: dict[str, str] = {}
+        for read in reads:
+            for author in read.metadata.get("authors") or []:
+                key = self._normalized_author(author)
+                if not key:
+                    continue
+                grouped.setdefault(key, []).append(read)
+                names.setdefault(key, str(author).strip())
+
+        units: list[KnowledgeUnit] = []
+        for key, author_reads in sorted(grouped.items()):
+            unique_reads = sorted({read.source_id: read for read in author_reads}.values(), key=lambda read: read.source_id)
+            titles = sorted({str(read.metadata.get("title") or read.title) for read in unique_reads})
+            read_source_ids = [read.source_id for read in unique_reads]
+            source_files = sorted({str(read.metadata.get("source_file")) for read in unique_reads if read.metadata.get("source_file")})
+            author = names[key]
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.STORYGRAPH_READING_HISTORY_CSV,
+                    source_id=self._author_source_id(key),
+                    source_entity_type="author",
+                    title=author,
+                    content="\n".join([f"Author: {author}", f"Books read: {len(unique_reads)}"]),
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "author": author,
+                        "normalized_author": key,
+                        "book_count": len(unique_reads),
+                        "read_source_ids": read_source_ids,
+                        "titles": titles,
+                        "source_files": source_files,
+                    },
+                    tags=["storygraph", "author"],
+                    created_at=min(read.created_at for read in unique_reads),
+                    updated_at=max(read.updated_at for read in unique_reads),
+                )
+            )
+        return units
+
+    def _author_edges(self, authors: list[KnowledgeUnit], reads: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        author_ids = {str(author.metadata.get("normalized_author")): author.source_id for author in authors}
+        edges: list[KnowledgeEdge] = []
+        seen: set[tuple[str, str]] = set()
+        for read in reads:
+            for author in read.metadata.get("authors") or []:
+                author_id = author_ids.get(self._normalized_author(str(author)))
+                if not author_id or (author_id, read.source_id) in seen:
+                    continue
+                seen.add((author_id, read.source_id))
+                edges.append(
+                    KnowledgeEdge(
+                        id=self._edge_id(author_id, read.source_id),
+                        from_unit_id=author_id,
+                        to_unit_id=read.source_id,
+                        relation=EdgeRelation.CONTAINS,
+                        source=EdgeSource.SOURCE,
+                        metadata={
+                            "source_project": SourceProject.STORYGRAPH_READING_HISTORY_CSV.value,
+                            "from_entity_type": "author",
+                            "to_entity_type": "read",
+                            "author": author,
+                        },
+                        created_at=read.created_at,
+                    )
+                )
+        return edges
+
+    def _normalized_author(self, author: str) -> str:
+        return " ".join(author.casefold().split())
+
+    def _author_source_id(self, normalized_author: str) -> str:
+        digest = hashlib.sha256(normalized_author.encode("utf-8")).hexdigest()[:24]
+        return f"storygraph_reading_history_csv:author:{digest}"
+
+    def _edge_id(self, author_id: str, read_id: str) -> str:
+        digest = hashlib.sha256(f"{author_id}|{read_id}|contains".encode("utf-8")).hexdigest()[:24]
+        return f"storygraph-reading-history-author-contains-{digest}"
 
     def _first(self, row: dict[str, Any], *keys: str) -> str:
         lowered = {str(key).lower(): value for key, value in row.items()}

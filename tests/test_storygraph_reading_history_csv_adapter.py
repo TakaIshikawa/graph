@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from graph.adapters.registry import get_adapter
 from graph.adapters.storygraph_reading_history_csv import StoryGraphReadingHistoryCsvAdapter
-from graph.types.enums import SourceProject
+from graph.types.enums import EdgeRelation, EdgeSource, SourceProject
 from graph.types.models import SyncState
 
 
@@ -39,8 +39,9 @@ def test_storygraph_reading_history_csv_ingests_single_file(tmp_path):
 
     result = StoryGraphReadingHistoryCsvAdapter(path=str(path)).ingest()
 
-    assert len(result.units) == 1
-    unit = result.units[0]
+    reads = [unit for unit in result.units if unit.source_entity_type == "read"]
+    assert len(reads) == 1
+    unit = reads[0]
     assert unit.source_project == SourceProject.STORYGRAPH_READING_HISTORY_CSV
     assert unit.source_entity_type == "read"
     assert unit.title == "A Memory Called Empire by Arkady Martine"
@@ -67,7 +68,7 @@ def test_storygraph_reading_history_csv_directory_and_since_filter(tmp_path):
 
     result = StoryGraphReadingHistoryCsvAdapter(path=str(tmp_path)).ingest(since=since)
 
-    assert [unit.title for unit in result.units] == ["New Book"]
+    assert [unit.title for unit in result.units if unit.source_entity_type == "read"] == ["New Book"]
     assert get_adapter("storygraph_reading_history_csv", path=str(tmp_path)).name == "storygraph_reading_history_csv"
 
 
@@ -86,8 +87,8 @@ def test_storygraph_reading_history_csv_source_ids_are_deterministic(tmp_path):
     path = tmp_path / "storygraph.csv"
     _write_csv(path, [{"Title": "Stable", "Authors": "Ada", "Date Read": "2026-05-01", "Read Count": "1"}])
 
-    first = StoryGraphReadingHistoryCsvAdapter(path=str(path)).ingest().units[0]
-    second = StoryGraphReadingHistoryCsvAdapter(path=str(path)).ingest().units[0]
+    first = StoryGraphReadingHistoryCsvAdapter(path=str(path)).ingest(entity_types=["read"]).units[0]
+    second = StoryGraphReadingHistoryCsvAdapter(path=str(path)).ingest(entity_types=["read"]).units[0]
 
     assert first.source_id == second.source_id
 
@@ -164,3 +165,57 @@ def test_storygraph_reading_history_csv_pace_buckets_and_invalid_numbers(tmp_pat
     assert "pages_per_day" not in by_title["Long Book"].metadata
     assert by_title["Unknown Pace"].metadata["completion_bucket"] == "unknown"
     assert "reading_days" not in by_title["Unknown Pace"].metadata
+
+
+def test_storygraph_reading_history_csv_emits_author_units_and_edges(tmp_path):
+    first = tmp_path / "first.csv"
+    second = tmp_path / "second.csv"
+    _write_csv(
+        first,
+        [
+            {"Title": "First Book", "Authors": "Ada Lovelace", "Date Read": "2026-05-01"},
+            {"Title": "Second Book", "Authors": "ada   lovelace", "Date Read": "2026-05-02"},
+        ],
+    )
+    _write_csv(second, [{"Title": "Other Book", "Authors": "Grace Hopper", "Date Read": "2026-05-03"}])
+
+    result = StoryGraphReadingHistoryCsvAdapter(path=str(tmp_path)).ingest()
+
+    reads = [unit for unit in result.units if unit.source_entity_type == "read"]
+    authors = sorted((unit for unit in result.units if unit.source_entity_type == "author"), key=lambda unit: unit.title)
+    assert len(reads) == 3
+    assert [unit.title for unit in authors] == ["Ada Lovelace", "Grace Hopper"]
+    ada = authors[0]
+    repeat_ada = next(
+        unit
+        for unit in StoryGraphReadingHistoryCsvAdapter(path=str(tmp_path)).ingest().units
+        if unit.source_entity_type == "author" and unit.title == "Ada Lovelace"
+    )
+    assert ada.source_id == repeat_ada.source_id
+    assert ada.metadata["author"] == "Ada Lovelace"
+    assert ada.metadata["book_count"] == 2
+    assert ada.metadata["titles"] == ["First Book", "Second Book"]
+    assert ada.metadata["read_source_ids"] == sorted(
+        unit.source_id for unit in reads if unit.metadata["title"] in {"First Book", "Second Book"}
+    )
+    assert ada.metadata["source_files"] == [str(first)]
+    assert len(result.edges) == 3
+    assert {edge.relation for edge in result.edges} == {EdgeRelation.CONTAINS}
+    assert {edge.source for edge in result.edges} == {EdgeSource.SOURCE}
+    assert {edge.from_unit_id for edge in result.edges} == {author.source_id for author in authors}
+
+
+def test_storygraph_reading_history_csv_author_entity_filtering(tmp_path):
+    path = tmp_path / "storygraph.csv"
+    _write_csv(path, [{"Title": "Stable", "Authors": "Ada", "Date Read": "2026-05-01"}])
+
+    read_only = StoryGraphReadingHistoryCsvAdapter(path=str(path)).ingest(entity_types=["read"])
+    author_only = StoryGraphReadingHistoryCsvAdapter(path=str(path)).ingest(entity_types=["author"])
+    both = StoryGraphReadingHistoryCsvAdapter(path=str(path)).ingest(entity_types=["read", "author"])
+
+    assert [unit.source_entity_type for unit in read_only.units] == ["read"]
+    assert read_only.edges == []
+    assert [unit.source_entity_type for unit in author_only.units] == ["author"]
+    assert author_only.edges == []
+    assert {unit.source_entity_type for unit in both.units} == {"read", "author"}
+    assert len(both.edges) == 1
