@@ -21,7 +21,7 @@ class SteamLibraryCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["game", "genre"]
+        return ["game", "genre", "developer"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -53,12 +53,17 @@ class SteamLibraryCsvAdapter(SourceAdapter):
                 game_units.append(unit)
 
         genre_units = self._genre_units(game_units)
+        developer_units = self._developer_units(game_units)
         if "game" in allowed_types:
             result.units.extend(game_units)
         if "genre" in allowed_types:
             result.units.extend(genre_units)
+        if "developer" in allowed_types:
+            result.units.extend(developer_units)
         if {"game", "genre"}.issubset(allowed_types):
             result.edges.extend(self._genre_edges(genre_units, game_units))
+        if {"game", "developer"}.issubset(allowed_types):
+            result.edges.extend(self._developer_edges(developer_units, game_units))
         result.units.sort(key=lambda unit: unit.source_id)
         result.edges.sort(key=lambda edge: edge.id)
         return result
@@ -91,6 +96,7 @@ class SteamLibraryCsvAdapter(SourceAdapter):
             store_url = f"https://store.steampowered.com/app/{app_id}/"
         platform = self._first(row, "platform", "Platform") or "steam"
         tags = self._tags(row)
+        creators = self._creator_values(row)
         now = datetime.now(timezone.utc)
 
         metadata = {
@@ -101,6 +107,7 @@ class SteamLibraryCsvAdapter(SourceAdapter):
             "store_url": store_url,
             "platform": platform,
             "genres": self._genre_values(row),
+            "creators": creators,
             "source_file": source_file,
             "row": dict(row),
         }
@@ -150,6 +157,19 @@ class SteamLibraryCsvAdapter(SourceAdapter):
                 if tag and tag not in values:
                     values.append(tag)
         return values
+
+    def _creator_values(self, row: dict[str, Any]) -> list[dict[str, str]]:
+        creators: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for key in ("Developer", "Developers", "Publisher", "Publishers"):
+            for value in re.split(r"[,;|]", self._first(row, key)):
+                name = " ".join(value.strip().split())
+                normalized = " ".join(name.casefold().split())
+                if not normalized or normalized in seen:
+                    continue
+                seen.add(normalized)
+                creators.append({"name": name, "normalized_name": normalized})
+        return creators
 
     def _genre_units(self, games: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
         grouped: dict[str, list[KnowledgeUnit]] = {}
@@ -213,6 +233,78 @@ class SteamLibraryCsvAdapter(SourceAdapter):
     def _genre_source_id(self, genre: str) -> str:
         digest = hashlib.sha256(genre.encode("utf-8")).hexdigest()[:24]
         return f"steam_library_csv:genre:{digest}"
+
+    def _developer_units(self, games: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        names: dict[str, str] = {}
+        for game in games:
+            for creator in game.metadata.get("creators") or []:
+                normalized = str(creator.get("normalized_name") or "")
+                if not normalized:
+                    continue
+                grouped.setdefault(normalized, []).append(game)
+                names.setdefault(normalized, str(creator.get("name") or normalized))
+
+        units: list[KnowledgeUnit] = []
+        for normalized, creator_games in sorted(grouped.items()):
+            unique_games = sorted({game.source_id: game for game in creator_games}.values(), key=lambda game: game.source_id)
+            playtimes = [value for game in unique_games if (value := game.metadata.get("playtime_minutes")) is not None]
+            app_ids = sorted(str(game.metadata.get("app_id")) for game in unique_games if game.metadata.get("app_id"))
+            name = names[normalized]
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.STEAM_LIBRARY_CSV,
+                    source_id=self._developer_source_id(normalized),
+                    source_entity_type="developer",
+                    title=name,
+                    content=f"Steam creator: {name}\nGames: {len(unique_games)}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "developer": name,
+                        "normalized_name": normalized,
+                        "game_count": len(unique_games),
+                        "total_playtime_minutes": sum(playtimes),
+                        "game_source_ids": [game.source_id for game in unique_games],
+                        "app_ids": app_ids,
+                        "source_files": sorted({str(game.metadata.get("source_file")) for game in unique_games if game.metadata.get("source_file")}),
+                    },
+                    tags=["steam", "developer", name],
+                    created_at=min(game.created_at for game in unique_games),
+                    updated_at=max(game.updated_at for game in unique_games),
+                )
+            )
+        return units
+
+    def _developer_edges(self, developers: list[KnowledgeUnit], games: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        developer_ids = {str(developer.metadata.get("normalized_name")): developer.source_id for developer in developers}
+        edges: list[KnowledgeEdge] = []
+        seen: set[tuple[str, str]] = set()
+        for game in games:
+            for creator in game.metadata.get("creators") or []:
+                developer_id = developer_ids.get(str(creator.get("normalized_name") or ""))
+                if not developer_id or (developer_id, game.source_id) in seen:
+                    continue
+                seen.add((developer_id, game.source_id))
+                digest = hashlib.sha256("|".join((developer_id, game.source_id, "developer_contains_game")).encode("utf-8")).hexdigest()[:24]
+                edges.append(
+                    KnowledgeEdge(
+                        id=f"steam-library-csv-developer-contains-{digest}",
+                        from_unit_id=developer_id,
+                        to_unit_id=game.source_id,
+                        relation=EdgeRelation.CONTAINS,
+                        source=EdgeSource.SOURCE,
+                        metadata={
+                            "source_project": SourceProject.STEAM_LIBRARY_CSV.value,
+                            "relation_type": "developer_contains_game",
+                            "developer": creator.get("name"),
+                        },
+                    )
+                )
+        return edges
+
+    def _developer_source_id(self, normalized_name: str) -> str:
+        digest = hashlib.sha256(normalized_name.encode("utf-8")).hexdigest()[:24]
+        return f"steam_library_csv:developer:{digest}"
 
     def _first(self, row: dict[str, Any], *keys: str) -> str:
         lowered = {str(key).casefold(): value for key, value in row.items()}

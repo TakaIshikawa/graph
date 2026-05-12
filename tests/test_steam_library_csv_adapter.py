@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from graph.adapters.registry import get_adapter
 from graph.adapters.steam_library_csv import SteamLibraryCsvAdapter
-from graph.types.enums import SourceProject
+from graph.types.enums import EdgeRelation, EdgeSource, SourceProject
 
 
 def _write_csv(path, rows):
@@ -112,7 +112,7 @@ def test_steam_library_csv_emits_genre_units_and_edges(tmp_path):
 
     result = SteamLibraryCsvAdapter(path=str(export)).ingest(entity_types=["game", "genre"])
 
-    assert SteamLibraryCsvAdapter(path=str(export)).entity_types == ["game", "genre"]
+    assert SteamLibraryCsvAdapter(path=str(export)).entity_types == ["game", "genre", "developer"]
     genres = sorted((unit for unit in result.units if unit.source_entity_type == "genre"), key=lambda unit: unit.title)
     assert [unit.title for unit in genres] == ["co-op", "puzzle"]
     puzzle = next(unit for unit in genres if unit.title == "puzzle")
@@ -128,3 +128,56 @@ def test_steam_library_csv_emits_genre_units_and_edges(tmp_path):
     genre_only = SteamLibraryCsvAdapter(path=str(export)).ingest(entity_types=["genre"])
     assert {unit.source_entity_type for unit in genre_only.units} == {"genre"}
     assert genre_only.edges == []
+
+
+def test_steam_library_csv_emits_developer_units_and_edges(tmp_path):
+    export = tmp_path / "steam.csv"
+    _write_csv(
+        export,
+        [
+            {
+                "App ID": "620",
+                "Name": "Portal 2",
+                "Hours Played": "12.5",
+                "Developer": "Valve",
+                "Publishers": "Valve | Electronic Arts",
+            },
+            {
+                "App ID": "400",
+                "Name": "Portal",
+                "Minutes Played": "30",
+                "Developers": " valve ; Valve ",
+                "Publisher": "Valve",
+            },
+        ],
+    )
+
+    result = SteamLibraryCsvAdapter(path=str(export)).ingest(entity_types=["game", "developer"])
+
+    games = [unit for unit in result.units if unit.source_entity_type == "game"]
+    developers = sorted((unit for unit in result.units if unit.source_entity_type == "developer"), key=lambda unit: unit.title)
+    assert [unit.title for unit in developers] == ["Electronic Arts", "Valve"]
+    valve = next(unit for unit in developers if unit.title == "Valve")
+    assert games[0].metadata["creators"]
+    assert valve.metadata["developer"] == "Valve"
+    assert valve.metadata["game_count"] == 2
+    assert valve.metadata["total_playtime_minutes"] == 780
+    assert valve.metadata["game_source_ids"] == sorted(game.source_id for game in games)
+    assert valve.metadata["app_ids"] == ["400", "620"]
+    assert valve.metadata["source_files"] == ["steam.csv"]
+    assert {edge.relation for edge in result.edges} == {EdgeRelation.CONTAINS}
+    assert {edge.source for edge in result.edges} == {EdgeSource.SOURCE}
+    assert {edge.to_unit_id for edge in result.edges if edge.from_unit_id == valve.source_id} == {game.source_id for game in games}
+
+
+def test_steam_library_csv_developer_filtering(tmp_path):
+    export = tmp_path / "steam.csv"
+    _write_csv(export, [{"App ID": "1", "Name": "Game", "Developer": "Studio"}])
+
+    developer_only = SteamLibraryCsvAdapter(path=str(export)).ingest(entity_types=["developer"])
+    game_only = SteamLibraryCsvAdapter(path=str(export)).ingest(entity_types=["game"])
+
+    assert [unit.source_entity_type for unit in developer_only.units] == ["developer"]
+    assert developer_only.edges == []
+    assert [unit.source_entity_type for unit in game_only.units] == ["game"]
+    assert game_only.edges == []
