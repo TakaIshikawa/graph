@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -77,7 +78,8 @@ class HackerNewsSavedAdapter(SourceAdapter):
     def _unit_from_item(self, item: dict[str, Any], source_file: str) -> KnowledgeUnit | None:
         item_id = self._first(item, "id", "item_id")
         url = self._first(item, "url")
-        hn_item_url = self._hn_item_url(item_id)
+        hn_item_id = self._hn_item_id(item_id, url)
+        hn_item_url = self._hn_item_url(str(hn_item_id) if hn_item_id is not None else item_id)
         source_url = url or hn_item_url
         title = self._first(item, "title") or url or (f"Hacker News item {item_id}" if item_id else "")
         text = self._first(item, "text")
@@ -89,13 +91,17 @@ class HackerNewsSavedAdapter(SourceAdapter):
         now = datetime.now(timezone.utc)
         kids = item.get("kids")
         comment_count = len(kids) if isinstance(kids, list) else 0
-        item_type = self._first(item, "type") or "story"
+        item_type = self._normalized_item_type(item, url, title, text)
         source_id = self._source_id(item_id, source_url, title)
+        parent_id = self._first_int(item, "parent", "parent_id", "parentId")
+        story_id = self._first_int(item, "story_id", "story", "storyId", "root_id", "root")
         metadata: dict[str, Any] = {
             "item_id": self._parse_int(item_id),
+            "hn_item_id": hn_item_id,
             "author": self._first(item, "by"),
             "score": self._parse_int(item.get("score")),
             "item_type": item_type,
+            "hn_item_type": item_type,
             "comment_count": comment_count,
             "time": self._parse_int(item.get("time")),
             "time_iso": item_time_iso,
@@ -103,6 +109,12 @@ class HackerNewsSavedAdapter(SourceAdapter):
             "hn_item_url": hn_item_url,
             "source_file": source_file,
         }
+        if parent_id is not None:
+            metadata["parent_id"] = parent_id
+            metadata["hn_parent_id"] = parent_id
+        if story_id is not None:
+            metadata["story_id"] = story_id
+            metadata["hn_story_id"] = story_id
         if url:
             metadata["external_url"] = url
         if isinstance(kids, list):
@@ -151,6 +163,42 @@ class HackerNewsSavedAdapter(SourceAdapter):
             if text:
                 return text
         return ""
+
+    def _first_int(self, item: dict[str, Any], *keys: str) -> int | None:
+        for key in keys:
+            parsed = self._parse_int(item.get(key))
+            if parsed is not None:
+                return parsed
+        return None
+
+    def _hn_item_id(self, item_id: str, url: str) -> int | None:
+        parsed = self._parse_int(item_id)
+        if parsed is not None:
+            return parsed
+        match = re.search(r"[?&]id=(\d+)", url)
+        return int(match.group(1)) if match else None
+
+    def _normalized_item_type(self, item: dict[str, Any], url: str, title: str, text: str) -> str:
+        raw_type = self._first(item, "type", "item_type", "hn_item_type").casefold()
+        aliases = {
+            "story": "story",
+            "comment": "comment",
+            "job": "job",
+            "poll": "poll",
+            "ask": "story",
+            "show": "story",
+        }
+        if raw_type in aliases:
+            return aliases[raw_type]
+        if raw_type:
+            return "unknown"
+        if self._first(item, "parent", "parent_id", "parentId"):
+            return "comment"
+        if text and not title and not url:
+            return "comment"
+        if title or url:
+            return "story"
+        return "unknown"
 
     def _parse_int(self, value: Any) -> int | None:
         if value is None or value == "":

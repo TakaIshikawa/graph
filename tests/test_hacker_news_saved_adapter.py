@@ -45,15 +45,61 @@ def test_hacker_news_saved_imports_story_metadata(tmp_path):
     assert "URL: https://example.com/systems" in unit.content
     assert "Hacker News: https://news.ycombinator.com/item?id=424242" in unit.content
     assert unit.metadata["item_id"] == 424242
+    assert unit.metadata["hn_item_id"] == 424242
     assert unit.metadata["author"] == "pg"
     assert unit.metadata["score"] == 123
     assert unit.metadata["item_type"] == "story"
+    assert unit.metadata["hn_item_type"] == "story"
     assert unit.metadata["comment_count"] == 3
     assert unit.metadata["time"] == 1735689600
     assert unit.metadata["time_iso"] == "2025-01-01T00:00:00+00:00"
     assert unit.metadata["external_url"] == "https://example.com/systems"
     assert unit.metadata["source_url"] == "https://example.com/systems"
     assert unit.metadata["hn_item_url"] == "https://news.ycombinator.com/item?id=424242"
+
+
+def test_hacker_news_saved_normalizes_comment_metadata_and_references(tmp_path):
+    path = tmp_path / "saved.json"
+    path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": 424243,
+                    "type": "comment",
+                    "by": "dang",
+                    "text": "A saved comment.",
+                    "parent": 424242,
+                    "story_id": 424200,
+                    "time": 1735689600,
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = HackerNewsSavedAdapter(path=str(path)).ingest()
+
+    assert len(result.units) == 1
+    unit = result.units[0]
+    assert unit.metadata["hn_item_type"] == "comment"
+    assert unit.metadata["hn_item_id"] == 424243
+    assert unit.metadata["hn_parent_id"] == 424242
+    assert unit.metadata["hn_story_id"] == 424200
+    assert unit.tags == ["hacker_news", "comment"]
+
+
+def test_hacker_news_saved_preserves_sparse_unknown_items(tmp_path):
+    path = tmp_path / "saved.json"
+    path.write_text(
+        json.dumps([{"id": 999, "type": "pollopt", "text": "Sparse saved item."}]),
+        encoding="utf-8",
+    )
+
+    result = HackerNewsSavedAdapter(path=str(path)).ingest()
+
+    assert len(result.units) == 1
+    assert result.units[0].metadata["hn_item_id"] == 999
+    assert result.units[0].metadata["hn_item_type"] == "unknown"
 
 
 def test_hacker_news_saved_accepts_top_level_items_and_saved_items(tmp_path):
