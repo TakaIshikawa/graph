@@ -84,6 +84,7 @@ from graph.export.sqlite_snapshot import export_graph_sqlite
 from graph.export.tag_activity_markdown import export_tag_activity_markdown
 from graph.export.tag_cooccurrence_csv import export_tag_cooccurrence_csv
 from graph.export.tag_cooccurrence_markdown import export_tag_cooccurrence_markdown
+from graph.export.tag_confidence_csv import export_tag_confidence_csv
 from graph.export.tag_glossary import export_tag_glossary_markdown
 from graph.export.tag_momentum_markdown import export_tag_momentum_markdown
 from graph.export.tag_source_matrix_csv import export_tag_source_matrix_csv
@@ -203,6 +204,7 @@ __all__ = [
     "export_tag_activity_markdown",
     "export_tag_cooccurrence_csv",
     "export_tag_cooccurrence_markdown",
+    "export_tag_confidence_csv",
     "export_tag_glossary_markdown",
     "export_tag_momentum_markdown",
     "export_tag_source_matrix_csv",
