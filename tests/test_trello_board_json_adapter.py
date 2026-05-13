@@ -103,8 +103,8 @@ def test_trello_board_json_emits_check_item_units_and_card_edges(tmp_path):
 
     result = TrelloBoardJsonAdapter(path=str(export)).ingest()
 
-    assert TrelloBoardJsonAdapter(path=str(export)).entity_types == ["card", "check_item"]
-    assert [unit.source_entity_type for unit in result.units] == ["card", "check_item", "check_item"]
+    assert TrelloBoardJsonAdapter(path=str(export)).entity_types == ["card", "check_item", "list"]
+    assert [unit.source_entity_type for unit in result.units] == ["card", "check_item", "check_item", "list"]
     check_item = next(unit for unit in result.units if unit.metadata.get("item_id") == "item-1")
     assert check_item.source_id == "trello_board_json:card-1:check_item:check-1:item-1"
     assert check_item.title == "Write tests"
@@ -226,3 +226,46 @@ def test_trello_board_json_adds_checklist_items_to_card_metadata_and_content(tmp
     ]
     assert "Checklist item: Write tests (complete; Checklist: Launch; Due: 2025-01-09T00:00:00Z)" in card.content
     assert "Checklist item: Ship adapter (incomplete; Checklist: Launch)" in card.content
+
+
+def test_trello_board_json_ingests_list_aggregates_and_card_edges(tmp_path):
+    export = tmp_path / "board.json"
+    export.write_text(
+        json.dumps(
+            {
+                "lists": [{"id": "list-1", "name": "Doing"}],
+                "cards": [
+                    {"id": "card-1", "name": "Open card", "idList": "list-1", "closed": False},
+                    {"id": "card-2", "name": "Closed card", "idList": "list-1", "closed": True},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    lists_only = TrelloBoardJsonAdapter(path=str(export)).ingest(entity_types=["list"])
+    with_cards = TrelloBoardJsonAdapter(path=str(export)).ingest(entity_types=["list", "card"])
+
+    list_unit = lists_only.units[0]
+    assert list_unit.source_entity_type == "list"
+    assert list_unit.source_id == "trello_board_json:list:list-1"
+    assert list_unit.metadata["card_count"] == 2
+    assert list_unit.metadata["open_count"] == 1
+    assert list_unit.metadata["closed_count"] == 1
+    assert list_unit.metadata["source_file"] == "board.json"
+    assert list_unit.metadata["source_files"] == ["board.json"]
+    assert list_unit.metadata["card_source_ids"] == [
+        "trello_board_json:card-1",
+        "trello_board_json:card-2",
+    ]
+    assert lists_only.edges == []
+
+    list_edges = [edge for edge in with_cards.edges if edge.metadata["kind"] == "list_card"]
+    assert len(list_edges) == 2
+    assert {edge.from_unit_id for edge in list_edges} == {"trello_board_json:list:list-1"}
+    assert {edge.to_unit_id for edge in list_edges} == {
+        "trello_board_json:card-1",
+        "trello_board_json:card-2",
+    }
+    assert {edge.relation for edge in list_edges} == {EdgeRelation.CONTAINS}
+    assert {edge.source for edge in list_edges} == {EdgeSource.SOURCE}
