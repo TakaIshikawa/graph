@@ -43,7 +43,7 @@ class DiscordJsonAdapter(SourceAdapter):
             return result
 
         sync_at = self._sync_datetime(since) if since else None
-        references_by_source_id: dict[str, list[dict[str, str]]] = {}
+        references_by_source_id: dict[str, list[dict[str, Any]]] = {}
         attachment_edges: list[KnowledgeEdge] = []
 
         for path in self._json_files(root):
@@ -84,6 +84,19 @@ class DiscordJsonAdapter(SourceAdapter):
                 if edge_key in emitted_edges:
                     continue
                 emitted_edges.add(edge_key)
+                metadata: dict[str, Any] = {
+                    "source_project": SourceProject.DISCORD_JSON.value,
+                    "from_entity_type": "discord_message",
+                    "to_entity_type": "discord_message",
+                    "relation_type": "discord_reply_reference",
+                    "referenced_message_id": referenced_message_id,
+                    "referenced_channel_id": reference.get("channel_id", ""),
+                    "referenced_server_id": reference.get("server_id", ""),
+                }
+                if reference.get("author"):
+                    metadata["referenced_author"] = reference["author"]
+                if reference.get("timestamp"):
+                    metadata["referenced_timestamp"] = reference["timestamp"]
                 result.edges.append(
                     KnowledgeEdge(
                         id=self._edge_id(source_id, target_id, referenced_message_id),
@@ -91,15 +104,7 @@ class DiscordJsonAdapter(SourceAdapter):
                         to_unit_id=target_id,
                         relation=EdgeRelation.REFERENCES,
                         source=EdgeSource.SOURCE,
-                        metadata={
-                            "source_project": SourceProject.DISCORD_JSON.value,
-                            "from_entity_type": "discord_message",
-                            "to_entity_type": "discord_message",
-                            "relation_type": "discord_reply_reference",
-                            "referenced_message_id": referenced_message_id,
-                            "referenced_channel_id": reference.get("channel_id", ""),
-                            "referenced_server_id": reference.get("server_id", ""),
-                        },
+                        metadata=metadata,
                     )
                 )
 
@@ -410,7 +415,7 @@ class DiscordJsonAdapter(SourceAdapter):
     def _has_attachment_identity(self, attachment: dict[str, Any]) -> bool:
         return bool(attachment.get("id") or attachment.get("url") or attachment.get("filename"))
 
-    def _references(self, message: dict[str, Any]) -> list[dict[str, str]]:
+    def _references(self, message: dict[str, Any]) -> list[dict[str, Any]]:
         values = [
             message.get("message_reference"),
             message.get("messageReference"),
@@ -418,14 +423,14 @@ class DiscordJsonAdapter(SourceAdapter):
             message.get("referenced_message"),
             message.get("referencedMessage"),
         ]
-        references: list[dict[str, str]] = []
+        references: list[dict[str, Any]] = []
         for value in values:
             reference = self._reference(value)
             if reference and reference not in references:
                 references.append(reference)
         return references
 
-    def _reference(self, value: Any) -> dict[str, str] | None:
+    def _reference(self, value: Any) -> dict[str, Any] | None:
         if isinstance(value, str):
             message_id = value.strip()
             return {"message_id": message_id, "channel_id": "", "server_id": ""} if message_id else None
@@ -434,15 +439,20 @@ class DiscordJsonAdapter(SourceAdapter):
         message_id = self._first(value, "message_id", "messageId", "id")
         if not message_id:
             return None
-        return {
+        reference: dict[str, Any] = {
             "message_id": message_id,
             "channel_id": self._first(value, "channel_id", "channelId"),
             "server_id": self._first(value, "guild_id", "guildId", "server_id", "serverId"),
+            "timestamp": self._first(value, "timestamp", "Timestamp", "created_at", "createdAt", "date"),
         }
+        author = self._author(value.get("author") or value.get("Author"))
+        if any(author.values()):
+            reference["author"] = author
+        return reference
 
     def _reference_source_id(
         self,
-        reference: dict[str, str],
+        reference: dict[str, Any],
         source_id_by_message_id: dict[str, str],
     ) -> str:
         return source_id_by_message_id.get(self._message_index_key(reference.get("message_id")), "")

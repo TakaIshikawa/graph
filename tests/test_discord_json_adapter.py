@@ -45,6 +45,12 @@ def test_discord_json_adapter_ingests_messages_metadata_and_reply_edges(tmp_path
                             "messageId": "100",
                             "channelId": "channel-1",
                             "guildId": "guild-1",
+                            "timestamp": "2026-04-01T10:00:00.000+00:00",
+                            "author": {
+                                "id": "user-1",
+                                "username": "alice",
+                                "globalName": "Alice A.",
+                            },
                         },
                     },
                     {
@@ -89,6 +95,21 @@ def test_discord_json_adapter_ingests_messages_metadata_and_reply_edges(tmp_path
     ]
     assert first.created_at == datetime(2026, 4, 1, 10, 0, tzinfo=timezone.utc)
     assert second.updated_at == datetime(2026, 4, 1, 10, 6, tzinfo=timezone.utc)
+    assert second.metadata["references"] == [
+        {
+            "message_id": "100",
+            "channel_id": "channel-1",
+            "server_id": "guild-1",
+            "timestamp": "2026-04-01T10:00:00.000+00:00",
+            "author": {
+                "id": "user-1",
+                "username": "alice",
+                "display_name": "Alice A.",
+                "discriminator": "",
+                "bot": "",
+            },
+        }
+    ]
 
     assert len(result.edges) == 1
     edge = result.edges[0]
@@ -98,6 +119,10 @@ def test_discord_json_adapter_ingests_messages_metadata_and_reply_edges(tmp_path
     assert edge.source == EdgeSource.SOURCE
     assert edge.metadata["relation_type"] == "discord_reply_reference"
     assert edge.metadata["referenced_message_id"] == "100"
+    assert edge.metadata["referenced_channel_id"] == "channel-1"
+    assert edge.metadata["referenced_server_id"] == "guild-1"
+    assert edge.metadata["referenced_timestamp"] == "2026-04-01T10:00:00.000+00:00"
+    assert edge.metadata["referenced_author"]["id"] == "user-1"
 
 
 def test_discord_json_adapter_reads_directory_and_ignores_malformed_optional_fields(tmp_path):
