@@ -23,7 +23,7 @@ class GooglePhotosTakeoutAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["album", "photo", "video"]
+        return ["album", "photo", "video", "place"]
 
     def __init__(self, path: str = "", *, album: str = "", album_context: str = "") -> None:
         self.path = path
@@ -43,6 +43,8 @@ class GooglePhotosTakeoutAdapter(SourceAdapter):
         sync_at = self._ensure_utc(since.last_sync_at) if since else None
         units_by_source_id: dict[str, KnowledgeUnit] = {}
         album_links: list[tuple[KnowledgeUnit, KnowledgeUnit]] = []
+        place_media: dict[str, list[KnowledgeUnit]] = {}
+        place_metadata: dict[str, dict[str, Any]] = {}
         root = Path(self.path).expanduser() if self.path else None
         album_units = self._album_units(root)
         album_by_dir = {album.metadata["album_dir"]: album for album in album_units}
@@ -65,18 +67,35 @@ class GooglePhotosTakeoutAdapter(SourceAdapter):
             album = album_by_dir.get(album_dir)
             if album is not None:
                 album_links.append((album, units_by_source_id[unit.source_id]))
+            place = self._place_identity(unit)
+            if place:
+                place_key, metadata = place
+                place_media.setdefault(place_key, []).append(units_by_source_id[unit.source_id])
+                place_metadata.setdefault(place_key, metadata)
 
         if "album" in requested:
             for album in album_units:
                 if not sync_at or album.updated_at > sync_at:
                     result.units.append(album)
+        place_units = [
+            self._place_unit(place_key, place_metadata[place_key], media)
+            for place_key, media in sorted(place_media.items())
+        ]
         for unit in units_by_source_id.values():
             if unit.source_entity_type in requested:
                 result.units.append(unit)
+        if "place" in requested:
+            result.units.extend(place_units)
         if "album" in requested:
             for album, media in album_links:
                 if media.source_entity_type in requested:
                     result.edges.append(self._album_edge(album, media))
+        if "place" in requested and {"photo", "video"}.intersection(requested):
+            media_ids = {unit.source_id for unit in result.units if unit.source_entity_type in {"photo", "video"}}
+            for place in place_units:
+                for media_id in place.metadata["media_source_ids"]:
+                    if media_id in media_ids:
+                        result.edges.append(self._place_edge(media_id, place))
 
         result.units.sort(key=lambda unit: (unit.created_at, unit.source_id))
         result.edges.sort(key=lambda edge: edge.id)
@@ -121,6 +140,7 @@ class GooglePhotosTakeoutAdapter(SourceAdapter):
             "people": people,
             "source_file": source_file,
         }
+        metadata.update(self._named_place_metadata(sidecar))
         if album:
             metadata["album"] = album
         for key in ("geoData", "geoDataExif"):
@@ -145,6 +165,18 @@ class GooglePhotosTakeoutAdapter(SourceAdapter):
             created_at=created_at,
             updated_at=self._parse_datetime(creation_time) or created_at,
         )
+
+    def _named_place_metadata(self, sidecar: dict[str, Any]) -> dict[str, str]:
+        metadata: dict[str, str] = {}
+        for output_key, keys in {
+            "locationName": ("locationName", "location_name", "location", "place"),
+            "city": ("city", "locality"),
+            "country": ("country", "countryCode", "country_code"),
+        }.items():
+            value = self._first(sidecar, *keys)
+            if value:
+                metadata[output_key] = value
+        return metadata
 
     def _source_id(
         self,
@@ -236,6 +268,96 @@ class GooglePhotosTakeoutAdapter(SourceAdapter):
                 "media_title": media.title,
             },
             created_at=media.created_at,
+        )
+
+    def _place_identity(self, media: KnowledgeUnit) -> tuple[str, dict[str, Any]] | None:
+        metadata = media.metadata
+        location_name = self._first(metadata, "locationName", "location_name", "location", "place", "name")
+        city = self._first(metadata, "city", "locality")
+        country = self._first(metadata, "country", "countryCode", "country_code")
+        for key in ("geoData", "geoDataExif"):
+            value = metadata.get(key)
+            if not isinstance(value, dict):
+                continue
+            location_name = location_name or self._first(value, "locationName", "location_name", "location", "place", "name")
+            city = city or self._first(value, "city", "locality")
+            country = country or self._first(value, "country", "countryCode", "country_code")
+
+        latitude = self._parse_float(metadata.get("latitude"))
+        longitude = self._parse_float(metadata.get("longitude"))
+        lat_bucket = round(latitude, 2) if latitude is not None else None
+        lon_bucket = round(longitude, 2) if longitude is not None else None
+        if not any([location_name, city, country, lat_bucket is not None and lon_bucket is not None]):
+            return None
+
+        identity = {
+            "location_name": location_name.casefold(),
+            "city": city.casefold(),
+            "country": country.casefold(),
+            "lat_bucket": lat_bucket,
+            "lon_bucket": lon_bucket,
+        }
+        digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode("utf-8")).hexdigest()[:24]
+        return digest, {
+            "location_name": location_name,
+            "city": city,
+            "country": country,
+            "lat_bucket": lat_bucket,
+            "lon_bucket": lon_bucket,
+            "latitude": latitude,
+            "longitude": longitude,
+        }
+
+    def _place_unit(self, place_key: str, place: dict[str, Any], media: list[KnowledgeUnit]) -> KnowledgeUnit:
+        media_ids = sorted({unit.source_id for unit in media})
+        title = self._place_title(place)
+        source_files = sorted({str(unit.metadata.get("source_file")) for unit in media if unit.metadata.get("source_file")})
+        return KnowledgeUnit(
+            source_project=SourceProject.GOOGLE_PHOTOS_TAKEOUT,
+            source_id=f"google_photos_takeout:place:{place_key}",
+            source_entity_type="place",
+            title=title,
+            content=f"Google Photos place: {title}\nMedia: {len(media_ids)}",
+            content_type=ContentType.METADATA,
+            metadata={
+                "place_key": place_key,
+                "location_name": place.get("location_name") or "",
+                "city": place.get("city") or "",
+                "country": place.get("country") or "",
+                "lat_bucket": place.get("lat_bucket"),
+                "lon_bucket": place.get("lon_bucket"),
+                "latitude": place.get("latitude"),
+                "longitude": place.get("longitude"),
+                "media_count": len(media_ids),
+                "media_source_ids": media_ids,
+                "source_files": source_files,
+            },
+            tags=["google_photos", "place"],
+            created_at=min(unit.created_at for unit in media),
+            updated_at=max(unit.updated_at for unit in media),
+        )
+
+    def _place_title(self, place: dict[str, Any]) -> str:
+        parts = [str(place.get(key) or "").strip() for key in ("location_name", "city", "country")]
+        title = ", ".join(dict.fromkeys(part for part in parts if part))
+        if title:
+            return title
+        return f"{place.get('lat_bucket')}, {place.get('lon_bucket')}"
+
+    def _place_edge(self, media_id: str, place: KnowledgeUnit) -> KnowledgeEdge:
+        digest = hashlib.sha256(f"{media_id}|{place.source_id}|relates_to".encode("utf-8")).hexdigest()[:24]
+        return KnowledgeEdge(
+            id=f"google-photos-place-relates-{digest}",
+            from_unit_id=media_id,
+            to_unit_id=place.source_id,
+            relation=EdgeRelation.RELATES_TO,
+            source=EdgeSource.SOURCE,
+            metadata={
+                "source_project": SourceProject.GOOGLE_PHOTOS_TAKEOUT.value,
+                "from_entity_type": "media",
+                "to_entity_type": "place",
+                "place": place.title,
+            },
         )
 
     def _geo_metadata(self, sidecar: dict[str, Any]) -> dict[str, Any]:

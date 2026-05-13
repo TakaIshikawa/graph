@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from graph.adapters.google_photos_takeout import GooglePhotosTakeoutAdapter
 from graph.adapters.registry import get_adapter, list_adapters
-from graph.types.enums import EdgeRelation, SourceProject
+from graph.types.enums import EdgeRelation, EdgeSource, SourceProject
 
 
 def test_google_photos_takeout_ingests_photo_sidecar_with_metadata(tmp_path):
@@ -30,8 +30,7 @@ def test_google_photos_takeout_ingests_photo_sidecar_with_metadata(tmp_path):
 
     result = GooglePhotosTakeoutAdapter(path=str(tmp_path)).ingest()
 
-    assert len(result.units) == 1
-    unit = result.units[0]
+    unit = next(unit for unit in result.units if unit.source_entity_type == "photo")
     assert unit.source_project == SourceProject.GOOGLE_PHOTOS_TAKEOUT
     assert unit.source_entity_type == "photo"
     assert unit.source_id == GooglePhotosTakeoutAdapter(path=str(tmp_path)).ingest().units[0].source_id
@@ -69,8 +68,7 @@ def test_google_photos_takeout_ingests_video_and_caller_album_context(tmp_path):
 
     result = GooglePhotosTakeoutAdapter(path=str(sidecar), album="Camera Uploads").ingest()
 
-    assert len(result.units) == 1
-    unit = result.units[0]
+    unit = next(unit for unit in result.units if unit.source_entity_type == "video")
     assert unit.source_entity_type == "video"
     assert unit.metadata["album"] == "Camera Uploads"
     assert unit.metadata["latitude"] == 35.6812
@@ -140,3 +138,49 @@ def test_google_photos_takeout_ingests_album_metadata_and_membership(tmp_path):
     media_only = GooglePhotosTakeoutAdapter(path=str(tmp_path)).ingest(entity_types=["photo", "video"])
     assert [unit.source_entity_type for unit in media_only.units] == ["photo"]
     assert media_only.edges == []
+
+
+def test_google_photos_takeout_emits_place_units_and_edges(tmp_path):
+    first = tmp_path / "Vacation" / "IMG_0001.JPG.json"
+    second = tmp_path / "Vacation" / "IMG_0002.JPG.json"
+    first.parent.mkdir()
+    payload = {
+        "creationTime": {"timestamp": "1710000000"},
+        "geoData": {"latitude": 37.7793, "longitude": -122.4192, "city": "San Francisco", "country": "US"},
+    }
+    first.write_text(json.dumps({"title": "IMG_0001.JPG", **payload}), encoding="utf-8")
+    second.write_text(
+        json.dumps(
+            {
+                "title": "IMG_0002.JPG",
+                "creationTime": {"timestamp": "1710001000"},
+                "geoData": {"latitude": 37.7799, "longitude": -122.4188, "city": "San Francisco", "country": "US"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = GooglePhotosTakeoutAdapter(path=str(tmp_path)).ingest(entity_types=["photo", "place"])
+    second_result = GooglePhotosTakeoutAdapter(path=str(tmp_path)).ingest(entity_types=["photo", "place"])
+
+    places = [unit for unit in result.units if unit.source_entity_type == "place"]
+    photos = [unit for unit in result.units if unit.source_entity_type == "photo"]
+    assert GooglePhotosTakeoutAdapter(path=str(tmp_path)).entity_types == ["album", "photo", "video", "place"]
+    assert len(places) == 1
+    place = places[0]
+    assert place.title == "San Francisco, US"
+    assert place.metadata["media_count"] == 2
+    assert place.metadata["media_source_ids"] == sorted(photo.source_id for photo in photos)
+    assert [unit.source_id for unit in places] == [
+        unit.source_id for unit in second_result.units if unit.source_entity_type == "place"
+    ]
+    assert len(result.edges) == 2
+    assert {edge.relation for edge in result.edges} == {EdgeRelation.RELATES_TO}
+    assert {edge.source for edge in result.edges} == {EdgeSource.SOURCE}
+    assert {edge.from_unit_id for edge in result.edges} == {photo.source_id for photo in photos}
+    assert {edge.to_unit_id for edge in result.edges} == {place.source_id}
+    assert [edge.id for edge in result.edges] == [edge.id for edge in second_result.edges]
+
+    place_only = GooglePhotosTakeoutAdapter(path=str(tmp_path)).ingest(entity_types=["place"])
+    assert [unit.source_entity_type for unit in place_only.units] == ["place"]
+    assert place_only.edges == []
