@@ -43,7 +43,7 @@ def test_omnivore_json_ingests_articles_highlights_and_notes(tmp_path):
         encoding="utf-8",
     )
 
-    result = OmnivoreJsonAdapter(path=str(export)).ingest()
+    result = OmnivoreJsonAdapter(path=str(export)).ingest(entity_types=["article", "highlight", "note"])
 
     assert len(result.units) == 3
     article = next(unit for unit in result.units if unit.source_entity_type == "article")
@@ -107,7 +107,7 @@ def test_omnivore_json_accepts_nested_single_object_shape(tmp_path):
         encoding="utf-8",
     )
 
-    result = OmnivoreJsonAdapter(path=str(export)).ingest()
+    result = OmnivoreJsonAdapter(path=str(export)).ingest(entity_types=["article", "highlight", "note"])
 
     assert [unit.source_entity_type for unit in result.units] == ["article", "highlight"]
     article = result.units[0]
@@ -136,7 +136,7 @@ def test_omnivore_json_uses_url_source_id_without_omnivore_id(tmp_path):
         encoding="utf-8",
     )
 
-    result = OmnivoreJsonAdapter(path=str(export)).ingest()
+    result = OmnivoreJsonAdapter(path=str(export)).ingest(entity_types=["article", "highlight", "note"])
 
     assert len(result.units) == 1
     assert result.units[0].source_id == "url:https://example.com/url-only"
@@ -164,6 +164,57 @@ def test_omnivore_json_entity_type_filtering(tmp_path):
     assert len(result.units) == 1
     assert result.units[0].source_entity_type == "highlight"
     assert result.edges[0].from_unit_id == "omnivore:page-2"
+
+
+def test_omnivore_json_ingests_label_aggregates_and_edges(tmp_path):
+    export = tmp_path / "omnivore.json"
+    export.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "page-1",
+                    "title": "Research Article",
+                    "url": "https://example.com/research",
+                    "labels": [{"name": "Research"}, {"name": "AI"}],
+                    "highlights": [
+                        {"id": "hl-1", "quote": "A useful passage", "labels": [{"name": "research"}, {"name": "ML"}]},
+                        {"id": "note-1", "annotation": "Article-level note", "labels": ["AI"]},
+                    ],
+                },
+                {
+                    "id": "page-2",
+                    "title": "Second Article",
+                    "url": "https://example.com/second",
+                    "labels": ["research"],
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = OmnivoreJsonAdapter(path=str(export)).ingest(entity_types=["article", "highlight", "label"])
+
+    assert "label" in OmnivoreJsonAdapter(path=str(export)).entity_types
+    labels = {unit.metadata["normalized_label"]: unit for unit in result.units if unit.source_entity_type == "label"}
+    assert set(labels) == {"ai", "ml", "research"}
+    assert labels["research"].title == "Research"
+    assert labels["research"].metadata["article_count"] == 2
+    assert labels["research"].metadata["highlight_count"] == 1
+    assert labels["research"].metadata["article_source_ids"] == ["omnivore:page-1", "omnivore:page-2"]
+    assert labels["research"].metadata["highlight_source_ids"] == ["omnivore_highlight:hl-1"]
+    assert labels["research"].metadata["linked_source_ids"] == [
+        "omnivore:page-1",
+        "omnivore:page-2",
+        "omnivore_highlight:hl-1",
+    ]
+
+    label_edges = [edge for edge in result.edges if edge.metadata["relation_type"] == "content_label"]
+    assert len(label_edges) == 6
+    assert {edge.relation for edge in label_edges} == {EdgeRelation.RELATES_TO}
+    assert {edge.to_unit_id for edge in label_edges} == {unit.source_id for unit in labels.values()}
+    labels_only = OmnivoreJsonAdapter(path=str(export)).ingest(entity_types=["label"])
+    assert [unit.source_entity_type for unit in labels_only.units] == ["label", "label", "label"]
+    assert labels_only.edges == []
 
 
 def test_omnivore_json_filters_by_sync_state(tmp_path):

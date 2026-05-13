@@ -21,7 +21,7 @@ class OmnivoreJsonAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["article", "highlight", "note"]
+        return ["article", "highlight", "note", "label"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -48,6 +48,7 @@ class OmnivoreJsonAdapter(SourceAdapter):
 
         sync_at = self._sync_datetime(since) if since else None
         emitted_edges: set[tuple[str, str]] = set()
+        label_links: dict[str, dict[str, Any]] = {}
         now = datetime.now(timezone.utc)
 
         for item in items:
@@ -87,39 +88,43 @@ class OmnivoreJsonAdapter(SourceAdapter):
                 continue
 
             labels = self._labels(article)
+            article_label_entries = self._label_entries(article)
             author = self._first(article, "author", "authorName", "author_name", "byline")
             state = self._first(article, "state", "status")
             highlights = self._highlights(item, article)
+            if "label" in requested:
+                self._add_label_source_link(label_links, article_label_entries, article_source_id, "article")
 
             if "article" in requested:
-                result.units.append(
-                    KnowledgeUnit(
-                        source_project=SourceProject.OMNIVORE_JSON,
-                        source_id=article_source_id,
-                        source_entity_type="article",
-                        title=title or "Untitled Omnivore article",
-                        content=self._article_content(title, url, author, labels, highlights),
-                        content_type=ContentType.ARTIFACT,
-                        metadata={
-                            "omnivore_id": omnivore_id,
-                            "url": url,
-                            "author": author,
-                            "state": state,
-                            "labels": labels,
-                            "saved_at": saved_text,
-                            "read_at": read_text,
-                            "archived": self._is_archived(article, state),
-                            "read": self._is_read(article, state, read_text),
-                            "highlight_count": len(highlights),
-                        },
-                        tags=labels,
-                        created_at=saved_at or read_at or updated_at or now,
-                        updated_at=updated_at or read_at or saved_at or now,
-                    )
+                article_unit = KnowledgeUnit(
+                    source_project=SourceProject.OMNIVORE_JSON,
+                    source_id=article_source_id,
+                    source_entity_type="article",
+                    title=title or "Untitled Omnivore article",
+                    content=self._article_content(title, url, author, labels, highlights),
+                    content_type=ContentType.ARTIFACT,
+                    metadata={
+                        "omnivore_id": omnivore_id,
+                        "url": url,
+                        "author": author,
+                        "state": state,
+                        "labels": labels,
+                        "saved_at": saved_text,
+                        "read_at": read_text,
+                        "archived": self._is_archived(article, state),
+                        "read": self._is_read(article, state, read_text),
+                        "highlight_count": len(highlights),
+                    },
+                    tags=labels,
+                    created_at=saved_at or read_at or updated_at or now,
+                    updated_at=updated_at or read_at or saved_at or now,
                 )
+                result.units.append(article_unit)
 
-            if requested.intersection({"highlight", "note"}):
+            if requested.intersection({"highlight", "note"}) or "label" in requested:
                 for index, highlight in enumerate(highlights):
+                    child_label_entries = self._merge_label_entries(article_label_entries, self._label_entries(highlight))
+                    child_labels = [entry[0] for entry in child_label_entries]
                     child_unit = self._highlight_unit(
                         highlight,
                         index,
@@ -127,10 +132,14 @@ class OmnivoreJsonAdapter(SourceAdapter):
                         omnivore_id,
                         title,
                         url,
-                        labels,
+                        child_labels,
                         saved_at or updated_at or now,
                     )
-                    if child_unit is None or child_unit.source_entity_type not in requested:
+                    if child_unit is None:
+                        continue
+                    if "label" in requested and child_unit.source_entity_type == "highlight":
+                        self._add_label_source_link(label_links, child_label_entries, child_unit.source_id, "highlight")
+                    if child_unit.source_entity_type not in requested:
                         continue
 
                     result.units.append(child_unit)
@@ -152,6 +161,13 @@ class OmnivoreJsonAdapter(SourceAdapter):
                                 },
                             )
                         )
+
+        if "label" in requested:
+            label_units = self._label_units(label_links, now)
+            result.units.extend(label_units)
+            requested_content_types = requested.intersection({"article", "highlight"})
+            if requested_content_types:
+                result.edges.extend(self._label_edges(label_units, label_links, requested_content_types))
 
         result.units.sort(key=lambda unit: (unit.source_entity_type, unit.source_id))
         result.edges.sort(key=lambda edge: (edge.from_unit_id, edge.to_unit_id))
@@ -340,6 +356,9 @@ class OmnivoreJsonAdapter(SourceAdapter):
         return "\n".join(parts)
 
     def _labels(self, article: dict[str, Any]) -> list[str]:
+        return [key for key, _title in self._label_entries(article)]
+
+    def _label_entries(self, article: dict[str, Any]) -> list[tuple[str, str]]:
         raw = article.get("labels") or article.get("tags") or article.get("label")
         if isinstance(raw, dict):
             raw_values = list(raw.values())
@@ -350,7 +369,8 @@ class OmnivoreJsonAdapter(SourceAdapter):
         else:
             raw_values = []
 
-        labels: list[str] = []
+        labels: list[tuple[str, str]] = []
+        seen: set[str] = set()
         for value in raw_values:
             if isinstance(value, dict):
                 value = (
@@ -359,14 +379,120 @@ class OmnivoreJsonAdapter(SourceAdapter):
                     or value.get("title")
                     or value.get("id")
                 )
+            title = re.sub(r"\s+", " ", str(value or "").strip().removeprefix("#")).strip()
             normalized = (
                 re.sub(r"\s+", " ", str(value or "").strip().removeprefix("#"))
                 .strip()
                 .lower()
             )
-            if normalized and normalized not in labels:
-                labels.append(normalized)
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                labels.append((normalized, title or normalized))
         return labels
+
+    def _merge_label_entries(self, *groups: list[tuple[str, str]]) -> list[tuple[str, str]]:
+        merged: dict[str, str] = {}
+        for group in groups:
+            for key, title in group:
+                merged.setdefault(key, title)
+        return [(key, merged[key]) for key in sorted(merged)]
+
+    def _add_label_source_link(
+        self,
+        label_links: dict[str, dict[str, Any]],
+        labels: list[tuple[str, str]],
+        source_id: str,
+        entity_type: str,
+    ) -> None:
+        for key, title in labels:
+            info = label_links.setdefault(
+                key,
+                {
+                    "title": title,
+                    "article_source_ids": set(),
+                    "highlight_source_ids": set(),
+                },
+            )
+            if entity_type == "article":
+                info["article_source_ids"].add(source_id)
+            elif entity_type == "highlight":
+                info["highlight_source_ids"].add(source_id)
+
+    def _label_units(self, label_links: dict[str, dict[str, Any]], now: datetime) -> list[KnowledgeUnit]:
+        units: list[KnowledgeUnit] = []
+        for key in sorted(label_links):
+            info = label_links[key]
+            article_source_ids = sorted(info["article_source_ids"])
+            highlight_source_ids = sorted(info["highlight_source_ids"])
+            title = str(info["title"])
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.OMNIVORE_JSON,
+                    source_id=self._label_source_id(key),
+                    source_entity_type="label",
+                    title=title,
+                    content=f"Omnivore label: {title}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "label": title,
+                        "normalized_label": key,
+                        "article_count": len(article_source_ids),
+                        "highlight_count": len(highlight_source_ids),
+                        "article_source_ids": article_source_ids,
+                        "highlight_source_ids": highlight_source_ids,
+                        "linked_source_ids": sorted(article_source_ids + highlight_source_ids),
+                    },
+                    tags=["omnivore", "label", key],
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        return units
+
+    def _label_edges(
+        self,
+        label_units: list[KnowledgeUnit],
+        label_links: dict[str, dict[str, Any]],
+        requested_content_types: set[str],
+    ) -> list[KnowledgeEdge]:
+        label_unit_ids = {unit.metadata["normalized_label"]: unit.source_id for unit in label_units}
+        edges: list[KnowledgeEdge] = []
+        for key, info in label_links.items():
+            label_id = label_unit_ids.get(key)
+            if not label_id:
+                continue
+            linked: list[tuple[str, str]] = []
+            if "article" in requested_content_types:
+                linked.extend(("article", source_id) for source_id in info["article_source_ids"])
+            if "highlight" in requested_content_types:
+                linked.extend(("highlight", source_id) for source_id in info["highlight_source_ids"])
+            for entity_type, source_id in linked:
+                edges.append(
+                    KnowledgeEdge(
+                        id=self._label_edge_id(source_id, label_id),
+                        from_unit_id=source_id,
+                        to_unit_id=label_id,
+                        relation=EdgeRelation.RELATES_TO,
+                        source=EdgeSource.SOURCE,
+                        metadata={
+                            "source_project": SourceProject.OMNIVORE_JSON.value,
+                            "from_entity_type": entity_type,
+                            "to_entity_type": "label",
+                            "relation_type": "content_label",
+                            "label": info["title"],
+                            "normalized_label": key,
+                        },
+                    )
+                )
+        return list({edge.id: edge for edge in edges}.values())
+
+    def _label_source_id(self, label: str) -> str:
+        digest = hashlib.sha256(label.encode("utf-8")).hexdigest()[:24]
+        return f"omnivore_label:{digest}"
+
+    def _label_edge_id(self, content_source_id: str, label_source_id: str) -> str:
+        digest = hashlib.sha256(f"{content_source_id}\0label\0{label_source_id}".encode("utf-8")).hexdigest()[:24]
+        return f"omnivore_label_edge:{digest}"
 
     def _first(self, item: dict[str, Any], *keys: str) -> str:
         normalized = {self._normalize_key(key): value for key, value in item.items()}
