@@ -46,7 +46,7 @@ def export_source_orphan_ratio_csv(
         "path": str(output_path),
         "unit_count": len(unit_list),
         "edge_count": len(edge_list),
-        "group_count": len(rows),
+        "source_type_count": len(rows),
         "rows_exported": len(rows),
         "bytes_written": output_path.stat().st_size,
     }

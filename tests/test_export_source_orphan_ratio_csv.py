@@ -96,7 +96,7 @@ def test_source_orphan_ratio_csv_path_mode_writes_same_content_and_stats(tmp_pat
         "path": str(path),
         "unit_count": 2,
         "edge_count": 1,
-        "group_count": 1,
+        "source_type_count": 1,
         "rows_exported": 1,
         "bytes_written": path.stat().st_size,
     }

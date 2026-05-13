@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from graph.store.db import Store
+from graph.store.migrations import SCHEMA_VERSION
 from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
 from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
@@ -1860,7 +1861,7 @@ class TestSavedQueries:
             }
             assert "embedding_updated_at" in columns
             version = store.conn.execute("SELECT version FROM schema_version").fetchone()[0]
-            assert version == 6
+            assert version == SCHEMA_VERSION
         finally:
             store.close()
 
@@ -1886,7 +1887,7 @@ class TestSavedQueries:
 
             assert collections is not None
             assert collection_units is not None
-            assert version == 6
+            assert version == SCHEMA_VERSION
         finally:
             store.close()
 
@@ -2595,7 +2596,7 @@ class TestJsonBackup:
 
         payload = store.export_json()
 
-        assert payload["schema_version"] == 6
+        assert payload["schema_version"] == SCHEMA_VERSION
         assert payload["exported_at"]
         assert len(payload["units"]) == 1
         assert payload["units"][0]["id"] == inserted.id
