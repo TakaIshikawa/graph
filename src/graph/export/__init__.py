@@ -59,6 +59,7 @@ from graph.export.node_edge_csv import export_graph_node_edge_csv
 from graph.export.opml import export_units_to_opml
 from graph.export.org import export_units_to_org
 from graph.export.orphan_units import export_orphan_units_markdown
+from graph.export.relation_confidence_buckets_csv import export_relation_confidence_buckets_csv
 from graph.export.relation_evidence import export_relation_evidence_markdown
 from graph.export.relation_confidence_matrix_csv import export_relation_confidence_matrix_csv
 from graph.export.relation_evidence_gap_csv import export_relation_evidence_gap_csv
@@ -181,6 +182,7 @@ __all__ = [
     "export_graph_neo4j_bulk_csv",
     "export_graph_node_edge_csv",
     "export_orphan_units_markdown",
+    "export_relation_confidence_buckets_csv",
     "export_relation_confidence_matrix_csv",
     "export_relation_evidence_markdown",
     "export_relation_evidence_gap_csv",
