@@ -26,6 +26,7 @@ from graph.rag.reading_queue import build_reading_queue
 from graph.rag.reading_time import estimate_reading_time
 from graph.rag.result_clusters import cluster_results_by_overlap
 from graph.rag.result_explanations import explain_rag_results
+from graph.rag.result_provenance_completeness import analyze_result_provenance_completeness
 from graph.rag.source_agreement import score_source_agreement
 from graph.rag.source_attribution import summarize_source_attribution
 from graph.rag.snippets import highlight_result_snippets
@@ -48,6 +49,7 @@ __all__ = [
     "analyze_citation_coverage",
     "analyze_query_drift",
     "analyze_result_date_coverage",
+    "analyze_result_provenance_completeness",
     "audit_source_diversity",
     "allocate_evidence_budget",
     "build_answer_outline",
