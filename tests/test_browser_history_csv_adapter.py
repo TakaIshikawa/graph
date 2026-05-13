@@ -4,7 +4,7 @@ import hashlib
 from datetime import datetime, timezone
 
 from graph.adapters.browser_history_csv import BrowserHistoryCsvAdapter
-from graph.types.enums import ContentType, SourceProject
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
 from graph.types.models import SyncState
 
 
@@ -17,7 +17,7 @@ def test_browser_history_csv_ingests_common_columns(tmp_path):
         encoding="utf-8",
     )
 
-    result = BrowserHistoryCsvAdapter(path=str(csv_path)).ingest()
+    result = BrowserHistoryCsvAdapter(path=str(csv_path)).ingest(entity_types=["web_history"])
 
     assert len(result.units) == 1
     unit = result.units[0]
@@ -55,7 +55,7 @@ def test_browser_history_csv_tolerates_separator_and_case_variants(tmp_path):
         encoding="utf-8",
     )
 
-    result = BrowserHistoryCsvAdapter(path=str(csv_path)).ingest()
+    result = BrowserHistoryCsvAdapter(path=str(csv_path)).ingest(entity_types=["web_history"])
 
     assert len(result.units) == 1
     unit = result.units[0]
@@ -77,11 +77,66 @@ def test_browser_history_csv_deduplicates_by_normalized_url(tmp_path):
         encoding="utf-8",
     )
 
-    result = BrowserHistoryCsvAdapter(path=str(csv_path)).ingest()
+    result = BrowserHistoryCsvAdapter(path=str(csv_path)).ingest(entity_types=["web_history"])
 
     assert len(result.units) == 1
     assert result.units[0].title == "Home"
     assert result.units[0].metadata["normalized_url"] == "https://example.com/"
+
+
+def test_browser_history_csv_emits_domain_aggregates_and_edges(tmp_path):
+    csv_path = tmp_path / "history.csv"
+    csv_path.write_text(
+        "url,title,last_visit_time\n"
+        "https://example.com/,Home,2025-04-24T12:00:00Z\n"
+        "https://example.com/docs,Docs,2025-04-25T12:00:00Z\n"
+        "https://other.example/path,Other,2025-04-26T12:00:00Z\n",
+        encoding="utf-8",
+    )
+
+    result = BrowserHistoryCsvAdapter(path=str(csv_path)).ingest()
+
+    domains = [unit for unit in result.units if unit.source_entity_type == "domain"]
+    visits = [unit for unit in result.units if unit.source_entity_type == "web_history"]
+    assert len(domains) == 2
+    assert len(visits) == 3
+
+    example = next(unit for unit in domains if unit.metadata["domain"] == "example.com")
+    example_visits = [unit for unit in visits if unit.metadata["domain"] == "example.com"]
+    assert example.source_id.startswith("browser_history_csv:domain:")
+    assert example.title == "example.com"
+    assert example.metadata["visit_count"] == 2
+    assert example.metadata["page_source_ids"] == sorted(unit.source_id for unit in example_visits)
+    assert example.metadata["normalized_urls"] == [
+        "https://example.com/",
+        "https://example.com/docs",
+    ]
+
+    domain_edges = [edge for edge in result.edges if edge.to_unit_id == example.source_id]
+    assert {edge.from_unit_id for edge in domain_edges} == {unit.source_id for unit in example_visits}
+    assert all(edge.relation == EdgeRelation.RELATES_TO for edge in domain_edges)
+    assert all(edge.source == EdgeSource.SOURCE for edge in domain_edges)
+    assert all(edge.metadata["relation_type"] == "visit_domain" for edge in domain_edges)
+
+
+def test_browser_history_csv_domain_filtering_and_unparseable_urls(tmp_path):
+    csv_path = tmp_path / "history.csv"
+    csv_path.write_text(
+        "url,title,last_visit_time\n"
+        "https://example.com/,Home,2025-04-24T12:00:00Z\n"
+        "file:///Users/me/local.html,Local,2025-04-25T12:00:00Z\n"
+        "not a valid url,Invalid,2025-04-26T12:00:00Z\n",
+        encoding="utf-8",
+    )
+
+    domain_only = BrowserHistoryCsvAdapter(path=str(csv_path)).ingest(entity_types=["domain"])
+    web_only = BrowserHistoryCsvAdapter(path=str(csv_path)).ingest(entity_types=["web_history"])
+
+    assert [unit.source_entity_type for unit in domain_only.units] == ["domain"]
+    assert domain_only.units[0].metadata["domain"] == "example.com"
+    assert domain_only.edges == []
+    assert all(unit.source_entity_type == "web_history" for unit in web_only.units)
+    assert web_only.edges == []
 
 
 def test_browser_history_csv_respects_since_and_entity_type_filters(tmp_path):
@@ -102,7 +157,8 @@ def test_browser_history_csv_respects_since_and_entity_type_filters(tmp_path):
             source_project="browser_history_csv",
             source_entity_type="web_history",
             last_sync_at=datetime(2025, 4, 25, tzinfo=timezone.utc),
-        )
+        ),
+        entity_types=["web_history"],
     )
 
     assert [unit.title for unit in result.units] == ["New"]

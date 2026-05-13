@@ -11,8 +11,8 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class BrowserHistoryCsvAdapter(SourceAdapter):
@@ -22,7 +22,7 @@ class BrowserHistoryCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["web_history"]
+        return ["web_history", "domain"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -34,7 +34,8 @@ class BrowserHistoryCsvAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        if entity_types and "web_history" not in entity_types:
+        allowed_types = set(entity_types or self.entity_types)
+        if not allowed_types.intersection(self.entity_types):
             return result
 
         sync_at = self._sync_datetime(since) if since else None
@@ -54,7 +55,18 @@ class BrowserHistoryCsvAdapter(SourceAdapter):
                     continue
                 units.setdefault(unit.source_id, unit)
 
-        result.units.extend(sorted(units.values(), key=lambda unit: unit.source_id))
+        web_history_units = sorted(units.values(), key=lambda unit: unit.source_id)
+        domain_units = self._domain_units(web_history_units) if "domain" in allowed_types else []
+
+        if "web_history" in allowed_types:
+            result.units.extend(web_history_units)
+        if "domain" in allowed_types:
+            result.units.extend(domain_units)
+        if {"web_history", "domain"}.issubset(allowed_types):
+            result.edges.extend(self._domain_edges(web_history_units, domain_units))
+
+        result.units.sort(key=lambda unit: unit.source_id)
+        result.edges.sort(key=lambda edge: edge.id)
         return result
 
     def _iter_paths(self) -> list[Path]:
@@ -173,9 +185,12 @@ class BrowserHistoryCsvAdapter(SourceAdapter):
 
         scheme = (parsed.scheme or "https").lower()
         hostname = (parsed.hostname or "").lower()
-        if not hostname:
+        if not hostname or any(char.isspace() for char in hostname):
             return ""
-        port = parsed.port
+        try:
+            port = parsed.port
+        except ValueError:
+            return ""
         netloc = hostname
         if port and not ((scheme == "http" and port == 80) or (scheme == "https" and port == 443)):
             netloc = f"{hostname}:{port}"
@@ -192,6 +207,93 @@ class BrowserHistoryCsvAdapter(SourceAdapter):
     def _source_id(self, normalized_url: str) -> str:
         digest = hashlib.sha256(normalized_url.encode("utf-8")).hexdigest()[:24]
         return f"browser_history_csv:{digest}"
+
+    def _domain_units(self, units: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        for unit in units:
+            domain = str(unit.metadata.get("domain") or "").strip().lower()
+            if domain:
+                grouped.setdefault(domain, []).append(unit)
+
+        domain_units: list[KnowledgeUnit] = []
+        for domain, visits in sorted(grouped.items()):
+            ordered = sorted(visits, key=lambda unit: unit.source_id)
+            created_at = min(unit.created_at for unit in ordered)
+            updated_at = max(unit.updated_at for unit in ordered)
+            domain_units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.BROWSER_HISTORY_CSV,
+                    source_id=self._domain_source_id(domain),
+                    source_entity_type="domain",
+                    title=domain,
+                    content=f"Browser history domain: {domain}\nVisits: {len(ordered)}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "domain": domain,
+                        "visit_count": len(ordered),
+                        "page_source_ids": [unit.source_id for unit in ordered],
+                        "normalized_urls": sorted(
+                            str(unit.metadata.get("normalized_url"))
+                            for unit in ordered
+                            if unit.metadata.get("normalized_url")
+                        ),
+                        "source_files": sorted(
+                            {
+                                str(unit.metadata.get("source_file"))
+                                for unit in ordered
+                                if unit.metadata.get("source_file")
+                            }
+                        ),
+                    },
+                    created_at=created_at,
+                    updated_at=updated_at,
+                )
+            )
+        return domain_units
+
+    def _domain_edges(
+        self,
+        web_history_units: list[KnowledgeUnit],
+        domain_units: list[KnowledgeUnit],
+    ) -> list[KnowledgeEdge]:
+        domain_source_ids = {
+            str(unit.metadata.get("domain") or ""): unit.source_id
+            for unit in domain_units
+            if unit.metadata.get("domain")
+        }
+        edges: list[KnowledgeEdge] = []
+        for unit in web_history_units:
+            domain = str(unit.metadata.get("domain") or "")
+            domain_source_id = domain_source_ids.get(domain)
+            if not domain_source_id:
+                continue
+            edges.append(
+                KnowledgeEdge(
+                    id=self._domain_edge_id(unit.source_id, domain_source_id),
+                    from_unit_id=unit.source_id,
+                    to_unit_id=domain_source_id,
+                    relation=EdgeRelation.RELATES_TO,
+                    source=EdgeSource.SOURCE,
+                    metadata={
+                        "source_project": SourceProject.BROWSER_HISTORY_CSV.value,
+                        "from_entity_type": "web_history",
+                        "to_entity_type": "domain",
+                        "relation_type": "visit_domain",
+                        "domain": domain,
+                    },
+                    created_at=unit.created_at,
+                )
+            )
+        return edges
+
+    def _domain_source_id(self, domain: str) -> str:
+        digest = hashlib.sha256(domain.encode("utf-8")).hexdigest()[:24]
+        return f"browser_history_csv:domain:{digest}"
+
+    def _domain_edge_id(self, visit_source_id: str, domain_source_id: str) -> str:
+        raw = "|".join([SourceProject.BROWSER_HISTORY_CSV.value, visit_source_id, domain_source_id])
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+        return f"browser-history-csv-domain-{digest}"
 
     def _content(self, title: str, normalized_url: str) -> str:
         return "\n".join([title, f"URL: {normalized_url}"])
