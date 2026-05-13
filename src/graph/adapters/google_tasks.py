@@ -53,10 +53,8 @@ class GoogleTasksAdapter(SourceAdapter):
             if not isinstance(data, dict):
                 continue
 
-            list_title = data.get("title") or file_path.stem
-            list_id_raw = f"list:{list_title}"
-            list_digest = hashlib.sha1(list_id_raw.encode("utf-8")).hexdigest()[:16]
-            list_source_id = f"google_tasks:task_list:{list_digest}"
+            list_title = self._list_title(data, file_path)
+            list_source_id = self._list_source_id(data, file_path, list_title)
 
             # Create task_list unit
             if not allowed_types or "task_list" in allowed_types:
@@ -67,7 +65,7 @@ class GoogleTasksAdapter(SourceAdapter):
                     title=list_title,
                     content=list_title,
                     content_type=ContentType.ARTIFACT,
-                    metadata={"list_title": list_title},
+                    metadata={"list_title": list_title, "source_file": file_path.name},
                     tags=[],
                 )
                 result.units.append(unit)
@@ -99,6 +97,7 @@ class GoogleTasksAdapter(SourceAdapter):
 
                 metadata: dict[str, Any] = {
                     "list_title": list_title,
+                    "list_source_id": list_source_id,
                 }
                 if status:
                     metadata["status"] = status
@@ -131,6 +130,21 @@ class GoogleTasksAdapter(SourceAdapter):
                     updated_at=created_at,
                 )
                 result.units.append(unit)
+                if not allowed_types or {"task", "task_list"}.issubset(allowed_types):
+                    result.edges.append(
+                        KnowledgeEdge(
+                            id=self._edge_id(source_id, list_source_id, "task_list_membership"),
+                            from_unit_id=source_id,
+                            to_unit_id=list_source_id,
+                            relation=EdgeRelation.CONTAINS,
+                            source=EdgeSource.SOURCE,
+                            metadata={
+                                "source_project": SourceProject.GOOGLE_TASKS.value,
+                                "relation_type": "task_list_membership",
+                                "list_title": list_title,
+                            },
+                        )
+                    )
 
             # Create hierarchy edges for subtasks
             if not allowed_types or "task" in allowed_types:
@@ -169,6 +183,16 @@ class GoogleTasksAdapter(SourceAdapter):
         if root.is_file():
             return [root]
         return sorted(p for p in root.rglob("*.json") if p.is_file())
+
+    def _list_title(self, data: dict[str, Any], file_path: Path) -> str:
+        title = str(data.get("title") or "").strip()
+        return title or file_path.stem or "Untitled Task List"
+
+    def _list_source_id(self, data: dict[str, Any], file_path: Path, list_title: str) -> str:
+        raw_id = str(data.get("id") or "").strip()
+        stable_key = raw_id or file_path.as_posix() or list_title
+        digest = hashlib.sha1(f"list:{stable_key}".encode("utf-8")).hexdigest()[:16]
+        return f"google_tasks:task_list:{digest}"
 
     def _edge_id(self, from_id: str, to_id: str, relation_type: str) -> str:
         raw = "|".join([SourceProject.GOOGLE_TASKS.value, relation_type, from_id, to_id])

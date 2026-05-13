@@ -62,8 +62,8 @@ def test_subtask_hierarchy_creates_edges(tmp_path):
     result = GoogleTasksAdapter(path=str(tmp_path / "tasks.json")).ingest()
 
     contains = [e for e in result.edges if e.relation == EdgeRelation.CONTAINS]
-    assert len(contains) == 1
-    assert contains[0].metadata["relation_type"] == "subtask"
+    subtask_edges = [e for e in contains if e.metadata["relation_type"] == "subtask"]
+    assert len(subtask_edges) == 1
 
 
 def test_task_notes_as_content(tmp_path):
@@ -136,6 +136,42 @@ def test_task_metadata_fields(tmp_path):
     task = [u for u in result.units if u.source_entity_type == "task"][0]
     assert task.metadata["due"] == "2024-06-15T00:00:00.000Z"
     assert task.metadata["list_title"] == "My Tasks"
+
+
+def test_task_list_membership_edges_are_deterministic(tmp_path):
+    data = _make_task_list("Work", items=[
+        {"id": "t1", "title": "Task 1", "status": "needsAction"},
+        {"id": "t2", "title": "Task 2", "status": "completed"},
+    ])
+    _write_json(tmp_path / "tasks.json", data)
+
+    first = GoogleTasksAdapter(path=str(tmp_path / "tasks.json")).ingest()
+    second = GoogleTasksAdapter(path=str(tmp_path / "tasks.json")).ingest()
+
+    task_list = next(u for u in first.units if u.source_entity_type == "task_list")
+    membership_edges = [
+        edge
+        for edge in first.edges
+        if edge.metadata["relation_type"] == "task_list_membership"
+    ]
+    assert len(membership_edges) == 2
+    assert {edge.to_unit_id for edge in membership_edges} == {task_list.source_id}
+    assert {edge.from_unit_id for edge in membership_edges} == {
+        u.source_id for u in first.units if u.source_entity_type == "task"
+    }
+    assert [edge.id for edge in first.edges] == [edge.id for edge in second.edges]
+    assert [edge.metadata for edge in first.edges] == [edge.metadata for edge in second.edges]
+
+
+def test_missing_task_list_titles_use_stable_distinct_fallbacks(tmp_path):
+    _write_json(tmp_path / "first.json", {"kind": "tasks#taskList", "items": []})
+    _write_json(tmp_path / "second.json", {"kind": "tasks#taskList", "title": "", "items": []})
+
+    result = GoogleTasksAdapter(path=str(tmp_path)).ingest()
+
+    lists = [u for u in result.units if u.source_entity_type == "task_list"]
+    assert sorted(u.title for u in lists) == ["first", "second"]
+    assert len({u.source_id for u in lists}) == 2
 
 
 def test_task_recurrence_metadata_is_normalized_and_omitted_when_empty(tmp_path):
