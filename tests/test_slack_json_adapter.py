@@ -172,9 +172,37 @@ def test_slack_json_emits_thread_reply_edges(tmp_path):
         ),
     ]
     assert [edge.id for edge in first.edges] == [edge.id for edge in second.edges]
+    assert [edge.metadata for edge in first.edges] == [edge.metadata for edge in second.edges]
     assert [edge.created_at for edge in first.edges] == [edge.created_at for edge in second.edges]
     assert all(edge.from_unit_id != edge.to_unit_id for edge in first.edges)
+    assert [edge.metadata["relation_type"] for edge in reply_edges] == [
+        "thread_reply",
+        "thread_reply",
+    ]
     assert reply_edges[0].metadata["thread_ts"] == "1712345000.000100"
+    assert reply_edges[0].metadata["root_ts"] == "1712345000.000100"
+    assert reply_edges[0].metadata["root_message_source_id"] == root_id
+
+
+def test_slack_json_standalone_messages_do_not_emit_thread_reply_edges(tmp_path):
+    export = tmp_path / "general.json"
+    _write_json(
+        export,
+        [
+            {"type": "message", "user": "U1", "text": "Standalone", "ts": "1712345000.000100"},
+            {
+                "type": "message",
+                "user": "U2",
+                "text": "Thread root only",
+                "ts": "1712345100.000200",
+                "thread_ts": "1712345100.000200",
+            },
+        ],
+    )
+
+    result = SlackJsonAdapter(path=str(export)).ingest()
+
+    assert [edge for edge in result.edges if edge.relation == EdgeRelation.REPLIES_TO] == []
 
 
 def test_slack_json_emits_thread_summary_units(tmp_path):

@@ -327,9 +327,12 @@ class SlackJsonAdapter(SourceAdapter):
                         "source_project": SourceProject.SLACK_JSON.value,
                         "from_entity_type": "slack_message",
                         "to_entity_type": "slack_message",
+                        "relation_type": "thread_reply",
                         "channel": channel,
                         "ts": ts,
                         "thread_ts": thread_ts,
+                        "root_ts": thread_ts,
+                        "root_message_source_id": root.source_id,
                     },
                     created_at=unit.created_at,
                 )
