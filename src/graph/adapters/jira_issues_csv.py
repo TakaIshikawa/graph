@@ -102,6 +102,9 @@ class JiraIssuesCsvAdapter(SourceAdapter):
             "source_file": source_file,
             "row": dict(row),
         }
+        issue_links = self._issue_links(row)
+        if issue_links:
+            metadata["issue_links"] = issue_links
         now = datetime.now(timezone.utc)
         tags = ["jira", "issue", *labels, *[f"component:{item}" for item in components], *[f"fix_version:{item}" for item in fix_versions]]
         return KnowledgeUnit(
@@ -123,8 +126,25 @@ class JiraIssuesCsvAdapter(SourceAdapter):
             value = unit.metadata.get(kind)
             if value:
                 relation = EdgeRelation.REFERENCES if kind == "parent_key" else EdgeRelation.RELATES_TO
-                target = f"jira:{kind}:{value}"
+                target = self._issue_source_id(str(value)) if kind == "parent_key" else f"jira:{kind}:{value}"
                 edges.append(self._edge(unit.source_id, target, relation, kind, str(value)))
+        for link in unit.metadata.get("issue_links") or []:
+            if not isinstance(link, dict):
+                continue
+            target_key = self._first(link, "target_key")
+            kind = self._first(link, "kind")
+            relation_name = self._first(link, "relation")
+            relation = EdgeRelation.REFERENCES if relation_name == EdgeRelation.REFERENCES.value else EdgeRelation.RELATES_TO
+            if target_key:
+                edges.append(
+                    self._edge(
+                        unit.source_id,
+                        self._issue_source_id(target_key),
+                        relation,
+                        kind or "issue_link",
+                        target_key,
+                    )
+                )
         return edges
 
     def _component_units(self, components: list[str], issue: KnowledgeUnit) -> list[KnowledgeUnit]:
@@ -158,6 +178,40 @@ class JiraIssuesCsvAdapter(SourceAdapter):
         digest = hashlib.sha256(f"{source_id}|{relation}|{target}".encode("utf-8")).hexdigest()[:24]
         return KnowledgeEdge(id=f"jira_issues_csv:{digest}", from_unit_id=source_id, to_unit_id=target, relation=relation, source=EdgeSource.SOURCE, metadata={"kind": kind, "value": value})
 
+    def _issue_links(self, row: dict[str, Any]) -> list[dict[str, str]]:
+        specs = (
+            (("Blocks", "Blocked", "Outward issue link (Blocks)"), "blocks", EdgeRelation.RELATES_TO),
+            (("Is blocked by", "Blocked by", "Inward issue link (Blocks)"), "is_blocked_by", EdgeRelation.RELATES_TO),
+            (("Relates to", "Related", "Related issues", "Issue Links"), "relates_to", EdgeRelation.RELATES_TO),
+            (("Duplicates", "Duplicate", "Outward issue link (Duplicate)"), "duplicates", EdgeRelation.RELATES_TO),
+            (("Is duplicated by", "Duplicated by", "Inward issue link (Duplicate)"), "is_duplicated_by", EdgeRelation.RELATES_TO),
+            (("Epic Link", "Epic", "Epic key"), "epic", EdgeRelation.REFERENCES),
+        )
+        links: list[dict[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for columns, kind, relation in specs:
+            for target_key in self._linked_issue_keys(self._first(row, *columns)):
+                key = (kind, target_key)
+                if key in seen:
+                    continue
+                seen.add(key)
+                links.append(
+                    {
+                        "kind": kind,
+                        "target_key": target_key,
+                        "relation": relation.value,
+                    }
+                )
+        return links
+
+    def _linked_issue_keys(self, value: str) -> list[str]:
+        keys: list[str] = []
+        for item in re.split(r"[,;|\s]+", value or ""):
+            text = item.strip().upper()
+            if re.fullmatch(r"[A-Z][A-Z0-9]+-\d+", text) and text not in keys:
+                keys.append(text)
+        return keys
+
     def _content(self, summary: str, description: str, metadata: dict[str, Any]) -> str:
         parts = [item for item in (summary, description) if item]
         for key, label in (("issue_key", "Key"), ("issue_type", "Type"), ("status", "Status"), ("priority", "Priority")):
@@ -168,6 +222,9 @@ class JiraIssuesCsvAdapter(SourceAdapter):
     def _source_id(self, *parts: str) -> str:
         digest = hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:24]
         return f"jira_issues_csv:{digest}"
+
+    def _issue_source_id(self, key: str) -> str:
+        return f"jira_issues_csv:{key.strip().upper()}"
 
     def _first(self, row: dict[str, Any], *keys: str) -> str:
         compact = {self._normalize_key(key): value for key, value in row.items()}

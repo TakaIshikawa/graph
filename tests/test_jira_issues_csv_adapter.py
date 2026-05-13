@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from graph.adapters.jira_issues_csv import JiraIssuesCsvAdapter
 from graph.adapters.registry import get_adapter
-from graph.types.enums import SourceProject
+from graph.types.enums import EdgeRelation, SourceProject
 
 
 def test_jira_issues_csv_ingests_case_insensitive_headers_metadata_and_edges(tmp_path):
@@ -57,3 +57,56 @@ def test_jira_issues_csv_ingests_multiple_components_and_skips_missing(tmp_path)
     components = [unit for unit in result.units if unit.source_entity_type == "component"]
     assert sorted(unit.title for unit in components) == ["API", "UI"]
     assert len([edge for edge in result.edges if edge.metadata["kind"] == "component"]) == 2
+
+
+def test_jira_issues_csv_creates_issue_link_edges(tmp_path):
+    export = tmp_path / "jira.csv"
+    export.write_text(
+        "\n".join(
+            [
+                "Issue key,Summary,Blocks,Is blocked by,Relates to,Duplicates,Epic Link",
+                "PROJ-1,One,\"PROJ-2; proj-3\",PROJ-4,\"PROJ-5 PROJ-5\",PROJ-6,EPIC-1",
+                "PROJ-2,Two,,,,,",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    first = JiraIssuesCsvAdapter(path=str(export)).ingest()
+    second = JiraIssuesCsvAdapter(path=str(export)).ingest()
+
+    link_edges = [
+        edge
+        for edge in first.edges
+        if edge.from_unit_id == "jira_issues_csv:PROJ-1"
+        and edge.to_unit_id.startswith("jira_issues_csv:")
+    ]
+    assert sorted(
+        (edge.to_unit_id, edge.relation, edge.metadata["kind"], edge.metadata["value"])
+        for edge in link_edges
+    ) == [
+        ("jira_issues_csv:EPIC-1", EdgeRelation.REFERENCES, "epic", "EPIC-1"),
+        ("jira_issues_csv:PROJ-2", EdgeRelation.RELATES_TO, "blocks", "PROJ-2"),
+        ("jira_issues_csv:PROJ-3", EdgeRelation.RELATES_TO, "blocks", "PROJ-3"),
+        ("jira_issues_csv:PROJ-4", EdgeRelation.RELATES_TO, "is_blocked_by", "PROJ-4"),
+        ("jira_issues_csv:PROJ-5", EdgeRelation.RELATES_TO, "relates_to", "PROJ-5"),
+        ("jira_issues_csv:PROJ-6", EdgeRelation.RELATES_TO, "duplicates", "PROJ-6"),
+    ]
+    assert [edge.id for edge in first.edges] == [edge.id for edge in second.edges]
+
+
+def test_jira_issues_csv_empty_link_fields_do_not_create_issue_link_edges(tmp_path):
+    export = tmp_path / "jira.csv"
+    export.write_text(
+        "\n".join(
+            [
+                "Issue key,Summary,Blocks,Relates to",
+                "PROJ-1,One,,",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = JiraIssuesCsvAdapter(path=str(export)).ingest()
+
+    assert result.edges == []
