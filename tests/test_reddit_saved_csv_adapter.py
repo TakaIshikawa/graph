@@ -65,7 +65,7 @@ def test_reddit_saved_csv_imports_posts_comments_and_reply_edges(tmp_path):
             }
         )
 
-    result = RedditSavedCsvAdapter(path=str(tmp_path)).ingest()
+    result = RedditSavedCsvAdapter(path=str(tmp_path)).ingest(entity_types=["post", "comment"])
 
     assert len(result.units) == 2
     post, comment = result.units
@@ -92,3 +92,56 @@ def test_reddit_saved_csv_filters_and_registry(tmp_path):
 
     assert RedditSavedCsvAdapter(path=str(export)).ingest(entity_types=["comment"]).units == []
     assert get_adapter("reddit_saved_csv", path=str(export)).name == "reddit_saved_csv"
+
+
+def test_reddit_saved_csv_ingests_subreddit_aggregates_and_edges(tmp_path):
+    export = tmp_path / "saved.csv"
+    with export.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=["id", "name", "type", "title", "body", "subreddit", "permalink", "created_utc"],
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "id": "abc",
+                "name": "t3_abc",
+                "type": "post",
+                "title": "Useful post",
+                "subreddit": "Python",
+                "permalink": "/r/Python/comments/abc/useful_post/",
+                "created_utc": "1735689600",
+            }
+        )
+        writer.writerow(
+            {
+                "id": "def",
+                "name": "t1_def",
+                "type": "comment",
+                "body": "Saved comment body",
+                "subreddit": "r/python",
+                "permalink": "https://www.reddit.com/r/Python/comments/abc/_/def/",
+                "created_utc": "1735776000",
+            }
+        )
+
+    subreddits = RedditSavedCsvAdapter(path=str(export)).ingest(entity_types=["subreddit"])
+    with_items = RedditSavedCsvAdapter(path=str(export)).ingest(entity_types=["post", "comment", "subreddit"])
+
+    assert RedditSavedCsvAdapter(path=str(export)).entity_types == ["post", "comment", "subreddit"]
+    subreddit = subreddits.units[0]
+    assert subreddit.source_entity_type == "subreddit"
+    assert subreddit.title == "r/Python"
+    assert subreddit.metadata["normalized_subreddit"] == "python"
+    assert subreddit.metadata["saved_count"] == 2
+    assert subreddit.metadata["post_count"] == 1
+    assert subreddit.metadata["comment_count"] == 1
+    assert len(subreddit.metadata["saved_source_ids"]) == 2
+    assert subreddit.metadata["saved_source_ids"] == sorted(subreddit.metadata["saved_source_ids"])
+    assert subreddits.edges == []
+
+    subreddit_edges = [edge for edge in with_items.edges if edge.metadata.get("relation_type") == "subreddit_saved_item"]
+    assert len(subreddit_edges) == 2
+    assert {edge.from_unit_id for edge in subreddit_edges} == {subreddit.source_id}
+    assert {edge.relation for edge in subreddit_edges} == {EdgeRelation.CONTAINS}
+    assert {edge.source for edge in subreddit_edges} == {EdgeSource.SOURCE}

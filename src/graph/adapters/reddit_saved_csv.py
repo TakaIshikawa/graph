@@ -20,7 +20,7 @@ class RedditSavedCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["post", "comment"]
+        return ["post", "comment", "subreddit"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -39,6 +39,7 @@ class RedditSavedCsvAdapter(SourceAdapter):
         sync_at = self._sync_datetime(since) if since else None
         post_index: dict[str, str] = {}
         comments: list[KnowledgeUnit] = []
+        subreddit_items: dict[str, dict[str, Any]] = {}
 
         for path in self._iter_paths():
             try:
@@ -47,9 +48,13 @@ class RedditSavedCsvAdapter(SourceAdapter):
                 continue
             for row in rows:
                 unit = self._unit_from_row(row, path.name)
-                if unit is None or unit.source_entity_type not in requested:
+                if unit is None:
                     continue
                 if sync_at and unit.updated_at <= sync_at:
+                    continue
+                if "subreddit" in requested:
+                    self._add_subreddit_item(subreddit_items, unit)
+                if unit.source_entity_type not in requested:
                     continue
                 result.units.append(unit)
                 if unit.source_entity_type == "post":
@@ -85,6 +90,12 @@ class RedditSavedCsvAdapter(SourceAdapter):
                     },
                 )
             )
+
+        subreddit_units = self._subreddit_units(subreddit_items) if "subreddit" in requested else []
+        if "subreddit" in requested:
+            result.units.extend(subreddit_units)
+        if "subreddit" in requested and requested.intersection({"post", "comment"}):
+            result.edges.extend(self._subreddit_edges(subreddit_units, subreddit_items, included_source_ids))
 
         result.units.sort(key=lambda unit: (unit.created_at, unit.source_id))
         result.edges.sort(key=lambda edge: (edge.from_unit_id, edge.to_unit_id, edge.id))
@@ -194,6 +205,110 @@ class RedditSavedCsvAdapter(SourceAdapter):
         raw = "|".join([SourceProject.REDDIT_SAVED_CSV.value, EdgeRelation.REPLIES_TO.value, from_id, to_id])
         digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
         return f"reddit-saved-csv-replies-{digest}"
+
+    def _add_subreddit_item(self, subreddit_items: dict[str, dict[str, Any]], unit: KnowledgeUnit) -> None:
+        subreddit = self._subreddit_name(self._string(unit.metadata.get("subreddit")))
+        if not subreddit:
+            return
+        key = subreddit.casefold()
+        item = subreddit_items.setdefault(
+            key,
+            {
+                "name": subreddit,
+                "post_source_ids": set(),
+                "comment_source_ids": set(),
+                "created_at": unit.created_at,
+                "updated_at": unit.updated_at,
+            },
+        )
+        item["created_at"] = min(item["created_at"], unit.created_at)
+        item["updated_at"] = max(item["updated_at"], unit.updated_at)
+        if unit.source_entity_type == "post":
+            item["post_source_ids"].add(unit.source_id)
+        elif unit.source_entity_type == "comment":
+            item["comment_source_ids"].add(unit.source_id)
+
+    def _subreddit_units(self, subreddit_items: dict[str, dict[str, Any]]) -> list[KnowledgeUnit]:
+        units: list[KnowledgeUnit] = []
+        for key in sorted(subreddit_items):
+            item = subreddit_items[key]
+            post_source_ids = sorted(item["post_source_ids"])
+            comment_source_ids = sorted(item["comment_source_ids"])
+            saved_source_ids = sorted(post_source_ids + comment_source_ids)
+            name = str(item["name"])
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.REDDIT_SAVED_CSV,
+                    source_id=self._subreddit_source_id(key),
+                    source_entity_type="subreddit",
+                    title=f"r/{name}",
+                    content=f"Reddit subreddit: r/{name}\nSaved: {len(saved_source_ids)}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "subreddit": name,
+                        "normalized_subreddit": key,
+                        "saved_count": len(saved_source_ids),
+                        "post_count": len(post_source_ids),
+                        "comment_count": len(comment_source_ids),
+                        "saved_source_ids": saved_source_ids,
+                        "post_source_ids": post_source_ids,
+                        "comment_source_ids": comment_source_ids,
+                    },
+                    tags=["reddit", "subreddit", name],
+                    created_at=item["created_at"],
+                    updated_at=item["updated_at"],
+                )
+            )
+        return units
+
+    def _subreddit_edges(
+        self,
+        subreddit_units: list[KnowledgeUnit],
+        subreddit_items: dict[str, dict[str, Any]],
+        included_source_ids: set[str],
+    ) -> list[KnowledgeEdge]:
+        subreddit_ids = {unit.metadata["normalized_subreddit"]: unit.source_id for unit in subreddit_units}
+        edges: list[KnowledgeEdge] = []
+        for key, item in subreddit_items.items():
+            subreddit_id = subreddit_ids.get(key)
+            if not subreddit_id:
+                continue
+            for source_id in sorted(item["post_source_ids"] | item["comment_source_ids"]):
+                if source_id not in included_source_ids:
+                    continue
+                edges.append(
+                    KnowledgeEdge(
+                        id=self._subreddit_edge_id(subreddit_id, source_id),
+                        from_unit_id=subreddit_id,
+                        to_unit_id=source_id,
+                        relation=EdgeRelation.CONTAINS,
+                        source=EdgeSource.SOURCE,
+                        metadata={
+                            "source_project": SourceProject.REDDIT_SAVED_CSV.value,
+                            "from_entity_type": "subreddit",
+                            "relation_type": "subreddit_saved_item",
+                            "subreddit": item["name"],
+                        },
+                    )
+                )
+        return list({edge.id: edge for edge in edges}.values())
+
+    def _subreddit_name(self, value: str) -> str:
+        text = value.strip()
+        if text.casefold().startswith("r/"):
+            return text[2:].strip()
+        if text.casefold().startswith("/r/"):
+            return text[3:].strip()
+        return text
+
+    def _subreddit_source_id(self, subreddit: str) -> str:
+        digest = hashlib.sha1(subreddit.encode("utf-8")).hexdigest()[:16]
+        return f"reddit-saved-csv-subreddit-{digest}"
+
+    def _subreddit_edge_id(self, subreddit_id: str, source_id: str) -> str:
+        raw = "|".join([SourceProject.REDDIT_SAVED_CSV.value, EdgeRelation.CONTAINS.value, subreddit_id, source_id])
+        digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+        return f"reddit-saved-csv-subreddit-edge-{digest}"
 
     def _content(self, entity_type: str, title: str, body: str, link_title: str, permalink: str, url: str) -> str:
         parts = []
