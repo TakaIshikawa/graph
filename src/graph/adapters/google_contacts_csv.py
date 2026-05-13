@@ -20,7 +20,7 @@ class GoogleContactsCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["contact", "organization", "group"]
+        return ["contact", "organization", "group", "domain"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -42,6 +42,7 @@ class GoogleContactsCsvAdapter(SourceAdapter):
         organization_names: dict[str, str] = {}
         group_contacts: dict[str, list[KnowledgeUnit]] = {}
         group_names: dict[str, str] = {}
+        domain_contacts: dict[str, list[KnowledgeUnit]] = {}
         contact_units: list[KnowledgeUnit] = []
         for path in self._iter_paths():
             try:
@@ -65,6 +66,8 @@ class GoogleContactsCsvAdapter(SourceAdapter):
                     if group_key:
                         group_contacts.setdefault(group_key, []).append(unit)
                         group_names.setdefault(group_key, str(group))
+                for domain in self._email_domains(unit.metadata.get("emails", [])):
+                    domain_contacts.setdefault(domain, []).append(unit)
                 if "contact" in allowed:
                     units.append(unit)
 
@@ -77,6 +80,9 @@ class GoogleContactsCsvAdapter(SourceAdapter):
         group_units = [self._group_unit(key, group_names[key], contacts) for key, contacts in sorted(group_contacts.items())]
         if "group" in allowed:
             units.extend(group_units)
+        domain_units = [self._domain_unit(domain, contacts) for domain, contacts in sorted(domain_contacts.items())]
+        if "domain" in allowed:
+            units.extend(domain_units)
         result.units.extend(sorted(units, key=lambda unit: unit.source_id))
         if {"contact", "organization"}.issubset(allowed):
             org_by_key = {self._organization_key(unit.title): unit for unit in organization_units}
@@ -90,6 +96,12 @@ class GoogleContactsCsvAdapter(SourceAdapter):
                 group = group_by_key[group_key]
                 for contact in contacts:
                     result.edges.append(self._group_edge(contact, group))
+        if {"contact", "domain"}.issubset(allowed):
+            domain_by_name = {unit.title: unit for unit in domain_units}
+            for domain, contacts in domain_contacts.items():
+                domain_unit = domain_by_name[domain]
+                for contact in contacts:
+                    result.edges.append(self._domain_edge(contact, domain_unit))
         if "contact" in allowed:
             result.edges.extend(self._relationship_edges(contact_units))
         result.edges.sort(key=lambda edge: edge.id)
@@ -338,12 +350,70 @@ class GoogleContactsCsvAdapter(SourceAdapter):
             created_at=contact.created_at,
         )
 
+    def _email_domains(self, emails: list[str]) -> list[str]:
+        domains: list[str] = []
+        for email in emails:
+            if "@" not in email:
+                continue
+            domain = email.rsplit("@", 1)[1].strip().strip(">").casefold()
+            if domain and domain not in domains:
+                domains.append(domain)
+        return domains
+
+    def _domain_unit(self, domain: str, contacts: list[KnowledgeUnit]) -> KnowledgeUnit:
+        contact_ids = sorted(contact.source_id for contact in contacts)
+        organizations = sorted(
+            {
+                str(contact.metadata.get("organization", {}).get("name"))
+                for contact in contacts
+                if contact.metadata.get("organization", {}).get("name")
+            }
+        )
+        source_files = sorted({str(contact.metadata.get("source_file")) for contact in contacts if contact.metadata.get("source_file")})
+        return KnowledgeUnit(
+            source_project=SourceProject.GOOGLE_CONTACTS_CSV,
+            source_id=f"google_contacts_csv:domain:{self._domain_key(domain)}",
+            source_entity_type="domain",
+            title=domain,
+            content=f"Email domain: {domain}\nContacts: {len(contacts)}",
+            content_type=ContentType.METADATA,
+            metadata={
+                "domain": domain,
+                "contact_count": len(contacts),
+                "contact_source_ids": contact_ids,
+                "observed_organizations": organizations,
+                "source_files": source_files,
+            },
+            tags=["email-domain", domain],
+            created_at=min(contact.created_at for contact in contacts),
+            updated_at=max(contact.updated_at for contact in contacts),
+        )
+
+    def _domain_edge(self, contact: KnowledgeUnit, domain: KnowledgeUnit) -> KnowledgeEdge:
+        return KnowledgeEdge(
+            id=self._domain_edge_id(contact.source_id, domain.source_id),
+            from_unit_id=contact.source_id,
+            to_unit_id=domain.source_id,
+            relation=EdgeRelation.RELATES_TO,
+            source=EdgeSource.SOURCE,
+            metadata={
+                "source_project": SourceProject.GOOGLE_CONTACTS_CSV.value,
+                "from_entity_type": "contact",
+                "to_entity_type": "domain",
+                "domain": domain.title,
+            },
+            created_at=contact.created_at,
+        )
+
     def _organization_key(self, name: str) -> str:
         return hashlib.sha256(" ".join(name.casefold().split()).encode("utf-8")).hexdigest()[:24]
 
     def _group_key(self, name: str) -> str:
         normalized = " ".join(name.casefold().split())
         return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:24] if normalized else ""
+
+    def _domain_key(self, domain: str) -> str:
+        return hashlib.sha256(domain.casefold().encode("utf-8")).hexdigest()[:24]
 
     def _edge_id(self, organization_id: str, contact_id: str) -> str:
         digest = hashlib.sha256(f"{organization_id}|{contact_id}|contains".encode("utf-8")).hexdigest()[:24]
@@ -352,6 +422,10 @@ class GoogleContactsCsvAdapter(SourceAdapter):
     def _group_edge_id(self, contact_id: str, group_id: str) -> str:
         digest = hashlib.sha256(f"{contact_id}|{group_id}|references".encode("utf-8")).hexdigest()[:24]
         return f"google-contacts-group-references-{digest}"
+
+    def _domain_edge_id(self, contact_id: str, domain_id: str) -> str:
+        digest = hashlib.sha256(f"{contact_id}|{domain_id}|relates_to".encode("utf-8")).hexdigest()[:24]
+        return f"google-contacts-domain-relates-{digest}"
 
     def _relationship_edges(self, contacts: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
         contact_index: dict[str, list[KnowledgeUnit]] = {}

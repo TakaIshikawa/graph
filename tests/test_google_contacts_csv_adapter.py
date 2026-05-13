@@ -63,9 +63,10 @@ def test_google_contacts_csv_handles_empty_rows_and_missing_names(tmp_path):
 
     result = GoogleContactsCsvAdapter(path=str(export)).ingest()
 
-    assert len(result.units) == 1
-    assert result.units[0].title == "unnamed@example.com"
-    assert result.units[0].source_id.startswith("google_contacts_csv:")
+    contacts = [unit for unit in result.units if unit.source_entity_type == "contact"]
+    assert len(contacts) == 1
+    assert contacts[0].title == "unnamed@example.com"
+    assert contacts[0].source_id.startswith("google_contacts_csv:")
 
 
 def test_google_contacts_csv_filters_and_registry(tmp_path):
@@ -98,7 +99,7 @@ def test_google_contacts_csv_emits_organization_units_and_edges(tmp_path):
         ],
     )
 
-    result = GoogleContactsCsvAdapter(path=str(export)).ingest()
+    result = GoogleContactsCsvAdapter(path=str(export)).ingest(entity_types=["contact", "organization"])
 
     contacts = [unit for unit in result.units if unit.source_entity_type == "contact"]
     organizations = [unit for unit in result.units if unit.source_entity_type == "organization"]
@@ -144,7 +145,7 @@ def test_google_contacts_csv_emits_group_units_and_edges(tmp_path):
 
     result = GoogleContactsCsvAdapter(path=str(export)).ingest(entity_types=["contact", "group"])
 
-    assert GoogleContactsCsvAdapter(path=str(export)).entity_types == ["contact", "organization", "group"]
+    assert GoogleContactsCsvAdapter(path=str(export)).entity_types == ["contact", "organization", "group", "domain"]
     groups = sorted((unit for unit in result.units if unit.source_entity_type == "group"), key=lambda unit: unit.title)
     assert [unit.title for unit in groups] == ["Friends", "Research"]
     friends = groups[0]
@@ -264,3 +265,48 @@ def test_google_contacts_csv_relationship_edges_respect_filters_and_skip_self_or
     ]
     assert result.edges == []
     assert GoogleContactsCsvAdapter(path=str(export)).ingest(entity_types=["group"]).edges == []
+
+
+def test_google_contacts_csv_emits_domain_units_and_edges(tmp_path):
+    export = tmp_path / "contacts.csv"
+    _write_csv(
+        export,
+        [
+            {
+                "Name": "Ada Lovelace",
+                "E-mail 1 - Value": "ada@example.com",
+                "E-mail 2 - Value": "ada@work.test",
+                "Organization Name": "Analytical Engines",
+            },
+            {
+                "Name": "Grace Hopper",
+                "E-mail 1 - Value": "grace@example.com",
+                "Company": "Navy",
+            },
+        ],
+    )
+
+    result = GoogleContactsCsvAdapter(path=str(export)).ingest(entity_types=["contact", "domain"])
+    second = GoogleContactsCsvAdapter(path=str(export)).ingest(entity_types=["contact", "domain"])
+
+    contacts = [unit for unit in result.units if unit.source_entity_type == "contact"]
+    domains = sorted((unit for unit in result.units if unit.source_entity_type == "domain"), key=lambda unit: unit.title)
+    assert [unit.title for unit in domains] == ["example.com", "work.test"]
+    example = domains[0]
+    assert example.metadata["contact_count"] == 2
+    assert example.metadata["contact_source_ids"] == sorted(contact.source_id for contact in contacts)
+    assert example.metadata["observed_organizations"] == ["Analytical Engines", "Navy"]
+    assert example.metadata["source_files"] == ["contacts.csv"]
+    assert [unit.source_id for unit in domains] == [
+        unit.source_id for unit in sorted((u for u in second.units if u.source_entity_type == "domain"), key=lambda u: u.title)
+    ]
+    assert len(result.edges) == 3
+    assert {edge.relation for edge in result.edges} == {EdgeRelation.RELATES_TO}
+    assert {edge.source for edge in result.edges} == {EdgeSource.SOURCE}
+    assert {edge.from_unit_id for edge in result.edges} == {contact.source_id for contact in contacts}
+    assert {edge.to_unit_id for edge in result.edges} == {domain.source_id for domain in domains}
+    assert [edge.id for edge in result.edges] == [edge.id for edge in second.edges]
+
+    domain_only = GoogleContactsCsvAdapter(path=str(export)).ingest(entity_types=["domain"])
+    assert {unit.source_entity_type for unit in domain_only.units} == {"domain"}
+    assert domain_only.edges == []
