@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from graph.adapters._personal_exports import clean_metadata, digest_source_id, ensure_utc, first, iter_paths, parse_datetime
+from graph.adapters._personal_exports import clean_metadata, digest_source_id, ensure_utc, first, iter_paths, parse_datetime, split_values
 from graph.adapters.base import IngestResult, SourceAdapter
 from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
 from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
@@ -20,7 +20,7 @@ class AppleBooksHighlightsJsonAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["book", "highlight", "note"]
+        return ["book", "highlight", "note", "author"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -46,15 +46,21 @@ class AppleBooksHighlightsJsonAdapter(SourceAdapter):
                 result.units.append(unit)
 
         annotations = sorted(result.units, key=lambda unit: (unit.updated_at, unit.source_id))
-        books = self._book_units(annotations) if "book" in allowed else []
+        needs_books = "book" in allowed or "author" in allowed
+        books = self._book_units(annotations) if needs_books else []
+        authors = self._author_units(books, annotations) if "author" in allowed else []
         result.units = []
         if "book" in allowed:
             result.units.extend(books)
+        if "author" in allowed:
+            result.units.extend(authors)
         for entity_type in ("highlight", "note"):
             if entity_type in allowed:
                 result.units.extend(unit for unit in annotations if unit.source_entity_type == entity_type)
         if "book" in allowed and {"highlight", "note"}.intersection(allowed):
             result.edges.extend(self._book_annotation_edges(books, annotations, allowed))
+        if "author" in allowed:
+            result.edges.extend(self._author_edges(authors, books, annotations, allowed))
         result.units.sort(key=lambda unit: (unit.updated_at, unit.source_id))
         result.edges.sort(key=lambda edge: edge.id)
         return result
@@ -184,6 +190,88 @@ class AppleBooksHighlightsJsonAdapter(SourceAdapter):
                 edges.append(self._edge(book_id, annotation.source_id, f"book_contains_{annotation.source_entity_type}"))
         return list({edge.id: edge for edge in edges}.values())
 
+    def _author_units(self, books: list[KnowledgeUnit], annotations: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, dict[str, Any]] = {}
+        book_ids_by_identity = {self._book_identity(book.metadata): book.source_id for book in books}
+        for annotation in annotations:
+            author_names = self._author_names(annotation.metadata)
+            if not author_names:
+                continue
+            book_source_id = book_ids_by_identity.get(self._book_identity(annotation.metadata))
+            for author in author_names:
+                key = self._author_key(author)
+                item = grouped.setdefault(
+                    key,
+                    {
+                        "name": author,
+                        "book_source_ids": set(),
+                        "highlight_source_ids": set(),
+                        "created_at": annotation.created_at,
+                        "updated_at": annotation.updated_at,
+                    },
+                )
+                item["created_at"] = min(item["created_at"], annotation.created_at)
+                item["updated_at"] = max(item["updated_at"], annotation.updated_at)
+                if book_source_id:
+                    item["book_source_ids"].add(book_source_id)
+                if annotation.source_entity_type == "highlight":
+                    item["highlight_source_ids"].add(annotation.source_id)
+
+        units: list[KnowledgeUnit] = []
+        for key in sorted(grouped):
+            item = grouped[key]
+            book_source_ids = sorted(item["book_source_ids"])
+            highlight_source_ids = sorted(item["highlight_source_ids"])
+            name = str(item["name"])
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.APPLE_BOOKS_HIGHLIGHTS_JSON,
+                    source_id=self._author_source_id(key),
+                    source_entity_type="author",
+                    title=name,
+                    content=f"Apple Books author: {name}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "author": name,
+                        "normalized_author": key,
+                        "book_count": len(book_source_ids),
+                        "highlight_count": len(highlight_source_ids),
+                        "book_source_ids": book_source_ids,
+                        "highlight_source_ids": highlight_source_ids,
+                        "linked_source_ids": sorted(book_source_ids + highlight_source_ids),
+                    },
+                    tags=["apple_books", "author"],
+                    created_at=item["created_at"],
+                    updated_at=item["updated_at"],
+                )
+            )
+        return units
+
+    def _author_edges(
+        self,
+        authors: list[KnowledgeUnit],
+        books: list[KnowledgeUnit],
+        annotations: list[KnowledgeUnit],
+        allowed: set[str],
+    ) -> list[KnowledgeEdge]:
+        author_ids = {unit.metadata["normalized_author"]: unit.source_id for unit in authors}
+        edges: list[KnowledgeEdge] = []
+        if "book" in allowed:
+            for book in books:
+                for author in self._author_names(book.metadata):
+                    author_id = author_ids.get(self._author_key(author))
+                    if author_id:
+                        edges.append(self._author_edge(book.source_id, author_id, "book_author"))
+        if "highlight" in allowed:
+            for annotation in annotations:
+                if annotation.source_entity_type != "highlight":
+                    continue
+                for author in self._author_names(annotation.metadata):
+                    author_id = author_ids.get(self._author_key(author))
+                    if author_id:
+                        edges.append(self._author_edge(annotation.source_id, author_id, "highlight_author"))
+        return list({edge.id: edge for edge in edges}.values())
+
     def _book_identity(self, metadata: dict[str, Any]) -> tuple[str, str, str]:
         record = metadata.get("record") if isinstance(metadata.get("record"), dict) else {}
         asset_id = str(metadata.get("asset_id") or "") or first(record, "assetId", "asset_id", "bookId", "book_id")
@@ -208,6 +296,30 @@ class AppleBooksHighlightsJsonAdapter(SourceAdapter):
                 "relation_type": relation_type,
             },
         )
+
+    def _author_edge(self, from_id: str, to_id: str, relation_type: str) -> KnowledgeEdge:
+        return KnowledgeEdge(
+            id=digest_source_id("apple-books-highlights-json-edge", from_id, to_id, relation_type),
+            from_unit_id=from_id,
+            to_unit_id=to_id,
+            relation=EdgeRelation.RELATES_TO,
+            source=EdgeSource.SOURCE,
+            metadata={
+                "source_project": SourceProject.APPLE_BOOKS_HIGHLIGHTS_JSON.value,
+                "relation_type": relation_type,
+            },
+        )
+
+    def _author_names(self, metadata: dict[str, Any]) -> list[str]:
+        record = metadata.get("record") if isinstance(metadata.get("record"), dict) else {}
+        raw = metadata.get("author") or first(record, "author", "authors", "bookAuthor", "book_author")
+        return split_values(raw)
+
+    def _author_key(self, author: str) -> str:
+        return " ".join(author.casefold().split())
+
+    def _author_source_id(self, author_key: str) -> str:
+        return digest_source_id("apple_books_highlights_json:author", author_key)
 
     def _title(self, entity_type: str, book_title: str, text: str) -> str:
         label = "Apple Books note" if entity_type == "note" else "Apple Books highlight"

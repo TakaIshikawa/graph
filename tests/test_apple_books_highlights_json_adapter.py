@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from graph.adapters.apple_books_highlights_json import AppleBooksHighlightsJsonAdapter
+from graph.types.enums import EdgeRelation, EdgeSource
 from graph.types.models import SyncState
 
 
@@ -78,3 +79,37 @@ def test_apple_books_highlights_json_book_aggregates_and_edges(tmp_path):
     assert book.metadata["note_count"] == 1
     assert book.metadata["locations"] == ["p. 42", "p. 43"]
     assert {edge.metadata["relation_type"] for edge in result.edges} == {"book_contains_highlight", "book_contains_note"}
+
+
+def test_apple_books_highlights_json_author_aggregates_and_edges(tmp_path):
+    export = tmp_path / "books.json"
+    export.write_text(
+        """[
+          {"id": "h1", "assetId": "asset-1", "bookTitle": "Designing Data", "author": "Ada Reader", "selectedText": "Systems need feedback.", "location": "p. 42", "created": "2026-05-01T09:00:00Z"},
+          {"id": "h2", "assetId": "asset-1", "bookTitle": "Designing Data", "author": "ada reader", "selectedText": "Feedback loops matter.", "location": "p. 44", "created": "2026-05-01T10:00:00Z"},
+          {"id": "n1", "assetId": "asset-1", "bookTitle": "Designing Data", "author": "Ada Reader", "note": "Connect this.", "location": "p. 43", "modified": "2026-05-02T09:00:00Z"}
+        ]""",
+        encoding="utf-8",
+    )
+
+    authors = AppleBooksHighlightsJsonAdapter(path=str(export)).ingest(entity_types=["author"])
+    with_edges = AppleBooksHighlightsJsonAdapter(path=str(export)).ingest(entity_types=["book", "highlight", "author"])
+
+    assert "author" in AppleBooksHighlightsJsonAdapter(path=str(export)).entity_types
+    author = authors.units[0]
+    assert author.source_entity_type == "author"
+    assert author.title == "Ada Reader"
+    assert author.metadata["book_count"] == 1
+    assert author.metadata["highlight_count"] == 2
+    assert len(author.metadata["book_source_ids"]) == 1
+    assert len(author.metadata["highlight_source_ids"]) == 2
+    assert author.metadata["linked_source_ids"] == sorted(
+        author.metadata["book_source_ids"] + author.metadata["highlight_source_ids"]
+    )
+    assert authors.edges == []
+
+    author_edges = [edge for edge in with_edges.edges if edge.metadata["relation_type"] in {"book_author", "highlight_author"}]
+    assert len(author_edges) == 3
+    assert {edge.relation for edge in author_edges} == {EdgeRelation.RELATES_TO}
+    assert {edge.source for edge in author_edges} == {EdgeSource.SOURCE}
+    assert {edge.metadata["relation_type"] for edge in author_edges} == {"book_author", "highlight_author"}
