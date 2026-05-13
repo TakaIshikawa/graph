@@ -16,6 +16,7 @@ from graph.rag.evidence_budget import allocate_evidence_budget
 from graph.rag.evidence_density import score_evidence_density
 from graph.rag.keywords import extract_keywords
 from graph.rag.query_intent import classify_query_intent
+from graph.rag.query_source_strategy import plan_query_source_strategy
 from graph.rag.dedupe import rank_duplicate_candidates
 from graph.rag.facets import build_result_facets
 from graph.rag.citations import format_result_citations
@@ -75,6 +76,7 @@ __all__ = [
     "highlight_result_snippets",
     "map_evidence_tensions",
     "plan_reading_order",
+    "plan_query_source_strategy",
     "plan_tag_reading_path",
     "rank_duplicate_candidates",
     "rerank_for_recency",
