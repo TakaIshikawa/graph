@@ -99,6 +99,7 @@ from graph.export.unit_content_length_csv import export_unit_content_length_csv
 from graph.export.unit_evidence_markdown import export_unit_evidence_markdown
 from graph.export.unit_markdown_table import export_units_to_markdown_table
 from graph.export.unit_metadata_schema_csv import export_unit_metadata_schema_csv
+from graph.export.unit_reference_density_csv import export_unit_reference_density_csv
 from graph.export.unit_source_timeline_csv import export_unit_source_timeline_csv
 from graph.export.unit_source_diversity_csv import export_unit_source_diversity_csv
 from graph.export.unit_yaml import export_units_to_yaml
@@ -218,6 +219,7 @@ __all__ = [
     "export_unit_date_coverage_markdown",
     "export_unit_evidence_markdown",
     "export_unit_metadata_schema_csv",
+    "export_unit_reference_density_csv",
     "export_unit_schema_inventory",
     "export_unit_source_diversity_csv",
     "export_unit_source_timeline_csv",
