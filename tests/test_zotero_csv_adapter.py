@@ -5,7 +5,7 @@ import io
 from pathlib import Path
 
 from graph.adapters.zotero_csv import ZoteroCsvAdapter
-from graph.types.enums import ContentType, SourceProject
+from graph.types.enums import EdgeRelation, EdgeSource, SourceProject
 
 
 def _write_csv(path: Path, rows: list[dict[str, str]], columns: list[str] | None = None) -> Path:
@@ -40,8 +40,7 @@ def test_parses_journal_article(tmp_path):
 
     result = ZoteroCsvAdapter(path=str(csv_path)).ingest()
 
-    assert len(result.units) == 1
-    unit = result.units[0]
+    unit = next(unit for unit in result.units if unit.source_entity_type == "article")
     assert unit.title == "A Study of X"
     assert unit.source_project == SourceProject.ZOTERO_CSV
     assert unit.source_entity_type == "article"
@@ -79,7 +78,7 @@ def test_parses_manual_and_automatic_tags(tmp_path):
 
     result = ZoteroCsvAdapter(path=str(csv_path)).ingest()
 
-    unit = result.units[0]
+    unit = next(unit for unit in result.units if unit.source_entity_type == "article")
     assert "machine learning" in unit.tags
     assert "deep learning" in unit.tags
     assert "ai" in unit.tags
@@ -131,4 +130,47 @@ def test_title_as_fallback_content(tmp_path):
     ])
 
     result = ZoteroCsvAdapter(path=str(csv_path)).ingest()
-    assert result.units[0].content == "No Abstract"
+    unit = next(unit for unit in result.units if unit.source_entity_type == "book")
+    assert unit.content == "No Abstract"
+
+
+def test_exposes_author_entity_type():
+    assert "author" in ZoteroCsvAdapter().entity_types
+
+
+def test_ingests_deduplicated_author_units_and_edges(tmp_path):
+    csv_path = _write_csv(tmp_path / "zotero.csv", [
+        {"Key": "A1", "Title": "First Paper", "Item Type": "journalArticle", "Author": "Smith, John; Doe, Jane"},
+        {"Key": "B2", "Title": "Second Paper", "Item Type": "book", "Author": "smith, john"},
+    ])
+
+    result = ZoteroCsvAdapter(path=str(csv_path)).ingest(entity_types=["article", "book", "author"])
+    second = ZoteroCsvAdapter(path=str(csv_path)).ingest(entity_types=["article", "book", "author"])
+
+    authors = sorted((unit for unit in result.units if unit.source_entity_type == "author"), key=lambda unit: unit.title)
+    items = [unit for unit in result.units if unit.source_entity_type != "author"]
+    assert [unit.title for unit in authors] == ["Doe, Jane", "Smith, John"]
+    assert [unit.source_id for unit in authors] == [
+        unit.source_id for unit in sorted((u for u in second.units if u.source_entity_type == "author"), key=lambda u: u.title)
+    ]
+    smith = next(unit for unit in authors if unit.title == "Smith, John")
+    assert smith.metadata["item_count"] == 2
+    assert smith.metadata["item_source_ids"] == sorted(item.source_id for item in items)
+    assert len(result.edges) == 3
+    assert {edge.relation for edge in result.edges} == {EdgeRelation.RELATES_TO}
+    assert {edge.source for edge in result.edges} == {EdgeSource.SOURCE}
+    assert {edge.from_unit_id for edge in result.edges} == {item.source_id for item in items}
+    assert {edge.to_unit_id for edge in result.edges} == {author.source_id for author in authors}
+    assert [edge.id for edge in result.edges] == [edge.id for edge in second.edges]
+
+
+def test_author_filtering_can_return_only_authors_without_edges(tmp_path):
+    csv_path = _write_csv(tmp_path / "zotero.csv", [
+        {"Key": "A1", "Title": "First Paper", "Item Type": "journalArticle", "Author": "Smith, John; Doe, Jane"},
+    ])
+
+    result = ZoteroCsvAdapter(path=str(csv_path)).ingest(entity_types=["author"])
+
+    assert {unit.source_entity_type for unit in result.units} == {"author"}
+    assert {unit.title for unit in result.units} == {"Smith, John", "Doe, Jane"}
+    assert result.edges == []

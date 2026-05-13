@@ -8,8 +8,8 @@ import io
 from pathlib import Path
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 # Map Zotero item types to normalized entity types
 _ITEM_TYPE_MAP = {
@@ -40,7 +40,7 @@ class ZoteroCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["article", "book", "conference_paper", "thesis", "report"]
+        return ["article", "book", "conference_paper", "thesis", "report", "author"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -59,7 +59,10 @@ class ZoteroCsvAdapter(SourceAdapter):
         if not csv_path.exists():
             return result
 
-        allowed_types = set(entity_types) if entity_types else None
+        allowed_types = set(entity_types or self.entity_types)
+        include_authors = "author" in allowed_types
+        author_items: dict[str, list[KnowledgeUnit]] = {}
+        author_names: dict[str, str] = {}
 
         try:
             text = csv_path.read_text(encoding="utf-8-sig")
@@ -76,9 +79,6 @@ class ZoteroCsvAdapter(SourceAdapter):
             raw_type = (row.get("Item Type") or "article").strip().lower()
             entity_type = _ITEM_TYPE_MAP.get(raw_type, "article")
 
-            if allowed_types and entity_type not in allowed_types:
-                continue
-
             # Parse tags from Manual Tags and Automatic Tags (semicolon-separated)
             tags: list[str] = []
             for col in ("Manual Tags", "Automatic Tags"):
@@ -92,6 +92,7 @@ class ZoteroCsvAdapter(SourceAdapter):
             # Build metadata
             key = (row.get("Key") or "").strip()
             author = (row.get("Author") or "").strip() or None
+            authors = self._parse_authors(author or "")
             pub_title = (row.get("Publication Title") or "").strip() or None
             pub_year = (row.get("Publication Year") or "").strip() or None
             doi = (row.get("DOI") or "").strip() or None
@@ -140,7 +141,83 @@ class ZoteroCsvAdapter(SourceAdapter):
                 metadata=metadata,
                 tags=sorted(tags),
             )
-            result.units.append(unit)
+            for author_name in authors:
+                author_key = self._author_key(author_name)
+                if not author_key:
+                    continue
+                author_items.setdefault(author_key, []).append(unit)
+                author_names.setdefault(author_key, author_name)
+            if entity_type in allowed_types:
+                result.units.append(unit)
+
+        author_units = [
+            self._author_unit(author_key, author_names[author_key], author_items[author_key])
+            for author_key in sorted(author_items)
+        ]
+        if include_authors:
+            result.units.extend(author_units)
+        if include_authors:
+            item_ids = {unit.source_id for unit in result.units if unit.source_entity_type != "author"}
+            author_by_key = {unit.metadata["normalized_name"]: unit for unit in author_units}
+            for author_key, items in author_items.items():
+                author_unit = author_by_key[author_key]
+                for item in items:
+                    if item.source_id in item_ids:
+                        result.edges.append(self._item_author_edge(item, author_unit))
 
         result.units.sort(key=lambda u: (u.source_entity_type, u.source_id))
+        result.edges.sort(key=lambda edge: edge.id)
         return result
+
+    def _parse_authors(self, value: str) -> list[str]:
+        authors: list[str] = []
+        for raw in value.replace("\n", ";").split(";"):
+            author = " ".join(raw.strip().split())
+            if author and author.casefold() not in {item.casefold() for item in authors}:
+                authors.append(author)
+        return authors
+
+    def _author_key(self, name: str) -> str:
+        normalized = " ".join(name.casefold().split())
+        return hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:16] if normalized else ""
+
+    def _author_unit(self, author_key: str, name: str, items: list[KnowledgeUnit]) -> KnowledgeUnit:
+        item_ids = sorted({item.source_id for item in items})
+        item_titles = sorted({item.title for item in items})
+        item_types = sorted({item.source_entity_type for item in items})
+        return KnowledgeUnit(
+            source_project=SourceProject.ZOTERO_CSV,
+            source_id=f"zotero_csv:author:{author_key}",
+            source_entity_type="author",
+            title=name,
+            content=f"Zotero author: {name}\nItems: {len(item_ids)}",
+            content_type=ContentType.METADATA,
+            metadata={
+                "name": name,
+                "normalized_name": author_key,
+                "item_count": len(item_ids),
+                "item_source_ids": item_ids,
+                "item_titles": item_titles,
+                "item_types": item_types,
+            },
+            tags=["author"],
+            created_at=min(item.created_at for item in items),
+            updated_at=max(item.updated_at for item in items),
+        )
+
+    def _item_author_edge(self, item: KnowledgeUnit, author: KnowledgeUnit) -> KnowledgeEdge:
+        digest = hashlib.sha1(f"{item.source_id}|{author.source_id}|relates_to".encode("utf-8")).hexdigest()[:16]
+        return KnowledgeEdge(
+            id=f"zotero-csv-item-author-{digest}",
+            from_unit_id=item.source_id,
+            to_unit_id=author.source_id,
+            relation=EdgeRelation.RELATES_TO,
+            source=EdgeSource.SOURCE,
+            metadata={
+                "source_project": SourceProject.ZOTERO_CSV.value,
+                "from_entity_type": item.source_entity_type,
+                "to_entity_type": "author",
+                "author": author.title,
+            },
+            created_at=item.created_at,
+        )
