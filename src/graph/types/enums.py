@@ -146,6 +146,7 @@ class SourceProject(StrEnum):
     PELOTON_WORKOUTS_CSV = "peloton_workouts_csv"
     PODCASTS_OPML = "podcasts_opml"
     STACKOVERFLOW_BOOKMARKS_JSON = "stackoverflow_bookmarks_json"
+    CHROME_READING_LIST_JSON = "chrome_reading_list_json"
 
 
 class ContentType(StrEnum):
