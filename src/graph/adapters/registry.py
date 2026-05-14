@@ -152,6 +152,7 @@ from graph.adapters.wallabag import WallabagAdapter
 from graph.adapters.webvtt import WebVttAdapter
 from graph.adapters.yaml_adapter import YamlAdapter
 from graph.adapters.yaml_frontmatter import YamlFrontmatterAdapter
+from graph.adapters.youtube_playlists_json import YouTubePlaylistsJsonAdapter
 from graph.adapters.zotero_rdf import ZoteroRdfAdapter
 
 _ADAPTERS: dict[str, type[SourceAdapter]] = {
@@ -305,6 +306,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "peloton_workouts_csv": PelotonWorkoutsCsvAdapter,
     "podcasts_opml": PodcastsOpmlAdapter,
     "stackoverflow_bookmarks_json": StackOverflowBookmarksJsonAdapter,
+    "youtube_playlists_json": YouTubePlaylistsJsonAdapter,
 }
 
 
