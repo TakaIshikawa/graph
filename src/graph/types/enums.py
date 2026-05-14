@@ -149,6 +149,7 @@ class SourceProject(StrEnum):
     CHROME_READING_LIST_JSON = "chrome_reading_list_json"
     AUDIBLE_LIBRARY_CSV = "audible_library_csv"
     GOOGLE_PLAY_BOOKS_NOTES_CSV = "google_play_books_notes_csv"
+    CALENDAR_EVENTS_CSV = "calendar_events_csv"
 
 
 class ContentType(StrEnum):

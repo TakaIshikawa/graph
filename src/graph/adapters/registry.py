@@ -16,6 +16,7 @@ from graph.adapters.bookmarks import BookmarksAdapter
 from graph.adapters.bookmarks_html import BookmarksHtmlAdapter
 from graph.adapters.browser_history_csv import BrowserHistoryCsvAdapter
 from graph.adapters.calibre_sqlite import CalibreSqliteAdapter
+from graph.adapters.calendar_events_csv import CalendarEventsCsvAdapter
 from graph.adapters.chatgpt_json import ChatGptJsonAdapter
 from graph.adapters.chrome_history import ChromeHistoryAdapter
 from graph.adapters.chrome_reading_list_json import ChromeReadingListJsonAdapter
@@ -177,6 +178,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "bookmarks_html": BookmarksHtmlAdapter,
     "browser_history_csv": BrowserHistoryCsvAdapter,
     "calibre_sqlite": CalibreSqliteAdapter,
+    "calendar_events_csv": CalendarEventsCsvAdapter,
     "chrome_history": ChromeHistoryAdapter,
     "chrome_reading_list_json": ChromeReadingListJsonAdapter,
     "chatgpt_json": ChatGptJsonAdapter,
