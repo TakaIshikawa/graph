@@ -193,3 +193,48 @@ def test_task_recurrence_metadata_is_normalized_and_omitted_when_empty(tmp_path)
     assert tasks["Weekly sync"].metadata["recurrence"] == {"frequency": "weekly", "interval": 1}
     assert tasks["Daily review"].metadata["recurrence"] == "RRULE:FREQ=DAILY"
     assert "recurrence" not in tasks["One-off"].metadata
+
+
+def test_task_due_day_aggregates_due_tasks_and_edges(tmp_path):
+    data = _make_task_list("Work", items=[
+        {"id": "t1", "title": "First", "status": "needsAction", "due": "2024-06-15T00:00:00.000Z"},
+        {"id": "t2", "title": "Second", "status": "completed", "due": "2024-06-15T12:30:00.000Z"},
+        {"id": "t3", "title": "Undated", "status": "needsAction"},
+    ])
+    _write_json(tmp_path / "tasks.json", data)
+
+    result = GoogleTasksAdapter(path=str(tmp_path / "tasks.json")).ingest(entity_types=["task", "task_due_day"])
+
+    assert "task_due_day" in GoogleTasksAdapter(path=str(tmp_path / "tasks.json")).entity_types
+    due_day = next(unit for unit in result.units if unit.source_entity_type == "task_due_day")
+    tasks = [unit for unit in result.units if unit.source_entity_type == "task"]
+    due_tasks = [unit for unit in tasks if unit.metadata.get("due")]
+    assert due_day.source_id == "google_tasks:task_due_day:2024-06-15"
+    assert due_day.metadata == {
+        "due_date": "2024-06-15",
+        "task_count": 2,
+        "completed_count": 1,
+        "incomplete_count": 1,
+        "list_titles": ["Work"],
+        "task_source_ids": sorted(unit.source_id for unit in due_tasks),
+    }
+    due_day_edges = [
+        edge for edge in result.edges if edge.metadata["relation_type"] == "task_due_day_contains_task"
+    ]
+    assert len(due_day_edges) == 2
+    assert {edge.from_unit_id for edge in due_day_edges} == {due_day.source_id}
+    assert {edge.to_unit_id for edge in due_day_edges} == {unit.source_id for unit in due_tasks}
+    assert all(edge.relation == EdgeRelation.CONTAINS for edge in due_day_edges)
+
+
+def test_task_due_day_filtering_omits_edges_without_tasks(tmp_path):
+    data = _make_task_list(items=[
+        {"id": "t1", "title": "First", "status": "needsAction", "due": "2024-06-15"},
+        {"id": "t2", "title": "Undated", "status": "needsAction"},
+    ])
+    _write_json(tmp_path / "tasks.json", data)
+
+    due_days = GoogleTasksAdapter(path=str(tmp_path / "tasks.json")).ingest(entity_types=["task_due_day"])
+
+    assert [unit.source_entity_type for unit in due_days.units] == ["task_due_day"]
+    assert due_days.edges == []

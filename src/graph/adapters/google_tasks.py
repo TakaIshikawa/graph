@@ -22,7 +22,7 @@ class GoogleTasksAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["task", "task_list"]
+        return ["task", "task_list", "task_due_day"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -43,6 +43,7 @@ class GoogleTasksAdapter(SourceAdapter):
 
         allowed_types = set(entity_types) if entity_types else None
         files = self._json_paths(root)
+        task_units: list[KnowledgeUnit] = []
 
         for file_path in files:
             try:
@@ -76,8 +77,6 @@ class GoogleTasksAdapter(SourceAdapter):
 
             for item in items:
                 if not isinstance(item, dict):
-                    continue
-                if allowed_types and "task" not in allowed_types:
                     continue
 
                 task_title = item.get("title") or ""
@@ -129,7 +128,9 @@ class GoogleTasksAdapter(SourceAdapter):
                     created_at=created_at,
                     updated_at=created_at,
                 )
-                result.units.append(unit)
+                task_units.append(unit)
+                if not allowed_types or "task" in allowed_types:
+                    result.units.append(unit)
                 if not allowed_types or {"task", "task_list"}.issubset(allowed_types):
                     result.edges.append(
                         KnowledgeEdge(
@@ -175,6 +176,12 @@ class GoogleTasksAdapter(SourceAdapter):
                             )
                         )
 
+        if not allowed_types or "task_due_day" in allowed_types:
+            due_day_units = self._due_day_units(task_units)
+            result.units.extend(due_day_units)
+            if not allowed_types or {"task_due_day", "task"}.issubset(allowed_types):
+                result.edges.extend(self._due_day_edges(due_day_units, task_units))
+
         result.units.sort(key=lambda u: (u.source_entity_type, u.source_id))
         result.edges.sort(key=lambda e: (e.from_unit_id, e.to_unit_id))
         return result
@@ -198,6 +205,79 @@ class GoogleTasksAdapter(SourceAdapter):
         raw = "|".join([SourceProject.GOOGLE_TASKS.value, relation_type, from_id, to_id])
         digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
         return f"google_tasks-{relation_type}-{digest}"
+
+    def _due_day_units(self, tasks: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        for task in tasks:
+            due_day = self._due_day(task.metadata.get("due"))
+            if due_day:
+                grouped.setdefault(due_day, []).append(task)
+
+        units: list[KnowledgeUnit] = []
+        for due_day, day_tasks in sorted(grouped.items()):
+            ordered = sorted(day_tasks, key=lambda task: task.source_id)
+            completed_count = sum(1 for task in ordered if str(task.metadata.get("status", "")).lower() == "completed")
+            list_titles = sorted({str(task.metadata.get("list_title")) for task in ordered if task.metadata.get("list_title")})
+            source_id = self._due_day_source_id(due_day)
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.GOOGLE_TASKS,
+                    source_id=source_id,
+                    source_entity_type="task_due_day",
+                    title=f"Google Tasks due {due_day}",
+                    content=f"{len(ordered)} Google Tasks due on {due_day}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "due_date": due_day,
+                        "task_count": len(ordered),
+                        "completed_count": completed_count,
+                        "incomplete_count": len(ordered) - completed_count,
+                        "list_titles": list_titles,
+                        "task_source_ids": [task.source_id for task in ordered],
+                    },
+                    tags=["google_tasks", "task_due_day", due_day],
+                    created_at=min(task.created_at for task in ordered),
+                    updated_at=max(task.updated_at for task in ordered),
+                )
+            )
+        return units
+
+    def _due_day_edges(self, due_days: list[KnowledgeUnit], tasks: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        due_day_ids = {str(unit.metadata["due_date"]): unit.source_id for unit in due_days}
+        edges: list[KnowledgeEdge] = []
+        for task in tasks:
+            due_day = self._due_day(task.metadata.get("due"))
+            due_day_id = due_day_ids.get(due_day)
+            if not due_day_id:
+                continue
+            edges.append(
+                KnowledgeEdge(
+                    id=self._edge_id(due_day_id, task.source_id, "task_due_day_contains_task"),
+                    from_unit_id=due_day_id,
+                    to_unit_id=task.source_id,
+                    relation=EdgeRelation.CONTAINS,
+                    source=EdgeSource.SOURCE,
+                    metadata={
+                        "source_project": SourceProject.GOOGLE_TASKS.value,
+                        "relation_type": "task_due_day_contains_task",
+                        "due_date": due_day,
+                    },
+                    created_at=task.created_at,
+                )
+            )
+        return edges
+
+    def _due_day_source_id(self, due_day: str) -> str:
+        return f"google_tasks:task_due_day:{due_day}"
+
+    def _due_day(self, value: Any) -> str:
+        parsed = self._parse_datetime(value)
+        if parsed is not None:
+            return parsed.date().isoformat()
+        raw = str(value or "").strip()
+        if len(raw) >= 10:
+            return raw[:10]
+        return ""
 
     def _recurrence_metadata(self, item: dict[str, Any]) -> Any:
         values: dict[str, Any] = {}
