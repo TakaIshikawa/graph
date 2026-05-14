@@ -80,6 +80,7 @@ from graph.export.source_inventory import export_source_inventory_csv
 from graph.export.source_confidence_summary_csv import export_source_confidence_summary_csv
 from graph.export.source_freshness_summary_csv import export_source_freshness_summary_csv
 from graph.export.source_date_gap_csv import export_source_date_gap_csv
+from graph.export.source_author_coverage_csv import export_source_author_coverage_csv
 from graph.export.source_metadata_density_csv import export_source_metadata_density_csv
 from graph.export.source_metadata_outliers_markdown import export_source_metadata_outliers_markdown
 from graph.export.source_quality_markdown import export_source_quality_markdown
@@ -208,6 +209,7 @@ __all__ = [
     "export_source_gap_markdown",
     "export_source_inventory_csv",
     "export_source_confidence_summary_csv",
+    "export_source_author_coverage_csv",
     "export_source_date_gap_csv",
     "export_source_freshness_summary_csv",
     "export_source_metadata_density_csv",
