@@ -51,6 +51,7 @@ from graph.export.metadata_date_histogram_markdown import export_metadata_date_h
 from graph.export.metadata_enum_candidates_markdown import export_metadata_enum_candidates_markdown
 from graph.export.metadata_namespace_summary_csv import export_metadata_namespace_summary_csv
 from graph.export.metadata_value_frequency_markdown import export_metadata_value_frequency_markdown
+from graph.export.metadata_value_spread_csv import export_metadata_value_spread_csv
 from graph.export.metadata_key_matrix_csv import export_metadata_key_matrix_csv
 from graph.export.metadata_completeness import export_metadata_completeness_markdown
 from graph.export.mermaid_mindmap import export_units_to_mermaid_mindmap
@@ -192,6 +193,7 @@ __all__ = [
     "export_metadata_enum_candidates_markdown",
     "export_metadata_namespace_summary_csv",
     "export_metadata_value_frequency_markdown",
+    "export_metadata_value_spread_csv",
     "export_metadata_key_matrix_csv",
     "export_graph_ndjson",
     "export_graph_neo4j_bulk_csv",
