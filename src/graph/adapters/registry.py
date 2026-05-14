@@ -58,6 +58,7 @@ from graph.adapters.kindle_clippings import KindleClippingsAdapter
 from graph.adapters.kobo_highlights_csv import KoboHighlightsCsvAdapter
 from graph.adapters.logseq import LogseqAdapter
 from graph.adapters.google_maps_timeline_json import GoogleMapsTimelineJsonAdapter
+from graph.adapters.google_play_books_notes_csv import GooglePlayBooksNotesCsvAdapter
 from graph.adapters.markdown import MarkdownAdapter
 from graph.adapters.markdown_callouts import MarkdownCalloutsAdapter
 from graph.adapters.markdown_definitions import MarkdownDefinitionsAdapter
@@ -287,6 +288,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "jira_issues_csv": JiraIssuesCsvAdapter,
     "trello_board_json": TrelloBoardJsonAdapter,
     "google_maps_timeline_json": GoogleMapsTimelineJsonAdapter,
+    "google_play_books_notes_csv": GooglePlayBooksNotesCsvAdapter,
     "libby_loans_csv": LibbyLoansCsvAdapter,
     "boardgamegeek_collection_csv": BoardGameGeekCollectionCsvAdapter,
     "reddit_saved_csv": RedditSavedCsvAdapter,
