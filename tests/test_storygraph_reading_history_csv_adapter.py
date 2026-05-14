@@ -219,3 +219,44 @@ def test_storygraph_reading_history_csv_author_entity_filtering(tmp_path):
     assert author_only.edges == []
     assert {unit.source_entity_type for unit in both.units} == {"read", "author"}
     assert len(both.edges) == 1
+
+
+def test_storygraph_reading_history_csv_emits_shelf_aggregates_and_edges(tmp_path):
+    path = tmp_path / "storygraph.csv"
+    _write_csv(
+        path,
+        [
+            {"Title": "First Book", "Authors": "Ada", "Date Read": "2026-05-01", "Star Rating": "4", "Tags": "Favorites, Sci-Fi"},
+            {"Title": "Second Book", "Authors": "Grace", "Date Read": "2026-05-03", "Star Rating": "5", "Shelves": "favorites"},
+            {"Title": "Third Book", "Authors": "Ada", "Date Read": "2026-05-05", "Tags": ""},
+        ],
+    )
+
+    result = StoryGraphReadingHistoryCsvAdapter(path=str(path)).ingest(entity_types=["read", "shelf"])
+
+    assert "shelf" in StoryGraphReadingHistoryCsvAdapter(path=str(path)).entity_types
+    shelves = {unit.metadata["normalized_shelf"]: unit for unit in result.units if unit.source_entity_type == "shelf"}
+    assert set(shelves) == {"favorites", "sci-fi"}
+    favorites = shelves["favorites"]
+    assert favorites.metadata["read_count"] == 2
+    assert favorites.metadata["authors"] == ["Ada", "Grace"]
+    assert favorites.metadata["titles"] == ["First Book", "Second Book"]
+    assert favorites.metadata["average_rating"] == 4.5
+    assert favorites.metadata["first_read_at"] == "2026-05-01T00:00:00+00:00"
+    assert favorites.metadata["last_read_at"] == "2026-05-03T00:00:00+00:00"
+    assert len(favorites.metadata["read_source_ids"]) == 2
+
+    edges = [edge for edge in result.edges if edge.metadata["from_entity_type"] == "shelf"]
+    assert len(edges) == 3
+    assert {edge.relation for edge in edges} == {EdgeRelation.CONTAINS}
+    assert {edge.from_unit_id for edge in edges} == {unit.source_id for unit in shelves.values()}
+
+
+def test_storygraph_reading_history_csv_shelf_entity_filtering(tmp_path):
+    path = tmp_path / "storygraph.csv"
+    _write_csv(path, [{"Title": "Stable", "Tags": "favorites"}])
+
+    shelves = StoryGraphReadingHistoryCsvAdapter(path=str(path)).ingest(entity_types=["shelf"])
+
+    assert [unit.source_entity_type for unit in shelves.units] == ["shelf"]
+    assert shelves.edges == []

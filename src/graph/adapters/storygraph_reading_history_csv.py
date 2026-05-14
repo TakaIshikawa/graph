@@ -21,7 +21,7 @@ class StoryGraphReadingHistoryCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["book", "read", "author"]
+        return ["book", "read", "author", "shelf"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -59,6 +59,10 @@ class StoryGraphReadingHistoryCsvAdapter(SourceAdapter):
             result.units.extend(author_units)
         if {"author", "read"}.issubset(allowed):
             result.edges.extend(self._author_edges(author_units, read_units))
+        shelf_units = self._shelf_units(read_units) if "shelf" in allowed else []
+        result.units.extend(shelf_units)
+        if {"shelf", "read"}.issubset(allowed):
+            result.edges.extend(self._shelf_edges(shelf_units, read_units))
 
         result.units.sort(key=lambda unit: (unit.updated_at, unit.source_id))
         result.edges.sort(key=lambda edge: edge.id)
@@ -262,16 +266,105 @@ class StoryGraphReadingHistoryCsvAdapter(SourceAdapter):
                 )
         return edges
 
+    def _shelf_units(self, reads: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        names: dict[str, str] = {}
+        for read in reads:
+            for shelf in read.metadata.get("shelves") or read.metadata.get("tags") or []:
+                key = self._normalized_shelf(str(shelf))
+                if not key:
+                    continue
+                grouped.setdefault(key, []).append(read)
+                names.setdefault(key, str(shelf).strip())
+
+        units: list[KnowledgeUnit] = []
+        for key, shelf_reads in sorted(grouped.items()):
+            unique_reads = sorted({read.source_id: read for read in shelf_reads}.values(), key=lambda read: read.source_id)
+            ratings = [float(read.metadata["rating"]) for read in unique_reads if read.metadata.get("rating") is not None]
+            read_dates = [
+                value
+                for read in unique_reads
+                for value in (self._parse_datetime(str(read.metadata.get("date_read") or "")), self._parse_datetime(str(read.metadata.get("finished_at") or "")))
+                if value is not None
+            ]
+            shelf = names[key]
+            metadata: dict[str, Any] = {
+                "shelf": shelf,
+                "normalized_shelf": key,
+                "read_count": len(unique_reads),
+                "authors": sorted({author for read in unique_reads for author in (read.metadata.get("authors") or [])}),
+                "titles": sorted({str(read.metadata.get("title") or read.title) for read in unique_reads}),
+                "first_read_at": min(read_dates).isoformat() if read_dates else "",
+                "last_read_at": max(read_dates).isoformat() if read_dates else "",
+                "read_source_ids": [read.source_id for read in unique_reads],
+            }
+            if ratings:
+                metadata["average_rating"] = round(sum(ratings) / len(ratings), 2)
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.STORYGRAPH_READING_HISTORY_CSV,
+                    source_id=self._shelf_source_id(key),
+                    source_entity_type="shelf",
+                    title=shelf,
+                    content=f"StoryGraph shelf: {shelf}",
+                    content_type=ContentType.METADATA,
+                    metadata={item_key: value for item_key, value in metadata.items() if value not in ("", None, [])},
+                    tags=["storygraph", "shelf", key],
+                    created_at=min(read.created_at for read in unique_reads),
+                    updated_at=max(read.updated_at for read in unique_reads),
+                )
+            )
+        return units
+
+    def _shelf_edges(self, shelves: list[KnowledgeUnit], reads: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        shelf_ids = {str(shelf.metadata["normalized_shelf"]): shelf.source_id for shelf in shelves}
+        edges: list[KnowledgeEdge] = []
+        seen: set[tuple[str, str]] = set()
+        for read in reads:
+            for shelf in read.metadata.get("shelves") or read.metadata.get("tags") or []:
+                shelf_id = shelf_ids.get(self._normalized_shelf(str(shelf)))
+                if not shelf_id or (shelf_id, read.source_id) in seen:
+                    continue
+                seen.add((shelf_id, read.source_id))
+                edges.append(
+                    KnowledgeEdge(
+                        id=self._shelf_edge_id(shelf_id, read.source_id),
+                        from_unit_id=shelf_id,
+                        to_unit_id=read.source_id,
+                        relation=EdgeRelation.CONTAINS,
+                        source=EdgeSource.SOURCE,
+                        metadata={
+                            "source_project": SourceProject.STORYGRAPH_READING_HISTORY_CSV.value,
+                            "from_entity_type": "shelf",
+                            "to_entity_type": "read",
+                            "shelf": shelf,
+                        },
+                        created_at=read.created_at,
+                    )
+                )
+        return edges
+
     def _normalized_author(self, author: str) -> str:
         return " ".join(author.casefold().split())
+
+    def _normalized_shelf(self, shelf: str) -> str:
+        return " ".join(shelf.casefold().split())
 
     def _author_source_id(self, normalized_author: str) -> str:
         digest = hashlib.sha256(normalized_author.encode("utf-8")).hexdigest()[:24]
         return f"storygraph_reading_history_csv:author:{digest}"
 
+    def _shelf_source_id(self, normalized_shelf: str) -> str:
+        digest = hashlib.sha256(normalized_shelf.encode("utf-8")).hexdigest()[:24]
+        return f"storygraph_reading_history_csv:shelf:{digest}"
+
     def _edge_id(self, author_id: str, read_id: str) -> str:
         digest = hashlib.sha256(f"{author_id}|{read_id}|contains".encode("utf-8")).hexdigest()[:24]
         return f"storygraph-reading-history-author-contains-{digest}"
+
+    def _shelf_edge_id(self, shelf_id: str, read_id: str) -> str:
+        digest = hashlib.sha256(f"{shelf_id}|{read_id}|contains".encode("utf-8")).hexdigest()[:24]
+        return f"storygraph-reading-history-shelf-contains-{digest}"
 
     def _first(self, row: dict[str, Any], *keys: str) -> str:
         lowered = {str(key).lower(): value for key, value in row.items()}
