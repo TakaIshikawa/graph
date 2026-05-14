@@ -8,6 +8,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from graph.adapters.base import IngestResult, SourceAdapter
 from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
@@ -21,7 +22,7 @@ class OmnivoreJsonAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["article", "highlight", "note", "label"]
+        return ["article", "highlight", "note", "label", "site"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -33,7 +34,7 @@ class OmnivoreJsonAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        requested = set(entity_types or self.entity_types)
+        requested = set(entity_types) if entity_types is not None else {"article", "highlight", "note", "label"}
         if not requested.intersection(self.entity_types):
             return result
 
@@ -49,6 +50,7 @@ class OmnivoreJsonAdapter(SourceAdapter):
         sync_at = self._sync_datetime(since) if since else None
         emitted_edges: set[tuple[str, str]] = set()
         label_links: dict[str, dict[str, Any]] = {}
+        article_units: list[KnowledgeUnit] = []
         now = datetime.now(timezone.utc)
 
         for item in items:
@@ -95,30 +97,33 @@ class OmnivoreJsonAdapter(SourceAdapter):
             if "label" in requested:
                 self._add_label_source_link(label_links, article_label_entries, article_source_id, "article")
 
+            article_unit = KnowledgeUnit(
+                source_project=SourceProject.OMNIVORE_JSON,
+                source_id=article_source_id,
+                source_entity_type="article",
+                title=title or "Untitled Omnivore article",
+                content=self._article_content(title, url, author, labels, highlights),
+                content_type=ContentType.ARTIFACT,
+                metadata={
+                    "omnivore_id": omnivore_id,
+                    "url": url,
+                    "author": author,
+                    "state": state,
+                    "labels": labels,
+                    "saved_at": saved_text,
+                    "read_at": read_text,
+                    "archived": self._is_archived(article, state),
+                    "read": self._is_read(article, state, read_text),
+                    "highlight_count": len(highlights),
+                    "site_host": self._article_host(article),
+                },
+                tags=labels,
+                created_at=saved_at or read_at or updated_at or now,
+                updated_at=updated_at or read_at or saved_at or now,
+            )
+            if "site" in requested:
+                article_units.append(article_unit)
             if "article" in requested:
-                article_unit = KnowledgeUnit(
-                    source_project=SourceProject.OMNIVORE_JSON,
-                    source_id=article_source_id,
-                    source_entity_type="article",
-                    title=title or "Untitled Omnivore article",
-                    content=self._article_content(title, url, author, labels, highlights),
-                    content_type=ContentType.ARTIFACT,
-                    metadata={
-                        "omnivore_id": omnivore_id,
-                        "url": url,
-                        "author": author,
-                        "state": state,
-                        "labels": labels,
-                        "saved_at": saved_text,
-                        "read_at": read_text,
-                        "archived": self._is_archived(article, state),
-                        "read": self._is_read(article, state, read_text),
-                        "highlight_count": len(highlights),
-                    },
-                    tags=labels,
-                    created_at=saved_at or read_at or updated_at or now,
-                    updated_at=updated_at or read_at or saved_at or now,
-                )
                 result.units.append(article_unit)
 
             if requested.intersection({"highlight", "note"}) or "label" in requested:
@@ -168,6 +173,11 @@ class OmnivoreJsonAdapter(SourceAdapter):
             requested_content_types = requested.intersection({"article", "highlight"})
             if requested_content_types:
                 result.edges.extend(self._label_edges(label_units, label_links, requested_content_types))
+        if "site" in requested:
+            site_units = self._site_units(article_units, now)
+            result.units.extend(site_units)
+            if "article" in requested:
+                result.edges.extend(self._site_edges(site_units, article_units))
 
         result.units.sort(key=lambda unit: (unit.source_entity_type, unit.source_id))
         result.edges.sort(key=lambda edge: (edge.from_unit_id, edge.to_unit_id))
@@ -486,6 +496,71 @@ class OmnivoreJsonAdapter(SourceAdapter):
                 )
         return list({edge.id: edge for edge in edges}.values())
 
+    def _site_units(self, articles: list[KnowledgeUnit], now: datetime) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        for article in articles:
+            host = str(article.metadata.get("site_host") or "").strip()
+            if host:
+                grouped.setdefault(host, []).append(article)
+
+        units: list[KnowledgeUnit] = []
+        for host, site_articles in sorted(grouped.items()):
+            ordered = sorted({article.source_id: article for article in site_articles}.values(), key=lambda article: article.source_id)
+            saved_dates = [self._parse_datetime(str(article.metadata.get("saved_at") or "")) for article in ordered]
+            read_dates = [self._parse_datetime(str(article.metadata.get("read_at") or "")) for article in ordered]
+            saved_dates = [value for value in saved_dates if value is not None]
+            read_dates = [value for value in read_dates if value is not None]
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.OMNIVORE_JSON,
+                    source_id=self._site_source_id(host),
+                    source_entity_type="site",
+                    title=host,
+                    content=f"Omnivore site: {host}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "host": host,
+                        "article_count": len(ordered),
+                        "highlight_count": sum(int(article.metadata.get("highlight_count") or 0) for article in ordered),
+                        "labels": sorted({label for article in ordered for label in (article.metadata.get("labels") or [])}),
+                        "authors": sorted({str(article.metadata.get("author")) for article in ordered if article.metadata.get("author")}),
+                        "first_saved_at": min(saved_dates).isoformat() if saved_dates else "",
+                        "last_read_at": max(read_dates).isoformat() if read_dates else "",
+                        "article_source_ids": [article.source_id for article in ordered],
+                    },
+                    tags=["omnivore", "site", host],
+                    created_at=min((article.created_at for article in ordered), default=now),
+                    updated_at=max((article.updated_at for article in ordered), default=now),
+                )
+            )
+        return units
+
+    def _site_edges(self, sites: list[KnowledgeUnit], articles: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        site_ids = {str(site.metadata["host"]): site.source_id for site in sites}
+        edges: list[KnowledgeEdge] = []
+        for article in articles:
+            host = str(article.metadata.get("site_host") or "")
+            site_id = site_ids.get(host)
+            if not site_id:
+                continue
+            edges.append(
+                KnowledgeEdge(
+                    id=self._site_edge_id(article.source_id, site_id),
+                    from_unit_id=article.source_id,
+                    to_unit_id=site_id,
+                    relation=EdgeRelation.RELATES_TO,
+                    source=EdgeSource.SOURCE,
+                    metadata={
+                        "source_project": SourceProject.OMNIVORE_JSON.value,
+                        "from_entity_type": "article",
+                        "to_entity_type": "site",
+                        "relation_type": "article_site",
+                        "host": host,
+                    },
+                )
+            )
+        return edges
+
     def _label_source_id(self, label: str) -> str:
         digest = hashlib.sha256(label.encode("utf-8")).hexdigest()[:24]
         return f"omnivore_label:{digest}"
@@ -493,6 +568,27 @@ class OmnivoreJsonAdapter(SourceAdapter):
     def _label_edge_id(self, content_source_id: str, label_source_id: str) -> str:
         digest = hashlib.sha256(f"{content_source_id}\0label\0{label_source_id}".encode("utf-8")).hexdigest()[:24]
         return f"omnivore_label_edge:{digest}"
+
+    def _site_source_id(self, host: str) -> str:
+        digest = hashlib.sha256(host.encode("utf-8")).hexdigest()[:24]
+        return f"omnivore_site:{digest}"
+
+    def _site_edge_id(self, article_source_id: str, site_source_id: str) -> str:
+        digest = hashlib.sha256(f"{article_source_id}\0site\0{site_source_id}".encode("utf-8")).hexdigest()[:24]
+        return f"omnivore_site_edge:{digest}"
+
+    def _article_host(self, article: dict[str, Any]) -> str:
+        for key in ("url", "originalUrl", "original_url", "canonicalUrl", "canonical_url"):
+            host = self._url_host(self._first(article, key))
+            if host:
+                return host
+        return ""
+
+    def _url_host(self, url: str) -> str:
+        if not url:
+            return ""
+        parsed = urlparse(url if "://" in url else f"https://{url}")
+        return (parsed.hostname or "").casefold().removeprefix("www.")
 
     def _first(self, item: dict[str, Any], *keys: str) -> str:
         normalized = {self._normalize_key(key): value for key, value in item.items()}

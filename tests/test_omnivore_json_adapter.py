@@ -258,6 +258,71 @@ def test_omnivore_json_handles_bad_input(tmp_path):
 
     assert result.units == []
     assert result.edges == []
+
+
+def test_omnivore_json_emits_site_aggregates_and_edges(tmp_path):
+    export = tmp_path / "omnivore.json"
+    export.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "page-1",
+                    "title": "Research Article",
+                    "url": "https://www.example.com/research",
+                    "author": "Ada Lovelace",
+                    "labels": ["Research"],
+                    "savedAt": "2025-02-01T10:00:00Z",
+                    "readAt": "2025-02-02T12:00:00Z",
+                    "highlights": [{"id": "hl-1", "quote": "A useful passage"}],
+                },
+                {
+                    "id": "page-2",
+                    "title": "Second Article",
+                    "originalUrl": "https://example.com/second",
+                    "author": "Grace Hopper",
+                    "labels": ["AI"],
+                    "savedAt": "2025-02-03T10:00:00Z",
+                    "readAt": "2025-02-04T12:00:00Z",
+                    "highlights": [{"id": "hl-2", "quote": "Another passage"}, {"id": "hl-3", "quote": "More"}],
+                },
+                {
+                    "id": "page-3",
+                    "title": "Other",
+                    "canonicalUrl": "https://other.example/path",
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = OmnivoreJsonAdapter(path=str(export)).ingest(entity_types=["article", "site"])
+
+    assert "site" in OmnivoreJsonAdapter(path=str(export)).entity_types
+    sites = {unit.metadata["host"]: unit for unit in result.units if unit.source_entity_type == "site"}
+    assert set(sites) == {"example.com", "other.example"}
+    site = sites["example.com"]
+    assert site.metadata["article_count"] == 2
+    assert site.metadata["highlight_count"] == 3
+    assert site.metadata["labels"] == ["ai", "research"]
+    assert site.metadata["authors"] == ["Ada Lovelace", "Grace Hopper"]
+    assert site.metadata["first_saved_at"] == "2025-02-01T10:00:00+00:00"
+    assert site.metadata["last_read_at"] == "2025-02-04T12:00:00+00:00"
+    assert site.metadata["article_source_ids"] == ["omnivore:page-1", "omnivore:page-2"]
+
+    site_edges = [edge for edge in result.edges if edge.metadata.get("relation_type") == "article_site"]
+    assert len(site_edges) == 3
+    assert {edge.relation for edge in site_edges} == {EdgeRelation.RELATES_TO}
+    assert {edge.to_unit_id for edge in site_edges} == {unit.source_id for unit in sites.values()}
+
+
+def test_omnivore_json_site_entity_filtering(tmp_path):
+    export = tmp_path / "omnivore.json"
+    export.write_text(json.dumps([{"id": "page-1", "title": "Article", "url": "https://example.com/a"}]), encoding="utf-8")
+
+    result = OmnivoreJsonAdapter(path=str(export)).ingest(entity_types=["site"])
+
+    assert [unit.source_entity_type for unit in result.units] == ["site"]
+    assert result.edges == []
     assert OmnivoreJsonAdapter(path="/does/not/exist.json").ingest().units == []
 
 
