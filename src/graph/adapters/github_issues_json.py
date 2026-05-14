@@ -24,7 +24,7 @@ class GithubIssuesJsonAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["issue", "pull_request"]
+        return ["issue", "pull_request", "label"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -36,8 +36,9 @@ class GithubIssuesJsonAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        requested = set(entity_types or self.entity_types)
+        requested = set(entity_types) if entity_types is not None else {"issue", "pull_request"}
         sync_at = self._ensure_utc(since.last_sync_at) if since else None
+        issue_units: list[KnowledgeUnit] = []
         for path in self._iter_paths():
             try:
                 records = self._read_records(path)
@@ -45,12 +46,26 @@ class GithubIssuesJsonAdapter(SourceAdapter):
                 continue
             for record in records:
                 unit = self._unit_from_record(record, path.name)
-                if unit is None or unit.source_entity_type not in requested:
+                if unit is None:
                     continue
                 if sync_at and unit.updated_at <= sync_at:
                     continue
+                issue_units.append(unit)
+                if unit.source_entity_type not in requested:
+                    continue
                 result.units.append(unit)
                 result.edges.extend(self._edges_from_unit(unit))
+        label_units = self._label_units(issue_units)
+        if "label" in requested:
+            result.units.extend(label_units)
+        if "label" in requested and requested.intersection({"issue", "pull_request"}):
+            label_ids = {unit.metadata["label"]: unit.source_id for unit in label_units}
+            for issue in issue_units:
+                if issue.source_entity_type not in requested:
+                    continue
+                for label in issue.metadata.get("labels", []):
+                    if label in label_ids:
+                        result.edges.append(self._edge(issue.source_id, label_ids[label], "label", label, EdgeRelation.RELATES_TO))
         result.units.sort(key=lambda unit: unit.source_id)
         result.edges = sorted({edge.id: edge for edge in result.edges}.values(), key=lambda edge: edge.id)
         return result
@@ -131,6 +146,46 @@ class GithubIssuesJsonAdapter(SourceAdapter):
         raw = url or f"{repository}|{number}|{title}"
         digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
         return f"github_issues_json:{digest}"
+
+    def _label_units(self, issues: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        for issue in issues:
+            for label in issue.metadata.get("labels", []):
+                grouped.setdefault(label, []).append(issue)
+
+        units: list[KnowledgeUnit] = []
+        now = datetime.now(timezone.utc)
+        for label, linked_issues in grouped.items():
+            created_at = min((issue.created_at for issue in linked_issues), default=now)
+            updated_at = max((issue.updated_at for issue in linked_issues), default=created_at)
+            source_ids = sorted({issue.source_id for issue in linked_issues})
+            repositories = sorted({repo for issue in linked_issues if (repo := self._text(issue.metadata.get("repository")))})
+            metadata = {
+                "label": label,
+                "issue_source_ids": source_ids,
+                "issue_count": len(source_ids),
+                "repositories": repositories,
+                "latest_updated_at": updated_at.isoformat(),
+            }
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.GITHUB_ISSUES_JSON,
+                    source_id=self._label_source_id(label),
+                    source_entity_type="label",
+                    title=f"GitHub label: {label}",
+                    content=f"GitHub label: {label}\nIssues: {len(source_ids)}",
+                    content_type=ContentType.METADATA,
+                    metadata={key: value for key, value in metadata.items() if value not in ("", None, [])},
+                    tags=["github", "label", label],
+                    created_at=created_at,
+                    updated_at=updated_at,
+                )
+            )
+        return units
+
+    def _label_source_id(self, label: str) -> str:
+        digest = hashlib.sha256(label.casefold().encode("utf-8")).hexdigest()[:24]
+        return f"github_issues_json:label:{digest}"
 
     def _edges_from_unit(self, unit: KnowledgeUnit) -> list[KnowledgeEdge]:
         edges: list[KnowledgeEdge] = []

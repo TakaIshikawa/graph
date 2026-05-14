@@ -153,3 +153,49 @@ def test_github_issues_json_emits_relationship_edges_deterministically(tmp_path)
     assert {edge.metadata["value"] for edge in first_edges} == {"ada", "grace", "v1.0", "https://example.com/spec"}
     assert {edge.relation for edge in first_edges} == {EdgeRelation.RELATES_TO, EdgeRelation.REFERENCES}
     assert all(edge.source == EdgeSource.SOURCE for edge in first_edges)
+
+
+def test_github_issues_json_ingests_label_aggregates_and_edges(tmp_path):
+    export = tmp_path / "issues.json"
+    export.write_text(
+        json.dumps(
+            [
+                {
+                    "number": 1,
+                    "title": "Fix bug",
+                    "labels": [{"name": "Bug"}, {"name": "Import"}],
+                    "repository_full_name": "acme/graph",
+                    "updated_at": "2025-01-02T00:00:00Z",
+                },
+                {
+                    "number": 2,
+                    "title": "Ship PR",
+                    "labels": ["bug"],
+                    "repository_full_name": "acme/graph",
+                    "pull_request": {},
+                    "updated_at": "2025-01-03T00:00:00Z",
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    labels_only = GithubIssuesJsonAdapter(path=str(export)).ingest(entity_types=["label"])
+    combined = GithubIssuesJsonAdapter(path=str(export)).ingest(entity_types=["issue", "pull_request", "label"])
+
+    assert GithubIssuesJsonAdapter().entity_types == ["issue", "pull_request", "label"]
+    labels = {unit.metadata["label"]: unit for unit in labels_only.units}
+    assert sorted(labels) == ["bug", "import"]
+    bug = labels["bug"]
+    assert bug.source_entity_type == "label"
+    assert bug.metadata["issue_source_ids"] == [
+        "github_issues_json:acme/graph#1",
+        "github_issues_json:acme/graph#2",
+    ]
+    assert bug.metadata["issue_count"] == 2
+    assert labels_only.edges == []
+
+    label_edges = [edge for edge in combined.edges if edge.metadata["kind"] == "label"]
+    assert len(label_edges) == 3
+    assert {edge.relation for edge in label_edges} == {EdgeRelation.RELATES_TO}
+    assert {edge.source for edge in label_edges} == {EdgeSource.SOURCE}
