@@ -103,7 +103,7 @@ def test_trello_board_json_emits_check_item_units_and_card_edges(tmp_path):
 
     result = TrelloBoardJsonAdapter(path=str(export)).ingest()
 
-    assert TrelloBoardJsonAdapter(path=str(export)).entity_types == ["card", "check_item", "list"]
+    assert TrelloBoardJsonAdapter(path=str(export)).entity_types == ["card", "check_item", "list", "label", "member"]
     assert [unit.source_entity_type for unit in result.units] == ["card", "check_item", "check_item", "list"]
     check_item = next(unit for unit in result.units if unit.metadata.get("item_id") == "item-1")
     assert check_item.source_id == "trello_board_json:card-1:check_item:check-1:item-1"
@@ -269,3 +269,52 @@ def test_trello_board_json_ingests_list_aggregates_and_card_edges(tmp_path):
     }
     assert {edge.relation for edge in list_edges} == {EdgeRelation.CONTAINS}
     assert {edge.source for edge in list_edges} == {EdgeSource.SOURCE}
+
+
+def test_trello_board_json_ingests_label_and_member_aggregates(tmp_path):
+    export = tmp_path / "board.json"
+    export.write_text(
+        json.dumps(
+            {
+                "lists": [{"id": "list-1", "name": "Doing"}],
+                "labels": [{"id": "label-1", "name": "Import"}],
+                "members": [{"id": "member-1", "username": "ada", "fullName": "Ada Lovelace"}],
+                "cards": [
+                    {
+                        "id": "card-1",
+                        "name": "First",
+                        "idList": "list-1",
+                        "idLabels": ["label-1"],
+                        "idMembers": ["member-1"],
+                        "dateLastActivity": "2025-01-02T00:00:00Z",
+                    },
+                    {
+                        "id": "card-2",
+                        "name": "Second",
+                        "idList": "list-1",
+                        "labels": [{"name": "Import"}],
+                        "idMembers": ["member-1"],
+                        "dateLastActivity": "2025-01-03T00:00:00Z",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    aggregates = TrelloBoardJsonAdapter(path=str(export)).ingest(entity_types=["label", "member"])
+    combined = TrelloBoardJsonAdapter(path=str(export)).ingest(entity_types=["card", "label", "member"])
+
+    units = {(unit.source_entity_type, unit.metadata["name"]): unit for unit in aggregates.units}
+    label = units[("label", "Import")]
+    member = units[("member", "Ada Lovelace")]
+    assert label.metadata["card_source_ids"] == ["trello_board_json:card-1", "trello_board_json:card-2"]
+    assert label.metadata["card_count"] == 2
+    assert label.metadata["lists"] == ["Doing"]
+    assert label.metadata["latest_updated_at"] == "2025-01-03T00:00:00+00:00"
+    assert member.metadata["card_count"] == 2
+    assert aggregates.edges == []
+
+    aggregate_edges = [edge for edge in combined.edges if edge.metadata.get("relation_type") in {"trello_card_label", "trello_card_member"}]
+    assert len(aggregate_edges) == 4
+    assert {edge.relation for edge in aggregate_edges} == {EdgeRelation.RELATES_TO}
