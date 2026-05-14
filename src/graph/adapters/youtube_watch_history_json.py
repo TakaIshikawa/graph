@@ -20,7 +20,7 @@ class YouTubeWatchHistoryJsonAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["channel", "watch"]
+        return ["channel", "watch", "product"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -53,8 +53,13 @@ class YouTubeWatchHistoryJsonAdapter(SourceAdapter):
             result.units.extend(channels)
         if "watch" in allowed:
             result.units.extend(watches)
+        products = self._product_units(watches) if "product" in allowed else []
+        if "product" in allowed:
+            result.units.extend(products)
         if {"channel", "watch"}.issubset(allowed):
             result.edges.extend(self._channel_watch_edges(channels, watches))
+        if {"product", "watch"}.issubset(allowed):
+            result.edges.extend(self._product_watch_edges(products, watches))
         result.units.sort(key=lambda unit: (unit.updated_at, unit.source_id))
         result.edges.sort(key=lambda edge: edge.id)
         return result
@@ -161,6 +166,51 @@ class YouTubeWatchHistoryJsonAdapter(SourceAdapter):
                 edges.append(self._edge(channel_id, watch.source_id, "channel_contains_watch"))
         return list({edge.id: edge for edge in edges}.values())
 
+    def _product_units(self, watches: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        for watch in watches:
+            for product in watch.metadata.get("products", []):
+                name = self._text(product)
+                if name:
+                    grouped.setdefault(name, []).append(watch)
+
+        units: list[KnowledgeUnit] = []
+        for product, product_watches in grouped.items():
+            created_at = min(watch.created_at for watch in product_watches)
+            updated_at = max(watch.updated_at for watch in product_watches)
+            watch_source_ids = [watch.source_id for watch in product_watches]
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.YOUTUBE_WATCH_HISTORY_JSON,
+                    source_id=self._product_source_id(product),
+                    source_entity_type="product",
+                    title=product,
+                    content=f"YouTube product: {product}\nWatches: {len(watch_source_ids)}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "product": product,
+                        "watch_source_ids": watch_source_ids,
+                        "watch_count": len(watch_source_ids),
+                        "first_watched_at": created_at.isoformat(),
+                        "latest_watched_at": updated_at.isoformat(),
+                    },
+                    tags=["youtube", "product"],
+                    created_at=created_at,
+                    updated_at=updated_at,
+                )
+            )
+        return units
+
+    def _product_watch_edges(self, products: list[KnowledgeUnit], watches: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        product_ids = {self._text(product.metadata.get("product")): product.source_id for product in products}
+        edges: list[KnowledgeEdge] = []
+        for watch in watches:
+            for product in watch.metadata.get("products", []):
+                product_id = product_ids.get(self._text(product))
+                if product_id:
+                    edges.append(self._relation_edge(watch.source_id, product_id, "watch_product"))
+        return list({edge.id: edge for edge in edges}.values())
+
     def _channel_identity(self, metadata: dict[str, Any]) -> tuple[str, str]:
         url = self._text(metadata.get("channel_url")).casefold()
         if url:
@@ -170,12 +220,28 @@ class YouTubeWatchHistoryJsonAdapter(SourceAdapter):
     def _channel_source_id(self, identity: tuple[str, str]) -> str:
         return digest_source_id("youtube_watch_history_json:channel", *identity)
 
+    def _product_source_id(self, product: str) -> str:
+        return digest_source_id("youtube_watch_history_json:product", " ".join(product.casefold().split()))
+
     def _edge(self, from_id: str, to_id: str, relation_type: str) -> KnowledgeEdge:
         return KnowledgeEdge(
             id=digest_source_id("youtube-watch-history-json-edge", from_id, to_id, relation_type),
             from_unit_id=from_id,
             to_unit_id=to_id,
             relation=EdgeRelation.CONTAINS,
+            source=EdgeSource.SOURCE,
+            metadata={
+                "source_project": SourceProject.YOUTUBE_WATCH_HISTORY_JSON.value,
+                "relation_type": relation_type,
+            },
+        )
+
+    def _relation_edge(self, from_id: str, to_id: str, relation_type: str) -> KnowledgeEdge:
+        return KnowledgeEdge(
+            id=digest_source_id("youtube-watch-history-json-edge", from_id, to_id, relation_type),
+            from_unit_id=from_id,
+            to_unit_id=to_id,
+            relation=EdgeRelation.RELATES_TO,
             source=EdgeSource.SOURCE,
             metadata={
                 "source_project": SourceProject.YOUTUBE_WATCH_HISTORY_JSON.value,

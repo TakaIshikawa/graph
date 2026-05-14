@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from graph.adapters.youtube_watch_history_json import YouTubeWatchHistoryJsonAdapter
+from graph.types.enums import EdgeRelation
 from graph.types.models import SyncState
 
 
@@ -100,7 +101,7 @@ def test_youtube_watch_history_json_channel_aggregates_and_edges(tmp_path):
     channel = next(unit for unit in result.units if unit.source_entity_type == "channel")
     watches = [unit for unit in result.units if unit.source_entity_type == "watch"]
 
-    assert YouTubeWatchHistoryJsonAdapter().entity_types == ["channel", "watch"]
+    assert YouTubeWatchHistoryJsonAdapter().entity_types == ["channel", "watch", "product"]
     assert channel.metadata["channel"] == "Useful Channel"
     assert channel.metadata["channel_url"] == "https://www.youtube.com/channel/1"
     assert channel.metadata["watch_count"] == 2
@@ -135,3 +136,34 @@ def test_youtube_watch_history_json_channel_dedupes_by_url_then_name_and_filters
     assert len(result.edges) == 4
     assert channel_only.edges == []
     assert watch_only.edges == []
+
+
+def test_youtube_watch_history_json_product_aggregates_and_edges(tmp_path):
+    export = tmp_path / "watch-history.json"
+    export.write_text(
+        """[
+          {"title": "Watched One", "titleUrl": "https://youtu.be/1", "time": "2026-05-01T00:00:00Z", "products": ["YouTube", "Google TV"]},
+          {"title": "Watched Two", "titleUrl": "https://youtu.be/2", "time": "2026-05-02T00:00:00Z", "products": ["YouTube"]}
+        ]""",
+        encoding="utf-8",
+    )
+
+    products_only = YouTubeWatchHistoryJsonAdapter(path=str(export)).ingest(entity_types=["product"])
+    combined = YouTubeWatchHistoryJsonAdapter(path=str(export)).ingest(entity_types=["watch", "product"])
+
+    products = {unit.metadata["product"]: unit for unit in products_only.units}
+    watches = [unit for unit in combined.units if unit.source_entity_type == "watch"]
+    assert sorted(products) == ["Google TV", "YouTube"]
+    assert products["YouTube"].source_entity_type == "product"
+    assert products["YouTube"].metadata["watch_source_ids"] == [
+        watches[0].source_id,
+        watches[1].source_id,
+    ]
+    assert products["YouTube"].metadata["watch_count"] == 2
+    assert products["YouTube"].metadata["first_watched_at"] == "2026-05-01T00:00:00+00:00"
+    assert products["YouTube"].metadata["latest_watched_at"] == "2026-05-02T00:00:00+00:00"
+    assert products_only.edges == []
+
+    product_edges = [edge for edge in combined.edges if edge.metadata["relation_type"] == "watch_product"]
+    assert len(product_edges) == 3
+    assert {edge.relation for edge in product_edges} == {EdgeRelation.RELATES_TO}
