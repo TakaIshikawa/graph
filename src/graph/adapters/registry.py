@@ -70,6 +70,7 @@ from graph.adapters.mbox import MboxAdapter
 from graph.adapters.me import MeAdapter
 from graph.adapters.mediawiki import MediaWikiAdapter
 from graph.adapters.myanimelist_xml import MyAnimeListXmlAdapter
+from graph.adapters.netflix_viewing_activity_csv import NetflixViewingActivityCsvAdapter
 from graph.adapters.notion_markdown import NotionMarkdownAdapter
 from graph.adapters.notion_export import NotionExportAdapter
 from graph.adapters.evernote_export import EvernoteExportAdapter
@@ -270,6 +271,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "spotify_streaming_history": SpotifyStreamingHistoryAdapter,
     "spotify_takeout": SpotifyTakeoutAdapter,
     "trakt_watch_history_csv": TraktWatchHistoryCsvAdapter,
+    "netflix_viewing_activity_csv": NetflixViewingActivityCsvAdapter,
     "storygraph_reading_history_csv": StoryGraphReadingHistoryCsvAdapter,
     "myanimelist_xml": MyAnimeListXmlAdapter,
     "kobo_highlights_csv": KoboHighlightsCsvAdapter,

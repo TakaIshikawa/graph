@@ -116,6 +116,7 @@ class SourceProject(StrEnum):
     SPOTIFY_TAKEOUT = "spotify_takeout"
     LASTFM_SCROBBLES_CSV = "lastfm_scrobbles_csv"
     TRAKT_WATCH_HISTORY_CSV = "trakt_watch_history_csv"
+    NETFLIX_VIEWING_ACTIVITY_CSV = "netflix_viewing_activity_csv"
     STORYGRAPH_READING_HISTORY_CSV = "storygraph_reading_history_csv"
     MYANIMELIST_XML = "myanimelist_xml"
     KOBO_HIGHLIGHTS_CSV = "kobo_highlights_csv"
