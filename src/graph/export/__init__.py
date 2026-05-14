@@ -65,6 +65,7 @@ from graph.export.relation_evidence import export_relation_evidence_markdown
 from graph.export.relation_confidence_matrix_csv import export_relation_confidence_matrix_csv
 from graph.export.relation_date_lag_csv import export_relation_date_lag_csv
 from graph.export.relation_evidence_gap_csv import export_relation_evidence_gap_csv
+from graph.export.relation_tag_bridge_csv import export_relation_tag_bridge_csv
 from graph.export.rdf_turtle import export_graph_rdf_turtle
 from graph.export.ris import export_units_to_ris
 from graph.export.rss import export_units_to_rss
@@ -195,6 +196,7 @@ __all__ = [
     "export_relation_date_lag_csv",
     "export_relation_evidence_markdown",
     "export_relation_evidence_gap_csv",
+    "export_relation_tag_bridge_csv",
     "export_units_to_ris",
     "export_units_to_rss",
     "export_source_collection_mix_csv",
