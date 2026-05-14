@@ -368,3 +368,48 @@ def test_slack_json_adapter_is_registered():
     adapter = get_adapter("slack_json", path="/tmp/slack/general")
     assert isinstance(adapter, SlackJsonAdapter)
     assert adapter.name == "slack_json"
+
+
+def test_slack_json_emits_channel_aggregate_and_edges(tmp_path):
+    channel = tmp_path / "research"
+    channel.mkdir()
+    _write_json(
+        channel / "2024-04-05.json",
+        [
+            {"type": "message", "user": "U1", "text": "First", "ts": "1712300000.000001"},
+            {"type": "message", "user": "U2", "text": "Second", "ts": "1712400000.000002"},
+        ],
+    )
+    _write_json(
+        channel / "2024-04-06.json",
+        [{"type": "message", "user": "U1", "text": "Third", "ts": "1712500000.000003"}],
+    )
+
+    result = SlackJsonAdapter(path=str(channel)).ingest(entity_types=["slack_message", "slack_channel"])
+
+    assert "slack_channel" in SlackJsonAdapter(path=str(channel)).entity_types
+    aggregate = next(unit for unit in result.units if unit.source_entity_type == "slack_channel")
+    messages = [unit for unit in result.units if unit.source_entity_type == "slack_message"]
+    assert aggregate.source_id == "slack_json:channel:research"
+    assert aggregate.metadata["message_count"] == 3
+    assert aggregate.metadata["participant_count"] == 2
+    assert aggregate.metadata["first_message_at"] == datetime.fromtimestamp(1712300000.000001, tz=timezone.utc).isoformat()
+    assert aggregate.metadata["last_message_at"] == datetime.fromtimestamp(1712500000.000003, tz=timezone.utc).isoformat()
+    assert aggregate.metadata["source_paths"] == ["2024-04-05.json", "2024-04-06.json"]
+    assert aggregate.metadata["users"] == ["U1", "U2"]
+    assert aggregate.metadata["message_source_ids"] == [unit.source_id for unit in messages]
+
+    channel_edges = [edge for edge in result.edges if edge.metadata.get("from_entity_type") == "slack_channel"]
+    assert len(channel_edges) == 3
+    assert {edge.from_unit_id for edge in channel_edges} == {aggregate.source_id}
+    assert {edge.to_unit_id for edge in channel_edges} == {unit.source_id for unit in messages}
+
+
+def test_slack_json_channel_entity_filtering(tmp_path):
+    export = tmp_path / "general.json"
+    _write_json(export, [{"type": "message", "user": "U1", "text": "First", "ts": "1712300000.000001"}])
+
+    result = SlackJsonAdapter(path=str(export)).ingest(entity_types=["slack_channel"])
+
+    assert [unit.source_entity_type for unit in result.units] == ["slack_channel"]
+    assert result.edges == []
