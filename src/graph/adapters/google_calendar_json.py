@@ -20,7 +20,7 @@ class GoogleCalendarJsonAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["event"]
+        return ["event", "person"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -32,9 +32,11 @@ class GoogleCalendarJsonAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        if entity_types and "event" not in entity_types:
+        requested = set(entity_types) if entity_types is not None else {"event"}
+        if not requested.intersection(self.entity_types):
             return result
         sync_at = self._sync_datetime(since) if since else None
+        event_units: list[KnowledgeUnit] = []
 
         for path in self._iter_paths():
             try:
@@ -47,8 +49,12 @@ class GoogleCalendarJsonAdapter(SourceAdapter):
                     continue
                 if sync_at and unit.updated_at <= sync_at:
                     continue
-                result.units.append(unit)
-                result.edges.extend(self._participant_edges(unit))
+                event_units.append(unit)
+                if "event" in requested:
+                    result.units.append(unit)
+                    result.edges.extend(self._participant_edges(unit))
+        if "person" in requested:
+            result.units.extend(self._person_units(event_units))
 
         result.units.sort(key=lambda unit: (unit.updated_at, unit.source_id))
         result.edges = sorted({edge.id: edge for edge in result.edges}.values(), key=lambda edge: edge.id)
@@ -148,7 +154,7 @@ class GoogleCalendarJsonAdapter(SourceAdapter):
         email = self._normalize_email(person.get("email"))
         if not email:
             return None
-        target_id = f"google_calendar:person:{email}"
+        target_id = self._person_source_id(email)
         digest = hashlib.sha256(f"{source_id}|participant|{target_id}".encode("utf-8")).hexdigest()[:24]
         return KnowledgeEdge(
             id=f"google_calendar_json:participant:{digest}",
@@ -164,6 +170,77 @@ class GoogleCalendarJsonAdapter(SourceAdapter):
                 "source_project": SourceProject.GOOGLE_CALENDAR_JSON.value,
             },
         )
+
+    def _person_units(self, events: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, dict[str, Any]] = {}
+        for event in events:
+            participants: list[tuple[str, dict[str, Any]]] = []
+            organizer = event.metadata.get("organizer")
+            if isinstance(organizer, dict):
+                participants.append(("organizer", organizer))
+            for attendee in event.metadata.get("attendees", []):
+                if isinstance(attendee, dict):
+                    participants.append(("attendee", attendee))
+            for role, person in participants:
+                email = self._normalize_email(person.get("email"))
+                if not email:
+                    continue
+                info = grouped.setdefault(
+                    email,
+                    {
+                        "events": [],
+                        "display_names": set(),
+                        "response_statuses": set(),
+                        "organizer_count": 0,
+                        "attendee_count": 0,
+                    },
+                )
+                info["events"].append(event)
+                display_name = person.get("displayName")
+                if display_name:
+                    info["display_names"].add(str(display_name))
+                response_status = person.get("responseStatus")
+                if response_status:
+                    info["response_statuses"].add(str(response_status))
+                if role == "organizer":
+                    info["organizer_count"] += 1
+                else:
+                    info["attendee_count"] += 1
+
+        units: list[KnowledgeUnit] = []
+        now = datetime.now(timezone.utc)
+        for email, info in grouped.items():
+            event_source_ids = sorted({event.source_id for event in info["events"]})
+            created_at = min((event.created_at for event in info["events"]), default=now)
+            updated_at = max((event.updated_at for event in info["events"]), default=created_at)
+            display_names = sorted(info["display_names"])
+            metadata = {
+                "email": email,
+                "display_names": display_names,
+                "response_statuses": sorted(info["response_statuses"]),
+                "event_source_ids": event_source_ids,
+                "event_count": len(event_source_ids),
+                "organizer_count": info["organizer_count"],
+                "attendee_count": info["attendee_count"],
+            }
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.GOOGLE_CALENDAR_JSON,
+                    source_id=self._person_source_id(email),
+                    source_entity_type="person",
+                    title=display_names[0] if display_names else email,
+                    content=f"Google Calendar person: {display_names[0] if display_names else email}\nEvents: {len(event_source_ids)}",
+                    content_type=ContentType.METADATA,
+                    metadata={key: value for key, value in metadata.items() if value not in ("", None, [], set())},
+                    tags=["google_calendar", "person"],
+                    created_at=created_at,
+                    updated_at=updated_at,
+                )
+            )
+        return units
+
+    def _person_source_id(self, email: str) -> str:
+        return f"google_calendar:person:{email}"
 
     def _normalize_email(self, value: Any) -> str:
         return str(value).strip().casefold() if value not in ("", None) else ""

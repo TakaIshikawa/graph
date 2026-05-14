@@ -106,3 +106,50 @@ def test_google_calendar_json_emits_attendee_and_organizer_edges(tmp_path):
     assert all(edge.relation == EdgeRelation.RELATES_TO for edge in result.edges)
     assert all(edge.source == EdgeSource.SOURCE for edge in result.edges)
     assert len({edge.id for edge in result.edges}) == 2
+
+
+def test_google_calendar_json_ingests_person_units_for_participants(tmp_path):
+    path = tmp_path / "calendar.json"
+    path.write_text(
+        json.dumps(
+            {
+                "items": [
+                    {
+                        "id": "event-1",
+                        "summary": "Planning",
+                        "organizer": {"email": "Ada@Example.com", "displayName": "Ada"},
+                        "attendees": [
+                            {"email": "ada@example.com", "displayName": "Ada L", "responseStatus": "accepted"},
+                            {"email": "grace@example.com", "displayName": "Grace", "responseStatus": "needsAction"},
+                        ],
+                        "updated": "2025-01-02T00:00:00Z",
+                    },
+                    {
+                        "id": "event-2",
+                        "summary": "Review",
+                        "attendees": [{"email": "GRACE@example.com", "displayName": "Grace Hopper", "responseStatus": "accepted"}],
+                        "updated": "2025-01-03T00:00:00Z",
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    people_only = GoogleCalendarJsonAdapter(path=str(path)).ingest(entity_types=["person"])
+    combined = GoogleCalendarJsonAdapter(path=str(path)).ingest(entity_types=["event", "person"])
+
+    assert GoogleCalendarJsonAdapter().entity_types == ["event", "person"]
+    people = {unit.metadata["email"]: unit for unit in people_only.units}
+    assert sorted(people) == ["ada@example.com", "grace@example.com"]
+    assert people["ada@example.com"].source_id == "google_calendar:person:ada@example.com"
+    assert people["ada@example.com"].metadata["event_source_ids"] == ["google_calendar_json:event-1"]
+    assert people["ada@example.com"].metadata["event_count"] == 1
+    assert people["ada@example.com"].metadata["organizer_count"] == 1
+    assert people["ada@example.com"].metadata["attendee_count"] == 1
+    assert people["ada@example.com"].metadata["display_names"] == ["Ada", "Ada L"]
+    assert people["ada@example.com"].metadata["response_statuses"] == ["accepted"]
+    assert people["grace@example.com"].metadata["event_count"] == 2
+    assert people_only.edges == []
+
+    assert {edge.to_unit_id for edge in combined.edges} == {unit.source_id for unit in people.values()}
