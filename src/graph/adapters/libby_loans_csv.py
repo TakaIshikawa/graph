@@ -21,7 +21,7 @@ class LibbyLoansCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["loan", "author", "book"]
+        return ["loan", "author", "book", "library"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -53,12 +53,16 @@ class LibbyLoansCsvAdapter(SourceAdapter):
                 if {"loan", "author"}.issubset(allowed_types):
                     result.edges.extend(self._author_edges(unit, authors))
                 if "loan" in allowed_types:
-                    result.edges.extend(self._edges_for_unit(unit))
+                    result.edges.extend(self._edges_for_unit(unit, skip_library="library" in allowed_types))
         book_units = self._book_units(loans) if "book" in allowed_types else []
         if "book" in allowed_types:
             result.units.extend(book_units)
         if {"book", "loan"}.issubset(allowed_types):
             result.edges.extend(self._book_edges(book_units, loans))
+        library_units = self._library_units(loans) if "library" in allowed_types else []
+        result.units.extend(library_units)
+        if {"library", "loan"}.issubset(allowed_types):
+            result.edges.extend(self._library_edges(library_units, loans))
         result.units = list({unit.source_id: unit for unit in result.units}.values())
         result.edges = list({edge.id: edge for edge in result.edges}.values())
         result.units.sort(key=lambda unit: unit.source_id)
@@ -187,12 +191,72 @@ class LibbyLoansCsvAdapter(SourceAdapter):
             updated_at=returned or borrowed or now,
         )
 
-    def _edges_for_unit(self, unit: KnowledgeUnit) -> list[KnowledgeEdge]:
+    def _edges_for_unit(self, unit: KnowledgeUnit, *, skip_library: bool = False) -> list[KnowledgeEdge]:
         edges: list[KnowledgeEdge] = []
         for kind in ("library", "series"):
+            if skip_library and kind == "library":
+                continue
             value = unit.metadata.get(kind)
             if value:
                 edges.append(self._edge(unit.source_id, f"libby:{kind}:{value}", kind, str(value)))
+        return edges
+
+    def _library_units(self, loans: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        names: dict[str, str] = {}
+        for loan in loans:
+            library = str(loan.metadata.get("library") or "").strip()
+            key = self._normalized_library(library)
+            if not key:
+                continue
+            grouped.setdefault(key, []).append(loan)
+            names.setdefault(key, library)
+
+        units: list[KnowledgeUnit] = []
+        for key, library_loans in sorted(grouped.items()):
+            unique_loans = sorted({loan.source_id: loan for loan in library_loans}.values(), key=lambda loan: loan.source_id)
+            borrowed = [self._parse_date(str(loan.metadata.get("borrowed_at") or "")) for loan in unique_loans]
+            returned = [self._parse_date(str(loan.metadata.get("returned_at") or "")) for loan in unique_loans]
+            borrowed_dates = [value for value in borrowed if value is not None]
+            returned_dates = [value for value in returned if value is not None]
+            book_keys = {self._book_key(loan) for loan in unique_loans if self._book_key(loan)[0] or self._book_key(loan)[1]}
+            library = names[key]
+            metadata = {
+                "library": library,
+                "normalized_library": key,
+                "loan_count": len(unique_loans),
+                "book_count": len(book_keys),
+                "authors": sorted({author for loan in unique_loans for author in self._authors(loan)}),
+                "formats": sorted({str(loan.metadata.get("format")) for loan in unique_loans if loan.metadata.get("format")}),
+                "subjects": sorted({subject for loan in unique_loans for subject in (loan.metadata.get("subjects") or [])}),
+                "first_borrowed_at": min(borrowed_dates).isoformat() if borrowed_dates else "",
+                "last_returned_at": max(returned_dates).isoformat() if returned_dates else "",
+                "loan_source_ids": [loan.source_id for loan in unique_loans],
+            }
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.LIBBY_LOANS_CSV,
+                    source_id=self._library_source_id(key),
+                    source_entity_type="library",
+                    title=library,
+                    content=f"Libby library: {library}",
+                    content_type=ContentType.METADATA,
+                    metadata={item_key: value for item_key, value in metadata.items() if value not in ("", None, [])},
+                    tags=["libby", "library"],
+                    created_at=min(loan.created_at for loan in unique_loans),
+                    updated_at=max(loan.updated_at for loan in unique_loans),
+                )
+            )
+        return units
+
+    def _library_edges(self, libraries: list[KnowledgeUnit], loans: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        library_ids = {str(library.metadata["normalized_library"]): library.source_id for library in libraries}
+        edges: list[KnowledgeEdge] = []
+        for loan in loans:
+            library = str(loan.metadata.get("library") or "").strip()
+            library_id = library_ids.get(self._normalized_library(library))
+            if library_id:
+                edges.append(self._edge(loan.source_id, library_id, "library", library))
         return edges
 
     def _author_units(self, authors: list[str], loan: KnowledgeUnit) -> list[KnowledgeUnit]:
@@ -244,6 +308,13 @@ class LibbyLoansCsvAdapter(SourceAdapter):
     def _book_source_id(self, key: tuple[str, str, str]) -> str:
         digest = hashlib.sha256("|".join(key).encode("utf-8")).hexdigest()[:24]
         return f"libby_loans_csv:book:{digest}"
+
+    def _library_source_id(self, normalized_library: str) -> str:
+        digest = hashlib.sha256(normalized_library.encode("utf-8")).hexdigest()[:24]
+        return f"libby_loans_csv:library:{digest}"
+
+    def _normalized_library(self, value: str) -> str:
+        return " ".join(value.casefold().split())
 
     def _first(self, row: dict[str, Any], *keys: str) -> str:
         compact = {self._normalize_key(key): value for key, value in row.items()}
