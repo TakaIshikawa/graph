@@ -173,3 +173,46 @@ def test_linear_issues_json_captures_comments_in_metadata_and_content(tmp_path):
     assert units["LIN-8"].metadata["comments"][0]["body"] == "Node comment"
     assert units["LIN-8"].metadata["comments"][0]["created_at"] == "2026-05-04T00:00:00+00:00"
     assert "Data comment" in units["LIN-9"].content
+
+
+def test_linear_issues_json_ingests_team_and_project_aggregates(tmp_path):
+    export = tmp_path / "linear.json"
+    export.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "a",
+                    "identifier": "LIN-10",
+                    "title": "First aggregate issue",
+                    "team": {"name": "Import Team"},
+                    "project": {"name": "Graph"},
+                    "updatedAt": "2026-05-02T00:00:00Z",
+                },
+                {
+                    "id": "b",
+                    "identifier": "LIN-11",
+                    "title": "Second aggregate issue",
+                    "team": {"name": "Import Team"},
+                    "project": {"name": "Graph"},
+                    "updatedAt": "2026-05-03T00:00:00Z",
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    aggregates_only = LinearIssuesJsonAdapter(path=str(export)).ingest(entity_types=["team", "project"])
+    combined = LinearIssuesJsonAdapter(path=str(export)).ingest(entity_types=["issue", "team", "project"])
+
+    assert LinearIssuesJsonAdapter().entity_types == ["issue", "team", "project"]
+    aggregates = {(unit.source_entity_type, unit.metadata["name"]): unit for unit in aggregates_only.units}
+    team = aggregates[("team", "Import Team")]
+    project = aggregates[("project", "Graph")]
+    assert team.metadata["issue_source_ids"] == ["linear_issues_json:a", "linear_issues_json:b"]
+    assert team.metadata["issue_count"] == 2
+    assert team.metadata["latest_updated_at"] == "2026-05-03T00:00:00+00:00"
+    assert project.metadata["issue_count"] == 2
+    assert aggregates_only.edges == []
+
+    aggregate_edges = [edge for edge in combined.edges if edge.metadata["kind"] in {"team", "project"}]
+    assert len(aggregate_edges) == 4

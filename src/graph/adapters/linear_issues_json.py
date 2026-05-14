@@ -21,17 +21,19 @@ class LinearIssuesJsonAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["issue"]
+        return ["issue", "team", "project"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
 
     def ingest(self, *, since: SyncState | None = None, entity_types: list[str] | None = None) -> IngestResult:
         result = IngestResult()
-        if entity_types and "issue" not in entity_types:
+        requested = set(entity_types) if entity_types is not None else {"issue"}
+        if not requested.intersection(self.entity_types):
             return result
         sync_at = ensure_utc(since.last_sync_at) if since else None
         by_id: dict[str, KnowledgeUnit] = {}
+        issue_units: list[KnowledgeUnit] = []
         records: list[dict[str, Any]] = []
         for path in iter_paths(self.path, {".json"}):
             try:
@@ -46,7 +48,9 @@ class LinearIssuesJsonAdapter(SourceAdapter):
                 continue
             if sync_at and unit.updated_at <= sync_at:
                 continue
-            result.units.append(unit)
+            issue_units.append(unit)
+            if "issue" in requested:
+                result.units.append(unit)
             if unit.metadata.get("issue_id"):
                 by_id[str(unit.metadata["issue_id"])] = unit
             if unit.metadata.get("identifier"):
@@ -59,6 +63,20 @@ class LinearIssuesJsonAdapter(SourceAdapter):
                 target = by_id.get(str(related))
                 if target:
                     result.edges.append(self._edge(unit.source_id, target.source_id, "related", EdgeRelation.RELATES_TO))
+        aggregate_units: list[KnowledgeUnit] = []
+        if "team" in requested:
+            aggregate_units.extend(self._aggregate_units("team", issue_units))
+        if "project" in requested:
+            aggregate_units.extend(self._aggregate_units("project", issue_units))
+        result.units.extend(aggregate_units)
+        if "issue" in requested:
+            aggregate_ids = {(unit.source_entity_type, unit.metadata["name"]): unit.source_id for unit in aggregate_units}
+            for issue in issue_units:
+                for kind in ("team", "project"):
+                    value = self._text(issue.metadata.get(kind))
+                    target_id = aggregate_ids.get((kind, value))
+                    if target_id:
+                        result.edges.append(self._edge(issue.source_id, target_id, kind, EdgeRelation.RELATES_TO))
         result.units.sort(key=lambda unit: unit.source_id)
         result.edges = sorted({edge.id: edge for edge in result.edges}.values(), key=lambda edge: edge.id)
         return result
@@ -144,6 +162,45 @@ class LinearIssuesJsonAdapter(SourceAdapter):
     def _edge(self, source_id: str, target_id: str, kind: str, relation: EdgeRelation) -> KnowledgeEdge:
         digest = hashlib.sha256(f"{source_id}|{kind}|{target_id}".encode("utf-8")).hexdigest()[:24]
         return KnowledgeEdge(id=f"linear_issues_json:{kind}:{digest}", from_unit_id=source_id, to_unit_id=target_id, relation=relation, source=EdgeSource.SOURCE, metadata={"kind": kind, "source_project": SourceProject.LINEAR_ISSUES_JSON.value})
+
+    def _aggregate_units(self, entity_type: str, issues: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        for issue in issues:
+            name = self._text(issue.metadata.get(entity_type))
+            if name:
+                grouped.setdefault(name, []).append(issue)
+
+        units: list[KnowledgeUnit] = []
+        now = datetime.now(timezone.utc)
+        for name, linked_issues in grouped.items():
+            created_at = min((issue.created_at for issue in linked_issues), default=now)
+            updated_at = max((issue.updated_at for issue in linked_issues), default=created_at)
+            source_ids = sorted({issue.source_id for issue in linked_issues})
+            metadata = {
+                "name": name,
+                "issue_source_ids": source_ids,
+                "issue_count": len(source_ids),
+                "latest_updated_at": updated_at.isoformat(),
+            }
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.LINEAR_ISSUES_JSON,
+                    source_id=self._aggregate_source_id(entity_type, name),
+                    source_entity_type=entity_type,
+                    title=f"Linear {entity_type}: {name}",
+                    content=f"Linear {entity_type}: {name}\nIssues: {len(source_ids)}",
+                    content_type=ContentType.METADATA,
+                    metadata=clean_metadata(metadata),
+                    tags=["linear", entity_type],
+                    created_at=created_at,
+                    updated_at=updated_at,
+                )
+            )
+        return units
+
+    def _aggregate_source_id(self, entity_type: str, name: str) -> str:
+        digest = hashlib.sha256(name.casefold().encode("utf-8")).hexdigest()[:24]
+        return f"linear_issues_json:{entity_type}:{digest}"
 
     def _content(self, title: str, description: str, metadata: dict[str, Any], comments: list[dict[str, Any]] | None = None) -> str:
         parts = [item for item in (title, description) if item]
