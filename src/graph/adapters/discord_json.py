@@ -20,7 +20,7 @@ class DiscordJsonAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["discord_message", "discord_attachment"]
+        return ["discord_message", "discord_attachment", "discord_channel"]
 
     def __init__(self, path: str = "", *, root_path: str = "") -> None:
         self.path = path or root_path
@@ -32,10 +32,11 @@ class DiscordJsonAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        requested_types = set(entity_types or self.entity_types)
+        requested_types = set(entity_types) if entity_types is not None else {"discord_message", "discord_attachment"}
         include_messages = "discord_message" in requested_types
         include_attachments = "discord_attachment" in requested_types
-        if not include_messages and not include_attachments:
+        include_channels = "discord_channel" in requested_types
+        if not include_messages and not include_attachments and not include_channels:
             return result
 
         root = Path(self.path).expanduser()
@@ -45,6 +46,7 @@ class DiscordJsonAdapter(SourceAdapter):
         sync_at = self._sync_datetime(since) if since else None
         references_by_source_id: dict[str, list[dict[str, Any]]] = {}
         attachment_edges: list[KnowledgeEdge] = []
+        message_units: list[KnowledgeUnit] = []
 
         for path in self._json_files(root):
             for index, record in enumerate(self._read_message_records(path)):
@@ -56,6 +58,8 @@ class DiscordJsonAdapter(SourceAdapter):
                 if include_record and include_messages:
                     result.units.append(unit)
                     references_by_source_id[unit.source_id] = self._references(record["message"])
+                if include_record and (include_messages or include_channels):
+                    message_units.append(unit)
                 if include_record and include_attachments:
                     result.units.extend(attachment_units)
                 if include_record and include_messages and include_attachments:
@@ -112,6 +116,13 @@ class DiscordJsonAdapter(SourceAdapter):
             if edge.from_unit_id in included_source_ids and edge.to_unit_id in included_source_ids:
                 result.edges.append(edge)
 
+        if include_channels:
+            channel_units = self._channel_units(message_units)
+            result.units.extend(channel_units)
+            if include_messages:
+                result.edges.extend(self._channel_edges(channel_units, message_units))
+
+        result.units.sort(key=lambda unit: (unit.created_at, unit.source_id))
         result.edges.sort(key=lambda edge: (edge.from_unit_id, edge.to_unit_id, edge.id))
         return result
 
@@ -320,6 +331,81 @@ class DiscordJsonAdapter(SourceAdapter):
             },
         )
 
+    def _channel_units(self, messages: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        for message in messages:
+            channel_key = self._channel_key(message)
+            if channel_key:
+                grouped.setdefault(channel_key, []).append(message)
+
+        units: list[KnowledgeUnit] = []
+        for channel_key, channel_messages in sorted(grouped.items()):
+            ordered = sorted(channel_messages, key=lambda unit: (unit.created_at, self._string(unit.metadata.get("message_id")), unit.source_id))
+            first = ordered[0]
+            channel_id = self._string(first.metadata.get("channel_id"))
+            channel_name = self._string(first.metadata.get("channel_name"))
+            server_ids = sorted({self._string(unit.metadata.get("server_id")) for unit in ordered if self._string(unit.metadata.get("server_id"))})
+            server_names = sorted({self._string(unit.metadata.get("server_name")) for unit in ordered if self._string(unit.metadata.get("server_name"))})
+            authors = sorted({self._string((unit.metadata.get("author") or {}).get("id") or (unit.metadata.get("author") or {}).get("username")) for unit in ordered if isinstance(unit.metadata.get("author"), dict) and self._string((unit.metadata.get("author") or {}).get("id") or (unit.metadata.get("author") or {}).get("username"))})
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.DISCORD_JSON,
+                    source_id=self._channel_source_id(channel_id or channel_name),
+                    source_entity_type="discord_channel",
+                    title=f"#{channel_name or channel_id or 'unknown-channel'}",
+                    content=f"Discord channel #{channel_name or channel_id or 'unknown-channel'}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "channel_id": channel_id,
+                        "channel_name": channel_name,
+                        "message_count": len(ordered),
+                        "attachment_count": sum(int(unit.metadata.get("attachment_count") or 0) for unit in ordered),
+                        "author_count": len(authors),
+                        "authors": authors,
+                        "server_ids": server_ids,
+                        "server_names": server_names,
+                        "first_message_at": ordered[0].created_at.isoformat(),
+                        "last_message_at": ordered[-1].created_at.isoformat(),
+                        "source_paths": sorted({self._string(unit.metadata.get("source_path")) for unit in ordered if self._string(unit.metadata.get("source_path"))}),
+                        "message_source_ids": [unit.source_id for unit in ordered],
+                    },
+                    tags=["discord", "discord-channel", *([f"discord-channel-{self._tag_value(channel_name)}"] if channel_name else [])],
+                    created_at=ordered[0].created_at,
+                    updated_at=max(unit.updated_at for unit in ordered),
+                )
+            )
+        return units
+
+    def _channel_edges(self, channels: list[KnowledgeUnit], messages: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        channel_ids = {
+            self._channel_key(channel): channel.source_id
+            for channel in channels
+        }
+        edges: list[KnowledgeEdge] = []
+        for message in messages:
+            channel_id = channel_ids.get(self._channel_key(message))
+            if not channel_id:
+                continue
+            edges.append(
+                KnowledgeEdge(
+                    id=self._edge_id(channel_id, message.source_id, "discord_channel_message"),
+                    from_unit_id=channel_id,
+                    to_unit_id=message.source_id,
+                    relation=EdgeRelation.CONTAINS,
+                    source=EdgeSource.SOURCE,
+                    metadata={
+                        "source_project": SourceProject.DISCORD_JSON.value,
+                        "from_entity_type": "discord_channel",
+                        "to_entity_type": "discord_message",
+                        "relation_type": "discord_channel_message",
+                        "channel_id": self._string(message.metadata.get("channel_id")),
+                        "channel_name": self._string(message.metadata.get("channel_name")),
+                        "message_id": self._string(message.metadata.get("message_id")),
+                    },
+                )
+            )
+        return edges
+
     def _context_from_payload(self, payload: dict[str, Any]) -> dict[str, str]:
         guild = payload.get("guild") or payload.get("server") or {}
         channel = payload.get("channel") or {}
@@ -460,6 +546,12 @@ class DiscordJsonAdapter(SourceAdapter):
     def _source_id(self, channel: str, message_id: str) -> str:
         channel_part = channel or "unknown-channel"
         return f"discord_json:{channel_part}:{message_id}"
+
+    def _channel_source_id(self, channel: str) -> str:
+        return f"discord_json:channel:{channel or 'unknown-channel'}"
+
+    def _channel_key(self, unit: KnowledgeUnit) -> str:
+        return self._string(unit.metadata.get("channel_id") or unit.metadata.get("channel_name"))
 
     def _attachment_source_id(
         self,

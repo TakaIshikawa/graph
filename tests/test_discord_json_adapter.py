@@ -243,7 +243,7 @@ def test_discord_json_adapter_emits_attachment_units_and_source_edges(tmp_path):
 
     result = DiscordJsonAdapter(path=str(export_path)).ingest()
 
-    assert DiscordJsonAdapter(path=str(export_path)).entity_types == ["discord_message", "discord_attachment"]
+    assert DiscordJsonAdapter(path=str(export_path)).entity_types == ["discord_message", "discord_attachment", "discord_channel"]
     assert [unit.source_entity_type for unit in result.units] == ["discord_message", "discord_attachment"]
     attachment = result.units[1]
     assert attachment.source_id == "discord_json:channel-1:400:attachment:att-1"
@@ -353,4 +353,67 @@ def test_discord_json_adapter_skips_malformed_attachment_units(tmp_path):
 
     assert [unit.source_entity_type for unit in result.units] == ["discord_message"]
     assert result.units[0].metadata["attachments"] == [{}]
+    assert result.edges == []
+
+
+def test_discord_json_adapter_emits_channel_aggregate_and_edges(tmp_path):
+    export_path = tmp_path / "general.json"
+    export_path.write_text(
+        json.dumps(
+            {
+                "guild": {"id": "guild-1", "name": "Research Lab"},
+                "channel": {"id": "channel-1", "name": "general"},
+                "messages": [
+                    {
+                        "id": "500",
+                        "timestamp": "2026-04-04T10:00:00Z",
+                        "content": "First.",
+                        "author": {"id": "user-1", "username": "alice"},
+                        "attachments": [{"id": "att-1", "filename": "diagram.png"}],
+                    },
+                    {
+                        "id": "501",
+                        "timestamp": "2026-04-04T10:05:00Z",
+                        "content": "Second.",
+                        "author": {"id": "user-2", "username": "bob"},
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = DiscordJsonAdapter(path=str(export_path)).ingest(entity_types=["discord_message", "discord_channel"])
+
+    channel = next(unit for unit in result.units if unit.source_entity_type == "discord_channel")
+    messages = [unit for unit in result.units if unit.source_entity_type == "discord_message"]
+    assert channel.source_id == "discord_json:channel:channel-1"
+    assert channel.metadata["channel_id"] == "channel-1"
+    assert channel.metadata["channel_name"] == "general"
+    assert channel.metadata["message_count"] == 2
+    assert channel.metadata["attachment_count"] == 1
+    assert channel.metadata["author_count"] == 2
+    assert channel.metadata["server_ids"] == ["guild-1"]
+    assert channel.metadata["server_names"] == ["Research Lab"]
+    assert channel.metadata["first_message_at"] == "2026-04-04T10:00:00+00:00"
+    assert channel.metadata["last_message_at"] == "2026-04-04T10:05:00+00:00"
+    assert channel.metadata["source_paths"] == ["general.json"]
+
+    channel_edges = [edge for edge in result.edges if edge.metadata.get("relation_type") == "discord_channel_message"]
+    assert len(channel_edges) == 2
+    assert {edge.from_unit_id for edge in channel_edges} == {channel.source_id}
+    assert {edge.to_unit_id for edge in channel_edges} == {unit.source_id for unit in messages}
+    assert {edge.relation for edge in channel_edges} == {EdgeRelation.CONTAINS}
+
+
+def test_discord_json_adapter_channel_entity_filtering(tmp_path):
+    export_path = tmp_path / "general.json"
+    export_path.write_text(
+        json.dumps({"channel": {"id": "channel-1", "name": "general"}, "messages": [{"id": "500", "content": "First."}]}),
+        encoding="utf-8",
+    )
+
+    result = DiscordJsonAdapter(path=str(export_path)).ingest(entity_types=["discord_channel"])
+
+    assert [unit.source_entity_type for unit in result.units] == ["discord_channel"]
     assert result.edges == []
