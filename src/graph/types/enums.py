@@ -147,6 +147,7 @@ class SourceProject(StrEnum):
     PODCASTS_OPML = "podcasts_opml"
     STACKOVERFLOW_BOOKMARKS_JSON = "stackoverflow_bookmarks_json"
     CHROME_READING_LIST_JSON = "chrome_reading_list_json"
+    AUDIBLE_LIBRARY_CSV = "audible_library_csv"
 
 
 class ContentType(StrEnum):
