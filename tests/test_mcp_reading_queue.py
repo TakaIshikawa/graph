@@ -8,6 +8,7 @@ import json
 import pytest
 
 from graph.mcp import server as mcp_server
+from graph.types.enums import EdgeRelation
 
 
 NOW = "2026-05-02T00:00:00+00:00"
@@ -48,16 +49,7 @@ def test_graph_rag_reading_queue_tool_is_registered_with_schema():
         "relation",
     ]
     assert properties["edges"]["items"]["properties"]["relation"]["enum"] == [
-        "builds_on",
-        "challenges",
-        "refines",
-        "discovers",
-        "replicates",
-        "inspires",
-        "derives_from",
-        "relates_to",
-        "contains",
-        "references",
+        relation.value for relation in EdgeRelation
     ]
     assert properties["limit"]["type"] == ["integer", "null"]
     assert properties["limit"]["minimum"] == 0

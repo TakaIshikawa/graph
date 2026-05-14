@@ -8,6 +8,7 @@ import pytest
 
 from graph.store.backup import export_store_backup
 from graph.store.db import Store
+from graph.store.migrations import SCHEMA_VERSION
 from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
 from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
@@ -91,7 +92,7 @@ def test_export_store_backup_exports_units_edges_sync_state_and_metadata(store: 
 
     assert payload["metadata"] == {
         "format": "graph.store.backup.v1",
-        "schema_version": 6,
+        "schema_version": SCHEMA_VERSION,
         "include_embeddings": False,
         "unit_count": 2,
         "edge_count": 2,

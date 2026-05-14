@@ -510,7 +510,7 @@ def _json_value(value: object) -> object:
     return value.isoformat() if hasattr(value, "isoformat") else value
 
 
-def _metadata_path_value(metadata: Mapping, path: str) -> tuple[bool, object]:
+def _metadata_similarity_path_value(metadata: Mapping, path: str) -> tuple[bool, object]:
     current: object = metadata
     for part in path.split("."):
         if not isinstance(current, Mapping) or part not in current:
@@ -614,7 +614,7 @@ def suggest_metadata_similarity_edges(
         key_values: dict[str, dict[str, object]] = {}
         if isinstance(metadata, Mapping):
             for key in selected_keys:
-                found, value = _metadata_path_value(metadata, key)
+                found, value = _metadata_similarity_path_value(metadata, key)
                 if found:
                     values = _metadata_similarity_values(value)
                     if values:

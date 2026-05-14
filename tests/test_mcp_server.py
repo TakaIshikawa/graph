@@ -1216,7 +1216,7 @@ def test_ingest_tool_syncs_configured_feed_fixture(tmp_path, monkeypatch):
     try:
         unit = store.conn.execute(
             """SELECT * FROM knowledge_units
-               WHERE source_project = 'me' AND source_entity_type = 'feed_item'"""
+               WHERE source_project = 'feed' AND source_entity_type = 'feed_item'"""
         ).fetchone()
         assert unit is not None
         assert unit["title"] == "MCP local feed item"
@@ -1260,7 +1260,11 @@ END:VCALENDAR
 
     store = Store(str(db_path))
     try:
-        unit = store.get_unit_by_source("me", "calendar.ics#mcp-event-1", "calendar_event")
+        unit = store.get_unit_by_source(
+            "calendar",
+            "calendar.ics#mcp-event-1",
+            "calendar_event",
+        )
         assert unit is not None
         assert unit.title == "MCP Calendar Event"
         assert unit.tags == ["mcp"]

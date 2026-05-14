@@ -204,61 +204,34 @@ class LinkedInArchiveAdapter(SourceAdapter):
 
     def _find_connections_files(self, root: Path) -> list[Path]:
         """Find connections CSV files."""
-        patterns = [
-            root / "Connections.csv",
-            root / "connections.csv",
-        ]
-        seen: set[Path] = set()
-        result: list[Path] = []
-        for p in patterns:
-            if p.exists() and p.is_file():
-                # Resolve to canonical path to avoid duplicates on case-insensitive filesystems
-                resolved = p.resolve()
-                if resolved not in seen:
-                    seen.add(resolved)
-                    result.append(p)
-        return result
+        return self._find_csv_files(root, ["Connections.csv", "connections.csv"])
 
     def _find_message_files(self, root: Path) -> list[Path]:
         """Find messages CSV files."""
-        patterns = [
-            root / "messages.csv",
-            root / "Messages.csv",
-        ]
-        seen: set[Path] = set()
-        result: list[Path] = []
-        for p in patterns:
-            if p.exists() and p.is_file():
-                resolved = p.resolve()
-                if resolved not in seen:
-                    seen.add(resolved)
-                    result.append(p)
-        return result
+        return self._find_csv_files(root, ["messages.csv", "Messages.csv"])
 
     def _find_position_files(self, root: Path) -> list[Path]:
         """Find positions CSV files."""
-        patterns = [
-            root / "Positions.csv",
-            root / "positions.csv",
-            root / "Profile.csv",
-            root / "profile.csv",
-        ]
-        seen: set[Path] = set()
-        result: list[Path] = []
-        for p in patterns:
-            if p.exists() and p.is_file():
-                resolved = p.resolve()
-                if resolved not in seen:
-                    seen.add(resolved)
-                    result.append(p)
-        return result
+        return self._find_csv_files(
+            root,
+            ["Positions.csv", "positions.csv", "Profile.csv", "profile.csv"],
+        )
+
+    def _find_csv_files(self, root: Path, names: list[str]) -> list[Path]:
+        order = {name.lower(): index for index, name in enumerate(names)}
+        matches: dict[str, Path] = {}
+        for child in root.iterdir():
+            key = child.name.lower()
+            if key in order and key not in matches and child.is_file():
+                matches[key] = child
+        return sorted(matches.values(), key=lambda path: order[path.name.lower()])
 
     def _read_csv(self, path: Path) -> list[dict[str, Any]]:
         """Read and parse CSV file."""
         rows: list[dict[str, Any]] = []
         try:
             # Try different encodings
-            for encoding in ("utf-8", "utf-8-sig", "latin1", "cp1252"):
+            for encoding in ("utf-8-sig", "utf-8", "latin1", "cp1252"):
                 try:
                     with path.open("r", encoding=encoding, newline="") as f:
                         reader = csv.DictReader(f)

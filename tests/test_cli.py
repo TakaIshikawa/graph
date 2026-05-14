@@ -17,6 +17,7 @@ from typer.testing import CliRunner
 from graph.cli.main import app
 from graph.rag.embeddings import serialize_embedding
 from graph.store.db import Store
+from graph.store.migrations import SCHEMA_VERSION
 from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
 from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
@@ -870,7 +871,7 @@ def test_json_export_and_import_commands_round_trip(tmp_path, monkeypatch):
     assert export_result.exit_code == 0
     assert export_path.exists()
     exported = json.loads(export_path.read_text())
-    assert exported["schema_version"] == 6
+    assert exported["schema_version"] == SCHEMA_VERSION
     assert exported["exported_at"]
     assert len(exported["units"]) == 4
     assert len(exported["edges"]) == 2
@@ -1945,7 +1946,7 @@ def test_ingest_feed_command_uses_configured_sources(tmp_path, monkeypatch):
         assert "feed: 1 new" in result.output
         unit = store.conn.execute(
             """SELECT * FROM knowledge_units
-               WHERE source_project = 'me' AND source_entity_type = 'feed_item'"""
+               WHERE source_project = 'feed' AND source_entity_type = 'feed_item'"""
         ).fetchone()
         assert unit is not None
         assert unit["title"] == "Local feed item"
@@ -2420,7 +2421,11 @@ END:VCALENDAR
         assert result.exit_code == 0
         assert "Ingesting from ical" in result.output
         assert "ical: 1 new" in result.output
-        unit = store.get_unit_by_source("me", "calendar.ics#cli-event-1", "calendar_event")
+        unit = store.get_unit_by_source(
+            "calendar",
+            "calendar.ics#cli-event-1",
+            "calendar_event",
+        )
         assert unit is not None
         assert unit.title == "CLI Calendar Event"
         assert unit.tags == ["calendar", "cli"]

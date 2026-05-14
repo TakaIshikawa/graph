@@ -91,16 +91,7 @@ def test_relation_motif_tool_is_registered_with_schema(relation_motif_store):
     assert properties["limit"]["minimum"] == 0
     assert properties["min_count"]["minimum"] == 1
     assert properties["relation_types"]["items"]["enum"] == [
-        "builds_on",
-        "challenges",
-        "refines",
-        "discovers",
-        "replicates",
-        "inspires",
-        "derives_from",
-        "relates_to",
-        "contains",
-        "references",
+        relation.value for relation in EdgeRelation
     ]
 
 
