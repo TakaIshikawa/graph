@@ -21,7 +21,7 @@ class JiraIssuesCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["issue", "component"]
+        return ["issue", "component", "fix_version"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -32,6 +32,7 @@ class JiraIssuesCsvAdapter(SourceAdapter):
         if not allowed_types.intersection(self.entity_types):
             return result
         sync_at = self._ensure_utc(since.last_sync_at) if since else None
+        issues: list[KnowledgeUnit] = []
         for path in self._iter_paths():
             try:
                 rows = self._read_rows(path)
@@ -43,6 +44,7 @@ class JiraIssuesCsvAdapter(SourceAdapter):
                     continue
                 if sync_at and unit.updated_at <= sync_at:
                     continue
+                issues.append(unit)
                 components = list(unit.metadata.get("components") or [])
                 if "issue" in allowed_types:
                     result.units.append(unit)
@@ -51,6 +53,10 @@ class JiraIssuesCsvAdapter(SourceAdapter):
                     result.units.extend(self._component_units(components, unit))
                 if {"issue", "component"}.issubset(allowed_types):
                     result.edges.extend(self._component_edges(unit, components))
+        fix_version_units = self._fix_version_units(issues) if "fix_version" in allowed_types else []
+        result.units.extend(fix_version_units)
+        if {"issue", "fix_version"}.issubset(allowed_types):
+            result.edges.extend(self._fix_version_edges(issues, fix_version_units))
         result.units = list({unit.source_id: unit for unit in result.units}.values())
         result.edges = list({edge.id: edge for edge in result.edges}.values())
         result.units.sort(key=lambda unit: unit.source_id)
@@ -173,6 +179,66 @@ class JiraIssuesCsvAdapter(SourceAdapter):
     def _component_source_id(self, component: str) -> str:
         digest = hashlib.sha256(component.casefold().encode("utf-8")).hexdigest()[:24]
         return f"jira_issues_csv:component:{digest}"
+
+    def _fix_version_units(self, issues: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        names: dict[str, str] = {}
+        for issue in issues:
+            for version in issue.metadata.get("fix_versions") or []:
+                key = self._normalized_fix_version(str(version))
+                if not key:
+                    continue
+                grouped.setdefault(key, []).append(issue)
+                names.setdefault(key, str(version).strip())
+
+        units: list[KnowledgeUnit] = []
+        for key, version_issues in sorted(grouped.items()):
+            unique_issues = sorted({issue.source_id: issue for issue in version_issues}.values(), key=lambda issue: issue.source_id)
+            created_dates = [issue.created_at for issue in unique_issues]
+            updated_dates = [issue.updated_at for issue in unique_issues]
+            name = names[key]
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.JIRA_ISSUES_CSV,
+                    source_id=self._fix_version_source_id(key),
+                    source_entity_type="fix_version",
+                    title=name,
+                    content=f"Jira fix version: {name}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "name": name,
+                        "normalized_name": key,
+                        "issue_count": len(unique_issues),
+                        "statuses": sorted({str(issue.metadata.get("status")) for issue in unique_issues if issue.metadata.get("status")}),
+                        "components": sorted({component for issue in unique_issues for component in (issue.metadata.get("components") or [])}),
+                        "first_created_at": min(created_dates).isoformat() if created_dates else "",
+                        "last_updated_at": max(updated_dates).isoformat() if updated_dates else "",
+                        "issue_source_ids": [issue.source_id for issue in unique_issues],
+                    },
+                    tags=["jira", "fix_version"],
+                    created_at=min(created_dates),
+                    updated_at=max(updated_dates),
+                )
+            )
+        return units
+
+    def _fix_version_edges(self, issues: list[KnowledgeUnit], fix_versions: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        version_ids = {str(unit.metadata["normalized_name"]): unit.source_id for unit in fix_versions}
+        edges: list[KnowledgeEdge] = []
+        for issue in issues:
+            for version in issue.metadata.get("fix_versions") or []:
+                key = self._normalized_fix_version(str(version))
+                target = version_ids.get(key)
+                if target:
+                    edges.append(self._edge(issue.source_id, target, EdgeRelation.RELATES_TO, "fix_version", str(version)))
+        return edges
+
+    def _fix_version_source_id(self, normalized_name: str) -> str:
+        digest = hashlib.sha256(normalized_name.encode("utf-8")).hexdigest()[:24]
+        return f"jira_issues_csv:fix_version:{digest}"
+
+    def _normalized_fix_version(self, value: str) -> str:
+        return " ".join(value.casefold().split())
 
     def _edge(self, source_id: str, target: str, relation: EdgeRelation, kind: str, value: str) -> KnowledgeEdge:
         digest = hashlib.sha256(f"{source_id}|{relation}|{target}".encode("utf-8")).hexdigest()[:24]
