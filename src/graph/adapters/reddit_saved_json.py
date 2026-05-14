@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class RedditSavedJsonAdapter(SourceAdapter):
@@ -20,7 +20,7 @@ class RedditSavedJsonAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["post", "comment"]
+        return ["post", "comment", "redditor"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -32,7 +32,7 @@ class RedditSavedJsonAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        requested = set(entity_types or self.entity_types)
+        requested = set(entity_types) if entity_types is not None else {"post", "comment"}
         if not requested.intersection(self.entity_types):
             return result
 
@@ -45,13 +45,21 @@ class RedditSavedJsonAdapter(SourceAdapter):
                 continue
             for item in items:
                 unit = self._unit_from_item(item, path.name)
-                if unit is None or unit.source_entity_type not in requested:
+                if unit is None:
                     continue
                 if sync_at and unit.created_at <= sync_at:
                     continue
+                if unit.source_entity_type not in requested and "redditor" not in requested:
+                    continue
                 units.append(unit)
 
-        result.units.extend(sorted(units, key=lambda unit: (unit.created_at, unit.source_id)))
+        item_units = sorted(units, key=lambda unit: (unit.created_at, unit.source_id))
+        result.units.extend(unit for unit in item_units if unit.source_entity_type in requested)
+        redditors = self._redditor_units(item_units) if "redditor" in requested else []
+        result.units.extend(redditors)
+        if requested.intersection({"post", "comment"}) and "redditor" in requested:
+            result.edges.extend(self._redditor_edges(item_units, redditors, requested.intersection({"post", "comment"})))
+        result.edges.sort(key=lambda edge: (edge.from_unit_id, edge.to_unit_id, edge.id))
         return result
 
     def _iter_paths(self) -> list[Path]:
@@ -167,6 +175,96 @@ class RedditSavedJsonAdapter(SourceAdapter):
         if url and (entity_type == "post" or url != permalink):
             parts.append(f"URL: {url}")
         return "\n\n".join(parts)
+
+    def _redditor_units(self, items: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        names: dict[str, str] = {}
+        for item in items:
+            author = str(item.metadata.get("author") or "").strip()
+            key = self._normalized_author(author)
+            if not key:
+                continue
+            grouped.setdefault(key, []).append(item)
+            names.setdefault(key, author)
+
+        units: list[KnowledgeUnit] = []
+        for key, author_items in sorted(grouped.items()):
+            unique_items = sorted({item.source_id: item for item in author_items}.values(), key=lambda item: item.source_id)
+            author = names[key]
+            post_count = sum(1 for item in unique_items if item.source_entity_type == "post")
+            comment_count = sum(1 for item in unique_items if item.source_entity_type == "comment")
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.REDDIT_SAVED_JSON,
+                    source_id=self._redditor_source_id(key),
+                    source_entity_type="redditor",
+                    title=author,
+                    content=f"Reddit author: {author}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "author": author,
+                        "normalized_author": key,
+                        "saved_count": len(unique_items),
+                        "post_count": post_count,
+                        "comment_count": comment_count,
+                        "subreddits": sorted({str(item.metadata.get("subreddit")) for item in unique_items if item.metadata.get("subreddit")}),
+                        "first_saved_at": min(item.created_at for item in unique_items).isoformat(),
+                        "last_saved_at": max(item.created_at for item in unique_items).isoformat(),
+                        "item_source_ids": [item.source_id for item in unique_items],
+                    },
+                    tags=["reddit", "redditor"],
+                    created_at=min(item.created_at for item in unique_items),
+                    updated_at=max(item.updated_at for item in unique_items),
+                )
+            )
+        return units
+
+    def _redditor_edges(
+        self,
+        items: list[KnowledgeUnit],
+        redditors: list[KnowledgeUnit],
+        requested_item_types: set[str],
+    ) -> list[KnowledgeEdge]:
+        redditor_ids = {str(unit.metadata["normalized_author"]): unit.source_id for unit in redditors}
+        edges: list[KnowledgeEdge] = []
+        seen: set[tuple[str, str]] = set()
+        for item in items:
+            if item.source_entity_type not in requested_item_types:
+                continue
+            author = str(item.metadata.get("author") or "").strip()
+            redditor_id = redditor_ids.get(self._normalized_author(author))
+            if not redditor_id or (item.source_id, redditor_id) in seen:
+                continue
+            seen.add((item.source_id, redditor_id))
+            edges.append(
+                KnowledgeEdge(
+                    id=self._redditor_edge_id(item.source_id, redditor_id),
+                    from_unit_id=item.source_id,
+                    to_unit_id=redditor_id,
+                    relation=EdgeRelation.RELATES_TO,
+                    source=EdgeSource.SOURCE,
+                    metadata={
+                        "source_project": SourceProject.REDDIT_SAVED_JSON.value,
+                        "from_entity_type": item.source_entity_type,
+                        "to_entity_type": "redditor",
+                        "relation_type": "saved_item_author",
+                        "author": author,
+                    },
+                    created_at=item.created_at,
+                )
+            )
+        return edges
+
+    def _redditor_source_id(self, normalized_author: str) -> str:
+        digest = hashlib.sha256(normalized_author.encode("utf-8")).hexdigest()[:24]
+        return f"reddit_saved_json:redditor:{digest}"
+
+    def _redditor_edge_id(self, item_source_id: str, redditor_source_id: str) -> str:
+        digest = hashlib.sha256(f"{item_source_id}|{redditor_source_id}|saved_item_author".encode("utf-8")).hexdigest()[:24]
+        return f"reddit_saved_json:edge:{digest}"
+
+    def _normalized_author(self, author: str) -> str:
+        return " ".join(author.casefold().split())
 
     def _absolute_permalink(self, value: str) -> str:
         if not value:
