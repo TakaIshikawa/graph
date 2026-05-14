@@ -98,6 +98,7 @@ from graph.export.tag_cooccurrence_markdown import export_tag_cooccurrence_markd
 from graph.export.tag_confidence_csv import export_tag_confidence_csv
 from graph.export.tag_glossary import export_tag_glossary_markdown
 from graph.export.tag_momentum_markdown import export_tag_momentum_markdown
+from graph.export.tag_source_coverage_csv import export_tag_source_coverage_csv
 from graph.export.tag_source_matrix_csv import export_tag_source_matrix_csv
 from graph.export.tag_timeline_csv import export_tag_timeline_csv
 from graph.export.task_board_markdown import export_task_board_markdown
@@ -235,6 +236,7 @@ __all__ = [
     "export_tag_confidence_csv",
     "export_tag_glossary_markdown",
     "export_tag_momentum_markdown",
+    "export_tag_source_coverage_csv",
     "export_tag_source_matrix_csv",
     "export_tag_timeline_csv",
     "export_task_board_markdown",
