@@ -116,3 +116,45 @@ def test_asana_tasks_csv_ingests_assignee_project_and_workspace_entities(tmp_pat
     assert sorted(unit.title for unit in result.units if unit.source_entity_type == "project") == ["Imports"]
     assert sorted(unit.title for unit in result.units if unit.source_entity_type == "workspace") == ["Acme", "Research"]
     assert {edge.metadata["relation_type"] for edge in result.edges} == {"task_assignee", "task_project", "task_workspace"}
+
+
+def test_asana_tasks_csv_ingests_tag_aggregates_and_edges(tmp_path):
+    export = tmp_path / "asana.csv"
+    _write_csv(
+        export,
+        [
+            {
+                "Task ID": "1",
+                "Name": "First",
+                "Tags": "backend;csv",
+                "Projects": "Imports, Graph",
+                "Workspace": "Acme",
+                "Modified At": "2026-05-02T00:00:00Z",
+            },
+            {
+                "Task ID": "2",
+                "Name": "Second",
+                "Tags": "csv",
+                "Projects": "Imports",
+                "Workspace": "Acme",
+                "Modified At": "2026-05-03T00:00:00Z",
+            },
+        ],
+    )
+
+    tags_only = AsanaTasksCsvAdapter(path=str(export)).ingest(entity_types=["tag"])
+    combined = AsanaTasksCsvAdapter(path=str(export)).ingest(entity_types=["task", "tag"])
+
+    assert AsanaTasksCsvAdapter().entity_types == ["task", "assignee", "project", "workspace", "tag"]
+    tags = {unit.metadata["name"]: unit for unit in tags_only.units}
+    assert sorted(tags) == ["backend", "csv"]
+    assert tags["csv"].source_entity_type == "tag"
+    assert tags["csv"].metadata["task_source_ids"] == ["asana_tasks_csv:1", "asana_tasks_csv:2"]
+    assert tags["csv"].metadata["task_count"] == 2
+    assert tags["csv"].metadata["projects"] == ["Graph", "Imports"]
+    assert tags["csv"].metadata["workspace"] == "Acme"
+    assert tags_only.edges == []
+
+    tag_edges = [edge for edge in combined.edges if edge.metadata["relation_type"] == "task_tag"]
+    assert len(tag_edges) == 3
+    assert {edge.relation for edge in tag_edges} == {EdgeRelation.RELATES_TO}

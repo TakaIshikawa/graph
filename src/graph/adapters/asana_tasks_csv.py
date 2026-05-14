@@ -20,19 +20,20 @@ class AsanaTasksCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["task", "assignee", "project", "workspace"]
+        return ["task", "assignee", "project", "workspace", "tag"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
 
     def ingest(self, *, since: SyncState | None = None, entity_types: list[str] | None = None) -> IngestResult:
         result = IngestResult()
-        allowed_types = set(entity_types or self.entity_types)
+        allowed_types = set(entity_types) if entity_types is not None else {"task", "assignee", "project", "workspace"}
         if not allowed_types.intersection(self.entity_types):
             return result
         sync_at = ensure_utc(since.last_sync_at) if since else None
         by_task_id: dict[str, KnowledgeUnit] = {}
         parent_refs: list[tuple[str, str]] = []
+        task_units: list[KnowledgeUnit] = []
         for path in iter_paths(self.path, {".csv"}):
             try:
                 rows = read_csv_rows(path)
@@ -44,6 +45,7 @@ class AsanaTasksCsvAdapter(SourceAdapter):
                     continue
                 if sync_at and unit.updated_at <= sync_at:
                     continue
+                task_units.append(unit)
                 if "task" in allowed_types:
                     result.units.append(unit)
                 task_id = str(unit.metadata.get("task_id") or "")
@@ -68,11 +70,16 @@ class AsanaTasksCsvAdapter(SourceAdapter):
                             result.edges.append(self._relation_edge(unit.source_id, self._entity_source_id("project", str(project)), "task_project"))
                     if workspace and "workspace" in allowed_types:
                         result.edges.append(self._relation_edge(unit.source_id, self._entity_source_id("workspace", workspace), "task_workspace"))
+                    if "tag" in allowed_types:
+                        for tag in unit.metadata.get("tags") or []:
+                            result.edges.append(self._relation_edge(unit.source_id, self._tag_source_id(str(tag)), "task_tag"))
         for parent_id, child_id in parent_refs:
             parent = by_task_id.get(parent_id)
             child = by_task_id.get(child_id)
             if parent and child and "task" in allowed_types:
                 result.edges.append(self._edge(parent.source_id, child.source_id))
+        if "tag" in allowed_types:
+            result.units.extend(self._tag_units(task_units))
         result.units = list({unit.source_id: unit for unit in result.units}.values())
         result.units.sort(key=lambda unit: unit.source_id)
         result.edges = sorted({edge.id: edge for edge in result.edges}.values(), key=lambda edge: edge.id)
@@ -153,6 +160,53 @@ class AsanaTasksCsvAdapter(SourceAdapter):
     def _entity_source_id(self, entity_type: str, name: str) -> str:
         digest = hashlib.sha256(name.casefold().encode("utf-8")).hexdigest()[:24]
         return f"asana_tasks_csv:{entity_type}:{digest}"
+
+    def _tag_units(self, tasks: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        for task in tasks:
+            for tag in task.metadata.get("tags") or []:
+                name = str(tag)
+                if name:
+                    grouped.setdefault(name, []).append(task)
+
+        units: list[KnowledgeUnit] = []
+        now = datetime.now(timezone.utc)
+        for tag, linked_tasks in grouped.items():
+            created_at = min((task.created_at for task in linked_tasks), default=now)
+            updated_at = max((task.updated_at for task in linked_tasks), default=created_at)
+            task_source_ids = sorted({task.source_id for task in linked_tasks})
+            projects = sorted({project for task in linked_tasks for project in (task.metadata.get("projects") or []) if project})
+            workspaces = sorted({workspace for task in linked_tasks if (workspace := str(task.metadata.get("workspace") or ""))})
+            workspace = workspaces[0] if len(workspaces) == 1 else ""
+            metadata = clean_metadata(
+                {
+                    "name": tag,
+                    "task_source_ids": task_source_ids,
+                    "task_count": len(task_source_ids),
+                    "projects": projects,
+                    "workspace": workspace,
+                    "workspaces": workspaces,
+                    "latest_updated_at": updated_at.isoformat(),
+                }
+            )
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.ASANA_TASKS_CSV,
+                    source_id=self._tag_source_id(tag),
+                    source_entity_type="tag",
+                    title=tag,
+                    content=f"Asana tag: {tag}\nTasks: {len(task_source_ids)}",
+                    content_type=ContentType.METADATA,
+                    metadata=metadata,
+                    tags=["asana", "tag", tag],
+                    created_at=created_at,
+                    updated_at=updated_at,
+                )
+            )
+        return units
+
+    def _tag_source_id(self, name: str) -> str:
+        return self._entity_source_id("tag", name)
 
     def _relation_edge(self, from_id: str, to_id: str, relation_type: str) -> KnowledgeEdge:
         digest = hashlib.sha256(f"{from_id}|{relation_type}|{to_id}".encode("utf-8")).hexdigest()[:24]
