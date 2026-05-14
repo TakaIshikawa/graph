@@ -141,6 +141,7 @@ class SourceProject(StrEnum):
     AMAZON_ORDERS_CSV = "amazon_orders_csv"
     YOUTUBE_WATCH_HISTORY_JSON = "youtube_watch_history_json"
     YOUTUBE_PLAYLISTS_JSON = "youtube_playlists_json"
+    SLEEP_AS_ANDROID_CSV = "sleep_as_android_csv"
     APPLE_BOOKS_HIGHLIGHTS_JSON = "apple_books_highlights_json"
     DUOLINGO_PROGRESS_CSV = "duolingo_progress_csv"
     LINEAR_ISSUES_JSON = "linear_issues_json"

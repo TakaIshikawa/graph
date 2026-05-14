@@ -125,6 +125,7 @@ from graph.adapters.roam import RoamAdapter
 from graph.adapters.safari_bookmarks import SafariBookmarksAdapter
 from graph.adapters.safari_history import SafariHistoryAdapter
 from graph.adapters.slack_json import SlackJsonAdapter
+from graph.adapters.sleep_as_android_csv import SleepAsAndroidCsvAdapter
 from graph.adapters.sota import SOTAAdapter
 from graph.adapters.spotify_streaming_history import SpotifyStreamingHistoryAdapter
 from graph.adapters.spotify_takeout import SpotifyTakeoutAdapter
@@ -259,6 +260,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "logseq": LogseqAdapter,
     "sqlite_query_log": SqliteQueryLogAdapter,
     "slack_json": SlackJsonAdapter,
+    "sleep_as_android_csv": SleepAsAndroidCsvAdapter,
     "vcard": VCardAdapter,
     "yaml_frontmatter": YamlFrontmatterAdapter,
     "foam_workspace": FoamWorkspaceAdapter,
