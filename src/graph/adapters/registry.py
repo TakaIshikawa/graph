@@ -124,6 +124,7 @@ from graph.adapters.slack_json import SlackJsonAdapter
 from graph.adapters.sota import SOTAAdapter
 from graph.adapters.spotify_streaming_history import SpotifyStreamingHistoryAdapter
 from graph.adapters.spotify_takeout import SpotifyTakeoutAdapter
+from graph.adapters.stackoverflow_bookmarks_json import StackOverflowBookmarksJsonAdapter
 from graph.adapters.strava_activities_json import StravaActivitiesJsonAdapter
 from graph.adapters.storygraph_reading_history_csv import StoryGraphReadingHistoryCsvAdapter
 from graph.adapters.steam_library_csv import SteamLibraryCsvAdapter
@@ -295,6 +296,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "linear_issues_json": LinearIssuesJsonAdapter,
     "peloton_workouts_csv": PelotonWorkoutsCsvAdapter,
     "podcasts_opml": PodcastsOpmlAdapter,
+    "stackoverflow_bookmarks_json": StackOverflowBookmarksJsonAdapter,
 }
 
 

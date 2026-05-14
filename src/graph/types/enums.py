@@ -145,6 +145,7 @@ class SourceProject(StrEnum):
     LINEAR_ISSUES_JSON = "linear_issues_json"
     PELOTON_WORKOUTS_CSV = "peloton_workouts_csv"
     PODCASTS_OPML = "podcasts_opml"
+    STACKOVERFLOW_BOOKMARKS_JSON = "stackoverflow_bookmarks_json"
 
 
 class ContentType(StrEnum):
