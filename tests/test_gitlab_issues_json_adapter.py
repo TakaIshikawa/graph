@@ -79,3 +79,48 @@ def test_gitlab_issues_json_ingests_object_with_issues_and_registry(tmp_path):
     assert result.units[0].source_id.startswith("gitlab_issues_json:")
     assert result.units[0].metadata["labels"] == ["ops", "team"]
     assert get_adapter("gitlab_issues_json", path=str(export)).name == "gitlab_issues_json"
+
+
+def test_gitlab_issues_json_ingests_label_aggregates_and_edges(tmp_path):
+    export = tmp_path / "issues.json"
+    export.write_text(
+        json.dumps(
+            [
+                {
+                    "iid": 1,
+                    "title": "Fix import",
+                    "labels": ["Bug", "Import"],
+                    "project_path": "acme/graph",
+                    "updated_at": "2025-01-02T00:00:00Z",
+                },
+                {
+                    "iid": 2,
+                    "title": "Fix another import",
+                    "labels": "bug",
+                    "project_path": "acme/graph",
+                    "updated_at": "2025-01-03T00:00:00Z",
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    labels_only = GitlabIssuesJsonAdapter(path=str(export)).ingest(entity_types=["label"])
+    combined = GitlabIssuesJsonAdapter(path=str(export)).ingest(entity_types=["issue", "label"])
+
+    assert GitlabIssuesJsonAdapter().entity_types == ["issue", "label"]
+    labels = {unit.metadata["label"]: unit for unit in labels_only.units}
+    assert sorted(labels) == ["bug", "import"]
+    assert labels["bug"].source_id.startswith("gitlab_issues_json:label:")
+    assert labels["bug"].metadata["issue_source_ids"] == [
+        "gitlab_issues_json:acme/graph#1",
+        "gitlab_issues_json:acme/graph#2",
+    ]
+    assert labels["bug"].metadata["issue_count"] == 2
+    assert labels["bug"].metadata["project_paths"] == ["acme/graph"]
+    assert labels["bug"].metadata["latest_updated_at"] == "2025-01-03T00:00:00+00:00"
+    assert labels_only.edges == []
+
+    label_edges = [edge for edge in combined.edges if edge.metadata["kind"] == "label"]
+    assert len(label_edges) == 3
+    assert {edge.relation for edge in label_edges} == {EdgeRelation.RELATES_TO}

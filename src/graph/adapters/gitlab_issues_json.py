@@ -21,7 +21,7 @@ class GitlabIssuesJsonAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["issue"]
+        return ["issue", "label"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -33,9 +33,11 @@ class GitlabIssuesJsonAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        if entity_types and "issue" not in entity_types:
+        requested = set(entity_types) if entity_types is not None else {"issue"}
+        if not requested.intersection(self.entity_types):
             return result
         sync_at = self._ensure_utc(since.last_sync_at) if since else None
+        issue_units: list[KnowledgeUnit] = []
         for path in self._iter_paths():
             try:
                 records = self._read_records(path)
@@ -47,10 +49,21 @@ class GitlabIssuesJsonAdapter(SourceAdapter):
                     continue
                 if sync_at and unit.updated_at <= sync_at:
                     continue
-                result.units.append(unit)
-                result.edges.extend(self._edges_for_record(unit, record))
+                issue_units.append(unit)
+                if "issue" in requested:
+                    result.units.append(unit)
+                    result.edges.extend(self._edges_for_record(unit, record))
+        label_units = self._label_units(issue_units)
+        if "label" in requested:
+            result.units.extend(label_units)
+        if {"issue", "label"}.issubset(requested):
+            label_ids = {unit.metadata["label"]: unit.source_id for unit in label_units}
+            for issue in issue_units:
+                for label in issue.metadata.get("labels", []):
+                    if label in label_ids:
+                        result.edges.append(self._edge(issue.source_id, label_ids[label], EdgeRelation.RELATES_TO, "label", label))
         result.units.sort(key=lambda unit: unit.source_id)
-        result.edges.sort(key=lambda edge: edge.id)
+        result.edges = sorted({edge.id: edge for edge in result.edges}.values(), key=lambda edge: edge.id)
         return result
 
     def _iter_paths(self) -> list[Path]:
@@ -146,6 +159,46 @@ class GitlabIssuesJsonAdapter(SourceAdapter):
             source=EdgeSource.SOURCE,
             metadata={"kind": kind, "value": value},
         )
+
+    def _label_units(self, issues: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        for issue in issues:
+            for label in issue.metadata.get("labels", []):
+                grouped.setdefault(label, []).append(issue)
+
+        units: list[KnowledgeUnit] = []
+        now = datetime.now(timezone.utc)
+        for label, linked_issues in grouped.items():
+            created_at = min((issue.created_at for issue in linked_issues), default=now)
+            updated_at = max((issue.updated_at for issue in linked_issues), default=created_at)
+            source_ids = sorted({issue.source_id for issue in linked_issues})
+            project_paths = sorted({path for issue in linked_issues if (path := self._text(issue.metadata.get("project_path")))})
+            metadata = {
+                "label": label,
+                "issue_source_ids": source_ids,
+                "issue_count": len(source_ids),
+                "project_paths": project_paths,
+                "latest_updated_at": updated_at.isoformat(),
+            }
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.GITLAB_ISSUES_JSON,
+                    source_id=self._label_source_id(label),
+                    source_entity_type="label",
+                    title=f"GitLab label: {label}",
+                    content=f"GitLab label: {label}\nIssues: {len(source_ids)}",
+                    content_type=ContentType.METADATA,
+                    metadata={key: value for key, value in metadata.items() if value not in ("", None, [])},
+                    tags=["gitlab", "label", label],
+                    created_at=created_at,
+                    updated_at=updated_at,
+                )
+            )
+        return units
+
+    def _label_source_id(self, label: str) -> str:
+        digest = hashlib.sha256(label.casefold().encode("utf-8")).hexdigest()[:24]
+        return f"gitlab_issues_json:label:{digest}"
 
     def _project_path(self, record: dict[str, Any]) -> str:
         project = record.get("project")
