@@ -109,6 +109,7 @@ from graph.export.unit_csv import export_units_to_csv
 from graph.export.unit_date_coverage_markdown import export_unit_date_coverage_markdown
 from graph.export.unit_attachment_inventory_csv import export_unit_attachment_inventory_csv
 from graph.export.unit_content_length_csv import export_unit_content_length_csv
+from graph.export.unit_content_length_summary_csv import export_unit_content_length_summary_csv
 from graph.export.unit_content_length_outliers_csv import export_unit_content_length_outliers_csv
 from graph.export.unit_evidence_markdown import export_unit_evidence_markdown
 from graph.export.unit_markdown_table import export_units_to_markdown_table
@@ -245,6 +246,7 @@ __all__ = [
     "export_unit_backlinks_markdown",
     "export_unit_attachment_inventory_csv",
     "export_unit_content_length_csv",
+    "export_unit_content_length_summary_csv",
     "export_unit_content_length_outliers_csv",
     "export_unit_date_coverage_markdown",
     "export_unit_evidence_markdown",
