@@ -65,6 +65,7 @@ from graph.export.relation_confidence_buckets_csv import export_relation_confide
 from graph.export.relation_evidence import export_relation_evidence_markdown
 from graph.export.relation_confidence_matrix_csv import export_relation_confidence_matrix_csv
 from graph.export.relation_date_lag_csv import export_relation_date_lag_csv
+from graph.export.relation_evidence_density_csv import export_relation_evidence_density_csv
 from graph.export.relation_evidence_gap_csv import export_relation_evidence_gap_csv
 from graph.export.relation_endpoint_type_matrix_csv import export_relation_endpoint_type_matrix_csv
 from graph.export.relation_tag_bridge_csv import export_relation_tag_bridge_csv
@@ -204,6 +205,7 @@ __all__ = [
     "export_relation_confidence_matrix_csv",
     "export_relation_date_lag_csv",
     "export_relation_endpoint_type_matrix_csv",
+    "export_relation_evidence_density_csv",
     "export_relation_evidence_markdown",
     "export_relation_evidence_gap_csv",
     "export_relation_tag_bridge_csv",
