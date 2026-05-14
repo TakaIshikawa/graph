@@ -63,6 +63,7 @@ from graph.export.orphan_units import export_orphan_units_markdown
 from graph.export.relation_confidence_buckets_csv import export_relation_confidence_buckets_csv
 from graph.export.relation_evidence import export_relation_evidence_markdown
 from graph.export.relation_confidence_matrix_csv import export_relation_confidence_matrix_csv
+from graph.export.relation_date_lag_csv import export_relation_date_lag_csv
 from graph.export.relation_evidence_gap_csv import export_relation_evidence_gap_csv
 from graph.export.rdf_turtle import export_graph_rdf_turtle
 from graph.export.ris import export_units_to_ris
@@ -191,6 +192,7 @@ __all__ = [
     "export_orphan_units_markdown",
     "export_relation_confidence_buckets_csv",
     "export_relation_confidence_matrix_csv",
+    "export_relation_date_lag_csv",
     "export_relation_evidence_markdown",
     "export_relation_evidence_gap_csv",
     "export_units_to_ris",
