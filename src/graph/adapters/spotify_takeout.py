@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class SpotifyTakeoutAdapter(SourceAdapter):
@@ -21,7 +21,7 @@ class SpotifyTakeoutAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["play", "podcast_play"]
+        return ["play", "podcast_play", "artist", "album"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -33,26 +33,41 @@ class SpotifyTakeoutAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        allowed_types = set(entity_types or ["play"])
+        allowed_types = set(entity_types) if entity_types is not None else {"play"}
         if not allowed_types.intersection(self.entity_types):
             return result
 
         sync_at = self._ensure_utc(since.last_sync_at) if since else None
         units: list[KnowledgeUnit] = []
+        play_units: list[KnowledgeUnit] = []
+        parse_types = set(allowed_types)
+        if allowed_types.intersection({"artist", "album"}):
+            parse_types.add("play")
         for path in self._iter_paths():
             try:
                 items = self._read_items(path)
             except (OSError, UnicodeDecodeError, json.JSONDecodeError):
                 continue
             for item in items:
-                unit = self._unit_from_item(item, path.name, allowed_types)
+                unit = self._unit_from_item(item, path.name, parse_types)
                 if unit is None:
                     continue
                 if sync_at and unit.created_at <= sync_at:
                     continue
-                units.append(unit)
+                if unit.source_entity_type == "play":
+                    play_units.append(unit)
+                if unit.source_entity_type in allowed_types:
+                    units.append(unit)
 
+        artist_units = self._aggregate_units("artist", play_units) if "artist" in allowed_types else []
+        album_units = self._aggregate_units("album", play_units) if "album" in allowed_types else []
+        units.extend(artist_units)
+        units.extend(album_units)
+        if "play" in allowed_types:
+            result.edges.extend(self._aggregate_edges(play_units, artist_units, "artist"))
+            result.edges.extend(self._aggregate_edges(play_units, album_units, "album"))
         result.units.extend(sorted(units, key=lambda unit: (unit.created_at, unit.source_id)))
+        result.edges = sorted({edge.id: edge for edge in result.edges}.values(), key=lambda edge: edge.id)
         return result
 
     def _iter_paths(self) -> list[Path]:
@@ -242,6 +257,69 @@ class SpotifyTakeoutAdapter(SourceAdapter):
         )
         digest = hashlib.sha256(identifier.encode("utf-8")).hexdigest()[:24]
         return f"spotify_takeout:podcast_play:{digest}"
+
+    def _aggregate_units(self, entity_type: str, plays: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        for play in plays:
+            name = str(play.metadata.get("artist_name" if entity_type == "artist" else "album_name") or "").strip()
+            if name:
+                grouped.setdefault(name, []).append(play)
+
+        units: list[KnowledgeUnit] = []
+        for name, linked_plays in grouped.items():
+            first_played_at = min(play.created_at for play in linked_plays)
+            latest_played_at = max(play.updated_at for play in linked_plays)
+            play_source_ids = sorted({play.source_id for play in linked_plays})
+            total_ms = sum(ms for play in linked_plays if isinstance((ms := play.metadata.get("ms_played")), int))
+            metadata = {
+                "name": name,
+                "play_source_ids": play_source_ids,
+                "play_count": len(play_source_ids),
+                "total_ms_played": total_ms,
+                "first_played_at": first_played_at.isoformat(),
+                "latest_played_at": latest_played_at.isoformat(),
+            }
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.SPOTIFY_TAKEOUT,
+                    source_id=self._aggregate_source_id(entity_type, name),
+                    source_entity_type=entity_type,
+                    title=name,
+                    content=f"Spotify {entity_type}: {name}\nPlays: {len(play_source_ids)}",
+                    content_type=ContentType.METADATA,
+                    metadata=metadata,
+                    tags=["spotify", entity_type],
+                    created_at=first_played_at,
+                    updated_at=latest_played_at,
+                )
+            )
+        return units
+
+    def _aggregate_edges(self, plays: list[KnowledgeUnit], aggregates: list[KnowledgeUnit], entity_type: str) -> list[KnowledgeEdge]:
+        aggregate_ids = {unit.metadata["name"]: unit.source_id for unit in aggregates}
+        metadata_key = "artist_name" if entity_type == "artist" else "album_name"
+        edges: list[KnowledgeEdge] = []
+        for play in plays:
+            name = str(play.metadata.get(metadata_key) or "").strip()
+            target_id = aggregate_ids.get(name)
+            if target_id:
+                edges.append(self._edge(play.source_id, target_id, f"play_{entity_type}"))
+        return edges
+
+    def _aggregate_source_id(self, entity_type: str, name: str) -> str:
+        digest = hashlib.sha256(name.casefold().encode("utf-8")).hexdigest()[:24]
+        return f"spotify_takeout:{entity_type}:{digest}"
+
+    def _edge(self, from_id: str, to_id: str, relation_type: str) -> KnowledgeEdge:
+        digest = hashlib.sha256(f"{from_id}|{relation_type}|{to_id}".encode("utf-8")).hexdigest()[:24]
+        return KnowledgeEdge(
+            id=f"spotify_takeout:relates:{digest}",
+            from_unit_id=from_id,
+            to_unit_id=to_id,
+            relation=EdgeRelation.RELATES_TO,
+            source=EdgeSource.SOURCE,
+            metadata={"source_project": SourceProject.SPOTIFY_TAKEOUT.value, "relation_type": relation_type},
+        )
 
     def _title(self, artist_name: str, track_name: str) -> str:
         if artist_name and track_name:

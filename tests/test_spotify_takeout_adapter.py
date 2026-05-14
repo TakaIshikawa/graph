@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from graph.adapters.registry import get_adapter, list_adapters
 from graph.adapters.spotify_takeout import SpotifyTakeoutAdapter
-from graph.types.enums import ContentType, SourceProject
+from graph.types.enums import ContentType, EdgeRelation, SourceProject
 from graph.types.models import SyncState
 
 
@@ -133,16 +133,24 @@ def test_spotify_takeout_filters_by_sync_state(tmp_path):
     assert result.units[0].metadata["track_name"] == "New Track"
 
 
-def test_spotify_takeout_entity_type_filtering_does_not_load_plays(tmp_path):
+def test_spotify_takeout_entity_type_filtering_loads_artist_aggregates_without_plays(tmp_path):
     export = tmp_path / "StreamingHistory_music_0.json"
     export.write_text(
-        json.dumps([{"endTime": "2025-01-01 10:00", "artistName": "Artist", "trackName": "Track"}]),
+        json.dumps(
+            [
+                {"endTime": "2025-01-01 10:00", "artistName": "Artist", "trackName": "Track", "msPlayed": 100},
+                {"endTime": "2025-01-01 10:01", "artistName": "Artist", "trackName": "Other", "msPlayed": 200},
+            ]
+        ),
         encoding="utf-8",
     )
 
     result = SpotifyTakeoutAdapter(path=str(export)).ingest(entity_types=["artist"])
 
-    assert result.units == []
+    assert [unit.source_entity_type for unit in result.units] == ["artist"]
+    assert result.units[0].metadata["name"] == "Artist"
+    assert result.units[0].metadata["play_count"] == 2
+    assert result.units[0].metadata["total_ms_played"] == 300
     assert result.edges == []
 
 
@@ -228,7 +236,44 @@ def test_spotify_takeout_entity_type_filtering_separates_music_and_podcast(tmp_p
 
 
 def test_spotify_takeout_reports_music_and_podcast_entity_types():
-    assert SpotifyTakeoutAdapter().entity_types == ["play", "podcast_play"]
+    assert SpotifyTakeoutAdapter().entity_types == ["play", "podcast_play", "artist", "album"]
+
+
+def test_spotify_takeout_ingests_artist_and_album_aggregates_with_edges(tmp_path):
+    export = tmp_path / "Streaming_History_Audio_2024-2025_0.json"
+    export.write_text(
+        json.dumps(
+            [
+                {
+                    "ts": "2025-01-01T00:00:00Z",
+                    "master_metadata_track_name": "First",
+                    "master_metadata_album_artist_name": "Ada",
+                    "master_metadata_album_album_name": "Graph Songs",
+                    "ms_played": 100,
+                },
+                {
+                    "ts": "2025-01-02T00:00:00Z",
+                    "master_metadata_track_name": "Second",
+                    "master_metadata_album_artist_name": "Ada",
+                    "master_metadata_album_album_name": "Graph Songs",
+                    "ms_played": 250,
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = SpotifyTakeoutAdapter(path=str(export)).ingest(entity_types=["play", "artist", "album"])
+    aggregates = {unit.source_entity_type: unit for unit in result.units if unit.source_entity_type in {"artist", "album"}}
+
+    assert aggregates["artist"].metadata["play_count"] == 2
+    assert aggregates["artist"].metadata["total_ms_played"] == 350
+    assert aggregates["artist"].metadata["first_played_at"] == "2025-01-01T00:00:00+00:00"
+    assert aggregates["artist"].metadata["latest_played_at"] == "2025-01-02T00:00:00+00:00"
+    assert aggregates["album"].metadata["name"] == "Graph Songs"
+    assert len([edge for edge in result.edges if edge.metadata["relation_type"] == "play_artist"]) == 2
+    assert len([edge for edge in result.edges if edge.metadata["relation_type"] == "play_album"]) == 2
+    assert {edge.relation for edge in result.edges} == {EdgeRelation.RELATES_TO}
 
 
 def test_spotify_takeout_source_id_is_stable(tmp_path):
