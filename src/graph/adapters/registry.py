@@ -102,6 +102,7 @@ from graph.adapters.archivebox_index_json import ArchiveBoxIndexJsonAdapter
 from graph.adapters.opml import OpmlAdapter
 from graph.adapters.obsidian_canvas import ObsidianCanvasAdapter
 from graph.adapters.omnivore_json import OmnivoreJsonAdapter
+from graph.adapters.openlibrary_reading_log_csv import OpenLibraryReadingLogCsvAdapter
 from graph.adapters.org import OrgAdapter
 from graph.adapters.pdf import PdfAdapter
 from graph.adapters.pinboard import PinboardAdapter
@@ -210,6 +211,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "opml": OpmlAdapter,
     "obsidian_canvas": ObsidianCanvasAdapter,
     "omnivore_json": OmnivoreJsonAdapter,
+    "openlibrary_reading_log_csv": OpenLibraryReadingLogCsvAdapter,
     "org": OrgAdapter,
     "pdf": PdfAdapter,
     "plain_text": PlainTextAdapter,
