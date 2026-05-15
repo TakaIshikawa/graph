@@ -29,6 +29,7 @@ from graph.export.edge_adjacency_markdown import export_edge_adjacency_markdown
 from graph.export.edge_coverage_csv import export_edge_coverage_csv
 from graph.export.edge_relation_source_csv import export_edge_relation_source_csv
 from graph.export.edge_relation_summary_markdown import export_edge_relation_summary_markdown
+from graph.export.edge_temporal_lag_csv import export_edge_temporal_lag_csv
 from graph.export.edge_type_matrix_csv import export_edge_type_matrix_csv
 from graph.export.external_domain_summary_markdown import export_external_domain_summary_markdown
 from graph.export.flashcards_markdown import export_units_to_flashcards_markdown
@@ -69,6 +70,8 @@ from graph.export.relation_evidence_density_csv import export_relation_evidence_
 from graph.export.relation_evidence_gap_csv import export_relation_evidence_gap_csv
 from graph.export.relation_endpoint_type_matrix_csv import export_relation_endpoint_type_matrix_csv
 from graph.export.relation_evidence_span_csv import export_relation_evidence_span_csv
+from graph.export.relation_provenance_matrix_csv import export_relation_provenance_matrix_csv
+from graph.export.relation_reciprocity_csv import export_relation_reciprocity_csv
 from graph.export.relation_tag_bridge_csv import export_relation_tag_bridge_csv
 from graph.export.rdf_turtle import export_graph_rdf_turtle
 from graph.export.ris import export_units_to_ris
@@ -119,6 +122,7 @@ from graph.export.unit_citation_inventory_csv import export_unit_citation_invent
 from graph.export.unit_content_length_csv import export_unit_content_length_csv
 from graph.export.unit_content_length_summary_csv import export_unit_content_length_summary_csv
 from graph.export.unit_content_length_outliers_csv import export_unit_content_length_outliers_csv
+from graph.export.unit_duplicate_title_csv import export_unit_duplicate_title_csv
 from graph.export.unit_evidence_markdown import export_unit_evidence_markdown
 from graph.export.unit_link_inventory_csv import export_unit_link_inventory_csv
 from graph.export.unit_markdown_table import export_units_to_markdown_table
@@ -131,6 +135,7 @@ from graph.export.unit_source_timeline_csv import export_unit_source_timeline_cs
 from graph.export.unit_source_diversity_csv import export_unit_source_diversity_csv
 from graph.export.unit_source_recency_csv import export_unit_source_recency_csv
 from graph.export.unit_yaml import export_units_to_yaml
+from graph.export.unit_tag_matrix_csv import export_unit_tag_matrix_csv
 from graph.export.unit_tag_source_matrix_csv import export_unit_tag_source_matrix_csv
 from graph.export.units_jsonl import export_units_to_jsonl
 from graph.export.vegalite_timeline import export_units_to_vegalite_timeline
@@ -178,6 +183,7 @@ __all__ = [
     "export_edge_coverage_csv",
     "export_edge_relation_source_csv",
     "export_edge_relation_summary_markdown",
+    "export_edge_temporal_lag_csv",
     "export_edge_type_matrix_csv",
     "export_edges_to_csv",
     "export_external_domain_summary_markdown",
@@ -220,6 +226,8 @@ __all__ = [
     "export_relation_evidence_markdown",
     "export_relation_evidence_gap_csv",
     "export_relation_evidence_span_csv",
+    "export_relation_provenance_matrix_csv",
+    "export_relation_reciprocity_csv",
     "export_relation_tag_bridge_csv",
     "export_units_to_ris",
     "export_units_to_rss",
@@ -269,6 +277,7 @@ __all__ = [
     "export_unit_content_length_summary_csv",
     "export_unit_content_length_outliers_csv",
     "export_unit_date_coverage_markdown",
+    "export_unit_duplicate_title_csv",
     "export_unit_evidence_markdown",
     "export_unit_link_inventory_csv",
     "export_unit_metadata_schema_csv",
@@ -280,6 +289,7 @@ __all__ = [
     "export_unit_source_diversity_csv",
     "export_unit_source_recency_csv",
     "export_unit_source_timeline_csv",
+    "export_unit_tag_matrix_csv",
     "export_unit_tag_source_matrix_csv",
     "export_units_to_anki_tsv",
     "export_units_to_atom",
