@@ -170,6 +170,7 @@ class SourceProject(StrEnum):
     GOOGLE_PLAY_BOOKS_NOTES_CSV = "google_play_books_notes_csv"
     CALENDAR_EVENTS_CSV = "calendar_events_csv"
     COURSERA_PROGRESS_CSV = "coursera_progress_csv"
+    CONFLUENCE_PAGES_JSON = "confluence_pages_json"
 
 
 class ContentType(StrEnum):

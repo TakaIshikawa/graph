@@ -20,6 +20,7 @@ from graph.adapters.calendar_events_csv import CalendarEventsCsvAdapter
 from graph.adapters.chatgpt_json import ChatGptJsonAdapter
 from graph.adapters.chrome_history import ChromeHistoryAdapter
 from graph.adapters.chrome_reading_list_json import ChromeReadingListJsonAdapter
+from graph.adapters.confluence_pages_json import ConfluencePagesJsonAdapter
 from graph.adapters.csv_adapter import CsvAdapter
 from graph.adapters.csv_rows import CsvRowsAdapter
 from graph.adapters.crossref import CrossrefAdapter
@@ -201,6 +202,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "calendar_events_csv": CalendarEventsCsvAdapter,
     "chrome_history": ChromeHistoryAdapter,
     "chrome_reading_list_json": ChromeReadingListJsonAdapter,
+    "confluence_pages_json": ConfluencePagesJsonAdapter,
     "chatgpt_json": ChatGptJsonAdapter,
     "discord_json": DiscordJsonAdapter,
     "csv": CsvAdapter,
