@@ -54,6 +54,7 @@ def export_unit_calendar_event_inventory_csv(
     return {
         "path": str(output_path),
         "unit_count": len(unit_list),
+        "event_count": len(rows),
         "rows_exported": len(rows),
         "bytes_written": output_path.stat().st_size,
     }

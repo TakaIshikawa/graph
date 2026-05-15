@@ -101,5 +101,6 @@ def test_export_unit_calendar_event_inventory_csv_path_mode(tmp_path):
 
     assert rows(path.read_text(encoding="utf-8"))[0]["event_date"] == "2026-01-01"
     assert stats["unit_count"] == 1
+    assert stats["event_count"] == 1
     assert stats["rows_exported"] == 1
     assert stats["bytes_written"] == path.stat().st_size
