@@ -20,7 +20,7 @@ class AppleBooksHighlightsJsonAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["book", "highlight", "note", "author"]
+        return ["book", "highlight", "note", "author", "highlight_color"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -49,11 +49,14 @@ class AppleBooksHighlightsJsonAdapter(SourceAdapter):
         needs_books = "book" in allowed or "author" in allowed
         books = self._book_units(annotations) if needs_books else []
         authors = self._author_units(books, annotations) if "author" in allowed else []
+        highlight_colors = self._highlight_color_units(annotations) if "highlight_color" in allowed else []
         result.units = []
         if "book" in allowed:
             result.units.extend(books)
         if "author" in allowed:
             result.units.extend(authors)
+        if "highlight_color" in allowed:
+            result.units.extend(highlight_colors)
         for entity_type in ("highlight", "note"):
             if entity_type in allowed:
                 result.units.extend(unit for unit in annotations if unit.source_entity_type == entity_type)
@@ -61,6 +64,8 @@ class AppleBooksHighlightsJsonAdapter(SourceAdapter):
             result.edges.extend(self._book_annotation_edges(books, annotations, allowed))
         if "author" in allowed:
             result.edges.extend(self._author_edges(authors, books, annotations, allowed))
+        if "highlight_color" in allowed and "highlight" in allowed:
+            result.edges.extend(self._highlight_color_edges(highlight_colors, annotations))
         result.units.sort(key=lambda unit: (unit.updated_at, unit.source_id))
         result.edges.sort(key=lambda edge: edge.id)
         return result
@@ -90,6 +95,9 @@ class AppleBooksHighlightsJsonAdapter(SourceAdapter):
         author = first(record, "author", "authors", "bookAuthor", "book_author")
         location = first(record, "location", "cfi", "page", "chapter")
         identifier = first(record, "id", "uuid", "annotationId", "annotation_id", "assetId", "asset_id", "isbn")
+        color = first(record, "color", "highlightColor", "highlight_color", "colour", "highlightColour", "highlight_colour")
+        style = first(record, "style", "annotationStyle", "annotation_style")
+        normalized_color = self._normalized_color(color, style)
 
         metadata = clean_metadata(
             {
@@ -97,6 +105,9 @@ class AppleBooksHighlightsJsonAdapter(SourceAdapter):
                 "author": author,
                 "selected_text": selected_text,
                 "note": note_text,
+                "color": color,
+                "style": style,
+                "normalized_color": normalized_color,
                 "location": location,
                 "page": first(record, "page", "pageNumber", "page_number"),
                 "chapter": first(record, "chapter"),
@@ -272,6 +283,73 @@ class AppleBooksHighlightsJsonAdapter(SourceAdapter):
                         edges.append(self._author_edge(annotation.source_id, author_id, "highlight_author"))
         return list({edge.id: edge for edge in edges}.values())
 
+    def _highlight_color_units(self, annotations: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[tuple[tuple[str, str, str], str], list[KnowledgeUnit]] = {}
+        for annotation in annotations:
+            if annotation.source_entity_type != "highlight":
+                continue
+            normalized_color = str(annotation.metadata.get("normalized_color") or "")
+            if not normalized_color:
+                continue
+            grouped.setdefault((self._book_identity(annotation.metadata), normalized_color), []).append(annotation)
+
+        units: list[KnowledgeUnit] = []
+        for (book_identity, normalized_color), highlights in sorted(grouped.items()):
+            first_unit = highlights[0]
+            book_title = str(first_unit.metadata.get("book_title") or "")
+            author = str(first_unit.metadata.get("author") or "")
+            color = str(first_unit.metadata.get("color") or "")
+            created_at = min(unit.created_at for unit in highlights)
+            updated_at = max(unit.updated_at for unit in highlights)
+            metadata = {
+                "book_title": book_title,
+                "author": author,
+                "asset_id": book_identity[0],
+                "isbn": book_identity[1],
+                "book_key": book_identity[2],
+                "color": color,
+                "normalized_color": normalized_color,
+                "styles": sorted({str(unit.metadata.get("style")) for unit in highlights if unit.metadata.get("style")}),
+                "highlight_count": len(highlights),
+                "locations": sorted({str(unit.metadata.get("location")) for unit in highlights if unit.metadata.get("location")}),
+                "selected_text_snippets": [
+                    str(unit.metadata.get("selected_text"))[:160]
+                    for unit in highlights
+                    if unit.metadata.get("selected_text")
+                ],
+                "annotation_source_ids": [unit.source_id for unit in highlights],
+            }
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.APPLE_BOOKS_HIGHLIGHTS_JSON,
+                    source_id=self._highlight_color_source_id(book_identity, normalized_color),
+                    source_entity_type="highlight_color",
+                    title=self._highlight_color_title(book_title, normalized_color),
+                    content=self._highlight_color_content(metadata),
+                    content_type=ContentType.METADATA,
+                    metadata=clean_metadata(metadata),
+                    tags=["apple_books", "highlight_color", normalized_color],
+                    created_at=created_at,
+                    updated_at=updated_at,
+                )
+            )
+        return units
+
+    def _highlight_color_edges(self, highlight_colors: list[KnowledgeUnit], annotations: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        color_ids = {
+            (self._book_identity(unit.metadata), str(unit.metadata.get("normalized_color") or "")): unit.source_id
+            for unit in highlight_colors
+        }
+        edges: list[KnowledgeEdge] = []
+        for annotation in annotations:
+            if annotation.source_entity_type != "highlight":
+                continue
+            key = (self._book_identity(annotation.metadata), str(annotation.metadata.get("normalized_color") or ""))
+            color_id = color_ids.get(key)
+            if color_id:
+                edges.append(self._highlight_color_edge(color_id, annotation.source_id))
+        return list({edge.id: edge for edge in edges}.values())
+
     def _book_identity(self, metadata: dict[str, Any]) -> tuple[str, str, str]:
         record = metadata.get("record") if isinstance(metadata.get("record"), dict) else {}
         asset_id = str(metadata.get("asset_id") or "") or first(record, "assetId", "asset_id", "bookId", "book_id")
@@ -320,6 +398,38 @@ class AppleBooksHighlightsJsonAdapter(SourceAdapter):
 
     def _author_source_id(self, author_key: str) -> str:
         return digest_source_id("apple_books_highlights_json:author", author_key)
+
+    def _normalized_color(self, color: str, style: str) -> str:
+        value = color or style
+        return " ".join(value.casefold().replace("_", " ").replace("-", " ").split())
+
+    def _highlight_color_source_id(self, book_identity: tuple[str, str, str], normalized_color: str) -> str:
+        return digest_source_id("apple_books_highlights_json:highlight_color", *book_identity, normalized_color)
+
+    def _highlight_color_edge(self, from_id: str, to_id: str) -> KnowledgeEdge:
+        return KnowledgeEdge(
+            id=digest_source_id("apple-books-highlights-json-edge", from_id, to_id, "highlight_color_highlight"),
+            from_unit_id=from_id,
+            to_unit_id=to_id,
+            relation=EdgeRelation.RELATES_TO,
+            source=EdgeSource.SOURCE,
+            metadata={
+                "source_project": SourceProject.APPLE_BOOKS_HIGHLIGHTS_JSON.value,
+                "relation_type": "highlight_color_highlight",
+            },
+        )
+
+    def _highlight_color_title(self, book_title: str, normalized_color: str) -> str:
+        return f"Apple Books {normalized_color} highlights: {book_title}" if book_title else f"Apple Books {normalized_color} highlights"
+
+    def _highlight_color_content(self, metadata: dict[str, Any]) -> str:
+        parts = [self._highlight_color_title(str(metadata.get("book_title") or ""), str(metadata.get("normalized_color") or ""))]
+        parts.append(f"Highlights: {metadata.get('highlight_count', 0)}")
+        if metadata.get("color"):
+            parts.append(f"Color: {metadata['color']}")
+        if metadata.get("styles"):
+            parts.append(f"Styles: {', '.join(metadata['styles'])}")
+        return "\n".join(part for part in parts if part)
 
     def _title(self, entity_type: str, book_title: str, text: str) -> str:
         label = "Apple Books note" if entity_type == "note" else "Apple Books highlight"
