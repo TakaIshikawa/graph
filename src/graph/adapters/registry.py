@@ -32,6 +32,7 @@ from graph.adapters.enex import EnexAdapter
 from graph.adapters.feed import FeedAdapter
 from graph.adapters.forty_two import FortyTwoAdapter
 from graph.adapters.git_adapter import GitAdapter
+from graph.adapters.github_gists_json import GithubGistsJsonAdapter
 from graph.adapters.github_issues_json import GithubIssuesJsonAdapter
 from graph.adapters.gitlab_issues_json import GitlabIssuesJsonAdapter
 from graph.adapters.github_stars_csv import GithubStarsCsvAdapter
@@ -296,6 +297,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "kobo_highlights_csv": KoboHighlightsCsvAdapter,
     "inaturalist_observations_csv": INaturalistObservationsCsvAdapter,
     "steam_library_csv": SteamLibraryCsvAdapter,
+    "github_gists_json": GithubGistsJsonAdapter,
     "github_issues_json": GithubIssuesJsonAdapter,
     "gitlab_issues_json": GitlabIssuesJsonAdapter,
     "jira_issues_csv": JiraIssuesCsvAdapter,
