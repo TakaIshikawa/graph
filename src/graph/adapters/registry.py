@@ -87,6 +87,7 @@ from graph.adapters.apple_podcasts_history_csv import ApplePodcastsHistoryCsvAda
 from graph.adapters.medium_bookmarks_json import MediumBookmarksJsonAdapter
 from graph.adapters.overcast_starred_episodes_json import OvercastStarredEpisodesJsonAdapter
 from graph.adapters.pocket_casts_listening_history_csv import PocketCastsListeningHistoryCsvAdapter
+from graph.adapters.product_hunt_bookmarks_json import ProductHuntBookmarksJsonAdapter
 from graph.adapters.apple_reminders_csv import AppleRemindersCsvAdapter
 from graph.adapters.day_one_json import DayOneJsonAdapter
 from graph.adapters.firefox_places import FirefoxPlacesAdapter
@@ -211,6 +212,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "medium_bookmarks_json": MediumBookmarksJsonAdapter,
     "overcast_starred_episodes_json": OvercastStarredEpisodesJsonAdapter,
     "pocket_casts_listening_history_csv": PocketCastsListeningHistoryCsvAdapter,
+    "product_hunt_bookmarks_json": ProductHuntBookmarksJsonAdapter,
     "apple_reminders_csv": AppleRemindersCsvAdapter,
     "day_one_json": DayOneJsonAdapter,
     "things_csv": ThingsCsvAdapter,
