@@ -29,6 +29,7 @@ from graph.export.edge_adjacency_markdown import export_edge_adjacency_markdown
 from graph.export.edge_coverage_csv import export_edge_coverage_csv
 from graph.export.edge_relation_source_csv import export_edge_relation_source_csv
 from graph.export.edge_relation_summary_markdown import export_edge_relation_summary_markdown
+from graph.export.edge_temporal_lag_csv import export_edge_temporal_lag_csv
 from graph.export.edge_type_matrix_csv import export_edge_type_matrix_csv
 from graph.export.external_domain_summary_markdown import export_external_domain_summary_markdown
 from graph.export.flashcards_markdown import export_units_to_flashcards_markdown
@@ -182,6 +183,7 @@ __all__ = [
     "export_edge_coverage_csv",
     "export_edge_relation_source_csv",
     "export_edge_relation_summary_markdown",
+    "export_edge_temporal_lag_csv",
     "export_edge_type_matrix_csv",
     "export_edges_to_csv",
     "export_external_domain_summary_markdown",
