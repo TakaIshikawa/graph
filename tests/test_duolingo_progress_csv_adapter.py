@@ -146,3 +146,72 @@ def test_duolingo_progress_csv_language_to_skill_edges_without_courses(tmp_path)
     assert {(edge.from_unit_id, edge.to_unit_id, edge.metadata["relation_type"]) for edge in result.edges} == {
         (language.source_id, skill.source_id, "language_contains_skill")
     }
+
+
+def test_duolingo_progress_csv_streak_aggregates_group_by_language_and_streak_day(tmp_path):
+    export = tmp_path / "duolingo.csv"
+    export.write_text(
+        "Timestamp,Language,Skill,Lesson Type,XP,Score,Streak Day,Mistakes\n"
+        "2026-05-01T08:00:00Z,Spanish,Basics,Lesson,15,90,10,1\n"
+        "2026-05-01T09:30:00Z,spanish,Food,Practice,10,100,10,0\n"
+        "2026-05-02T08:00:00Z,Spanish,Basics,Lesson,20,80,11,2\n"
+        "2026-05-01T08:30:00Z,French,Food,Lesson,5,70,10,3\n",
+        encoding="utf-8",
+    )
+
+    result = DuolingoProgressCsvAdapter(path=str(export)).ingest(entity_types=["streak"])
+
+    assert "streak" in DuolingoProgressCsvAdapter(path=str(export)).entity_types
+    streaks = [unit for unit in result.units if unit.source_entity_type == "streak"]
+    assert [(unit.metadata["normalized_language"], unit.metadata["streak_identity_type"], unit.metadata["streak_identity"]) for unit in streaks] == [
+        ("french", "streak_day", "10"),
+        ("spanish", "streak_day", "10"),
+        ("spanish", "streak_day", "11"),
+    ]
+
+    spanish_day_10 = next(unit for unit in streaks if unit.metadata["normalized_language"] == "spanish" and unit.metadata["streak_day"] == 10)
+    assert spanish_day_10.source_id.startswith("duolingo_progress_csv:streak:")
+    assert spanish_day_10.metadata["language"] == "Spanish"
+    assert spanish_day_10.metadata["activity_count"] == 2
+    assert spanish_day_10.metadata["lesson_count"] == 1
+    assert spanish_day_10.metadata["practice_count"] == 1
+    assert spanish_day_10.metadata["total_xp"] == 25
+    assert spanish_day_10.metadata["average_score"] == 95.0
+    assert spanish_day_10.metadata["mistake_total"] == 1
+    assert spanish_day_10.metadata["skills"] == ["Basics", "Food"]
+    assert spanish_day_10.metadata["first_completed_at"] == "2026-05-01T08:00:00+00:00"
+    assert spanish_day_10.metadata["last_completed_at"] == "2026-05-01T09:30:00+00:00"
+    assert len(spanish_day_10.metadata["activity_source_ids"]) == 2
+    assert result.edges == []
+
+
+def test_duolingo_progress_csv_streak_aggregates_fallback_to_completed_date_and_activity_edges(tmp_path):
+    export = tmp_path / "duolingo.csv"
+    export.write_text(
+        "Timestamp,Language,Skill,Lesson Type,XP\n"
+        "2026-05-01T08:00:00Z,Spanish,Basics,Lesson,15\n"
+        "2026-05-01T09:30:00Z,Spanish,Food,Practice,10\n"
+        "2026-05-02T08:00:00Z,Spanish,Basics,Lesson,20\n",
+        encoding="utf-8",
+    )
+
+    result = DuolingoProgressCsvAdapter(path=str(export)).ingest(entity_types=["streak", "lesson", "practice"])
+
+    streaks = [unit for unit in result.units if unit.source_entity_type == "streak"]
+    activities = [unit for unit in result.units if unit.source_entity_type in {"lesson", "practice"}]
+    may_1 = next(unit for unit in streaks if unit.metadata["completed_date"] == "2026-05-01")
+    may_1_activities = [unit for unit in activities if unit.metadata["completed_at"].startswith("2026-05-01")]
+
+    assert [(unit.metadata["streak_identity_type"], unit.metadata["streak_identity"]) for unit in streaks] == [
+        ("completed_date", "2026-05-01"),
+        ("completed_date", "2026-05-02"),
+    ]
+    assert may_1.metadata["activity_count"] == 2
+    assert may_1.metadata["total_xp"] == 25
+    assert may_1.metadata["skills"] == ["Basics", "Food"]
+    assert may_1.metadata["activity_source_ids"] == [unit.source_id for unit in may_1_activities]
+    assert {
+        (edge.from_unit_id, edge.to_unit_id, edge.metadata["relation_type"])
+        for edge in result.edges
+        if edge.from_unit_id == may_1.source_id
+    } == {(may_1.source_id, unit.source_id, "streak_contains_activity") for unit in may_1_activities}

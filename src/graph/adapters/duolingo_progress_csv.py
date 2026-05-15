@@ -19,7 +19,7 @@ class DuolingoProgressCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["course", "skill", "lesson", "practice", "language"]
+        return ["course", "skill", "lesson", "practice", "language", "streak"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -50,6 +50,7 @@ class DuolingoProgressCsvAdapter(SourceAdapter):
         courses = self._course_units(activities) if needs_courses else []
         skills = self._skill_units(activities) if needs_skills else []
         languages = self._language_units(activities, courses, skills) if "language" in allowed else []
+        streaks = self._streak_units(activities) if "streak" in allowed else []
         result.units = []
         if "language" in allowed:
             result.units.extend(languages)
@@ -57,6 +58,8 @@ class DuolingoProgressCsvAdapter(SourceAdapter):
             result.units.extend(courses)
         if "skill" in allowed:
             result.units.extend(skills)
+        if "streak" in allowed:
+            result.units.extend(streaks)
         for entity_type in ("lesson", "practice"):
             if entity_type in allowed:
                 result.units.extend(unit for unit in activities if unit.source_entity_type == entity_type)
@@ -68,6 +71,8 @@ class DuolingoProgressCsvAdapter(SourceAdapter):
             result.edges.extend(self._language_skill_edges(languages, skills))
         if "skill" in allowed and {"lesson", "practice"}.intersection(allowed):
             result.edges.extend(self._skill_activity_edges(skills, activities, allowed))
+        if "streak" in allowed and {"lesson", "practice"}.intersection(allowed):
+            result.edges.extend(self._streak_activity_edges(streaks, activities, allowed))
         result.units.sort(key=lambda unit: (unit.updated_at, unit.source_id))
         result.edges.sort(key=lambda edge: edge.id)
         return result
@@ -211,6 +216,50 @@ class DuolingoProgressCsvAdapter(SourceAdapter):
             "source_files": sorted({str(unit.metadata.get("source_file")) for unit in activities if unit.metadata.get("source_file")}),
         }
 
+    def _streak_units(self, activities: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[tuple[str, str, str], list[KnowledgeUnit]] = {}
+        labels: dict[tuple[str, str, str], tuple[str, str]] = {}
+        for activity in activities:
+            identity = self._streak_identity(activity.metadata)
+            if not identity[0] or not identity[2]:
+                continue
+            grouped.setdefault(identity, []).append(activity)
+            labels.setdefault(identity, (str(activity.metadata.get("language") or ""), self._streak_label(activity.metadata)))
+
+        units: list[KnowledgeUnit] = []
+        for identity, streak_activities in sorted(grouped.items()):
+            language, streak_label = labels[identity]
+            metadata = self._aggregate_metadata(streak_activities)
+            skills = sorted({str(unit.metadata.get("skill")) for unit in streak_activities if unit.metadata.get("skill")})
+            metadata.update(
+                {
+                    "language": language,
+                    "normalized_language": identity[0],
+                    "streak_identity_type": identity[1],
+                    "streak_identity": identity[2],
+                    "streak_day": parse_int(identity[2]) if identity[1] == "streak_day" else None,
+                    "completed_date": identity[2] if identity[1] == "completed_date" else None,
+                    "activity_count": len(streak_activities),
+                    "skills": skills,
+                    "activity_source_ids": [unit.source_id for unit in streak_activities],
+                }
+            )
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.DUOLINGO_PROGRESS_CSV,
+                    source_id=self._streak_source_id(identity),
+                    source_entity_type="streak",
+                    title=f"Duolingo streak: {language} {streak_label}",
+                    content=f"Duolingo streak: {language} {streak_label}",
+                    content_type=ContentType.METADATA,
+                    metadata=metadata,
+                    tags=self._dedupe(["duolingo", language.casefold(), "streak"]),
+                    created_at=min(unit.created_at for unit in streak_activities),
+                    updated_at=max(unit.updated_at for unit in streak_activities),
+                )
+            )
+        return units
+
     def _language_units(
         self,
         activities: list[KnowledgeUnit],
@@ -289,6 +338,17 @@ class DuolingoProgressCsvAdapter(SourceAdapter):
                 edges.append(self._edge(skill_id, activity.source_id, "skill_contains_activity"))
         return list({edge.id: edge for edge in edges}.values())
 
+    def _streak_activity_edges(self, streaks: list[KnowledgeUnit], activities: list[KnowledgeUnit], allowed: set[str]) -> list[KnowledgeEdge]:
+        streak_ids = {self._streak_identity(streak.metadata): streak.source_id for streak in streaks}
+        edges: list[KnowledgeEdge] = []
+        for activity in activities:
+            if activity.source_entity_type not in allowed:
+                continue
+            streak_id = streak_ids.get(self._streak_identity(activity.metadata))
+            if streak_id:
+                edges.append(self._edge(streak_id, activity.source_id, "streak_contains_activity"))
+        return list({edge.id: edge for edge in edges}.values())
+
     def _language_course_edges(self, languages: list[KnowledgeUnit], courses: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
         language_ids = {self._language_identity(language.metadata): language.source_id for language in languages}
         edges: list[KnowledgeEdge] = []
@@ -320,6 +380,28 @@ class DuolingoProgressCsvAdapter(SourceAdapter):
     def _language_identity(self, metadata: dict[str, Any]) -> str:
         return " ".join(str(metadata.get("language") or "").casefold().split())
 
+    def _streak_identity(self, metadata: dict[str, Any]) -> tuple[str, str, str]:
+        language = self._language_identity(metadata)
+        explicit_type = str(metadata.get("streak_identity_type") or "")
+        explicit_identity = str(metadata.get("streak_identity") or "")
+        if explicit_type and explicit_identity:
+            return language, explicit_type, explicit_identity
+        streak_day = parse_int(metadata.get("streak_day"))
+        if streak_day is not None:
+            return language, "streak_day", str(streak_day)
+        completed_date = str(metadata.get("completed_date") or "")
+        if completed_date:
+            return language, "completed_date", completed_date
+        completed_at = parse_datetime(str(metadata.get("completed_at") or ""))
+        completed_at_date = completed_at.date().isoformat() if completed_at else ""
+        return language, "completed_date", completed_at_date
+
+    def _streak_label(self, metadata: dict[str, Any]) -> str:
+        identity = self._streak_identity(metadata)
+        if identity[1] == "streak_day":
+            return f"day {identity[2]}"
+        return identity[2]
+
     def _course_source_id(self, identity: tuple[str, str]) -> str:
         return digest_source_id("duolingo_progress_csv:course", *identity)
 
@@ -328,6 +410,9 @@ class DuolingoProgressCsvAdapter(SourceAdapter):
 
     def _language_source_id(self, identity: str) -> str:
         return digest_source_id("duolingo_progress_csv:language", identity)
+
+    def _streak_source_id(self, identity: tuple[str, str, str]) -> str:
+        return digest_source_id("duolingo_progress_csv:streak", *identity)
 
     def _edge(self, from_id: str, to_id: str, relation_type: str) -> KnowledgeEdge:
         return KnowledgeEdge(
