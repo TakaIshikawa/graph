@@ -3113,6 +3113,7 @@ def test_registry_list_adapters_contains_expected():
     assert "mbox" in adapters
     assert "markdown" in adapters
     assert "bibtex" in adapters
+    assert "jira_worklogs_csv" in adapters
 
 
 def test_registry_get_all_adapters_returns_instances():

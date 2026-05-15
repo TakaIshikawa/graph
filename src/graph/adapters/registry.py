@@ -55,6 +55,7 @@ from graph.adapters.instapaper import InstapaperAdapter
 from graph.adapters.ipynb import IpynbAdapter
 from graph.adapters.jats import JatsAdapter
 from graph.adapters.jira_issues_csv import JiraIssuesCsvAdapter
+from graph.adapters.jira_worklogs_csv import JiraWorklogsCsvAdapter
 from graph.adapters.linear_issues_json import LinearIssuesJsonAdapter
 from graph.adapters.jsonl_adapter import JsonlAdapter
 from graph.adapters.jsonl_notes import JsonlNotesAdapter
@@ -324,6 +325,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "gitlab_issues_json": GitlabIssuesJsonAdapter,
     "gitlab_merge_requests_json": GitlabMergeRequestsJsonAdapter,
     "jira_issues_csv": JiraIssuesCsvAdapter,
+    "jira_worklogs_csv": JiraWorklogsCsvAdapter,
     "trello_board_json": TrelloBoardJsonAdapter,
     "google_maps_timeline_json": GoogleMapsTimelineJsonAdapter,
     "google_play_books_notes_csv": GooglePlayBooksNotesCsvAdapter,

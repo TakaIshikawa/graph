@@ -145,6 +145,7 @@ class SourceProject(StrEnum):
     GITLAB_ISSUES_JSON = "gitlab_issues_json"
     GITLAB_MERGE_REQUESTS_JSON = "gitlab_merge_requests_json"
     JIRA_ISSUES_CSV = "jira_issues_csv"
+    JIRA_WORKLOGS_CSV = "jira_worklogs_csv"
     TRELLO_BOARD_JSON = "trello_board_json"
     MIRO_BOARD_JSON = "miro_board_json"
     GOOGLE_MAPS_TIMELINE_JSON = "google_maps_timeline_json"
