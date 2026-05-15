@@ -171,6 +171,7 @@ class SourceProject(StrEnum):
     CALENDAR_EVENTS_CSV = "calendar_events_csv"
     COURSERA_PROGRESS_CSV = "coursera_progress_csv"
     CONFLUENCE_PAGES_JSON = "confluence_pages_json"
+    PAYPAL_ACTIVITY_CSV = "paypal_activity_csv"
 
 
 class ContentType(StrEnum):
