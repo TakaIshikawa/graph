@@ -82,6 +82,7 @@ from graph.adapters.bear_export import BearExportAdapter
 from graph.adapters.apple_notes_export import AppleNotesExportAdapter
 from graph.adapters.apple_health_workouts import AppleHealthWorkoutsAdapter
 from graph.adapters.apple_music_library_csv import AppleMusicLibraryCsvAdapter
+from graph.adapters.apple_podcasts_history_csv import ApplePodcastsHistoryCsvAdapter
 from graph.adapters.apple_reminders_csv import AppleRemindersCsvAdapter
 from graph.adapters.day_one_json import DayOneJsonAdapter
 from graph.adapters.firefox_places import FirefoxPlacesAdapter
@@ -199,6 +200,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "apple_notes_export": AppleNotesExportAdapter,
     "apple_health_workouts": AppleHealthWorkoutsAdapter,
     "apple_music_library_csv": AppleMusicLibraryCsvAdapter,
+    "apple_podcasts_history_csv": ApplePodcastsHistoryCsvAdapter,
     "apple_reminders_csv": AppleRemindersCsvAdapter,
     "day_one_json": DayOneJsonAdapter,
     "things_csv": ThingsCsvAdapter,
