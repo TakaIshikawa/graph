@@ -169,6 +169,7 @@ from graph.adapters.webvtt import WebVttAdapter
 from graph.adapters.yaml_adapter import YamlAdapter
 from graph.adapters.yaml_frontmatter import YamlFrontmatterAdapter
 from graph.adapters.youtube_playlists_json import YouTubePlaylistsJsonAdapter
+from graph.adapters.zotero_library_csv import ZoteroLibraryCsvAdapter
 from graph.adapters.zotero_rdf import ZoteroRdfAdapter
 
 _ADAPTERS: dict[str, type[SourceAdapter]] = {
@@ -294,6 +295,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "todoist": TodoistAdapter,
     "are_na": AreNaAdapter,
     "zotero_csv": ZoteroCsvAdapter,
+    "zotero_library_csv": ZoteroLibraryCsvAdapter,
     "google_tasks": GoogleTasksAdapter,
     "google_contacts_csv": GoogleContactsCsvAdapter,
     "hacker_news_saved": HackerNewsSavedAdapter,

@@ -110,6 +110,7 @@ class SourceProject(StrEnum):
     TODOIST = "todoist"
     ARE_NA = "are_na"
     ZOTERO_CSV = "zotero_csv"
+    ZOTERO_LIBRARY_CSV = "zotero_library_csv"
     GOOGLE_TASKS = "google_tasks"
     GOOGLE_CONTACTS_CSV = "google_contacts_csv"
     HACKER_NEWS_SAVED = "hacker_news_saved"
