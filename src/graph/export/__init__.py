@@ -115,6 +115,7 @@ from graph.export.unit_csv import export_units_to_csv
 from graph.export.unit_date_coverage_markdown import export_unit_date_coverage_markdown
 from graph.export.unit_attachment_inventory_csv import export_unit_attachment_inventory_csv
 from graph.export.unit_calendar_event_inventory_csv import export_unit_calendar_event_inventory_csv
+from graph.export.unit_citation_inventory_csv import export_unit_citation_inventory_csv
 from graph.export.unit_content_length_csv import export_unit_content_length_csv
 from graph.export.unit_content_length_summary_csv import export_unit_content_length_summary_csv
 from graph.export.unit_content_length_outliers_csv import export_unit_content_length_outliers_csv
@@ -263,6 +264,7 @@ __all__ = [
     "export_unit_backlinks_markdown",
     "export_unit_attachment_inventory_csv",
     "export_unit_calendar_event_inventory_csv",
+    "export_unit_citation_inventory_csv",
     "export_unit_content_length_csv",
     "export_unit_content_length_summary_csv",
     "export_unit_content_length_outliers_csv",
