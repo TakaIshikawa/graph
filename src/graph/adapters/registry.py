@@ -122,6 +122,7 @@ from graph.adapters.plain_text import PlainTextAdapter
 from graph.adapters.pocket import PocketAdapter
 from graph.adapters.pocket_csv import PocketCsvAdapter
 from graph.adapters.pocket_export import PocketExportAdapter
+from graph.adapters.pocket_reading_list_csv import PocketReadingListCsvAdapter
 from graph.adapters.podcasts_opml import PodcastsOpmlAdapter
 from graph.adapters.presence import PresenceAdapter
 from graph.adapters.raindrop import RaindropAdapter
@@ -261,6 +262,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "pocket": PocketAdapter,
     "pocket_csv": PocketCsvAdapter,
     "pocket_export": PocketExportAdapter,
+    "pocket_reading_list_csv": PocketReadingListCsvAdapter,
     "instapaper": InstapaperAdapter,
     "pinboard": PinboardAdapter,
     "pinboard_html_export": PinboardHtmlExportAdapter,

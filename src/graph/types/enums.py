@@ -58,6 +58,7 @@ class SourceProject(StrEnum):
     POCKET = "pocket"
     POCKET_CSV = "pocket_csv"
     POCKET_EXPORT = "pocket_export"
+    POCKET_READING_LIST_CSV = "pocket_reading_list_csv"
     INSTAPAPER = "instapaper"
     PINBOARD = "pinboard"
     RAINDROP = "raindrop"
