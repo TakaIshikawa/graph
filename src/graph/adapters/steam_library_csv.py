@@ -179,10 +179,11 @@ class SteamLibraryCsvAdapter(SourceAdapter):
 
         units: list[KnowledgeUnit] = []
         for genre, genre_games in sorted(grouped.items()):
-            playtimes = [value for game in genre_games if (value := game.metadata.get("playtime_minutes")) is not None]
+            unique_games = sorted({game.source_id: game for game in genre_games}.values(), key=lambda game: game.source_id)
+            playtimes = [value for game in unique_games if (value := game.metadata.get("playtime_minutes")) is not None]
             last_played = [
                 parsed
-                for game in genre_games
+                for game in unique_games
                 if (parsed := self._parse_datetime(game.metadata.get("last_played"))) is not None
             ]
             units.append(
@@ -191,20 +192,20 @@ class SteamLibraryCsvAdapter(SourceAdapter):
                     source_id=self._genre_source_id(genre),
                     source_entity_type="genre",
                     title=genre,
-                    content=f"Steam genre: {genre}\nGames: {len(genre_games)}",
+                    content=f"Steam genre: {genre}\nGames: {len(unique_games)}",
                     content_type=ContentType.METADATA,
                     metadata={
                         "genre": genre,
-                        "game_count": len(genre_games),
+                        "game_count": len(unique_games),
                         "total_playtime_minutes": sum(playtimes),
-                        "game_source_ids": sorted(game.source_id for game in genre_games),
-                        "app_ids": sorted(str(game.metadata.get("app_id")) for game in genre_games if game.metadata.get("app_id")),
+                        "game_source_ids": [game.source_id for game in unique_games],
+                        "app_ids": sorted(str(game.metadata.get("app_id")) for game in unique_games if game.metadata.get("app_id")),
                         "last_played_at": max(last_played).isoformat() if last_played else None,
-                        "source_files": sorted({str(game.metadata.get("source_file")) for game in genre_games if game.metadata.get("source_file")}),
+                        "source_files": sorted({str(game.metadata.get("source_file")) for game in unique_games if game.metadata.get("source_file")}),
                     },
                     tags=["steam", "genre", genre],
-                    created_at=min(game.created_at for game in genre_games),
-                    updated_at=max(game.updated_at for game in genre_games),
+                    created_at=min(game.created_at for game in unique_games),
+                    updated_at=max(game.updated_at for game in unique_games),
                 )
             )
         return units
@@ -212,11 +213,13 @@ class SteamLibraryCsvAdapter(SourceAdapter):
     def _genre_edges(self, genres: list[KnowledgeUnit], games: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
         genre_ids = {str(genre.metadata.get("genre")): genre.source_id for genre in genres}
         edges: list[KnowledgeEdge] = []
+        seen: set[tuple[str, str]] = set()
         for game in games:
             for genre in game.metadata.get("genres") or []:
                 genre_id = genre_ids.get(str(genre))
-                if not genre_id:
+                if not genre_id or (genre_id, game.source_id) in seen:
                     continue
+                seen.add((genre_id, game.source_id))
                 digest = hashlib.sha256("|".join((genre_id, game.source_id, "genre_contains_game")).encode("utf-8")).hexdigest()[:24]
                 edges.append(
                     KnowledgeEdge(
