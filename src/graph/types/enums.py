@@ -92,6 +92,7 @@ class SourceProject(StrEnum):
     APPLE_REMINDERS_CSV = "apple_reminders_csv"
     APPLE_MUSIC_LIBRARY_CSV = "apple_music_library_csv"
     APPLE_PODCASTS_HISTORY_CSV = "apple_podcasts_history_csv"
+    POCKET_CASTS_LISTENING_HISTORY_CSV = "pocket_casts_listening_history_csv"
     OPENLIBRARY_READING_LOG_CSV = "openlibrary_reading_log_csv"
     FOURSQUARE_CHECKINS_CSV = "foursquare_checkins_csv"
     DAY_ONE_JSON = "day_one_json"
