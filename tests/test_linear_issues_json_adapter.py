@@ -204,7 +204,7 @@ def test_linear_issues_json_ingests_team_and_project_aggregates(tmp_path):
     aggregates_only = LinearIssuesJsonAdapter(path=str(export)).ingest(entity_types=["team", "project"])
     combined = LinearIssuesJsonAdapter(path=str(export)).ingest(entity_types=["issue", "team", "project"])
 
-    assert LinearIssuesJsonAdapter().entity_types == ["issue", "team", "project"]
+    assert LinearIssuesJsonAdapter().entity_types == ["issue", "team", "project", "label"]
     aggregates = {(unit.source_entity_type, unit.metadata["name"]): unit for unit in aggregates_only.units}
     team = aggregates[("team", "Import Team")]
     project = aggregates[("project", "Graph")]
@@ -216,3 +216,48 @@ def test_linear_issues_json_ingests_team_and_project_aggregates(tmp_path):
 
     aggregate_edges = [edge for edge in combined.edges if edge.metadata["kind"] in {"team", "project"}]
     assert len(aggregate_edges) == 4
+
+
+def test_linear_issues_json_ingests_label_aggregates_and_edges(tmp_path):
+    export = tmp_path / "linear.json"
+    export.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "a",
+                    "identifier": "LIN-12",
+                    "title": "First labeled issue",
+                    "team": {"name": "Import Team"},
+                    "project": {"name": "Graph"},
+                    "labels": [{"name": "Backend"}, {"name": "Import"}],
+                    "updatedAt": "2026-05-02T00:00:00Z",
+                },
+                {
+                    "id": "b",
+                    "identifier": "LIN-13",
+                    "title": "Second labeled issue",
+                    "team": {"name": "Import Team"},
+                    "project": {"name": "Graph"},
+                    "labels": ["Backend"],
+                    "updatedAt": "2026-05-03T00:00:00Z",
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    labels_only = LinearIssuesJsonAdapter(path=str(export)).ingest(entity_types=["label"])
+    combined = LinearIssuesJsonAdapter(path=str(export)).ingest(entity_types=["issue", "label"])
+
+    assert [unit.source_entity_type for unit in labels_only.units] == ["label", "label"]
+    labels = {unit.metadata["label"]: unit for unit in labels_only.units}
+    assert sorted(labels) == ["Backend", "Import"]
+    backend = labels["Backend"]
+    assert backend.metadata["issue_source_ids"] == ["linear_issues_json:a", "linear_issues_json:b"]
+    assert backend.metadata["issue_count"] == 2
+    assert backend.metadata["teams"] == ["Import Team"]
+    assert backend.metadata["projects"] == ["Graph"]
+    assert labels_only.edges == []
+
+    label_edges = [edge for edge in combined.edges if edge.metadata["kind"] == "label"]
+    assert len(label_edges) == 3

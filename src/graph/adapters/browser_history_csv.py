@@ -22,7 +22,7 @@ class BrowserHistoryCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["web_history", "domain"]
+        return ["web_history", "domain", "visit_hour"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -34,7 +34,7 @@ class BrowserHistoryCsvAdapter(SourceAdapter):
         entity_types: list[str] | None = None,
     ) -> IngestResult:
         result = IngestResult()
-        allowed_types = set(entity_types or self.entity_types)
+        allowed_types = set(entity_types) if entity_types is not None else {"web_history", "domain"}
         if not allowed_types.intersection(self.entity_types):
             return result
 
@@ -57,13 +57,18 @@ class BrowserHistoryCsvAdapter(SourceAdapter):
 
         web_history_units = sorted(units.values(), key=lambda unit: unit.source_id)
         domain_units = self._domain_units(web_history_units) if "domain" in allowed_types else []
+        visit_hour_units = self._visit_hour_units(web_history_units) if "visit_hour" in allowed_types else []
 
         if "web_history" in allowed_types:
             result.units.extend(web_history_units)
         if "domain" in allowed_types:
             result.units.extend(domain_units)
+        if "visit_hour" in allowed_types:
+            result.units.extend(visit_hour_units)
         if {"web_history", "domain"}.issubset(allowed_types):
             result.edges.extend(self._domain_edges(web_history_units, domain_units))
+        if {"web_history", "visit_hour"}.issubset(allowed_types):
+            result.edges.extend(self._visit_hour_edges(web_history_units, visit_hour_units))
 
         result.units.sort(key=lambda unit: unit.source_id)
         result.edges.sort(key=lambda edge: edge.id)
@@ -294,6 +299,90 @@ class BrowserHistoryCsvAdapter(SourceAdapter):
         raw = "|".join([SourceProject.BROWSER_HISTORY_CSV.value, visit_source_id, domain_source_id])
         digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
         return f"browser-history-csv-domain-{digest}"
+
+    def _visit_hour_units(self, units: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        for unit in units:
+            for hour in self._visit_hours(unit):
+                grouped.setdefault(hour, []).append(unit)
+
+        hour_units: list[KnowledgeUnit] = []
+        for hour, visits in sorted(grouped.items()):
+            ordered = sorted({unit.source_id: unit for unit in visits}.values(), key=lambda unit: unit.source_id)
+            parsed_hour = self._parse_datetime(hour)
+            created_at = parsed_hour or min(unit.created_at for unit in ordered)
+            updated_at = max(unit.updated_at for unit in ordered)
+            hour_units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.BROWSER_HISTORY_CSV,
+                    source_id=self._visit_hour_source_id(hour),
+                    source_entity_type="visit_hour",
+                    title=hour,
+                    content=f"Browser history visit hour: {hour}\nVisits: {len(ordered)}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "visit_hour": hour,
+                        "visit_count": len(ordered),
+                        "page_source_ids": [unit.source_id for unit in ordered],
+                        "domains": sorted({str(unit.metadata.get("domain")) for unit in ordered if unit.metadata.get("domain")}),
+                        "source_files": sorted({str(unit.metadata.get("source_file")) for unit in ordered if unit.metadata.get("source_file")}),
+                    },
+                    created_at=created_at,
+                    updated_at=updated_at,
+                )
+            )
+        return hour_units
+
+    def _visit_hour_edges(
+        self,
+        web_history_units: list[KnowledgeUnit],
+        visit_hour_units: list[KnowledgeUnit],
+    ) -> list[KnowledgeEdge]:
+        hour_source_ids = {str(unit.metadata.get("visit_hour")): unit.source_id for unit in visit_hour_units}
+        edges: list[KnowledgeEdge] = []
+        for unit in web_history_units:
+            for hour in self._visit_hours(unit):
+                hour_source_id = hour_source_ids.get(hour)
+                if not hour_source_id:
+                    continue
+                edges.append(
+                    KnowledgeEdge(
+                        id=self._visit_hour_edge_id(unit.source_id, hour_source_id),
+                        from_unit_id=unit.source_id,
+                        to_unit_id=hour_source_id,
+                        relation=EdgeRelation.RELATES_TO,
+                        source=EdgeSource.SOURCE,
+                        metadata={
+                            "source_project": SourceProject.BROWSER_HISTORY_CSV.value,
+                            "from_entity_type": "web_history",
+                            "to_entity_type": "visit_hour",
+                            "relation_type": "visit_hour",
+                            "visit_hour": hour,
+                        },
+                        created_at=unit.created_at,
+                    )
+                )
+        return edges
+
+    def _visit_hours(self, unit: KnowledgeUnit) -> list[str]:
+        hours: list[str] = []
+        for timestamp in unit.metadata.get("visit_timestamps") or []:
+            parsed = self._parse_datetime(timestamp)
+            if parsed is None:
+                continue
+            hour = parsed.replace(minute=0, second=0, microsecond=0).isoformat()
+            if hour not in hours:
+                hours.append(hour)
+        return hours
+
+    def _visit_hour_source_id(self, hour: str) -> str:
+        digest = hashlib.sha256(hour.encode("utf-8")).hexdigest()[:24]
+        return f"browser_history_csv:visit_hour:{digest}"
+
+    def _visit_hour_edge_id(self, visit_source_id: str, hour_source_id: str) -> str:
+        raw = "|".join([SourceProject.BROWSER_HISTORY_CSV.value, "visit_hour", visit_source_id, hour_source_id])
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+        return f"browser-history-csv-visit-hour-{digest}"
 
     def _content(self, title: str, normalized_url: str) -> str:
         return "\n".join([title, f"URL: {normalized_url}"])

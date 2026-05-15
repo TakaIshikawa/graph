@@ -237,3 +237,62 @@ def test_hacker_news_saved_submitter_filtering(tmp_path):
     assert submitter_only.edges == []
     assert [unit.source_entity_type for unit in item_only.units] == ["saved_item"]
     assert item_only.edges == []
+
+
+def test_hacker_news_saved_emits_domain_units_and_edges(tmp_path):
+    path = tmp_path / "saved.json"
+    path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": 1,
+                    "title": "One",
+                    "url": "https://www.example.com/one",
+                    "by": "pg",
+                    "type": "story",
+                    "time": 1735689600,
+                },
+                {
+                    "id": 2,
+                    "title": "Two",
+                    "url": "example.com/two",
+                    "by": "dang",
+                    "type": "story",
+                    "time": 1735689601,
+                },
+                {
+                    "id": 3,
+                    "title": "HN item",
+                    "url": "https://news.ycombinator.com/item?id=3",
+                    "by": "pg",
+                    "type": "story",
+                    "time": 1735689602,
+                },
+                {
+                    "id": 4,
+                    "title": "No URL",
+                    "by": "pg",
+                    "time": 1735689603,
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    domains_only = HackerNewsSavedAdapter(path=str(path)).ingest(entity_types=["domain"])
+    combined = HackerNewsSavedAdapter(path=str(path)).ingest(entity_types=["saved_item", "domain"])
+
+    assert HackerNewsSavedAdapter().entity_types == ["saved_item", "submitter", "domain"]
+    assert [unit.source_entity_type for unit in domains_only.units] == ["domain"]
+    domain = domains_only.units[0]
+    assert domain.metadata["domain"] == "example.com"
+    assert domain.metadata["item_count"] == 2
+    assert domain.metadata["item_source_ids"] == ["hacker_news_saved:1", "hacker_news_saved:2"]
+    assert domain.metadata["submitters"] == ["dang", "pg"]
+    assert domains_only.edges == []
+
+    domain_edges = [edge for edge in combined.edges if edge.metadata["relation_type"] == "saved_item_domain"]
+    assert len(domain_edges) == 2
+    assert {edge.to_unit_id for edge in domain_edges} == {domain.source_id}
+    assert {edge.relation for edge in domain_edges} == {EdgeRelation.RELATES_TO}
+    assert {edge.source for edge in domain_edges} == {EdgeSource.SOURCE}

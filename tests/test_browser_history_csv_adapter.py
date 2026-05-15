@@ -192,3 +192,32 @@ def test_browser_history_csv_preserves_supported_referrer_columns(tmp_path):
     assert units["One"].metadata["referrer_url"] == "https://search.example/?q=one"
     assert units["Two"].metadata["referrer_url"] == "https://example.com/one"
     assert "referrer_url" not in units["Three"].metadata
+
+
+def test_browser_history_csv_emits_visit_hour_aggregates_and_edges(tmp_path):
+    csv_path = tmp_path / "history.csv"
+    csv_path.write_text(
+        "url,title,visit_time,last_visit_time\n"
+        "https://example.com/one,One,2025-04-24T12:15:00Z,2025-04-24T12:45:00Z\n"
+        "https://example.com/two,Two,2025-04-24T13:05:00Z,\n"
+        "https://example.com/unknown,Unknown,not a date,\n",
+        encoding="utf-8",
+    )
+
+    hours_only = BrowserHistoryCsvAdapter(path=str(csv_path)).ingest(entity_types=["visit_hour"])
+    combined = BrowserHistoryCsvAdapter(path=str(csv_path)).ingest(entity_types=["web_history", "visit_hour"])
+
+    assert BrowserHistoryCsvAdapter().entity_types == ["web_history", "domain", "visit_hour"]
+    hours = {unit.metadata["visit_hour"]: unit for unit in hours_only.units}
+    assert sorted(hours) == [
+        "2025-04-24T12:00:00+00:00",
+        "2025-04-24T13:00:00+00:00",
+    ]
+    assert hours["2025-04-24T12:00:00+00:00"].metadata["visit_count"] == 1
+    assert hours["2025-04-24T13:00:00+00:00"].metadata["visit_count"] == 1
+    assert hours_only.edges == []
+
+    hour_edges = [edge for edge in combined.edges if edge.metadata["relation_type"] == "visit_hour"]
+    assert len(hour_edges) == 2
+    assert {edge.relation for edge in hour_edges} == {EdgeRelation.RELATES_TO}
+    assert {edge.source for edge in hour_edges} == {EdgeSource.SOURCE}
