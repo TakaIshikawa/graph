@@ -84,6 +84,7 @@ from graph.adapters.apple_notes_export import AppleNotesExportAdapter
 from graph.adapters.apple_health_workouts import AppleHealthWorkoutsAdapter
 from graph.adapters.apple_music_library_csv import AppleMusicLibraryCsvAdapter
 from graph.adapters.apple_podcasts_history_csv import ApplePodcastsHistoryCsvAdapter
+from graph.adapters.overcast_starred_episodes_json import OvercastStarredEpisodesJsonAdapter
 from graph.adapters.pocket_casts_listening_history_csv import PocketCastsListeningHistoryCsvAdapter
 from graph.adapters.apple_reminders_csv import AppleRemindersCsvAdapter
 from graph.adapters.day_one_json import DayOneJsonAdapter
@@ -206,6 +207,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "apple_health_workouts": AppleHealthWorkoutsAdapter,
     "apple_music_library_csv": AppleMusicLibraryCsvAdapter,
     "apple_podcasts_history_csv": ApplePodcastsHistoryCsvAdapter,
+    "overcast_starred_episodes_json": OvercastStarredEpisodesJsonAdapter,
     "pocket_casts_listening_history_csv": PocketCastsListeningHistoryCsvAdapter,
     "apple_reminders_csv": AppleRemindersCsvAdapter,
     "day_one_json": DayOneJsonAdapter,
