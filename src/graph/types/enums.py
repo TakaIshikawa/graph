@@ -126,6 +126,7 @@ class SourceProject(StrEnum):
     KOBO_HIGHLIGHTS_CSV = "kobo_highlights_csv"
     INATURALIST_OBSERVATIONS_CSV = "inaturalist_observations_csv"
     REDDIT_SAVED_JSON = "reddit_saved_json"
+    RSS_READER_STARRED_JSON = "rss_reader_starred_json"
     ARCHIVEBOX_INDEX_JSON = "archivebox_index_json"
     BLUESKY_ARCHIVE = "bluesky_archive"
     REDDIT_SAVED_CSV = "reddit_saved_csv"

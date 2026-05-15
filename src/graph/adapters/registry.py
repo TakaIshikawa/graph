@@ -127,6 +127,7 @@ from graph.adapters.rescuetime import RescueTimeAdapter
 from graph.adapters.toggl import TogglAdapter
 from graph.adapters.wakatime import WakaTimeAdapter
 from graph.adapters.roam import RoamAdapter
+from graph.adapters.rss_reader_starred_json import RssReaderStarredJsonAdapter
 from graph.adapters.safari_bookmarks import SafariBookmarksAdapter
 from graph.adapters.safari_history import SafariHistoryAdapter
 from graph.adapters.slack_json import SlackJsonAdapter
@@ -308,6 +309,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "boardgamegeek_collection_csv": BoardGameGeekCollectionCsvAdapter,
     "reddit_saved_csv": RedditSavedCsvAdapter,
     "reddit_saved_json": RedditSavedJsonAdapter,
+    "rss_reader_starred_json": RssReaderStarredJsonAdapter,
     "archivebox_index_json": ArchiveBoxIndexJsonAdapter,
     "asana_tasks_csv": AsanaTasksCsvAdapter,
     "strava_activities_json": StravaActivitiesJsonAdapter,
