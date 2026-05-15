@@ -25,7 +25,7 @@ class SlackJsonAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["slack_message", "reaction", "slack_thread", "slack_channel"]
+        return ["slack_message", "reaction", "slack_thread", "slack_channel", "user"]
 
     def __init__(self, path: str = "", *, root_path: str = "") -> None:
         self.path = path or root_path
@@ -58,7 +58,7 @@ class SlackJsonAdapter(SourceAdapter):
                 message_emitted = "slack_message" in allowed
                 if message_emitted:
                     result.units.append(unit)
-                if message_emitted or "slack_channel" in allowed or "slack_thread" in allowed:
+                if message_emitted or "slack_channel" in allowed or "slack_thread" in allowed or "user" in allowed:
                     message_units.append(unit)
                 reaction_units = self._reaction_units(message, unit)
                 if "reaction" in allowed:
@@ -77,6 +77,11 @@ class SlackJsonAdapter(SourceAdapter):
             result.units.extend(channel_units)
             if "slack_message" in allowed:
                 result.edges.extend(self._channel_edges(channel_units, message_units))
+        if "user" in allowed:
+            user_units = self._user_units(message_units)
+            result.units.extend(user_units)
+            if "slack_message" in allowed:
+                result.edges.extend(self._user_edges(user_units, message_units))
         result.edges.sort(key=lambda edge: (edge.from_unit_id, edge.to_unit_id, edge.id))
         return result
 
@@ -129,6 +134,7 @@ class SlackJsonAdapter(SourceAdapter):
             updated_at = created_at
 
         user = self._user(message)
+        user_metadata = self._user_metadata(message, user)
         thread_ts = self._string(message.get("thread_ts"))
         links = self._extract_links(text)
         source_path = self._relative_path(path, root)
@@ -136,6 +142,9 @@ class SlackJsonAdapter(SourceAdapter):
         metadata: dict[str, Any] = {
             "channel": channel,
             "user": user,
+            "user_id": user_metadata.get("user_id"),
+            "user_display_name": user_metadata.get("display_name"),
+            "user_profile": user_metadata,
             "ts": ts,
             "datetime": created_at.isoformat(),
             "source_path": source_path,
@@ -278,6 +287,26 @@ class SlackJsonAdapter(SourceAdapter):
                 if value:
                     return value
         return ""
+
+    def _user_metadata(self, message: dict[str, Any], user: str) -> dict[str, Any]:
+        profile = message.get("user_profile")
+        profile_data = profile if isinstance(profile, dict) else {}
+        display_name = (
+            self._string(profile_data.get("display_name"))
+            or self._string(profile_data.get("real_name"))
+            or self._string(profile_data.get("name"))
+            or self._string(message.get("username"))
+            or user
+        )
+        metadata = {
+            "user_id": self._string(message.get("user") or message.get("bot_id") or user),
+            "username": self._string(message.get("username") or profile_data.get("name")),
+            "display_name": display_name,
+            "real_name": self._string(profile_data.get("real_name")),
+            "bot_id": self._string(message.get("bot_id")),
+            "is_bot": bool(message.get("bot_id") or message.get("subtype") == "bot_message"),
+        }
+        return {key: value for key, value in metadata.items() if value not in ("", None)}
 
     def _readable_text(self, text: str) -> str:
         text = SLACK_LINK_RE.sub(
@@ -498,6 +527,74 @@ class SlackJsonAdapter(SourceAdapter):
             )
         return edges
 
+    def _user_units(self, units: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        for unit in units:
+            key = self._user_key(unit)
+            if key:
+                grouped.setdefault(key, []).append(unit)
+
+        users: list[KnowledgeUnit] = []
+        for key, user_messages in sorted(grouped.items()):
+            ordered = sorted(user_messages, key=lambda unit: (unit.created_at, self._string(unit.metadata.get("ts")), unit.source_id))
+            profile = ordered[0].metadata.get("user_profile") if isinstance(ordered[0].metadata.get("user_profile"), dict) else {}
+            user_profile = profile if isinstance(profile, dict) else {}
+            display_name = self._string(user_profile.get("display_name") or ordered[0].metadata.get("user") or key)
+            channels = sorted({self._string(unit.metadata.get("channel")) for unit in ordered if self._string(unit.metadata.get("channel"))})
+            users.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.SLACK_JSON,
+                    source_id=self._user_source_id(key),
+                    source_entity_type="user",
+                    title=display_name,
+                    content=f"Slack user: {display_name}\nMessages: {len(ordered)}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "user": self._string(user_profile.get("user_id") or ordered[0].metadata.get("user")),
+                        "user_key": key,
+                        "user_profile": user_profile,
+                        "message_count": len(ordered),
+                        "message_source_ids": [unit.source_id for unit in ordered],
+                        "channels": channels,
+                        "first_message_at": ordered[0].created_at.isoformat(),
+                        "last_message_at": ordered[-1].created_at.isoformat(),
+                    },
+                    tags=["slack", "user"],
+                    created_at=ordered[0].created_at,
+                    updated_at=max(unit.updated_at for unit in ordered),
+                )
+            )
+        return users
+
+    def _user_edges(self, users: list[KnowledgeUnit], messages: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        user_ids = {self._string(user.metadata.get("user_key")): user.source_id for user in users}
+        edges: list[KnowledgeEdge] = []
+        for message in messages:
+            key = self._user_key(message)
+            user_id = user_ids.get(key)
+            if not user_id:
+                continue
+            edges.append(
+                KnowledgeEdge(
+                    id=self._user_edge_id(message.source_id, user_id),
+                    from_unit_id=message.source_id,
+                    to_unit_id=user_id,
+                    relation=EdgeRelation.RELATES_TO,
+                    source=EdgeSource.SOURCE,
+                    metadata={
+                        "source_project": SourceProject.SLACK_JSON.value,
+                        "from_entity_type": "slack_message",
+                        "to_entity_type": "user",
+                        "relation_type": "message_user",
+                        "channel": self._string(message.metadata.get("channel")),
+                        "message_ts": self._string(message.metadata.get("ts")),
+                        "user": self._string(message.metadata.get("user")),
+                    },
+                    created_at=message.created_at,
+                )
+            )
+        return edges
+
     def _edge_id(self, from_id: str, to_id: str) -> str:
         raw = "|".join(
             [SourceProject.SLACK_JSON.value, EdgeRelation.REPLIES_TO.value, from_id, to_id]
@@ -531,6 +628,20 @@ class SlackJsonAdapter(SourceAdapter):
         )
         digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
         return f"slack-json-channel-contains-{digest[:16]}"
+
+    def _user_key(self, unit: KnowledgeUnit) -> str:
+        profile = unit.metadata.get("user_profile") if isinstance(unit.metadata.get("user_profile"), dict) else {}
+        user_id = self._string(unit.metadata.get("user_id") or (profile or {}).get("user_id") or unit.metadata.get("user"))
+        return user_id.casefold()
+
+    def _user_source_id(self, user_key: str) -> str:
+        digest = hashlib.sha256(user_key.encode("utf-8")).hexdigest()[:24]
+        return f"slack_json:user:{digest}"
+
+    def _user_edge_id(self, from_id: str, to_id: str) -> str:
+        raw = "|".join([SourceProject.SLACK_JSON.value, "user", EdgeRelation.RELATES_TO.value, from_id, to_id])
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        return f"slack-json-user-relates-{digest[:16]}"
 
     def _thread_summary_content(self, units: list[KnowledgeUnit]) -> str:
         lines: list[str] = []

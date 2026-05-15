@@ -243,7 +243,7 @@ def test_discord_json_adapter_emits_attachment_units_and_source_edges(tmp_path):
 
     result = DiscordJsonAdapter(path=str(export_path)).ingest()
 
-    assert DiscordJsonAdapter(path=str(export_path)).entity_types == ["discord_message", "discord_attachment", "discord_channel"]
+    assert DiscordJsonAdapter(path=str(export_path)).entity_types == ["discord_message", "discord_attachment", "discord_channel", "discord_author"]
     assert [unit.source_entity_type for unit in result.units] == ["discord_message", "discord_attachment"]
     attachment = result.units[1]
     assert attachment.source_id == "discord_json:channel-1:400:attachment:att-1"
@@ -417,3 +417,50 @@ def test_discord_json_adapter_channel_entity_filtering(tmp_path):
 
     assert [unit.source_entity_type for unit in result.units] == ["discord_channel"]
     assert result.edges == []
+
+
+def test_discord_json_adapter_emits_author_aggregate_and_edges(tmp_path):
+    export_path = tmp_path / "general.json"
+    export_path.write_text(
+        json.dumps(
+            {
+                "guild": {"id": "guild-1", "name": "Research Lab"},
+                "channel": {"id": "channel-1", "name": "general"},
+                "messages": [
+                    {
+                        "id": "600",
+                        "timestamp": "2026-04-04T10:00:00Z",
+                        "content": "First.",
+                        "author": {"id": "user-1", "username": "alice", "globalName": "Alice A."},
+                    },
+                    {
+                        "id": "601",
+                        "timestamp": "2026-04-04T10:05:00Z",
+                        "content": "Second.",
+                        "author": {"id": "user-1", "username": "alice", "globalName": "Alice A."},
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    authors_only = DiscordJsonAdapter(path=str(export_path)).ingest(entity_types=["discord_author"])
+    combined = DiscordJsonAdapter(path=str(export_path)).ingest(entity_types=["discord_message", "discord_author"])
+
+    assert [unit.source_entity_type for unit in authors_only.units] == ["discord_author"]
+    author = authors_only.units[0]
+    assert author.title == "Alice A."
+    assert author.metadata["author"]["id"] == "user-1"
+    assert author.metadata["message_count"] == 2
+    assert author.metadata["message_source_ids"] == [
+        "discord_json:channel-1:600",
+        "discord_json:channel-1:601",
+    ]
+    assert author.metadata["channels"] == ["general"]
+    assert authors_only.edges == []
+
+    author_edges = [edge for edge in combined.edges if edge.metadata.get("relation_type") == "discord_message_author"]
+    assert len(author_edges) == 2
+    assert {edge.to_unit_id for edge in author_edges} == {author.source_id}
+    assert {edge.relation for edge in author_edges} == {EdgeRelation.RELATES_TO}

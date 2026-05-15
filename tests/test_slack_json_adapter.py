@@ -388,6 +388,7 @@ def test_slack_json_emits_channel_aggregate_and_edges(tmp_path):
     result = SlackJsonAdapter(path=str(channel)).ingest(entity_types=["slack_message", "slack_channel"])
 
     assert "slack_channel" in SlackJsonAdapter(path=str(channel)).entity_types
+    assert "user" in SlackJsonAdapter(path=str(channel)).entity_types
     aggregate = next(unit for unit in result.units if unit.source_entity_type == "slack_channel")
     messages = [unit for unit in result.units if unit.source_entity_type == "slack_message"]
     assert aggregate.source_id == "slack_json:channel:research"
@@ -413,3 +414,51 @@ def test_slack_json_channel_entity_filtering(tmp_path):
 
     assert [unit.source_entity_type for unit in result.units] == ["slack_channel"]
     assert result.edges == []
+
+
+def test_slack_json_emits_user_aggregates_and_edges(tmp_path):
+    export = tmp_path / "general.json"
+    _write_json(
+        export,
+        [
+            {
+                "type": "message",
+                "user": "U1",
+                "text": "First",
+                "ts": "1712300000.000001",
+                "user_profile": {"display_name": "Ada", "real_name": "Ada Lovelace"},
+            },
+            {
+                "type": "message",
+                "user": "U1",
+                "text": "Second",
+                "ts": "1712400000.000002",
+                "user_profile": {"display_name": "Ada", "real_name": "Ada Lovelace"},
+            },
+            {
+                "type": "message",
+                "bot_id": "B1",
+                "username": "buildbot",
+                "text": "Bot message",
+                "ts": "1712500000.000003",
+            },
+        ],
+    )
+
+    users_only = SlackJsonAdapter(path=str(export)).ingest(entity_types=["user"])
+    combined = SlackJsonAdapter(path=str(export)).ingest(entity_types=["slack_message", "user"])
+
+    users = {unit.metadata["user"]: unit for unit in users_only.units}
+    assert sorted(users) == ["B1", "U1"]
+    assert users["U1"].title == "Ada"
+    assert users["U1"].metadata["user_profile"]["display_name"] == "Ada"
+    assert users["U1"].metadata["user_profile"]["real_name"] == "Ada Lovelace"
+    assert users["U1"].metadata["message_count"] == 2
+    assert users["B1"].metadata["user_profile"]["display_name"] == "buildbot"
+    assert users["B1"].metadata["user_profile"]["is_bot"] is True
+    assert users_only.edges == []
+
+    user_edges = [edge for edge in combined.edges if edge.metadata.get("relation_type") == "message_user"]
+    assert len(user_edges) == 3
+    assert {edge.relation for edge in user_edges} == {EdgeRelation.RELATES_TO}
+    assert {edge.source for edge in user_edges} == {EdgeSource.SOURCE}

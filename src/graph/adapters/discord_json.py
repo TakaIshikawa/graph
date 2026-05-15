@@ -20,7 +20,7 @@ class DiscordJsonAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["discord_message", "discord_attachment", "discord_channel"]
+        return ["discord_message", "discord_attachment", "discord_channel", "discord_author"]
 
     def __init__(self, path: str = "", *, root_path: str = "") -> None:
         self.path = path or root_path
@@ -36,7 +36,8 @@ class DiscordJsonAdapter(SourceAdapter):
         include_messages = "discord_message" in requested_types
         include_attachments = "discord_attachment" in requested_types
         include_channels = "discord_channel" in requested_types
-        if not include_messages and not include_attachments and not include_channels:
+        include_authors = "discord_author" in requested_types
+        if not include_messages and not include_attachments and not include_channels and not include_authors:
             return result
 
         root = Path(self.path).expanduser()
@@ -58,7 +59,7 @@ class DiscordJsonAdapter(SourceAdapter):
                 if include_record and include_messages:
                     result.units.append(unit)
                     references_by_source_id[unit.source_id] = self._references(record["message"])
-                if include_record and (include_messages or include_channels):
+                if include_record and (include_messages or include_channels or include_authors):
                     message_units.append(unit)
                 if include_record and include_attachments:
                     result.units.extend(attachment_units)
@@ -121,6 +122,11 @@ class DiscordJsonAdapter(SourceAdapter):
             result.units.extend(channel_units)
             if include_messages:
                 result.edges.extend(self._channel_edges(channel_units, message_units))
+        if include_authors:
+            author_units = self._author_units(message_units)
+            result.units.extend(author_units)
+            if include_messages:
+                result.edges.extend(self._author_edges(author_units, message_units))
 
         result.units.sort(key=lambda unit: (unit.created_at, unit.source_id))
         result.edges.sort(key=lambda edge: (edge.from_unit_id, edge.to_unit_id, edge.id))
@@ -406,6 +412,74 @@ class DiscordJsonAdapter(SourceAdapter):
             )
         return edges
 
+    def _author_units(self, messages: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        for message in messages:
+            key = self._author_key(message.metadata.get("author"))
+            if key:
+                grouped.setdefault(key, []).append(message)
+
+        units: list[KnowledgeUnit] = []
+        for key, author_messages in sorted(grouped.items()):
+            ordered = sorted(author_messages, key=lambda unit: (unit.created_at, self._string(unit.metadata.get("message_id")), unit.source_id))
+            first_author = ordered[0].metadata.get("author") if isinstance(ordered[0].metadata.get("author"), dict) else {}
+            author = first_author if isinstance(first_author, dict) else {}
+            display_name = self._string(author.get("display_name") or author.get("username") or author.get("id") or key)
+            channels = sorted({self._string(unit.metadata.get("channel_name") or unit.metadata.get("channel_id")) for unit in ordered if self._string(unit.metadata.get("channel_name") or unit.metadata.get("channel_id"))})
+            servers = sorted({self._string(unit.metadata.get("server_name") or unit.metadata.get("server_id")) for unit in ordered if self._string(unit.metadata.get("server_name") or unit.metadata.get("server_id"))})
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.DISCORD_JSON,
+                    source_id=self._author_source_id(key),
+                    source_entity_type="discord_author",
+                    title=display_name,
+                    content=f"Discord author: {display_name}\nMessages: {len(ordered)}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "author": author,
+                        "author_key": key,
+                        "message_count": len(ordered),
+                        "message_source_ids": [unit.source_id for unit in ordered],
+                        "channels": channels,
+                        "servers": servers,
+                        "first_message_at": ordered[0].created_at.isoformat(),
+                        "last_message_at": ordered[-1].created_at.isoformat(),
+                    },
+                    tags=["discord", "discord-author"],
+                    created_at=ordered[0].created_at,
+                    updated_at=max(unit.updated_at for unit in ordered),
+                )
+            )
+        return units
+
+    def _author_edges(self, authors: list[KnowledgeUnit], messages: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        author_ids = {self._string(author.metadata.get("author_key")): author.source_id for author in authors}
+        edges: list[KnowledgeEdge] = []
+        for message in messages:
+            key = self._author_key(message.metadata.get("author"))
+            author_id = author_ids.get(key)
+            if not author_id:
+                continue
+            edges.append(
+                KnowledgeEdge(
+                    id=self._edge_id(message.source_id, author_id, "discord_message_author"),
+                    from_unit_id=message.source_id,
+                    to_unit_id=author_id,
+                    relation=EdgeRelation.RELATES_TO,
+                    source=EdgeSource.SOURCE,
+                    metadata={
+                        "source_project": SourceProject.DISCORD_JSON.value,
+                        "from_entity_type": "discord_message",
+                        "to_entity_type": "discord_author",
+                        "relation_type": "discord_message_author",
+                        "message_id": self._string(message.metadata.get("message_id")),
+                        "author_key": key,
+                    },
+                    created_at=message.created_at,
+                )
+            )
+        return edges
+
     def _context_from_payload(self, payload: dict[str, Any]) -> dict[str, str]:
         guild = payload.get("guild") or payload.get("server") or {}
         channel = payload.get("channel") or {}
@@ -476,6 +550,15 @@ class DiscordJsonAdapter(SourceAdapter):
             "discriminator": self._first(value, "discriminator"),
             "bot": str(value.get("bot", "")).lower() if value.get("bot") is not None else "",
         }
+
+    def _author_key(self, value: Any) -> str:
+        if not isinstance(value, dict):
+            return ""
+        return self._string(value.get("id") or value.get("username") or value.get("display_name")).casefold()
+
+    def _author_source_id(self, author_key: str) -> str:
+        digest = hashlib.sha1(author_key.encode("utf-8")).hexdigest()[:16]
+        return f"discord_json:author:{digest}"
 
     def _attachments(self, value: Any) -> list[dict[str, Any]]:
         if not isinstance(value, list):

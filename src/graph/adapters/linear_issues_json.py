@@ -21,7 +21,7 @@ class LinearIssuesJsonAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["issue", "team", "project"]
+        return ["issue", "team", "project", "label"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -68,6 +68,8 @@ class LinearIssuesJsonAdapter(SourceAdapter):
             aggregate_units.extend(self._aggregate_units("team", issue_units))
         if "project" in requested:
             aggregate_units.extend(self._aggregate_units("project", issue_units))
+        if "label" in requested:
+            aggregate_units.extend(self._label_units(issue_units))
         result.units.extend(aggregate_units)
         if "issue" in requested:
             aggregate_ids = {(unit.source_entity_type, unit.metadata["name"]): unit.source_id for unit in aggregate_units}
@@ -77,6 +79,10 @@ class LinearIssuesJsonAdapter(SourceAdapter):
                     target_id = aggregate_ids.get((kind, value))
                     if target_id:
                         result.edges.append(self._edge(issue.source_id, target_id, kind, EdgeRelation.RELATES_TO))
+                for label in issue.metadata.get("labels", []):
+                    target_id = aggregate_ids.get(("label", label))
+                    if target_id:
+                        result.edges.append(self._edge(issue.source_id, target_id, "label", EdgeRelation.RELATES_TO))
         result.units.sort(key=lambda unit: unit.source_id)
         result.edges = sorted({edge.id: edge for edge in result.edges}.values(), key=lambda edge: edge.id)
         return result
@@ -201,6 +207,47 @@ class LinearIssuesJsonAdapter(SourceAdapter):
     def _aggregate_source_id(self, entity_type: str, name: str) -> str:
         digest = hashlib.sha256(name.casefold().encode("utf-8")).hexdigest()[:24]
         return f"linear_issues_json:{entity_type}:{digest}"
+
+    def _label_units(self, issues: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        for issue in issues:
+            for label in issue.metadata.get("labels") or []:
+                name = self._text(label)
+                if name:
+                    grouped.setdefault(name, []).append(issue)
+
+        units: list[KnowledgeUnit] = []
+        now = datetime.now(timezone.utc)
+        for name, linked_issues in grouped.items():
+            created_at = min((issue.created_at for issue in linked_issues), default=now)
+            updated_at = max((issue.updated_at for issue in linked_issues), default=created_at)
+            source_ids = sorted({issue.source_id for issue in linked_issues})
+            teams = sorted({team for issue in linked_issues if (team := self._text(issue.metadata.get("team")))})
+            projects = sorted({project for issue in linked_issues if (project := self._text(issue.metadata.get("project")))})
+            metadata = {
+                "name": name,
+                "label": name,
+                "issue_source_ids": source_ids,
+                "issue_count": len(source_ids),
+                "teams": teams,
+                "projects": projects,
+                "latest_updated_at": updated_at.isoformat(),
+            }
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.LINEAR_ISSUES_JSON,
+                    source_id=self._aggregate_source_id("label", name),
+                    source_entity_type="label",
+                    title=f"Linear label: {name}",
+                    content=f"Linear label: {name}\nIssues: {len(source_ids)}",
+                    content_type=ContentType.METADATA,
+                    metadata=clean_metadata(metadata),
+                    tags=["linear", "label", name],
+                    created_at=created_at,
+                    updated_at=updated_at,
+                )
+            )
+        return units
 
     def _content(self, title: str, description: str, metadata: dict[str, Any], comments: list[dict[str, Any]] | None = None) -> str:
         parts = [item for item in (title, description) if item]

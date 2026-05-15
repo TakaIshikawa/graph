@@ -183,7 +183,7 @@ def test_github_issues_json_ingests_label_aggregates_and_edges(tmp_path):
     labels_only = GithubIssuesJsonAdapter(path=str(export)).ingest(entity_types=["label"])
     combined = GithubIssuesJsonAdapter(path=str(export)).ingest(entity_types=["issue", "pull_request", "label"])
 
-    assert GithubIssuesJsonAdapter().entity_types == ["issue", "pull_request", "label"]
+    assert GithubIssuesJsonAdapter().entity_types == ["issue", "pull_request", "label", "milestone"]
     labels = {unit.metadata["label"]: unit for unit in labels_only.units}
     assert sorted(labels) == ["bug", "import"]
     bug = labels["bug"]
@@ -199,3 +199,56 @@ def test_github_issues_json_ingests_label_aggregates_and_edges(tmp_path):
     assert len(label_edges) == 3
     assert {edge.relation for edge in label_edges} == {EdgeRelation.RELATES_TO}
     assert {edge.source for edge in label_edges} == {EdgeSource.SOURCE}
+
+
+def test_github_issues_json_ingests_milestone_aggregates_and_edges(tmp_path):
+    export = tmp_path / "issues.json"
+    export.write_text(
+        json.dumps(
+            [
+                {
+                    "number": 1,
+                    "title": "Issue",
+                    "repository_full_name": "acme/graph",
+                    "milestone": {"title": "v1.0", "state": "open", "number": 3},
+                    "updated_at": "2025-01-02T00:00:00Z",
+                },
+                {
+                    "number": 2,
+                    "title": "PR",
+                    "repository_full_name": "acme/graph",
+                    "pull_request": {},
+                    "milestone": {"title": "v1.0", "state": "open", "number": 3},
+                    "updated_at": "2025-01-03T00:00:00Z",
+                },
+                {
+                    "number": 3,
+                    "title": "No milestone",
+                    "repository_full_name": "acme/graph",
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    milestones_only = GithubIssuesJsonAdapter(path=str(export)).ingest(entity_types=["milestone"])
+    combined = GithubIssuesJsonAdapter(path=str(export)).ingest(entity_types=["issue", "pull_request", "milestone"])
+
+    assert GithubIssuesJsonAdapter().entity_types == ["issue", "pull_request", "label", "milestone"]
+    assert [unit.source_entity_type for unit in milestones_only.units] == ["milestone"]
+    milestone = milestones_only.units[0]
+    assert milestone.metadata["milestone_title"] == "v1.0"
+    assert milestone.metadata["issue_source_ids"] == [
+        "github_issues_json:acme/graph#1",
+        "github_issues_json:acme/graph#2",
+    ]
+    assert milestone.metadata["issue_count"] == 2
+    assert milestone.metadata["repositories"] == ["acme/graph"]
+    assert milestone.metadata["states"] == ["open"]
+    assert milestone.metadata["numbers"] == [3]
+    assert milestones_only.edges == []
+
+    milestone_edges = [edge for edge in combined.edges if edge.metadata["kind"] == "milestone" and edge.to_unit_id == milestone.source_id]
+    assert len(milestone_edges) == 2
+    assert {edge.relation for edge in milestone_edges} == {EdgeRelation.RELATES_TO}
+    assert {edge.source for edge in milestone_edges} == {EdgeSource.SOURCE}
