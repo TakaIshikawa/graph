@@ -132,6 +132,7 @@ from graph.export.unit_source_timeline_csv import export_unit_source_timeline_cs
 from graph.export.unit_source_diversity_csv import export_unit_source_diversity_csv
 from graph.export.unit_source_recency_csv import export_unit_source_recency_csv
 from graph.export.unit_yaml import export_units_to_yaml
+from graph.export.unit_tag_matrix_csv import export_unit_tag_matrix_csv
 from graph.export.unit_tag_source_matrix_csv import export_unit_tag_source_matrix_csv
 from graph.export.units_jsonl import export_units_to_jsonl
 from graph.export.vegalite_timeline import export_units_to_vegalite_timeline
@@ -282,6 +283,7 @@ __all__ = [
     "export_unit_source_diversity_csv",
     "export_unit_source_recency_csv",
     "export_unit_source_timeline_csv",
+    "export_unit_tag_matrix_csv",
     "export_unit_tag_source_matrix_csv",
     "export_units_to_anki_tsv",
     "export_units_to_atom",
