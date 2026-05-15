@@ -74,9 +74,10 @@ class GithubIssuesJsonAdapter(SourceAdapter):
             for issue in issue_units:
                 if issue.source_entity_type not in requested:
                     continue
-                title = self._text(issue.metadata.get("milestone_title"))
-                if title in milestone_ids:
-                    result.edges.append(self._edge(issue.source_id, milestone_ids[title], "milestone", title, EdgeRelation.RELATES_TO))
+                milestone_title = self._text(issue.metadata.get("milestone_title"))
+                milestone_id = milestone_ids.get(milestone_title)
+                if milestone_id:
+                    result.edges.append(self._milestone_edge(issue, milestone_id))
         result.units.sort(key=lambda unit: unit.source_id)
         result.edges = sorted({edge.id: edge for edge in result.edges}.values(), key=lambda edge: edge.id)
         return result
@@ -200,10 +201,21 @@ class GithubIssuesJsonAdapter(SourceAdapter):
 
     def _milestone_units(self, issues: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
         grouped: dict[str, list[KnowledgeUnit]] = {}
+        metadata_by_title: dict[str, dict[str, Any]] = {}
         for issue in issues:
             title = self._text(issue.metadata.get("milestone_title"))
-            if title:
-                grouped.setdefault(title, []).append(issue)
+            if not title:
+                continue
+            grouped.setdefault(title, []).append(issue)
+            metadata_by_title.setdefault(
+                title,
+                {
+                    "milestone_title": title,
+                    "milestone_state": self._text(issue.metadata.get("milestone_state")),
+                    "milestone_due_on": self._text(issue.metadata.get("milestone_due_on")),
+                    "milestone_number": issue.metadata.get("milestone_number"),
+                },
+            )
 
         units: list[KnowledgeUnit] = []
         now = datetime.now(timezone.utc)
@@ -215,7 +227,9 @@ class GithubIssuesJsonAdapter(SourceAdapter):
             states = sorted({state for issue in linked_issues if (state := self._text(issue.metadata.get("milestone_state")))})
             due_dates = sorted({due for issue in linked_issues if (due := self._text(issue.metadata.get("milestone_due_on")))})
             numbers = sorted({number for issue in linked_issues if (number := issue.metadata.get("milestone_number")) is not None})
+            milestone_metadata = metadata_by_title[title]
             metadata = {
+                **milestone_metadata,
                 "milestone_title": title,
                 "issue_source_ids": source_ids,
                 "issue_count": len(source_ids),
@@ -248,7 +262,7 @@ class GithubIssuesJsonAdapter(SourceAdapter):
     def _edges_from_unit(self, unit: KnowledgeUnit) -> list[KnowledgeEdge]:
         edges: list[KnowledgeEdge] = []
         metadata = unit.metadata
-        for kind, value in (("author", metadata.get("author")), ("milestone", metadata.get("milestone_title"))):
+        for kind, value in (("author", metadata.get("author")),):
             text = self._text(value)
             if text:
                 edges.append(self._edge(unit.source_id, self._target_id(kind, text), kind, text, EdgeRelation.RELATES_TO))
@@ -259,6 +273,22 @@ class GithubIssuesJsonAdapter(SourceAdapter):
         for url in self._mentioned_urls(metadata.get("body", "")):
             edges.append(self._edge(unit.source_id, self._target_id("url", url), "mentioned_url", url, EdgeRelation.REFERENCES))
         return edges
+
+    def _milestone_edge(self, unit: KnowledgeUnit, milestone_id: str) -> KnowledgeEdge:
+        title = self._text(unit.metadata.get("milestone_title"))
+        edge = self._edge(unit.source_id, milestone_id, "milestone", title, EdgeRelation.RELATES_TO)
+        edge.metadata.update(
+            {
+                "milestone_title": title,
+                "milestone_state": self._text(unit.metadata.get("milestone_state")),
+                "milestone_due_on": self._text(unit.metadata.get("milestone_due_on")),
+                "milestone_number": unit.metadata.get("milestone_number"),
+                "from_entity_type": unit.source_entity_type,
+                "to_entity_type": "milestone",
+            }
+        )
+        edge.metadata = {key: value for key, value in edge.metadata.items() if value not in ("", None, [])}
+        return edge
 
     def _edge(self, source_id: str, target_id: str, kind: str, value: str, relation: EdgeRelation) -> KnowledgeEdge:
         digest = hashlib.sha256(f"{source_id}|{kind}|{target_id}".encode("utf-8")).hexdigest()[:24]

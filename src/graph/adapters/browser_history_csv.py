@@ -324,8 +324,20 @@ class BrowserHistoryCsvAdapter(SourceAdapter):
                         "visit_hour": hour,
                         "visit_count": len(ordered),
                         "page_source_ids": [unit.source_id for unit in ordered],
-                        "domains": sorted({str(unit.metadata.get("domain")) for unit in ordered if unit.metadata.get("domain")}),
-                        "source_files": sorted({str(unit.metadata.get("source_file")) for unit in ordered if unit.metadata.get("source_file")}),
+                        "domains": sorted(
+                            {
+                                str(unit.metadata.get("domain"))
+                                for unit in ordered
+                                if unit.metadata.get("domain")
+                            }
+                        ),
+                        "source_files": sorted(
+                            {
+                                str(unit.metadata.get("source_file"))
+                                for unit in ordered
+                                if unit.metadata.get("source_file")
+                            }
+                        ),
                     },
                     created_at=created_at,
                     updated_at=updated_at,
@@ -338,7 +350,11 @@ class BrowserHistoryCsvAdapter(SourceAdapter):
         web_history_units: list[KnowledgeUnit],
         visit_hour_units: list[KnowledgeUnit],
     ) -> list[KnowledgeEdge]:
-        hour_source_ids = {str(unit.metadata.get("visit_hour")): unit.source_id for unit in visit_hour_units}
+        hour_source_ids = {
+            str(unit.metadata.get("visit_hour") or ""): unit.source_id
+            for unit in visit_hour_units
+            if unit.metadata.get("visit_hour")
+        }
         edges: list[KnowledgeEdge] = []
         for unit in web_history_units:
             for hour in self._visit_hours(unit):

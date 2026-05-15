@@ -73,6 +73,8 @@ class AsanaTasksCsvAdapter(SourceAdapter):
                     if "tag" in allowed_types:
                         for tag in unit.metadata.get("tags") or []:
                             result.edges.append(self._relation_edge(unit.source_id, self._tag_source_id(str(tag)), "task_tag"))
+                    if "status" in allowed_types and unit.metadata.get("status"):
+                        result.edges.append(self._relation_edge(unit.source_id, self._status_source_id(str(unit.metadata["status"])), "task_status"))
         for parent_id, child_id in parent_refs:
             parent = by_task_id.get(parent_id)
             child = by_task_id.get(child_id)
@@ -81,15 +83,7 @@ class AsanaTasksCsvAdapter(SourceAdapter):
         if "tag" in allowed_types:
             result.units.extend(self._tag_units(task_units))
         if "status" in allowed_types:
-            status_units = self._status_units(task_units)
-            result.units.extend(status_units)
-            if "task" in allowed_types:
-                status_ids = {unit.metadata["status"]: unit.source_id for unit in status_units}
-                for task in task_units:
-                    status = str(task.metadata.get("status") or "")
-                    status_id = status_ids.get(status)
-                    if status_id:
-                        result.edges.append(self._relation_edge(task.source_id, status_id, "task_status"))
+            result.units.extend(self._status_units(task_units))
         result.units = list({unit.source_id: unit for unit in result.units}.values())
         result.units.sort(key=lambda unit: unit.source_id)
         result.edges = sorted({edge.id: edge for edge in result.edges}.values(), key=lambda edge: edge.id)
@@ -107,7 +101,7 @@ class AsanaTasksCsvAdapter(SourceAdapter):
         completed = parse_datetime(first(row, "Completed At", "Completion Date"))
         projects = split_values(first(row, "Projects", "Project"))
         tags = split_values(first(row, "Tags", "Tag"))
-        status = "completed" if completed else first(row, "Status", "Completed") or "open"
+        status = self._normalize_status("completed" if completed else first(row, "Status", "Completed"))
         metadata = {
             "task_id": task_id,
             "name": name,
@@ -116,7 +110,7 @@ class AsanaTasksCsvAdapter(SourceAdapter):
             "workspace": first(row, "Workspace", "Workspace Name"),
             "projects": projects,
             "tags": tags,
-            "status": status.casefold() if status else "",
+            "status": status,
             "created_at": created.isoformat() if created else first(row, "Created At", "Created"),
             "modified_at": modified.isoformat() if modified else first(row, "Modified At", "Updated At"),
             "due_date": due.isoformat() if due else first(row, "Due Date", "Due On", "Due At"),
@@ -233,6 +227,7 @@ class AsanaTasksCsvAdapter(SourceAdapter):
             task_source_ids = sorted({task.source_id for task in linked_tasks})
             projects = sorted({project for task in linked_tasks for project in (task.metadata.get("projects") or []) if project})
             workspaces = sorted({workspace for task in linked_tasks if (workspace := str(task.metadata.get("workspace") or ""))})
+            assignees = sorted({assignee for task in linked_tasks if (assignee := str(task.metadata.get("assignee") or ""))})
             metadata = clean_metadata(
                 {
                     "status": status,
@@ -241,6 +236,7 @@ class AsanaTasksCsvAdapter(SourceAdapter):
                     "task_count": len(task_source_ids),
                     "projects": projects,
                     "workspaces": workspaces,
+                    "assignees": assignees,
                     "latest_updated_at": updated_at.isoformat(),
                 }
             )
@@ -262,6 +258,16 @@ class AsanaTasksCsvAdapter(SourceAdapter):
 
     def _status_source_id(self, status: str) -> str:
         return self._entity_source_id("status", status)
+
+    def _normalize_status(self, value: str) -> str:
+        text = value.strip().casefold()
+        if not text:
+            return "open"
+        if text in {"true", "yes", "y", "1", "done", "complete", "completed"}:
+            return "completed"
+        if text in {"false", "no", "n", "0", "incomplete", "not completed", "not_complete", "not complete"}:
+            return "open"
+        return "_".join(text.replace("-", " ").split())
 
     def _relation_edge(self, from_id: str, to_id: str, relation_type: str) -> KnowledgeEdge:
         digest = hashlib.sha256(f"{from_id}|{relation_type}|{to_id}".encode("utf-8")).hexdigest()[:24]

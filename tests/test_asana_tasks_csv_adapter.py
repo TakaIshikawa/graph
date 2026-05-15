@@ -165,38 +165,30 @@ def test_asana_tasks_csv_ingests_status_aggregates_and_edges(tmp_path):
     _write_csv(
         export,
         [
-            {
-                "Task ID": "1",
-                "Name": "Open task",
-                "Status": "Open",
-                "Projects": "Imports",
-                "Workspace": "Acme",
-                "Modified At": "2026-05-02T00:00:00Z",
-                "Completed At": "",
-            },
-            {
-                "Task ID": "2",
-                "Name": "Completed task",
-                "Status": "",
-                "Modified At": "",
-                "Completed At": "2026-05-03T00:00:00Z",
-                "Projects": "Graph",
-                "Workspace": "Acme",
-            },
+            {"Task ID": "1", "Name": "Open task", "Status": "Incomplete", "Completed At": "", "Completed": "", "Assignee": "Ada", "Projects": "Imports", "Workspace": "Acme"},
+            {"Task ID": "2", "Name": "Done task", "Status": "", "Completed At": "2026-05-04T10:00:00Z", "Completed": "", "Assignee": "Grace", "Projects": "Imports", "Workspace": "Acme"},
+            {"Task ID": "3", "Name": "Also open", "Status": "", "Completed At": "", "Completed": "false", "Assignee": "Ada", "Projects": "Graph", "Workspace": "Acme"},
         ],
     )
 
     statuses_only = AsanaTasksCsvAdapter(path=str(export)).ingest(entity_types=["status"])
     combined = AsanaTasksCsvAdapter(path=str(export)).ingest(entity_types=["task", "status"])
+    full = AsanaTasksCsvAdapter(path=str(export)).ingest(entity_types=["task", "assignee", "project", "workspace", "status"])
 
     statuses = {unit.metadata["status"]: unit for unit in statuses_only.units}
     assert sorted(statuses) == ["completed", "open"]
-    assert statuses["open"].metadata["task_source_ids"] == ["asana_tasks_csv:1"]
+    assert statuses["open"].source_entity_type == "status"
+    assert statuses["open"].metadata["task_source_ids"] == ["asana_tasks_csv:1", "asana_tasks_csv:3"]
+    assert statuses["open"].metadata["task_count"] == 2
+    assert statuses["open"].metadata["projects"] == ["Graph", "Imports"]
+    assert statuses["open"].metadata["workspaces"] == ["Acme"]
+    assert statuses["open"].metadata["assignees"] == ["Ada"]
     assert statuses["completed"].metadata["task_source_ids"] == ["asana_tasks_csv:2"]
-    assert statuses["open"].metadata["projects"] == ["Imports"]
-    assert statuses["completed"].metadata["workspaces"] == ["Acme"]
     assert statuses_only.edges == []
 
     status_edges = [edge for edge in combined.edges if edge.metadata["relation_type"] == "task_status"]
-    assert len(status_edges) == 2
+    assert len(status_edges) == 3
     assert {edge.relation for edge in status_edges} == {EdgeRelation.RELATES_TO}
+    assert {edge.from_unit_id for edge in status_edges} == {"asana_tasks_csv:1", "asana_tasks_csv:2", "asana_tasks_csv:3"}
+    assert {edge.to_unit_id for edge in status_edges} == {unit.source_id for unit in statuses.values()}
+    assert {unit.source_entity_type for unit in full.units} == {"task", "assignee", "project", "workspace", "status"}

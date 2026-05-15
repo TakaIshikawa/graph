@@ -244,9 +244,10 @@ class HackerNewsSavedAdapter(SourceAdapter):
     def _domain_units(self, saved_items: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
         grouped: dict[str, list[KnowledgeUnit]] = {}
         for item in saved_items:
-            domain = self._external_domain(str(item.metadata.get("external_url") or ""))
-            if domain:
-                grouped.setdefault(domain, []).append(item)
+            domain = str(item.metadata.get("domain") or "")
+            if not domain:
+                continue
+            grouped.setdefault(domain, []).append(item)
 
         units: list[KnowledgeUnit] = []
         for domain, items in sorted(grouped.items()):
@@ -263,8 +264,8 @@ class HackerNewsSavedAdapter(SourceAdapter):
                         "domain": domain,
                         "item_count": len(unique_items),
                         "item_source_ids": [item.source_id for item in unique_items],
-                        "submitters": sorted({str(item.metadata.get("submitter")) for item in unique_items if item.metadata.get("submitter")}),
                         "item_types": sorted({str(item.metadata.get("item_type")) for item in unique_items if item.metadata.get("item_type")}),
+                        "submitters": sorted({str(item.metadata.get("submitter")).strip() for item in unique_items if item.metadata.get("submitter")}),
                         "source_files": sorted({str(item.metadata.get("source_file")) for item in unique_items if item.metadata.get("source_file")}),
                     },
                     tags=["hacker_news", "domain", domain],
@@ -278,7 +279,7 @@ class HackerNewsSavedAdapter(SourceAdapter):
         domain_ids = {str(domain.metadata.get("domain")): domain.source_id for domain in domains}
         edges: list[KnowledgeEdge] = []
         for item in saved_items:
-            domain = self._external_domain(str(item.metadata.get("external_url") or ""))
+            domain = str(item.metadata.get("domain") or "")
             domain_id = domain_ids.get(domain)
             if not domain_id:
                 continue
@@ -296,6 +297,7 @@ class HackerNewsSavedAdapter(SourceAdapter):
                         "to_entity_type": "domain",
                         "relation_type": "saved_item_domain",
                         "domain": domain,
+                        "external_url": item.metadata.get("external_url"),
                     },
                     created_at=item.created_at,
                 )
