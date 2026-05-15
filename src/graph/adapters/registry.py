@@ -86,6 +86,7 @@ from graph.adapters.apple_podcasts_history_csv import ApplePodcastsHistoryCsvAda
 from graph.adapters.apple_reminders_csv import AppleRemindersCsvAdapter
 from graph.adapters.day_one_json import DayOneJsonAdapter
 from graph.adapters.firefox_places import FirefoxPlacesAdapter
+from graph.adapters.foursquare_checkins_csv import FoursquareCheckinsCsvAdapter
 from graph.adapters.things_csv import ThingsCsvAdapter
 from graph.adapters.simplenote_export import SimplenoteExportAdapter
 from graph.adapters.foam import FoamWorkspaceAdapter
@@ -206,6 +207,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "day_one_json": DayOneJsonAdapter,
     "things_csv": ThingsCsvAdapter,
     "firefox_places": FirefoxPlacesAdapter,
+    "foursquare_checkins_csv": FoursquareCheckinsCsvAdapter,
     "simplenote_export": SimplenoteExportAdapter,
     "google_keep_export": GoogleKeepExportAdapter,
     "opml": OpmlAdapter,
