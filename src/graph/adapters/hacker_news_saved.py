@@ -22,7 +22,7 @@ class HackerNewsSavedAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["saved_item", "submitter"]
+        return ["saved_item", "submitter", "domain"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -55,12 +55,17 @@ class HackerNewsSavedAdapter(SourceAdapter):
                 saved_items.append(unit)
 
         submitter_units = self._submitter_units(saved_items)
+        domain_units = self._domain_units(saved_items)
         if "saved_item" in requested:
             result.units.extend(saved_items)
         if "submitter" in requested:
             result.units.extend(submitter_units)
+        if "domain" in requested:
+            result.units.extend(domain_units)
         if {"saved_item", "submitter"}.issubset(requested):
             result.edges.extend(self._submitter_edges(submitter_units, saved_items))
+        if {"saved_item", "domain"}.issubset(requested):
+            result.edges.extend(self._domain_edges(domain_units, saved_items))
         result.units.sort(key=lambda unit: (unit.updated_at, unit.source_id))
         result.edges.sort(key=lambda edge: edge.id)
         return result
@@ -235,6 +240,72 @@ class HackerNewsSavedAdapter(SourceAdapter):
     def _submitter_source_id(self, normalized_submitter: str) -> str:
         digest = hashlib.sha256(normalized_submitter.encode("utf-8")).hexdigest()[:24]
         return f"hacker_news_saved:submitter:{digest}"
+
+    def _domain_units(self, saved_items: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        for item in saved_items:
+            domain = str(item.metadata.get("domain") or "")
+            if not domain:
+                continue
+            grouped.setdefault(domain, []).append(item)
+
+        units: list[KnowledgeUnit] = []
+        for domain, items in sorted(grouped.items()):
+            unique_items = sorted({item.source_id: item for item in items}.values(), key=lambda item: item.source_id)
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.HACKER_NEWS_SAVED,
+                    source_id=self._domain_source_id(domain),
+                    source_entity_type="domain",
+                    title=domain,
+                    content=f"Hacker News saved domain: {domain}\nItems: {len(unique_items)}",
+                    content_type=ContentType.METADATA,
+                    metadata={
+                        "domain": domain,
+                        "item_count": len(unique_items),
+                        "item_source_ids": [item.source_id for item in unique_items],
+                        "item_types": sorted({str(item.metadata.get("item_type")) for item in unique_items if item.metadata.get("item_type")}),
+                        "submitters": sorted({str(item.metadata.get("submitter")).strip() for item in unique_items if item.metadata.get("submitter")}),
+                        "source_files": sorted({str(item.metadata.get("source_file")) for item in unique_items if item.metadata.get("source_file")}),
+                    },
+                    tags=["hacker_news", "domain", domain],
+                    created_at=min(item.created_at for item in unique_items),
+                    updated_at=max(item.updated_at for item in unique_items),
+                )
+            )
+        return units
+
+    def _domain_edges(self, domains: list[KnowledgeUnit], saved_items: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        domain_ids = {str(domain.metadata.get("domain")): domain.source_id for domain in domains}
+        edges: list[KnowledgeEdge] = []
+        for item in saved_items:
+            domain = str(item.metadata.get("domain") or "")
+            domain_id = domain_ids.get(domain)
+            if not domain_id:
+                continue
+            digest = hashlib.sha256(f"{item.source_id}|{domain_id}|links_to_domain".encode("utf-8")).hexdigest()[:24]
+            edges.append(
+                KnowledgeEdge(
+                    id=f"hacker-news-saved-domain-link-{digest}",
+                    from_unit_id=item.source_id,
+                    to_unit_id=domain_id,
+                    relation=EdgeRelation.RELATES_TO,
+                    source=EdgeSource.SOURCE,
+                    metadata={
+                        "source_project": SourceProject.HACKER_NEWS_SAVED.value,
+                        "from_entity_type": "saved_item",
+                        "to_entity_type": "domain",
+                        "domain": domain,
+                        "external_url": item.metadata.get("external_url"),
+                    },
+                    created_at=item.created_at,
+                )
+            )
+        return edges
+
+    def _domain_source_id(self, domain: str) -> str:
+        digest = hashlib.sha256(domain.encode("utf-8")).hexdigest()[:24]
+        return f"hacker_news_saved:domain:{digest}"
 
     def _hn_item_url(self, item_id: str) -> str:
         if not item_id:

@@ -30,7 +30,7 @@ def test_hacker_news_saved_imports_story_metadata(tmp_path):
         encoding="utf-8",
     )
 
-    result = HackerNewsSavedAdapter(path=str(path)).ingest()
+    result = HackerNewsSavedAdapter(path=str(path)).ingest(entity_types=["saved_item"])
 
     saved_items = [unit for unit in result.units if unit.source_entity_type == "saved_item"]
     assert len(saved_items) == 1
@@ -78,7 +78,7 @@ def test_hacker_news_saved_normalizes_comment_metadata_and_references(tmp_path):
         encoding="utf-8",
     )
 
-    result = HackerNewsSavedAdapter(path=str(path)).ingest()
+    result = HackerNewsSavedAdapter(path=str(path)).ingest(entity_types=["saved_item"])
 
     saved_items = [unit for unit in result.units if unit.source_entity_type == "saved_item"]
     assert len(saved_items) == 1
@@ -132,7 +132,7 @@ def test_hacker_news_saved_keeps_url_only_items_and_uses_hn_source_url_fallback(
         encoding="utf-8",
     )
 
-    result = HackerNewsSavedAdapter(path=str(path)).ingest()
+    result = HackerNewsSavedAdapter(path=str(path)).ingest(entity_types=["saved_item"])
 
     assert [unit.title for unit in result.units] == ["https://example.com/only-url", "Ask HN item"]
     assert result.units[0].metadata["external_url"] == "https://example.com/only-url"
@@ -172,6 +172,7 @@ def test_hacker_news_saved_adapter_is_registered():
     adapter = get_adapter("hacker-news-saved", path="/tmp/saved.json")
     assert isinstance(adapter, HackerNewsSavedAdapter)
     assert adapter.name == "hacker_news_saved"
+    assert adapter.entity_types == ["saved_item", "submitter", "domain"]
 
 
 def test_hacker_news_saved_emits_submitter_units_and_edges(tmp_path):
@@ -208,7 +209,7 @@ def test_hacker_news_saved_emits_submitter_units_and_edges(tmp_path):
         encoding="utf-8",
     )
 
-    result = HackerNewsSavedAdapter(path=str(path)).ingest()
+    result = HackerNewsSavedAdapter(path=str(path)).ingest(entity_types=["saved_item", "submitter"])
 
     saved_items = [unit for unit in result.units if unit.source_entity_type == "saved_item"]
     submitters = sorted((unit for unit in result.units if unit.source_entity_type == "submitter"), key=lambda unit: unit.title)
@@ -237,3 +238,71 @@ def test_hacker_news_saved_submitter_filtering(tmp_path):
     assert submitter_only.edges == []
     assert [unit.source_entity_type for unit in item_only.units] == ["saved_item"]
     assert item_only.edges == []
+
+
+def test_hacker_news_saved_emits_domain_units_and_edges(tmp_path):
+    path = tmp_path / "saved.json"
+    path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": 1,
+                    "title": "One",
+                    "url": "https://www.example.com/one",
+                    "by": "pg",
+                    "type": "story",
+                    "time": 1735689600,
+                },
+                {
+                    "id": 2,
+                    "title": "Two",
+                    "url": "https://example.com/two",
+                    "by": "dang",
+                    "type": "comment",
+                    "time": 1735689601,
+                },
+                {
+                    "id": 3,
+                    "title": "Three",
+                    "url": "not a valid url",
+                    "by": "pg",
+                    "type": "story",
+                    "time": 1735689602,
+                },
+                {
+                    "id": 4,
+                    "title": "Four",
+                    "by": "pg",
+                    "type": "story",
+                    "time": 1735689603,
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    domains_only = HackerNewsSavedAdapter(path=str(path)).ingest(entity_types=["domain"])
+    combined = HackerNewsSavedAdapter(path=str(path)).ingest(entity_types=["saved_item", "domain"])
+    items_only = HackerNewsSavedAdapter(path=str(path)).ingest(entity_types=["saved_item"])
+
+    domains = {unit.metadata["domain"]: unit for unit in domains_only.units}
+    assert list(domains) == ["example.com"]
+    domain = domains["example.com"]
+    assert domain.source_entity_type == "domain"
+    assert domain.source_id.startswith("hacker_news_saved:domain:")
+    assert domain.metadata["item_count"] == 2
+    assert domain.metadata["item_source_ids"] == ["hacker_news_saved:1", "hacker_news_saved:2"]
+    assert domain.metadata["item_types"] == ["comment", "story"]
+    assert domain.metadata["submitters"] == ["dang", "pg"]
+    assert domains_only.edges == []
+
+    domain_edges = [edge for edge in combined.edges if edge.metadata["to_entity_type"] == "domain"]
+    assert len(domain_edges) == 2
+    assert {edge.from_unit_id for edge in domain_edges} == {"hacker_news_saved:1", "hacker_news_saved:2"}
+    assert {edge.to_unit_id for edge in domain_edges} == {domain.source_id}
+    assert {edge.relation for edge in domain_edges} == {EdgeRelation.RELATES_TO}
+    assert {edge.source for edge in domain_edges} == {EdgeSource.SOURCE}
+    assert all(edge.metadata["domain"] == "example.com" for edge in domain_edges)
+
+    assert {unit.source_entity_type for unit in items_only.units} == {"saved_item"}
+    assert items_only.edges == []
