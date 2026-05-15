@@ -36,6 +36,7 @@ from graph.adapters.github_gists_json import GithubGistsJsonAdapter
 from graph.adapters.github_issues_json import GithubIssuesJsonAdapter
 from graph.adapters.github_notifications_json import GithubNotificationsJsonAdapter
 from graph.adapters.gitlab_issues_json import GitlabIssuesJsonAdapter
+from graph.adapters.gitlab_merge_requests_json import GitlabMergeRequestsJsonAdapter
 from graph.adapters.github_stars_csv import GithubStarsCsvAdapter
 from graph.adapters.garmin_activities_csv import GarminActivitiesCsvAdapter
 from graph.adapters.goodreads_library import GoodreadsLibraryAdapter
@@ -313,6 +314,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "github_issues_json": GithubIssuesJsonAdapter,
     "github_notifications_json": GithubNotificationsJsonAdapter,
     "gitlab_issues_json": GitlabIssuesJsonAdapter,
+    "gitlab_merge_requests_json": GitlabMergeRequestsJsonAdapter,
     "jira_issues_csv": JiraIssuesCsvAdapter,
     "trello_board_json": TrelloBoardJsonAdapter,
     "google_maps_timeline_json": GoogleMapsTimelineJsonAdapter,

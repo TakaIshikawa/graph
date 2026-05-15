@@ -140,6 +140,7 @@ class SourceProject(StrEnum):
     GITHUB_GISTS_JSON = "github_gists_json"
     GITHUB_NOTIFICATIONS_JSON = "github_notifications_json"
     GITLAB_ISSUES_JSON = "gitlab_issues_json"
+    GITLAB_MERGE_REQUESTS_JSON = "gitlab_merge_requests_json"
     JIRA_ISSUES_CSV = "jira_issues_csv"
     TRELLO_BOARD_JSON = "trello_board_json"
     MIRO_BOARD_JSON = "miro_board_json"
