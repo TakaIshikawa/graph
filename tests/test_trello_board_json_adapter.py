@@ -13,7 +13,10 @@ def test_trello_board_json_ingests_cards_metadata_and_relationships(tmp_path):
         json.dumps(
             {
                 "lists": [{"id": "list-1", "name": "Doing"}],
-                "labels": [{"id": "label-1", "name": "Import"}],
+                "labels": [
+                    {"id": "label-1", "name": "Import", "color": "green"},
+                    {"id": "label-2", "name": "Unused", "color": "red"},
+                ],
                 "members": [{"id": "member-1", "fullName": "Ada Lovelace"}],
                 "checklists": [
                     {
@@ -63,7 +66,10 @@ def test_trello_board_json_emits_check_item_units_and_card_edges(tmp_path):
         json.dumps(
             {
                 "lists": [{"id": "list-1", "name": "Doing"}],
-                "labels": [{"id": "label-1", "name": "Import"}],
+                "labels": [
+                    {"id": "label-1", "name": "Import", "color": "green"},
+                    {"id": "label-2", "name": "Unused", "color": "red"},
+                ],
                 "members": [{"id": "member-1", "fullName": "Ada Lovelace"}],
                 "checklists": [
                     {
@@ -277,7 +283,10 @@ def test_trello_board_json_ingests_label_and_member_aggregates(tmp_path):
         json.dumps(
             {
                 "lists": [{"id": "list-1", "name": "Doing"}],
-                "labels": [{"id": "label-1", "name": "Import"}],
+                "labels": [
+                    {"id": "label-1", "name": "Import", "color": "green"},
+                    {"id": "label-2", "name": "Unused", "color": "red"},
+                ],
                 "members": [{"id": "member-1", "username": "ada", "fullName": "Ada Lovelace"}],
                 "cards": [
                     {
@@ -308,6 +317,10 @@ def test_trello_board_json_ingests_label_and_member_aggregates(tmp_path):
     units = {(unit.source_entity_type, unit.metadata["name"]): unit for unit in aggregates.units}
     label = units[("label", "Import")]
     member = units[("member", "Ada Lovelace")]
+    assert {key[1] for key in units if key[0] == "label"} == {"Import"}
+    assert label.source_id == "trello_board_json:label:label-1"
+    assert label.metadata["label_id"] == "label-1"
+    assert label.metadata["color"] == "green"
     assert label.metadata["card_source_ids"] == ["trello_board_json:card-1", "trello_board_json:card-2"]
     assert label.metadata["card_count"] == 2
     assert label.metadata["lists"] == ["Doing"]
@@ -318,3 +331,6 @@ def test_trello_board_json_ingests_label_and_member_aggregates(tmp_path):
     aggregate_edges = [edge for edge in combined.edges if edge.metadata.get("relation_type") in {"trello_card_label", "trello_card_member"}]
     assert len(aggregate_edges) == 4
     assert {edge.relation for edge in aggregate_edges} == {EdgeRelation.RELATES_TO}
+    label_edges = [edge for edge in aggregate_edges if edge.metadata["relation_type"] == "trello_card_label"]
+    assert {edge.to_unit_id for edge in label_edges} == {"trello_board_json:label:label-1"}
+    assert {edge.metadata["label_color"] for edge in label_edges} == {"green"}

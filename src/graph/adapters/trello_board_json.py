@@ -94,12 +94,12 @@ class TrelloBoardJsonAdapter(SourceAdapter):
             result.units.extend(list_units)
         if include_lists and include_cards:
             result.edges.extend(self._list_card_edges(list_units, cards_by_list))
-        label_units = self._aggregate_units("label", card_units) if include_labels else []
+        label_units = self._label_units(card_units) if include_labels else []
         member_units = self._aggregate_units("member", card_units) if include_members else []
         result.units.extend(label_units)
         result.units.extend(member_units)
         if include_cards:
-            result.edges.extend(self._aggregate_card_edges(label_units, card_units, "label"))
+            result.edges.extend(self._label_card_edges(label_units, card_units))
             result.edges.extend(self._aggregate_card_edges(member_units, card_units, "member"))
         result.units.sort(key=lambda unit: unit.source_id)
         result.edges = sorted({edge.id: edge for edge in result.edges}.values(), key=lambda edge: edge.id)
@@ -132,6 +132,7 @@ class TrelloBoardJsonAdapter(SourceAdapter):
         updated = self._parse_datetime(card.get("dateLastActivity")) or created
         list_name = self._lookup_name(context["lists"].get(self._text(card.get("idList"))))
         labels = self._labels(card, context["labels"])
+        label_details = self._label_details(card, context["labels"])
         members = [self._lookup_member(context["members"].get(str(member_id))) for member_id in card.get("idMembers", [])]
         checklists = self._checklists(card.get("idChecklists", []), context["checklists"])
         checklist_items = self._checklist_items(card.get("idChecklists", []), context["checklists"])
@@ -144,6 +145,7 @@ class TrelloBoardJsonAdapter(SourceAdapter):
             "list_id": self._text(card.get("idList")),
             "list_name": list_name,
             "labels": labels,
+            "label_details": label_details,
             "members": [item for item in members if item],
             "checklists": checklists,
             "checklist_items": checklist_items,
@@ -314,7 +316,7 @@ class TrelloBoardJsonAdapter(SourceAdapter):
         return list({edge.id: edge for edge in edges}.values())
 
     def _aggregate_units(self, entity_type: str, cards: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
-        metadata_key = "labels" if entity_type == "label" else "members"
+        metadata_key = "members"
         grouped: dict[str, list[KnowledgeUnit]] = {}
         for card in cards:
             for value in card.metadata.get(metadata_key, []):
@@ -351,8 +353,68 @@ class TrelloBoardJsonAdapter(SourceAdapter):
             )
         return units
 
+    def _label_units(self, cards: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, dict[str, Any]] = {}
+        now = datetime.now(timezone.utc)
+        for card in cards:
+            for detail in card.metadata.get("label_details", []):
+                if not isinstance(detail, dict):
+                    continue
+                label_id = self._text(detail.get("id"))
+                name = self._text(detail.get("name"))
+                color = self._text(detail.get("color"))
+                if not label_id and not name and not color:
+                    continue
+                key = self._label_key(label_id, name, color)
+                item = grouped.setdefault(
+                    key,
+                    {
+                        "label_id": label_id,
+                        "name": name,
+                        "color": color,
+                        "cards": [],
+                    },
+                )
+                item["cards"].append(card)
+
+        units: list[KnowledgeUnit] = []
+        for key in sorted(grouped):
+            item = grouped[key]
+            linked_cards = item["cards"]
+            created_at = min((card.created_at for card in linked_cards), default=now)
+            updated_at = max((card.updated_at for card in linked_cards), default=created_at)
+            card_source_ids = sorted({card.source_id for card in linked_cards})
+            name = self._text(item["name"])
+            color = self._text(item["color"])
+            label_id = self._text(item["label_id"])
+            title_value = name or color or label_id
+            metadata = {
+                "label_id": label_id,
+                "name": name,
+                "color": color,
+                "card_source_ids": card_source_ids,
+                "card_count": len(card_source_ids),
+                "lists": sorted({list_name for card in linked_cards if (list_name := self._text(card.metadata.get("list_name")))}),
+                "latest_updated_at": updated_at.isoformat(),
+            }
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.TRELLO_BOARD_JSON,
+                    source_id=self._label_source_id(label_id, name, color),
+                    source_entity_type="label",
+                    title=f"Trello label: {title_value}",
+                    content=self._label_content(metadata),
+                    content_type=ContentType.METADATA,
+                    metadata={key: value for key, value in metadata.items() if value not in ("", None, [])},
+                    tags=["trello", "label"],
+                    created_at=created_at,
+                    updated_at=updated_at,
+                )
+            )
+        return units
+
     def _aggregate_card_edges(self, aggregate_units: list[KnowledgeUnit], cards: list[KnowledgeUnit], entity_type: str) -> list[KnowledgeEdge]:
-        metadata_key = "labels" if entity_type == "label" else "members"
+        metadata_key = "members"
         aggregate_ids = {unit.metadata["name"]: unit.source_id for unit in aggregate_units}
         edges: list[KnowledgeEdge] = []
         for card in cards:
@@ -362,6 +424,35 @@ class TrelloBoardJsonAdapter(SourceAdapter):
                 if target_id:
                     edges.append(self._relation_edge(card.source_id, target_id, f"card_{entity_type}", entity_type, name))
         return edges
+
+    def _label_card_edges(self, label_units: list[KnowledgeUnit], cards: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        label_ids = {
+            self._label_key(
+                self._text(unit.metadata.get("label_id")),
+                self._text(unit.metadata.get("name")),
+                self._text(unit.metadata.get("color")),
+            ): unit.source_id
+            for unit in label_units
+        }
+        edges: list[KnowledgeEdge] = []
+        for card in cards:
+            for detail in card.metadata.get("label_details", []):
+                if not isinstance(detail, dict):
+                    continue
+                label_id = self._text(detail.get("id"))
+                name = self._text(detail.get("name"))
+                color = self._text(detail.get("color"))
+                target_id = label_ids.get(self._label_key(label_id, name, color))
+                if target_id:
+                    edges.append(self._label_relation_edge(card.source_id, target_id, label_id, name, color))
+        return edges
+
+    def _label_content(self, metadata: dict[str, Any]) -> str:
+        parts = [f"Trello label: {metadata.get('name') or metadata.get('color') or metadata.get('label_id')}"]
+        if metadata.get("color"):
+            parts.append(f"Color: {metadata['color']}")
+        parts.append(f"Cards: {metadata.get('card_count', 0)}")
+        return "\n".join(part for part in parts if part)
 
     def _list_content(self, metadata: dict[str, Any]) -> str:
         parts = [metadata.get("name", "")]
@@ -381,6 +472,50 @@ class TrelloBoardJsonAdapter(SourceAdapter):
             if name and name not in labels:
                 labels.append(name)
         return labels
+
+    def _label_details(self, card: dict[str, Any], known_labels: dict[str, Any]) -> list[dict[str, str]]:
+        labels: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for raw_label in card.get("labels", []):
+            label = raw_label if isinstance(raw_label, dict) else known_labels.get(str(raw_label))
+            if isinstance(label, dict) and not self._text(label.get("id")):
+                label = self._known_label_by_name(self._lookup_name(label), known_labels) or label
+            detail = self._label_detail(label)
+            if detail:
+                key = self._label_key(detail.get("id", ""), detail.get("name", ""), detail.get("color", ""))
+                if key not in seen:
+                    seen.add(key)
+                    labels.append(detail)
+        for label_id in card.get("idLabels", []):
+            label = known_labels.get(str(label_id))
+            detail = self._label_detail(label)
+            if not detail and self._text(label_id):
+                detail = {"id": self._text(label_id)}
+            if detail:
+                key = self._label_key(detail.get("id", ""), detail.get("name", ""), detail.get("color", ""))
+                if key not in seen:
+                    seen.add(key)
+                    labels.append(detail)
+        return labels
+
+    def _label_detail(self, label: Any) -> dict[str, str]:
+        if not isinstance(label, dict):
+            return {}
+        detail = {
+            "id": self._text(label.get("id")),
+            "name": self._lookup_name(label),
+            "color": self._text(label.get("color")),
+        }
+        return {key: value for key, value in detail.items() if value}
+
+    def _known_label_by_name(self, name: str, known_labels: dict[str, Any]) -> dict[str, Any] | None:
+        normalized = name.casefold()
+        if not normalized:
+            return None
+        for label in known_labels.values():
+            if isinstance(label, dict) and self._lookup_name(label).casefold() == normalized:
+                return label
+        return None
 
     def _checklists(self, checklist_ids: list[Any], known_checklists: dict[str, Any]) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
@@ -521,6 +656,16 @@ class TrelloBoardJsonAdapter(SourceAdapter):
     def _aggregate_source_id(self, entity_type: str, name: str) -> str:
         return self._source_id(entity_type, name.casefold())
 
+    def _label_key(self, label_id: str, name: str, color: str) -> str:
+        if label_id:
+            return f"id:{label_id}"
+        return "fallback:" + "|".join([name.casefold(), color.casefold()])
+
+    def _label_source_id(self, label_id: str, name: str, color: str) -> str:
+        if label_id:
+            return f"trello_board_json:label:{label_id}"
+        return self._source_id("label", name.casefold(), color.casefold())
+
     def _relation_edge(self, source_id: str, target_id: str, relation_type: str, kind: str, value: str) -> KnowledgeEdge:
         return KnowledgeEdge(
             id=self._source_edge_id(source_id, target_id, relation_type),
@@ -529,6 +674,24 @@ class TrelloBoardJsonAdapter(SourceAdapter):
             relation=EdgeRelation.RELATES_TO,
             source=EdgeSource.SOURCE,
             metadata={"kind": kind, "value": value, "relation_type": f"trello_{relation_type}"},
+        )
+
+    def _label_relation_edge(self, source_id: str, target_id: str, label_id: str, name: str, color: str) -> KnowledgeEdge:
+        metadata = {
+            "kind": "label",
+            "value": name or color or label_id,
+            "relation_type": "trello_card_label",
+            "label_id": label_id,
+            "label_name": name,
+            "label_color": color,
+        }
+        return KnowledgeEdge(
+            id=self._source_edge_id(source_id, target_id, "card_label"),
+            from_unit_id=source_id,
+            to_unit_id=target_id,
+            relation=EdgeRelation.RELATES_TO,
+            source=EdgeSource.SOURCE,
+            metadata={key: value for key, value in metadata.items() if value not in ("", None, [])},
         )
 
     def _check_item_source_id(
