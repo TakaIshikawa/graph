@@ -34,6 +34,7 @@ from graph.adapters.forty_two import FortyTwoAdapter
 from graph.adapters.git_adapter import GitAdapter
 from graph.adapters.github_gists_json import GithubGistsJsonAdapter
 from graph.adapters.github_issues_json import GithubIssuesJsonAdapter
+from graph.adapters.github_notifications_json import GithubNotificationsJsonAdapter
 from graph.adapters.gitlab_issues_json import GitlabIssuesJsonAdapter
 from graph.adapters.github_stars_csv import GithubStarsCsvAdapter
 from graph.adapters.garmin_activities_csv import GarminActivitiesCsvAdapter
@@ -310,6 +311,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "steam_library_csv": SteamLibraryCsvAdapter,
     "github_gists_json": GithubGistsJsonAdapter,
     "github_issues_json": GithubIssuesJsonAdapter,
+    "github_notifications_json": GithubNotificationsJsonAdapter,
     "gitlab_issues_json": GitlabIssuesJsonAdapter,
     "jira_issues_csv": JiraIssuesCsvAdapter,
     "trello_board_json": TrelloBoardJsonAdapter,
