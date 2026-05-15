@@ -318,6 +318,62 @@ def test_slack_json_reaction_entity_filtering(tmp_path):
     assert reactions_only.edges == []
 
 
+def test_slack_json_emits_user_aggregates_and_edges(tmp_path):
+    channel = tmp_path / "design"
+    channel.mkdir()
+    _write_json(
+        channel / "2024-04-05.json",
+        [
+            {
+                "type": "message",
+                "user": "U1",
+                "text": "Root message",
+                "ts": "1712345000.000100",
+                "thread_ts": "1712345000.000100",
+                "user_profile": {"display_name": "Ada", "real_name": "Ada Lovelace", "team": "T1"},
+            },
+            {
+                "type": "message",
+                "user": "U1",
+                "text": "Reply message",
+                "ts": "1712345100.000200",
+                "thread_ts": "1712345000.000100",
+                "user_profile": {"real_name": "Ada Lovelace"},
+            },
+            {
+                "type": "message",
+                "bot_id": "B1",
+                "username": "Deploy Bot",
+                "text": "Build finished",
+                "ts": "1712345200.000300",
+            },
+        ],
+    )
+
+    users_only = SlackJsonAdapter(path=str(channel)).ingest(entity_types=["user"])
+    combined = SlackJsonAdapter(path=str(channel)).ingest(entity_types=["slack_message", "slack_thread", "user"])
+
+    assert SlackJsonAdapter().entity_types == ["slack_message", "reaction", "slack_thread", "user"]
+    users = {unit.metadata["user_id"] or unit.metadata["bot_id"]: unit for unit in users_only.units}
+    assert sorted(users) == ["B1", "U1"]
+    assert users["U1"].source_id == "slack_json:user:U1"
+    assert users["U1"].title == "Ada"
+    assert users["U1"].metadata["real_name"] == "Ada Lovelace"
+    assert users["U1"].metadata["message_count"] == 2
+    assert users["B1"].metadata["display_name"] == "Deploy Bot"
+    assert users_only.edges == []
+
+    message = next(unit for unit in combined.units if unit.source_entity_type == "slack_message" and unit.metadata["user"] == "U1")
+    assert message.metadata["user_profile"]["display_name"] == "Ada"
+    user_edges = [edge for edge in combined.edges if edge.metadata.get("relation_type") == "slack_message_user"]
+    thread_edges = [edge for edge in combined.edges if edge.metadata.get("relation_type") == "thread_reply"]
+    assert len(user_edges) == 3
+    assert len(thread_edges) == 1
+    assert {edge.relation for edge in user_edges} == {EdgeRelation.RELATES_TO}
+    assert {edge.source for edge in user_edges} == {EdgeSource.SOURCE}
+    assert {edge.to_unit_id for edge in user_edges} == {unit.source_id for unit in users.values()}
+
+
 def test_slack_json_skips_deleted_and_empty_messages(tmp_path):
     export = tmp_path / "random.json"
     _write_json(
