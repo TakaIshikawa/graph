@@ -24,6 +24,7 @@ from graph.adapters.csv_adapter import CsvAdapter
 from graph.adapters.csv_rows import CsvRowsAdapter
 from graph.adapters.crossref import CrossrefAdapter
 from graph.adapters.csl_json import CslJsonAdapter
+from graph.adapters.coursera_progress_csv import CourseraProgressCsvAdapter
 from graph.adapters.daily_journal import DailyJournalAdapter
 from graph.adapters.diigo import DiigoAdapter
 from graph.adapters.discord_json import DiscordJsonAdapter
@@ -34,7 +35,9 @@ from graph.adapters.forty_two import FortyTwoAdapter
 from graph.adapters.git_adapter import GitAdapter
 from graph.adapters.github_gists_json import GithubGistsJsonAdapter
 from graph.adapters.github_issues_json import GithubIssuesJsonAdapter
+from graph.adapters.github_notifications_json import GithubNotificationsJsonAdapter
 from graph.adapters.gitlab_issues_json import GitlabIssuesJsonAdapter
+from graph.adapters.gitlab_merge_requests_json import GitlabMergeRequestsJsonAdapter
 from graph.adapters.github_stars_csv import GithubStarsCsvAdapter
 from graph.adapters.garmin_activities_csv import GarminActivitiesCsvAdapter
 from graph.adapters.goodreads_library import GoodreadsLibraryAdapter
@@ -84,10 +87,15 @@ from graph.adapters.apple_notes_export import AppleNotesExportAdapter
 from graph.adapters.apple_health_workouts import AppleHealthWorkoutsAdapter
 from graph.adapters.apple_music_library_csv import AppleMusicLibraryCsvAdapter
 from graph.adapters.apple_podcasts_history_csv import ApplePodcastsHistoryCsvAdapter
+from graph.adapters.medium_bookmarks_json import MediumBookmarksJsonAdapter
+from graph.adapters.overcast_starred_episodes_json import OvercastStarredEpisodesJsonAdapter
+from graph.adapters.pocket_casts_listening_history_csv import PocketCastsListeningHistoryCsvAdapter
+from graph.adapters.product_hunt_bookmarks_json import ProductHuntBookmarksJsonAdapter
 from graph.adapters.apple_reminders_csv import AppleRemindersCsvAdapter
 from graph.adapters.day_one_json import DayOneJsonAdapter
 from graph.adapters.firefox_places import FirefoxPlacesAdapter
 from graph.adapters.foursquare_checkins_csv import FoursquareCheckinsCsvAdapter
+from graph.adapters.google_search_history_json import GoogleSearchHistoryJsonAdapter
 from graph.adapters.things_csv import ThingsCsvAdapter
 from graph.adapters.simplenote_export import SimplenoteExportAdapter
 from graph.adapters.foam import FoamWorkspaceAdapter
@@ -196,6 +204,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "jsonl": JsonlAdapter,
     "jsonl_notes": JsonlNotesAdapter,
     "daily_journal": DailyJournalAdapter,
+    "coursera_progress_csv": CourseraProgressCsvAdapter,
     "yaml": YamlAdapter,
     "notion_markdown": NotionMarkdownAdapter,
     "notion_export": NotionExportAdapter,
@@ -205,11 +214,16 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "apple_health_workouts": AppleHealthWorkoutsAdapter,
     "apple_music_library_csv": AppleMusicLibraryCsvAdapter,
     "apple_podcasts_history_csv": ApplePodcastsHistoryCsvAdapter,
+    "medium_bookmarks_json": MediumBookmarksJsonAdapter,
+    "overcast_starred_episodes_json": OvercastStarredEpisodesJsonAdapter,
+    "pocket_casts_listening_history_csv": PocketCastsListeningHistoryCsvAdapter,
+    "product_hunt_bookmarks_json": ProductHuntBookmarksJsonAdapter,
     "apple_reminders_csv": AppleRemindersCsvAdapter,
     "day_one_json": DayOneJsonAdapter,
     "things_csv": ThingsCsvAdapter,
     "firefox_places": FirefoxPlacesAdapter,
     "foursquare_checkins_csv": FoursquareCheckinsCsvAdapter,
+    "google_search_history_json": GoogleSearchHistoryJsonAdapter,
     "simplenote_export": SimplenoteExportAdapter,
     "google_keep_export": GoogleKeepExportAdapter,
     "opml": OpmlAdapter,
@@ -300,7 +314,9 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "steam_library_csv": SteamLibraryCsvAdapter,
     "github_gists_json": GithubGistsJsonAdapter,
     "github_issues_json": GithubIssuesJsonAdapter,
+    "github_notifications_json": GithubNotificationsJsonAdapter,
     "gitlab_issues_json": GitlabIssuesJsonAdapter,
+    "gitlab_merge_requests_json": GitlabMergeRequestsJsonAdapter,
     "jira_issues_csv": JiraIssuesCsvAdapter,
     "trello_board_json": TrelloBoardJsonAdapter,
     "google_maps_timeline_json": GoogleMapsTimelineJsonAdapter,

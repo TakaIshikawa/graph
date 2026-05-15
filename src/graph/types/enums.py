@@ -92,6 +92,11 @@ class SourceProject(StrEnum):
     APPLE_REMINDERS_CSV = "apple_reminders_csv"
     APPLE_MUSIC_LIBRARY_CSV = "apple_music_library_csv"
     APPLE_PODCASTS_HISTORY_CSV = "apple_podcasts_history_csv"
+    POCKET_CASTS_LISTENING_HISTORY_CSV = "pocket_casts_listening_history_csv"
+    OVERCAST_STARRED_EPISODES_JSON = "overcast_starred_episodes_json"
+    MEDIUM_BOOKMARKS_JSON = "medium_bookmarks_json"
+    PRODUCT_HUNT_BOOKMARKS_JSON = "product_hunt_bookmarks_json"
+    GOOGLE_SEARCH_HISTORY_JSON = "google_search_history_json"
     OPENLIBRARY_READING_LOG_CSV = "openlibrary_reading_log_csv"
     FOURSQUARE_CHECKINS_CSV = "foursquare_checkins_csv"
     DAY_ONE_JSON = "day_one_json"
@@ -133,7 +138,9 @@ class SourceProject(StrEnum):
     STEAM_LIBRARY_CSV = "steam_library_csv"
     GITHUB_ISSUES_JSON = "github_issues_json"
     GITHUB_GISTS_JSON = "github_gists_json"
+    GITHUB_NOTIFICATIONS_JSON = "github_notifications_json"
     GITLAB_ISSUES_JSON = "gitlab_issues_json"
+    GITLAB_MERGE_REQUESTS_JSON = "gitlab_merge_requests_json"
     JIRA_ISSUES_CSV = "jira_issues_csv"
     TRELLO_BOARD_JSON = "trello_board_json"
     MIRO_BOARD_JSON = "miro_board_json"
@@ -158,6 +165,7 @@ class SourceProject(StrEnum):
     AUDIBLE_LIBRARY_CSV = "audible_library_csv"
     GOOGLE_PLAY_BOOKS_NOTES_CSV = "google_play_books_notes_csv"
     CALENDAR_EVENTS_CSV = "calendar_events_csv"
+    COURSERA_PROGRESS_CSV = "coursera_progress_csv"
 
 
 class ContentType(StrEnum):
