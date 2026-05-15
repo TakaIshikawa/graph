@@ -20,7 +20,7 @@ class AsanaTasksCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["task", "assignee", "project", "workspace", "tag"]
+        return ["task", "assignee", "project", "workspace", "tag", "status"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -73,6 +73,8 @@ class AsanaTasksCsvAdapter(SourceAdapter):
                     if "tag" in allowed_types:
                         for tag in unit.metadata.get("tags") or []:
                             result.edges.append(self._relation_edge(unit.source_id, self._tag_source_id(str(tag)), "task_tag"))
+                    if "status" in allowed_types and unit.metadata.get("status"):
+                        result.edges.append(self._relation_edge(unit.source_id, self._status_source_id(str(unit.metadata["status"])), "task_status"))
         for parent_id, child_id in parent_refs:
             parent = by_task_id.get(parent_id)
             child = by_task_id.get(child_id)
@@ -80,6 +82,8 @@ class AsanaTasksCsvAdapter(SourceAdapter):
                 result.edges.append(self._edge(parent.source_id, child.source_id))
         if "tag" in allowed_types:
             result.units.extend(self._tag_units(task_units))
+        if "status" in allowed_types:
+            result.units.extend(self._status_units(task_units))
         result.units = list({unit.source_id: unit for unit in result.units}.values())
         result.units.sort(key=lambda unit: unit.source_id)
         result.edges = sorted({edge.id: edge for edge in result.edges}.values(), key=lambda edge: edge.id)
@@ -97,7 +101,7 @@ class AsanaTasksCsvAdapter(SourceAdapter):
         completed = parse_datetime(first(row, "Completed At", "Completion Date"))
         projects = split_values(first(row, "Projects", "Project"))
         tags = split_values(first(row, "Tags", "Tag"))
-        status = "completed" if completed else first(row, "Status", "Completed") or "open"
+        status = self._normalize_status("completed" if completed else first(row, "Status", "Completed"))
         metadata = {
             "task_id": task_id,
             "name": name,
@@ -106,7 +110,7 @@ class AsanaTasksCsvAdapter(SourceAdapter):
             "workspace": first(row, "Workspace", "Workspace Name"),
             "projects": projects,
             "tags": tags,
-            "status": status.casefold() if status else "",
+            "status": status,
             "created_at": created.isoformat() if created else first(row, "Created At", "Created"),
             "modified_at": modified.isoformat() if modified else first(row, "Modified At", "Updated At"),
             "due_date": due.isoformat() if due else first(row, "Due Date", "Due On", "Due At"),
@@ -207,6 +211,60 @@ class AsanaTasksCsvAdapter(SourceAdapter):
 
     def _tag_source_id(self, name: str) -> str:
         return self._entity_source_id("tag", name)
+
+    def _status_units(self, tasks: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        for task in tasks:
+            status = str(task.metadata.get("status") or "").strip()
+            if status:
+                grouped.setdefault(status, []).append(task)
+
+        units: list[KnowledgeUnit] = []
+        now = datetime.now(timezone.utc)
+        for status, linked_tasks in grouped.items():
+            created_at = min((task.created_at for task in linked_tasks), default=now)
+            updated_at = max((task.updated_at for task in linked_tasks), default=created_at)
+            task_source_ids = sorted({task.source_id for task in linked_tasks})
+            projects = sorted({project for task in linked_tasks for project in (task.metadata.get("projects") or []) if project})
+            assignees = sorted({assignee for task in linked_tasks if (assignee := str(task.metadata.get("assignee") or ""))})
+            metadata = clean_metadata(
+                {
+                    "status": status,
+                    "task_source_ids": task_source_ids,
+                    "task_count": len(task_source_ids),
+                    "projects": projects,
+                    "assignees": assignees,
+                    "latest_updated_at": updated_at.isoformat(),
+                }
+            )
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.ASANA_TASKS_CSV,
+                    source_id=self._status_source_id(status),
+                    source_entity_type="status",
+                    title=status,
+                    content=f"Asana task status: {status}\nTasks: {len(task_source_ids)}",
+                    content_type=ContentType.METADATA,
+                    metadata=metadata,
+                    tags=["asana", "status", status],
+                    created_at=created_at,
+                    updated_at=updated_at,
+                )
+            )
+        return units
+
+    def _status_source_id(self, status: str) -> str:
+        return self._entity_source_id("status", status)
+
+    def _normalize_status(self, value: str) -> str:
+        text = value.strip().casefold()
+        if not text:
+            return "open"
+        if text in {"true", "yes", "y", "1", "done", "complete", "completed"}:
+            return "completed"
+        if text in {"false", "no", "n", "0", "incomplete", "not completed", "not_complete", "not complete"}:
+            return "open"
+        return "_".join(text.replace("-", " ").split())
 
     def _relation_edge(self, from_id: str, to_id: str, relation_type: str) -> KnowledgeEdge:
         digest = hashlib.sha256(f"{from_id}|{relation_type}|{to_id}".encode("utf-8")).hexdigest()[:24]
