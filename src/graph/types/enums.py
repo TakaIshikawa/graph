@@ -172,6 +172,7 @@ class SourceProject(StrEnum):
     COURSERA_PROGRESS_CSV = "coursera_progress_csv"
     CONFLUENCE_PAGES_JSON = "confluence_pages_json"
     PAYPAL_ACTIVITY_CSV = "paypal_activity_csv"
+    MONZO_TRANSACTIONS_CSV = "monzo_transactions_csv"
 
 
 class ContentType(StrEnum):

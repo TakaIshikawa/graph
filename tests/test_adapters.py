@@ -3115,6 +3115,7 @@ def test_registry_list_adapters_contains_expected():
     assert "bibtex" in adapters
     assert "confluence_pages_json" in adapters
     assert "jira_worklogs_csv" in adapters
+    assert "monzo_transactions_csv" in adapters
     assert "paypal_activity_csv" in adapters
 
 
