@@ -90,6 +90,7 @@ class SourceProject(StrEnum):
     APPLE_NOTES_EXPORT = "apple_notes_export"
     APPLE_HEALTH_WORKOUTS = "apple_health_workouts"
     APPLE_REMINDERS_CSV = "apple_reminders_csv"
+    APPLE_MUSIC_LIBRARY_CSV = "apple_music_library_csv"
     DAY_ONE_JSON = "day_one_json"
     THINGS_CSV = "things_csv"
     FIREFOX_PLACES = "firefox_places"
