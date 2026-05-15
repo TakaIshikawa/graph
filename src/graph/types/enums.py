@@ -123,6 +123,7 @@ class SourceProject(StrEnum):
     CALENDAR = "calendar"
     CALIBRE_SQLITE = "calibre_sqlite"
     ACTIVITYWATCH_JSON = "activitywatch_json"
+    FITBIT_DAILY_ACTIVITY_CSV = "fitbit_daily_activity_csv"
     FITBIT_SLEEP_CSV = "fitbit_sleep_csv"
     SPOTIFY_STREAMING_HISTORY = "spotify_streaming_history"
     SPOTIFY_TAKEOUT = "spotify_takeout"

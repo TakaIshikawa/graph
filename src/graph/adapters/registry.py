@@ -98,6 +98,7 @@ from graph.adapters.product_hunt_bookmarks_json import ProductHuntBookmarksJsonA
 from graph.adapters.apple_reminders_csv import AppleRemindersCsvAdapter
 from graph.adapters.day_one_json import DayOneJsonAdapter
 from graph.adapters.firefox_places import FirefoxPlacesAdapter
+from graph.adapters.fitbit_daily_activity_csv import FitbitDailyActivityCsvAdapter
 from graph.adapters.foursquare_checkins_csv import FoursquareCheckinsCsvAdapter
 from graph.adapters.google_search_history_json import GoogleSearchHistoryJsonAdapter
 from graph.adapters.things_csv import ThingsCsvAdapter
@@ -313,6 +314,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "google_photos_takeout": GooglePhotosTakeoutAdapter,
     "activitywatch_json": ActivityWatchJsonAdapter,
     "audible_library_csv": AudibleLibraryCsvAdapter,
+    "fitbit_daily_activity_csv": FitbitDailyActivityCsvAdapter,
     "fitbit_sleep_csv": FitbitSleepCsvAdapter,
     "spotify_streaming_history": SpotifyStreamingHistoryAdapter,
     "spotify_takeout": SpotifyTakeoutAdapter,

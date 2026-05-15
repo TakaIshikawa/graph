@@ -3110,6 +3110,7 @@ def test_registry_list_adapters_contains_expected():
     # Check for some well-known adapters
     assert "atom" in adapters
     assert "feed" in adapters
+    assert "fitbit_daily_activity_csv" in adapters
     assert "mbox" in adapters
     assert "markdown" in adapters
     assert "bibtex" in adapters
