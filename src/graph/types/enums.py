@@ -61,6 +61,7 @@ class SourceProject(StrEnum):
     INSTAPAPER = "instapaper"
     PINBOARD = "pinboard"
     RAINDROP = "raindrop"
+    RAINDROP_BOOKMARKS_CSV = "raindrop_bookmarks_csv"
     RAINDROP_CSV = "raindrop_csv"
     RAINDROP_JSON = "raindrop_json"
     DIIGO = "diigo"

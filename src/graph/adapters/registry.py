@@ -125,6 +125,7 @@ from graph.adapters.pocket_export import PocketExportAdapter
 from graph.adapters.podcasts_opml import PodcastsOpmlAdapter
 from graph.adapters.presence import PresenceAdapter
 from graph.adapters.raindrop import RaindropAdapter
+from graph.adapters.raindrop_bookmarks_csv import RaindropBookmarksCsvAdapter
 from graph.adapters.raindrop_csv import RaindropCsvAdapter
 from graph.adapters.raindrop_json import RaindropJsonAdapter
 from graph.adapters.readwise import ReadwiseAdapter
@@ -263,6 +264,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "pinboard": PinboardAdapter,
     "pinboard_html_export": PinboardHtmlExportAdapter,
     "raindrop": RaindropAdapter,
+    "raindrop_bookmarks_csv": RaindropBookmarksCsvAdapter,
     "raindrop_csv": RaindropCsvAdapter,
     "raindrop_json": RaindropJsonAdapter,
     "diigo": DiigoAdapter,
