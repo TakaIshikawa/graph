@@ -86,6 +86,7 @@ from graph.export.source_freshness_summary_csv import export_source_freshness_su
 from graph.export.source_date_gap_csv import export_source_date_gap_csv
 from graph.export.source_author_coverage_csv import export_source_author_coverage_csv
 from graph.export.source_date_precision_csv import export_source_date_precision_csv
+from graph.export.source_domain_coverage_csv import export_source_domain_coverage_csv
 from graph.export.source_language_distribution_csv import export_source_language_distribution_csv
 from graph.export.source_metadata_density_csv import export_source_metadata_density_csv
 from graph.export.source_metadata_outliers_markdown import export_source_metadata_outliers_markdown
@@ -228,6 +229,7 @@ __all__ = [
     "export_source_author_coverage_csv",
     "export_source_date_gap_csv",
     "export_source_date_precision_csv",
+    "export_source_domain_coverage_csv",
     "export_source_freshness_summary_csv",
     "export_source_language_distribution_csv",
     "export_source_metadata_density_csv",
