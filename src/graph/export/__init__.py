@@ -120,6 +120,7 @@ from graph.export.unit_citation_inventory_csv import export_unit_citation_invent
 from graph.export.unit_content_length_csv import export_unit_content_length_csv
 from graph.export.unit_content_length_summary_csv import export_unit_content_length_summary_csv
 from graph.export.unit_content_length_outliers_csv import export_unit_content_length_outliers_csv
+from graph.export.unit_duplicate_title_csv import export_unit_duplicate_title_csv
 from graph.export.unit_evidence_markdown import export_unit_evidence_markdown
 from graph.export.unit_link_inventory_csv import export_unit_link_inventory_csv
 from graph.export.unit_markdown_table import export_units_to_markdown_table
@@ -272,6 +273,7 @@ __all__ = [
     "export_unit_content_length_summary_csv",
     "export_unit_content_length_outliers_csv",
     "export_unit_date_coverage_markdown",
+    "export_unit_duplicate_title_csv",
     "export_unit_evidence_markdown",
     "export_unit_link_inventory_csv",
     "export_unit_metadata_schema_csv",
