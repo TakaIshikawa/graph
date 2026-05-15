@@ -144,9 +144,9 @@ def test_github_issues_json_emits_relationship_edges_deterministically(tmp_path)
         encoding="utf-8",
     )
 
-    result = GithubIssuesJsonAdapter(path=str(export)).ingest()
+    result = GithubIssuesJsonAdapter(path=str(export)).ingest(entity_types=["issue", "milestone"])
 
-    assert len(result.units) == 2
+    assert len([unit for unit in result.units if unit.source_entity_type == "issue"]) == 2
     assert len(result.edges) == len({edge.id for edge in result.edges})
     first_edges = [edge for edge in result.edges if edge.from_unit_id == "github_issues_json:acme/graph#10"]
     assert [edge.metadata["kind"] for edge in first_edges] == ["assignee", "author", "mentioned_url", "milestone"]
@@ -183,7 +183,7 @@ def test_github_issues_json_ingests_label_aggregates_and_edges(tmp_path):
     labels_only = GithubIssuesJsonAdapter(path=str(export)).ingest(entity_types=["label"])
     combined = GithubIssuesJsonAdapter(path=str(export)).ingest(entity_types=["issue", "pull_request", "label"])
 
-    assert GithubIssuesJsonAdapter().entity_types == ["issue", "pull_request", "label"]
+    assert GithubIssuesJsonAdapter().entity_types == ["issue", "pull_request", "label", "milestone"]
     labels = {unit.metadata["label"]: unit for unit in labels_only.units}
     assert sorted(labels) == ["bug", "import"]
     bug = labels["bug"]
@@ -199,3 +199,70 @@ def test_github_issues_json_ingests_label_aggregates_and_edges(tmp_path):
     assert len(label_edges) == 3
     assert {edge.relation for edge in label_edges} == {EdgeRelation.RELATES_TO}
     assert {edge.source for edge in label_edges} == {EdgeSource.SOURCE}
+
+
+def test_github_issues_json_emits_milestone_aggregates_and_edges(tmp_path):
+    export = tmp_path / "issues.json"
+    export.write_text(
+        json.dumps(
+            [
+                {
+                    "number": 1,
+                    "title": "Fix bug",
+                    "repository_full_name": "acme/graph",
+                    "milestone": {
+                        "title": "v1.0",
+                        "state": "open",
+                        "due_on": "2025-02-01T00:00:00Z",
+                        "number": 3,
+                    },
+                    "updated_at": "2025-01-02T00:00:00Z",
+                },
+                {
+                    "number": 2,
+                    "title": "Ship PR",
+                    "repository_full_name": "acme/graph",
+                    "pull_request": {},
+                    "milestone": {"title": "v1.0", "state": "open", "number": 3},
+                    "updated_at": "2025-01-03T00:00:00Z",
+                },
+                {
+                    "number": 3,
+                    "title": "Next release",
+                    "repository_full_name": "acme/graph",
+                    "milestone": {"title": "v2.0", "state": "closed", "number": 4},
+                    "updated_at": "2025-01-04T00:00:00Z",
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    milestones_only = GithubIssuesJsonAdapter(path=str(export)).ingest(entity_types=["milestone"])
+    combined = GithubIssuesJsonAdapter(path=str(export)).ingest(entity_types=["issue", "pull_request", "milestone"])
+    issues_only = GithubIssuesJsonAdapter(path=str(export)).ingest(entity_types=["issue", "pull_request"])
+
+    milestones = {unit.metadata["milestone_title"]: unit for unit in milestones_only.units}
+    assert sorted(milestones) == ["v1.0", "v2.0"]
+    assert milestones["v1.0"].source_entity_type == "milestone"
+    assert milestones["v1.0"].source_id.startswith("github_issues_json:milestone:")
+    assert milestones["v1.0"].metadata["milestone_state"] == "open"
+    assert milestones["v1.0"].metadata["milestone_due_on"] == "2025-02-01T00:00:00+00:00"
+    assert milestones["v1.0"].metadata["milestone_number"] == 3
+    assert milestones["v1.0"].metadata["issue_source_ids"] == [
+        "github_issues_json:acme/graph#1",
+        "github_issues_json:acme/graph#2",
+    ]
+    assert milestones["v1.0"].metadata["issue_count"] == 2
+    assert milestones_only.edges == []
+
+    milestone_edges = [edge for edge in combined.edges if edge.metadata["kind"] == "milestone"]
+    assert len(milestone_edges) == 3
+    assert {edge.to_unit_id for edge in milestone_edges} == {unit.source_id for unit in combined.units if unit.source_entity_type == "milestone"}
+    assert {edge.relation for edge in milestone_edges} == {EdgeRelation.RELATES_TO}
+    assert {edge.source for edge in milestone_edges} == {EdgeSource.SOURCE}
+    assert all(edge.metadata["to_entity_type"] == "milestone" for edge in milestone_edges)
+    assert any(edge.metadata.get("milestone_due_on") == "2025-02-01T00:00:00+00:00" for edge in milestone_edges)
+
+    assert {unit.source_entity_type for unit in issues_only.units} == {"issue", "pull_request"}
+    assert all(edge.metadata["kind"] != "milestone" for edge in issues_only.edges)
