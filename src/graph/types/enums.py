@@ -176,6 +176,7 @@ class SourceProject(StrEnum):
     MONZO_TRANSACTIONS_CSV = "monzo_transactions_csv"
     REVOLUT_TRANSACTIONS_CSV = "revolut_transactions_csv"
     WISE_ACTIVITY_CSV = "wise_activity_csv"
+    SPLITWISE_EXPENSES_CSV = "splitwise_expenses_csv"
 
 
 class ContentType(StrEnum):
