@@ -137,6 +137,7 @@ from graph.adapters.pinboard import PinboardAdapter
 from graph.adapters.pinboard_html_export import PinboardHtmlExportAdapter
 from graph.adapters.peloton_workouts_csv import PelotonWorkoutsCsvAdapter
 from graph.adapters.plain_text import PlainTextAdapter
+from graph.adapters.plaid_transactions_csv import PlaidTransactionsCsvAdapter
 from graph.adapters.pocket import PocketAdapter
 from graph.adapters.pocket_csv import PocketCsvAdapter
 from graph.adapters.pocket_export import PocketExportAdapter
@@ -256,6 +257,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "org": OrgAdapter,
     "pdf": PdfAdapter,
     "plain_text": PlainTextAdapter,
+    "plaid_transactions_csv": PlaidTransactionsCsvAdapter,
     "email": EmailAdapter,
     "enex": EnexAdapter,
     "etrade_transactions_csv": EtradeTransactionsCsvAdapter,
