@@ -185,6 +185,7 @@ class SourceProject(StrEnum):
     MINT_TRANSACTIONS_CSV = "mint_transactions_csv"
     ROBINHOOD_ACTIVITY_CSV = "robinhood_activity_csv"
     FIDELITY_ACTIVITY_CSV = "fidelity_activity_csv"
+    SCHWAB_TRANSACTIONS_CSV = "schwab_transactions_csv"
 
 
 class ContentType(StrEnum):
