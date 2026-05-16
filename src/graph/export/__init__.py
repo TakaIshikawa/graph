@@ -73,6 +73,7 @@ from graph.export.relation_evidence_gap_csv import export_relation_evidence_gap_
 from graph.export.relation_endpoint_type_matrix_csv import export_relation_endpoint_type_matrix_csv
 from graph.export.relation_evidence_span_csv import export_relation_evidence_span_csv
 from graph.export.relation_provenance_matrix_csv import export_relation_provenance_matrix_csv
+from graph.export.relation_reciprocity_gaps_csv import export_relation_reciprocity_gaps_csv
 from graph.export.relation_reciprocity_csv import export_relation_reciprocity_csv
 from graph.export.relation_tag_bridge_csv import export_relation_tag_bridge_csv
 from graph.export.rdf_turtle import export_graph_rdf_turtle
@@ -234,6 +235,7 @@ __all__ = [
     "export_relation_evidence_gap_csv",
     "export_relation_evidence_span_csv",
     "export_relation_provenance_matrix_csv",
+    "export_relation_reciprocity_gaps_csv",
     "export_relation_reciprocity_csv",
     "export_relation_tag_bridge_csv",
     "export_units_to_ris",
