@@ -135,6 +135,7 @@ from graph.export.unit_reference_density_csv import export_unit_reference_densit
 from graph.export.unit_reading_queue_csv import export_unit_reading_queue_csv
 from graph.export.unit_review_readiness_csv import export_unit_review_readiness_csv
 from graph.export.unit_source_timeline_csv import export_unit_source_timeline_csv
+from graph.export.unit_staleness_csv import export_unit_staleness_csv
 from graph.export.unit_source_diversity_csv import export_unit_source_diversity_csv
 from graph.export.unit_source_recency_csv import export_unit_source_recency_csv
 from graph.export.unit_yaml import export_units_to_yaml
@@ -295,6 +296,7 @@ __all__ = [
     "export_unit_source_diversity_csv",
     "export_unit_source_recency_csv",
     "export_unit_source_timeline_csv",
+    "export_unit_staleness_csv",
     "export_unit_tag_matrix_csv",
     "export_unit_tag_source_matrix_csv",
     "export_units_to_anki_tsv",
