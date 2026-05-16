@@ -183,6 +183,7 @@ from graph.adapters.facebook_archive import FacebookArchiveAdapter
 from graph.adapters.instagram_archive import InstagramArchiveAdapter
 from graph.adapters.linkedin_archive import LinkedInArchiveAdapter
 from graph.adapters.vcard import VCardAdapter
+from graph.adapters.vanguard_activity_csv import VanguardActivityCsvAdapter
 from graph.adapters.wallabag import WallabagAdapter
 from graph.adapters.webvtt import WebVttAdapter
 from graph.adapters.yaml_adapter import YamlAdapter
@@ -310,6 +311,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "sqlite_query_log": SqliteQueryLogAdapter,
     "slack_json": SlackJsonAdapter,
     "sleep_as_android_csv": SleepAsAndroidCsvAdapter,
+    "vanguard_activity_csv": VanguardActivityCsvAdapter,
     "vcard": VCardAdapter,
     "yaml_frontmatter": YamlFrontmatterAdapter,
     "foam_workspace": FoamWorkspaceAdapter,
