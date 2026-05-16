@@ -93,6 +93,7 @@ from graph.adapters.medium_bookmarks_json import MediumBookmarksJsonAdapter
 from graph.adapters.monzo_transactions_csv import MonzoTransactionsCsvAdapter
 from graph.adapters.overcast_starred_episodes_json import OvercastStarredEpisodesJsonAdapter
 from graph.adapters.paypal_activity_csv import PaypalActivityCsvAdapter
+from graph.adapters.revolut_transactions_csv import RevolutTransactionsCsvAdapter
 from graph.adapters.pocket_casts_listening_history_csv import PocketCastsListeningHistoryCsvAdapter
 from graph.adapters.product_hunt_bookmarks_json import ProductHuntBookmarksJsonAdapter
 from graph.adapters.apple_reminders_csv import AppleRemindersCsvAdapter
@@ -338,6 +339,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "libby_loans_csv": LibbyLoansCsvAdapter,
     "monzo_transactions_csv": MonzoTransactionsCsvAdapter,
     "paypal_activity_csv": PaypalActivityCsvAdapter,
+    "revolut_transactions_csv": RevolutTransactionsCsvAdapter,
     "boardgamegeek_collection_csv": BoardGameGeekCollectionCsvAdapter,
     "reddit_saved_csv": RedditSavedCsvAdapter,
     "reddit_saved_json": RedditSavedJsonAdapter,

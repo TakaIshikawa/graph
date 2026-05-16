@@ -174,6 +174,7 @@ class SourceProject(StrEnum):
     CONFLUENCE_PAGES_JSON = "confluence_pages_json"
     PAYPAL_ACTIVITY_CSV = "paypal_activity_csv"
     MONZO_TRANSACTIONS_CSV = "monzo_transactions_csv"
+    REVOLUT_TRANSACTIONS_CSV = "revolut_transactions_csv"
 
 
 class ContentType(StrEnum):
