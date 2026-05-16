@@ -182,6 +182,7 @@ class SourceProject(StrEnum):
     STRIPE_BALANCE_TRANSACTIONS_CSV = "stripe_balance_transactions_csv"
     QUICKEN_TRANSACTIONS_CSV = "quicken_transactions_csv"
     YNAB_TRANSACTIONS_CSV = "ynab_transactions_csv"
+    MINT_TRANSACTIONS_CSV = "mint_transactions_csv"
 
 
 class ContentType(StrEnum):
