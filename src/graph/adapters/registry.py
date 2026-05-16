@@ -110,6 +110,7 @@ from graph.adapters.day_one_json import DayOneJsonAdapter
 from graph.adapters.firefox_places import FirefoxPlacesAdapter
 from graph.adapters.fitbit_daily_activity_csv import FitbitDailyActivityCsvAdapter
 from graph.adapters.foursquare_checkins_csv import FoursquareCheckinsCsvAdapter
+from graph.adapters.fidelity_activity_csv import FidelityActivityCsvAdapter
 from graph.adapters.google_search_history_json import GoogleSearchHistoryJsonAdapter
 from graph.adapters.things_csv import ThingsCsvAdapter
 from graph.adapters.simplenote_export import SimplenoteExportAdapter
@@ -324,6 +325,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "google_photos_takeout": GooglePhotosTakeoutAdapter,
     "activitywatch_json": ActivityWatchJsonAdapter,
     "audible_library_csv": AudibleLibraryCsvAdapter,
+    "fidelity_activity_csv": FidelityActivityCsvAdapter,
     "fitbit_daily_activity_csv": FitbitDailyActivityCsvAdapter,
     "fitbit_sleep_csv": FitbitSleepCsvAdapter,
     "spotify_streaming_history": SpotifyStreamingHistoryAdapter,
