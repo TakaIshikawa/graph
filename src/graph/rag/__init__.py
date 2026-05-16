@@ -9,6 +9,7 @@ from graph.rag.citation_gap_detector import detect_citation_gaps
 from graph.rag.citation_trails import build_citation_trails
 from graph.rag.claim_support_matrix import build_claim_support_matrix
 from graph.rag.date_coverage import analyze_result_date_coverage
+from graph.rag.query_decomposition import decompose_query_for_retrieval
 from graph.rag.diversity import rerank_for_source_diversity
 from graph.rag.evidence_pack import build_evidence_pack
 from graph.rag.evidence_packets import build_evidence_packets
@@ -53,6 +54,7 @@ __all__ = [
     "analyze_result_provenance_completeness",
     "audit_source_diversity",
     "allocate_evidence_budget",
+    "decompose_query_for_retrieval",
     "build_answer_outline",
     "build_evidence_pack",
     "build_evidence_packets",
