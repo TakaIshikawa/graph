@@ -174,6 +174,13 @@ class SourceProject(StrEnum):
     CONFLUENCE_PAGES_JSON = "confluence_pages_json"
     PAYPAL_ACTIVITY_CSV = "paypal_activity_csv"
     MONZO_TRANSACTIONS_CSV = "monzo_transactions_csv"
+    REVOLUT_TRANSACTIONS_CSV = "revolut_transactions_csv"
+    WISE_ACTIVITY_CSV = "wise_activity_csv"
+    SPLITWISE_EXPENSES_CSV = "splitwise_expenses_csv"
+    VENMO_TRANSACTIONS_CSV = "venmo_transactions_csv"
+    COINBASE_TRANSACTIONS_CSV = "coinbase_transactions_csv"
+    STRIPE_BALANCE_TRANSACTIONS_CSV = "stripe_balance_transactions_csv"
+    QUICKEN_TRANSACTIONS_CSV = "quicken_transactions_csv"
 
 
 class ContentType(StrEnum):
