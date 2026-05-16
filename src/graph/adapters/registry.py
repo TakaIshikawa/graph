@@ -100,6 +100,7 @@ from graph.adapters.venmo_transactions_csv import VenmoTransactionsCsvAdapter
 from graph.adapters.coinbase_transactions_csv import CoinbaseTransactionsCsvAdapter
 from graph.adapters.stripe_balance_transactions_csv import StripeBalanceTransactionsCsvAdapter
 from graph.adapters.quicken_transactions_csv import QuickenTransactionsCsvAdapter
+from graph.adapters.ynab_transactions_csv import YnabTransactionsCsvAdapter
 from graph.adapters.pocket_casts_listening_history_csv import PocketCastsListeningHistoryCsvAdapter
 from graph.adapters.product_hunt_bookmarks_json import ProductHuntBookmarksJsonAdapter
 from graph.adapters.apple_reminders_csv import AppleRemindersCsvAdapter
@@ -352,6 +353,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "coinbase_transactions_csv": CoinbaseTransactionsCsvAdapter,
     "stripe_balance_transactions_csv": StripeBalanceTransactionsCsvAdapter,
     "quicken_transactions_csv": QuickenTransactionsCsvAdapter,
+    "ynab_transactions_csv": YnabTransactionsCsvAdapter,
     "boardgamegeek_collection_csv": BoardGameGeekCollectionCsvAdapter,
     "reddit_saved_csv": RedditSavedCsvAdapter,
     "reddit_saved_json": RedditSavedJsonAdapter,
