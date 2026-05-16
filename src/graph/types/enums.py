@@ -186,6 +186,7 @@ class SourceProject(StrEnum):
     ROBINHOOD_ACTIVITY_CSV = "robinhood_activity_csv"
     FIDELITY_ACTIVITY_CSV = "fidelity_activity_csv"
     SCHWAB_TRANSACTIONS_CSV = "schwab_transactions_csv"
+    ETRADE_TRANSACTIONS_CSV = "etrade_transactions_csv"
 
 
 class ContentType(StrEnum):

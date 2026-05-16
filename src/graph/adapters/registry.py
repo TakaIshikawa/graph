@@ -31,6 +31,7 @@ from graph.adapters.diigo import DiigoAdapter
 from graph.adapters.discord_json import DiscordJsonAdapter
 from graph.adapters.email import EmailAdapter
 from graph.adapters.enex import EnexAdapter
+from graph.adapters.etrade_transactions_csv import EtradeTransactionsCsvAdapter
 from graph.adapters.feed import FeedAdapter
 from graph.adapters.forty_two import FortyTwoAdapter
 from graph.adapters.git_adapter import GitAdapter
@@ -256,6 +257,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "plain_text": PlainTextAdapter,
     "email": EmailAdapter,
     "enex": EnexAdapter,
+    "etrade_transactions_csv": EtradeTransactionsCsvAdapter,
     "text": TextAdapter,
     "text_outline": TextOutlineAdapter,
     "tana_paste": TanaPasteAdapter,
