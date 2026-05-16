@@ -95,6 +95,7 @@ from graph.export.source_language_distribution_csv import export_source_language
 from graph.export.source_metadata_density_csv import export_source_metadata_density_csv
 from graph.export.source_metadata_outliers_markdown import export_source_metadata_outliers_markdown
 from graph.export.source_quality_markdown import export_source_quality_markdown
+from graph.export.source_tag_vocabulary_csv import export_source_tag_vocabulary_csv
 from graph.export.source_title_similarity_csv import export_source_title_similarity_csv
 from graph.export.source_title_quality_csv import export_source_title_quality_csv
 from graph.export.source_tag_summary_markdown import export_source_tag_summary_markdown
@@ -249,6 +250,7 @@ __all__ = [
     "export_source_metadata_density_csv",
     "export_source_metadata_outliers_markdown",
     "export_source_quality_markdown",
+    "export_source_tag_vocabulary_csv",
     "export_source_title_similarity_csv",
     "export_source_title_quality_csv",
     "export_source_tag_summary_markdown",
