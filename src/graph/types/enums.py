@@ -178,6 +178,7 @@ class SourceProject(StrEnum):
     WISE_ACTIVITY_CSV = "wise_activity_csv"
     SPLITWISE_EXPENSES_CSV = "splitwise_expenses_csv"
     VENMO_TRANSACTIONS_CSV = "venmo_transactions_csv"
+    COINBASE_TRANSACTIONS_CSV = "coinbase_transactions_csv"
 
 
 class ContentType(StrEnum):
