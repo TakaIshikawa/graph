@@ -51,6 +51,36 @@ def test_paypal_activity_csv_handles_blank_fee_net_and_negative_parentheses(tmp_
     assert unit.metadata["note"] == "Refund note"
 
 
+def test_paypal_activity_csv_preserves_shipping_and_payer_metadata(tmp_path):
+    export = tmp_path / "paypal.csv"
+    export.write_text(
+        "Date,Transaction ID,Name,Type,Status,Gross,Currency,Payer Email,Shipping Name,Shipping Address,"
+        "Shipping City,Shipping State,Shipping Postal Code,Shipping Country,Item ID,Item URL,"
+        "Protection Eligibility,Shipping Address 2\n"
+        "2026-05-03,TXN3,Lin,Payment,Completed,$42.00,USD,lin@example.com,Lin Chen,"
+        "123 Market St,San Francisco,CA,94105,US,SKU-7,https://example.com/items/sku-7,"
+        "Eligible,\n",
+        encoding="utf-8",
+    )
+
+    result = PaypalActivityCsvAdapter(path=str(export)).ingest()
+
+    assert len(result.units) == 1
+    unit = result.units[0]
+    assert unit.source_id == "paypal_activity_csv:TXN3"
+    assert unit.metadata["payer_email"] == "lin@example.com"
+    assert unit.metadata["shipping_name"] == "Lin Chen"
+    assert unit.metadata["shipping_address"] == "123 Market St"
+    assert unit.metadata["shipping_city"] == "San Francisco"
+    assert unit.metadata["shipping_state"] == "CA"
+    assert unit.metadata["shipping_postal_code"] == "94105"
+    assert unit.metadata["shipping_country"] == "US"
+    assert unit.metadata["item_id"] == "SKU-7"
+    assert unit.metadata["item_url"] == "https://example.com/items/sku-7"
+    assert unit.metadata["protection_eligibility"] == "Eligible"
+    assert "shipping_address_2" not in unit.metadata
+
+
 def test_paypal_activity_csv_is_registered():
     assert "paypal_activity_csv" in list_adapters()
     assert isinstance(get_adapter("paypal-activity-csv"), PaypalActivityCsvAdapter)

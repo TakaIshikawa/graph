@@ -83,6 +83,16 @@ class PaypalActivityCsvAdapter(SourceAdapter):
                 "reference": reference,
                 "from_email": first(row, "From Email Address"),
                 "to_email": first(row, "To Email Address"),
+                "payer_email": first(row, "Payer Email", "Payer Email Address", "Buyer Email", "Buyer Email Address"),
+                "shipping_name": first(row, "Shipping Name", "Ship To Name", "Shipping Contact Name"),
+                "shipping_address": first(row, "Shipping Address", "Shipping Address 1", "Ship To Address", "Ship To Street"),
+                "shipping_city": first(row, "Shipping City", "Ship To City"),
+                "shipping_state": first(row, "Shipping State", "Shipping State/Province", "Ship To State", "Ship To State/Province"),
+                "shipping_postal_code": first(row, "Shipping Postal Code", "Shipping Zip", "Shipping Zip Code", "Ship To Zip", "Ship To Postal Code"),
+                "shipping_country": first(row, "Shipping Country", "Ship To Country"),
+                "item_id": first(row, "Item ID", "Item Id", "Item Number"),
+                "item_url": first(row, "Item URL", "Item Url", "Item Link"),
+                "protection_eligibility": first(row, "Protection Eligibility", "Seller Protection", "Seller Protection Eligibility"),
                 "source_file": source_file,
             }
         )
