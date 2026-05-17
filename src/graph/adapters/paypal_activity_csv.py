@@ -9,8 +9,8 @@ from typing import Any
 
 from graph.adapters._personal_exports import clean_metadata, digest_source_id, ensure_utc, first, iter_paths, parse_datetime, read_csv_rows
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class PaypalActivityCsvAdapter(SourceAdapter):
@@ -20,16 +20,18 @@ class PaypalActivityCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["activity"]
+        return ["activity", "counterparty"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
 
     def ingest(self, *, since: SyncState | None = None, entity_types: list[str] | None = None) -> IngestResult:
         result = IngestResult()
-        if entity_types is not None and "activity" not in entity_types:
+        allowed_types = set(entity_types or ["activity"])
+        if not allowed_types.intersection(self.entity_types):
             return result
         sync_at = ensure_utc(since.last_sync_at) if since else None
+        activities: list[KnowledgeUnit] = []
 
         for path in iter_paths(self.path, {".csv"}):
             try:
@@ -42,9 +44,17 @@ class PaypalActivityCsvAdapter(SourceAdapter):
                     continue
                 if sync_at and unit.updated_at <= sync_at:
                     continue
-                result.units.append(unit)
+                activities.append(unit)
+                if "activity" in allowed_types:
+                    result.units.append(unit)
 
-        result.units.sort(key=lambda unit: (unit.created_at, unit.source_id))
+        counterparties = self._counterparty_units(activities) if "counterparty" in allowed_types else []
+        if "counterparty" in allowed_types:
+            result.units.extend(counterparties)
+        if {"activity", "counterparty"}.issubset(allowed_types):
+            result.edges.extend(self._counterparty_edges(activities, counterparties))
+        result.units.sort(key=lambda unit: unit.source_id)
+        result.edges.sort(key=lambda edge: edge.id)
         return result
 
     def _unit(self, row: dict[str, Any], source_file: str, index: int) -> KnowledgeUnit | None:
@@ -83,6 +93,7 @@ class PaypalActivityCsvAdapter(SourceAdapter):
                 "reference": reference,
                 "from_email": first(row, "From Email Address"),
                 "to_email": first(row, "To Email Address"),
+                "counterparty": name,
                 "source_file": source_file,
             }
         )
@@ -138,3 +149,74 @@ class PaypalActivityCsvAdapter(SourceAdapter):
             f"Note: {metadata.get('note')}" if metadata.get("note") else "",
         ]
         return "\n".join(part for part in parts if part)
+
+    def _counterparty_units(self, activities: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        labels: dict[str, str] = {}
+        for activity in activities:
+            counterparty = str(activity.metadata.get("counterparty") or "").strip()
+            normalized = self._normalize_counterparty(counterparty)
+            if not normalized:
+                continue
+            grouped.setdefault(normalized, []).append(activity)
+            labels.setdefault(normalized, counterparty)
+
+        units: list[KnowledgeUnit] = []
+        for normalized, items in sorted(grouped.items()):
+            totals = [float(item.metadata.get("balance_impact")) for item in items if isinstance(item.metadata.get("balance_impact"), int | float)]
+            currencies = sorted({str(item.metadata.get("currency")) for item in items if item.metadata.get("currency")})
+            statuses = sorted({str(item.metadata.get("status")) for item in items if item.metadata.get("status")})
+            metadata = clean_metadata(
+                {
+                    "counterparty": labels[normalized],
+                    "normalized_counterparty": normalized,
+                    "activity_count": len(items),
+                    "first_seen": min(item.created_at for item in items).isoformat(),
+                    "last_seen": max(item.created_at for item in items).isoformat(),
+                    "net_total": sum(totals) if totals else None,
+                    "currencies": currencies,
+                    "statuses": statuses,
+                    "activity_source_ids": sorted(item.source_id for item in items),
+                }
+            )
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.PAYPAL_ACTIVITY_CSV,
+                    source_id=self._counterparty_source_id(normalized),
+                    source_entity_type="counterparty",
+                    title=labels[normalized],
+                    content=f"PayPal counterparty: {labels[normalized]}\nActivities: {len(items)}",
+                    content_type=ContentType.METADATA,
+                    metadata=metadata,
+                    tags=["paypal", "counterparty", labels[normalized]],
+                    created_at=min(item.created_at for item in items),
+                    updated_at=max(item.updated_at for item in items),
+                )
+            )
+        return units
+
+    def _counterparty_edges(self, activities: list[KnowledgeUnit], counterparties: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        counterparty_ids = {unit.metadata["normalized_counterparty"]: unit.source_id for unit in counterparties}
+        edges = []
+        for activity in activities:
+            target = counterparty_ids.get(self._normalize_counterparty(activity.metadata.get("counterparty")))
+            if target:
+                edges.append(self._edge(activity.source_id, target, "activity_counterparty"))
+        return list({edge.id: edge for edge in edges}.values())
+
+    def _edge(self, from_id: str, to_id: str, relation_type: str) -> KnowledgeEdge:
+        digest = digest_source_id("paypal_activity_csv:edge", from_id, relation_type, to_id).rsplit(":", 1)[-1]
+        return KnowledgeEdge(
+            id=f"paypal_activity_csv:edge:{digest}",
+            from_unit_id=from_id,
+            to_unit_id=to_id,
+            relation=EdgeRelation.RELATES_TO,
+            source=EdgeSource.SOURCE,
+            metadata={"source_project": SourceProject.PAYPAL_ACTIVITY_CSV.value, "relation_type": relation_type},
+        )
+
+    def _normalize_counterparty(self, value: Any) -> str:
+        return " ".join(str(value or "").strip().casefold().split())
+
+    def _counterparty_source_id(self, normalized: str) -> str:
+        return digest_source_id("paypal_activity_csv:counterparty", normalized)
