@@ -42,14 +42,18 @@ def test_apple_card_transactions_csv_ingests_purchases_refunds_and_payments(tmp_
 def test_apple_card_transactions_csv_source_ids_are_deterministic(tmp_path):
     export = tmp_path / "apple-card.csv"
     export.write_text(
-        "Transaction Date,Description,Merchant,Category,Type,Amount (USD),Purchased By,Last Four Digits\n"
-        "2026-04-01,Coffee,Cafe,Food & Drink,Purchase,($4.50),Ada,1234\n",
+        "Transaction ID,Transaction Date,Description,Merchant,Category,Type,Amount (USD),Location,Purchased By,Last Four Digits\n"
+        "tx_123,2026-04-01,Coffee,Cafe,Food & Drink,Purchase,($4.50),Oakland,Ada,1234\n"
+        ",2026-04-02,Tea,Cafe,Food & Drink,Purchase,3.25,Oakland,Ada,1234\n",
         encoding="utf-8",
     )
 
-    first = AppleCardTransactionsCsvAdapter(path=str(export)).ingest().units[0]
-    second = AppleCardTransactionsCsvAdapter(path=str(export)).ingest().units[0]
+    first_units = AppleCardTransactionsCsvAdapter(path=str(export)).ingest().units
+    second_units = AppleCardTransactionsCsvAdapter(path=str(export)).ingest().units
 
-    assert first.source_id == second.source_id
-    assert first.source_id.startswith("apple_card_transactions_csv:")
-    assert first.metadata["amount"] == -4.5
+    assert [unit.source_id for unit in first_units] == [unit.source_id for unit in second_units]
+    assert first_units[0].source_id == "apple_card_transactions_csv:tx_123"
+    assert first_units[0].metadata["transaction_id"] == "tx_123"
+    assert first_units[0].metadata["location"] == "Oakland"
+    assert first_units[0].metadata["amount"] == -4.5
+    assert first_units[1].source_id.startswith("apple_card_transactions_csv:")

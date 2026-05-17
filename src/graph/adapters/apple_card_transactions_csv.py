@@ -56,15 +56,18 @@ class AppleCardTransactionsCsvAdapter(SourceAdapter):
         merchant = first(row, "Merchant", "Merchant Name")
         category = first(row, "Category")
         transaction_type = first(row, "Type", "Transaction Type")
+        transaction_id = first(row, "Transaction ID", "Transaction Id", "ID")
         amount = self._amount(first(row, "Amount (USD)", "Amount", "Amount USD"))
+        location = first(row, "Location", "Merchant Location", "Address")
         purchased_by = first(row, "Purchased By", "User")
         last_four_digits = first(row, "Last Four Digits", "Last 4 Digits", "Card Last Four")
-        if not any([transaction_date_text, clearing_date_text, description, merchant, category, transaction_type, amount is not None]):
+        if not any([transaction_id, transaction_date_text, clearing_date_text, description, merchant, category, transaction_type, amount is not None]):
             return None
 
         now = datetime.now(timezone.utc)
         metadata = clean_metadata(
             {
+                "transaction_id": transaction_id,
                 "transaction_date": self._date(transaction_timestamp, transaction_date_text),
                 "clearing_date": self._date(clearing_timestamp, clearing_date_text),
                 "description": description,
@@ -73,23 +76,29 @@ class AppleCardTransactionsCsvAdapter(SourceAdapter):
                 "type": transaction_type,
                 "amount": amount,
                 "currency": "USD" if amount is not None else "",
+                "location": location,
                 "purchased_by": purchased_by,
                 "last_four_digits": last_four_digits,
                 "source_file": source_file,
                 "source_row": dict(row),
             }
         )
-        source_id = digest_source_id(
-            "apple_card_transactions_csv",
-            transaction_date_text,
-            clearing_date_text,
-            description,
-            merchant,
-            transaction_type,
-            amount,
-            purchased_by,
-            last_four_digits,
-            index,
+        source_id = (
+            f"apple_card_transactions_csv:{transaction_id}"
+            if transaction_id
+            else digest_source_id(
+                "apple_card_transactions_csv",
+                transaction_date_text,
+                clearing_date_text,
+                description,
+                merchant,
+                transaction_type,
+                amount,
+                location,
+                purchased_by,
+                last_four_digits,
+                index,
+            )
         )
         timestamp = transaction_timestamp or clearing_timestamp or now
         return KnowledgeUnit(
