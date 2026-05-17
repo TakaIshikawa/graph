@@ -57,6 +57,64 @@ def test_github_stars_csv_keeps_missing_description_url_units_and_topics(tmp_pat
     assert unit.tags == ["python", "testing"]
 
 
+def test_github_stars_csv_preserves_repository_health_metadata(tmp_path):
+    path = tmp_path / "stars.csv"
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=[
+                "full_name",
+                "description",
+                "html_url",
+                "language",
+                "topics",
+                "license",
+                "archived",
+                "fork",
+                "private",
+                "open_issues_count",
+                "stargazers_count",
+                "pushed_at",
+                "homepage",
+                "starred_at",
+            ],
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "full_name": "owner/repo",
+                "description": "Useful project",
+                "html_url": "https://github.com/owner/repo",
+                "language": "Rust",
+                "topics": "cli;knowledge|testing,graphs",
+                "license": "MIT",
+                "archived": "false",
+                "fork": "yes",
+                "private": "0",
+                "open_issues_count": "1,234",
+                "stargazers_count": "2,345",
+                "pushed_at": "2025-01-02T03:04:05-05:00",
+                "homepage": "https://example.com/repo",
+                "starred_at": "2025-01-03T00:00:00Z",
+            }
+        )
+
+    unit = GithubStarsCsvAdapter(path=str(path)).ingest(entity_types=["repository"]).units[0]
+
+    assert unit.metadata["language"] == "Rust"
+    assert unit.metadata["topics"] == ["cli", "knowledge", "testing", "graphs"]
+    assert unit.metadata["license"] == "MIT"
+    assert unit.metadata["archived"] is False
+    assert unit.metadata["fork"] is True
+    assert unit.metadata["private"] is False
+    assert unit.metadata["open_issues_count"] == 1234
+    assert unit.metadata["stargazers_count"] == 2345
+    assert unit.metadata["pushed_at"] == "2025-01-02T08:04:05+00:00"
+    assert unit.metadata["homepage"] == "https://example.com/repo"
+    assert unit.content == "owner/repo\nUseful project\nURL: https://github.com/owner/repo\nTopics: cli, knowledge, testing, graphs"
+    assert unit.tags == ["cli", "knowledge", "testing", "graphs"]
+
+
 def test_github_stars_csv_emits_owner_aggregates_and_edges(tmp_path):
     path = tmp_path / "stars.csv"
     with path.open("w", newline="", encoding="utf-8") as handle:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -78,6 +79,8 @@ class GithubStarsCsvAdapter(SourceAdapter):
         topics = self._parse_topics(self._first(row, "topics", "topic"))
         starred_at_text = self._first(row, "starred_at", "created_at")
         starred_at = self._parse_datetime(starred_at_text)
+        pushed_at_text = self._first(row, "pushed_at", "Pushed At", "last_pushed_at", "Last Pushed At")
+        pushed_at = self._parse_datetime(pushed_at_text)
         now = datetime.now(timezone.utc)
         metadata = {
             "full_name": full_name,
@@ -86,9 +89,16 @@ class GithubStarsCsvAdapter(SourceAdapter):
             "external_url": html_url,
             "language": self._first(row, "language"),
             "topics": topics,
+            "license": self._first(row, "license", "license_name", "License", "License Name"),
+            "archived": self._parse_bool(self._first(row, "archived", "Archived")),
+            "fork": self._parse_bool(self._first(row, "fork", "Fork", "is_fork", "Is Fork")),
+            "private": self._parse_bool(self._first(row, "private", "Private", "is_private", "Is Private")),
+            "open_issues_count": self._parse_int(self._first(row, "open_issues_count", "Open Issues Count", "open_issues", "Open Issues")),
             "owner": self._first(row, "owner") or full_name.split("/", 1)[0],
             "starred_at": starred_at_text,
             "stargazers_count": self._parse_int(self._first(row, "stargazers_count", "stars")),
+            "pushed_at": pushed_at.isoformat() if pushed_at else pushed_at_text,
+            "homepage": self._first(row, "homepage", "Homepage", "homepage_url", "Homepage URL"),
         }
         return KnowledgeUnit(
             source_project=SourceProject.GITHUB_STARS_CSV,
@@ -331,17 +341,36 @@ class GithubStarsCsvAdapter(SourceAdapter):
             return [{str(k).strip(): v for k, v in row.items() if k is not None} for row in reader]
 
     def _first(self, row: dict[str, Any], *keys: str) -> str:
+        lowered = {str(key).casefold(): value for key, value in row.items()}
+        compact = {self._normalize_key(str(key)): value for key, value in row.items()}
         for key in keys:
             value = row.get(key)
+            if value is None:
+                value = lowered.get(key.casefold())
+            if value is None:
+                value = compact.get(self._normalize_key(key))
             if value is not None and str(value).strip():
                 return str(value).strip()
         return ""
 
+    def _normalize_key(self, value: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "", value.casefold())
+
     def _parse_int(self, value: str) -> int | None:
         try:
-            return int(value)
+            return int(str(value).replace(",", ""))
         except (TypeError, ValueError):
             return None
+
+    def _parse_bool(self, value: str) -> bool | None:
+        if not value:
+            return None
+        text = value.strip().casefold()
+        if text in {"true", "t", "yes", "y", "1"}:
+            return True
+        if text in {"false", "f", "no", "n", "0"}:
+            return False
+        return None
 
     def _parse_datetime(self, value: str) -> datetime | None:
         if not value:
