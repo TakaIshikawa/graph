@@ -140,6 +140,40 @@ def test_goodreads_reviews_csv_parses_shelves_and_exclusive_shelf(tmp_path):
     assert "Shelves: favorites, sci-fi, currently-reading" in unit.content
 
 
+def test_goodreads_reviews_csv_preserves_review_shelves_and_visibility_metadata(tmp_path):
+    path = tmp_path / "goodreads.csv"
+    _write_csv(
+        path,
+        [
+            {
+                "Book Id": "42",
+                "Title": "Visibility",
+                "Author": "Ada",
+                "Review Shelves": "favorites | owned; favorites, research",
+                "Exclusive Shelf": "read",
+                "Spoiler": "yes",
+                "Private Notes": "Private margin notes",
+                "Owned Copies": "2",
+                "Read Count": "3",
+                "Date Added": "2026-05-01",
+                "Date Updated": "2026-05-02T12:30:00Z",
+            }
+        ],
+    )
+
+    unit = GoodreadsReviewsCsvAdapter(path=str(path)).ingest().units[0]
+
+    assert unit.metadata["exclusive_shelf"] == "read"
+    assert unit.metadata["shelves"] == ["favorites", "owned", "research"]
+    assert unit.metadata["spoiler"] is True
+    assert unit.metadata["private_notes"] == "Private margin notes"
+    assert unit.metadata["owned_copies"] == 2
+    assert unit.metadata["read_count"] == 3
+    assert unit.metadata["date_added"] == "2026-05-01T00:00:00+00:00"
+    assert unit.metadata["date_updated"] == "2026-05-02T12:30:00+00:00"
+    assert unit.tags == ["goodreads", "favorites", "owned", "research", "read"]
+
+
 def test_goodreads_reviews_csv_normalizes_common_date_formats(tmp_path):
     path = tmp_path / "goodreads.csv"
     _write_csv(

@@ -98,9 +98,11 @@ class GoodreadsReviewsCsvAdapter(SourceAdapter):
         original_publication_year = self._parse_int(self._first(row, "Original Publication Year", "original_publication_year"))
         date_read_text = self._first(row, "Date Read", "date_read")
         date_added_text = self._first(row, "Date Added", "date_added")
+        date_updated_text = self._first(row, "Date Updated", "date_updated", "Last Updated", "last_updated")
         date_read = self._parse_datetime(date_read_text)
         date_added = self._parse_datetime(date_added_text)
-        shelves = self._split_list(self._first(row, "Bookshelves", "Shelves", "bookshelves", "shelves"))
+        date_updated = self._parse_datetime(date_updated_text)
+        shelves = self._split_list(self._first(row, "Bookshelves", "Shelves", "Review Shelves", "bookshelves", "shelves"))
         exclusive_shelf = self._first(row, "Exclusive Shelf", "exclusive_shelf")
         review = self._first(row, "My Review", "Review", "my_review", "review")
         spoiler = self._parse_bool(self._first(row, "Spoiler", "spoiler"))
@@ -129,6 +131,7 @@ class GoodreadsReviewsCsvAdapter(SourceAdapter):
             "original_publication_year": original_publication_year,
             "date_read": date_read.isoformat() if date_read else date_read_text,
             "date_added": date_added.isoformat() if date_added else date_added_text,
+            "date_updated": date_updated.isoformat() if date_updated else date_updated_text,
             "shelves": shelves,
             "exclusive_shelf": exclusive_shelf,
             "review": review,
@@ -226,7 +229,7 @@ class GoodreadsReviewsCsvAdapter(SourceAdapter):
     def _split_list(self, value: str) -> list[str]:
         if not value:
             return []
-        return self._dedupe(part.strip().lower() for part in re.split(r"[,;]", value) if part.strip())
+        return self._dedupe(part.strip().lower() for part in re.split(r"[,;|]", value) if part.strip())
 
     def _clean_isbn(self, value: str) -> str:
         text = value.strip()
