@@ -39,9 +39,12 @@ def test_letterboxd_csv_ingests_films_with_full_metadata(tmp_path):
         "year": "2010",
         "letterboxd_uri": "https://letterboxd.com/film/inception/",
         "rating": "4.5",
-        "rewatch": "No",
+        "rewatch": False,
         "tags": ["sci-fi", "thriller"],
-        "watched_date": "2025-01-15",
+        "watched_date": "2025-01-15T00:00:00+00:00",
+        "diary_date": "",
+        "review_url": "",
+        "contains_spoilers": None,
         "review": "Mind-bending masterpiece!",
     }
     assert unit.tags == ["sci-fi", "thriller"]
@@ -70,6 +73,7 @@ def test_letterboxd_csv_handles_missing_optional_fields(tmp_path):
     assert unit.metadata["year"] == "2020"
     assert unit.metadata["letterboxd_uri"] == ""
     assert unit.metadata["rating"] == ""
+    assert unit.metadata["rewatch"] is None
     assert unit.metadata["review"] == ""
     assert unit.metadata["tags"] == []
     assert unit.tags == []
@@ -256,7 +260,34 @@ def test_letterboxd_handles_rewatches(tmp_path):
     result = LetterboxdAdapter(path=str(export)).ingest()
 
     unit = result.units[0]
-    assert unit.metadata["rewatch"] == "Yes"
+    assert unit.metadata["rewatch"] is True
+
+
+def test_letterboxd_preserves_watch_review_links_spoilers_and_tags(tmp_path):
+    export = tmp_path / "letterboxd.csv"
+    export.write_text(
+        "\n".join(
+            [
+                "Name,Year,Rewatch,Tags,Watched Date,Diary Date,Review URL,Letterboxd URI,Contains Spoilers",
+                "Film,2020,Yes,\"favorite; drama | favorite\",2026-05-01,2026-05-02,"
+                "https://letterboxd.com/user/film/review/,https://letterboxd.com/film/film/,true",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = LetterboxdAdapter(path=str(export)).ingest()
+
+    unit = result.units[0]
+    assert unit.source_id == "letterboxd:film"
+    assert unit.metadata["rewatch"] is True
+    assert unit.metadata["tags"] == ["favorite", "drama"]
+    assert unit.metadata["watched_date"] == "2026-05-01T00:00:00+00:00"
+    assert unit.metadata["diary_date"] == "2026-05-02T00:00:00+00:00"
+    assert unit.metadata["review_url"] == "https://letterboxd.com/user/film/review/"
+    assert unit.metadata["letterboxd_uri"] == "https://letterboxd.com/film/film/"
+    assert unit.metadata["contains_spoilers"] is True
+    assert unit.tags == ["favorite", "drama"]
 
 
 def test_letterboxd_ingests_director_entities(tmp_path):

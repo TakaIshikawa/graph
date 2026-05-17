@@ -63,9 +63,11 @@ class LetterboxdAdapter(SourceAdapter):
             year = self._first(item, "Year", "year", "release_year")
             letterboxd_uri = self._first(item, "Letterboxd URI", "letterboxd_uri", "uri", "url")
             rating = self._first(item, "Rating", "rating")
-            rewatch = self._first(item, "Rewatch", "rewatch")
+            rewatch = self._parse_bool(self._first(item, "Rewatch", "rewatch"))
             tags = self._tags(item)
             review = self._first(item, "Review", "review")
+            watched_date_text = self._date_metadata(item, "Watched Date", "watched_date", "Date", "date")
+            diary_date_text = self._date_metadata(item, "Diary Date", "diary_date")
 
             film_id = self._source_id(letterboxd_uri, name, year)
             film_unit = KnowledgeUnit(
@@ -82,9 +84,10 @@ class LetterboxdAdapter(SourceAdapter):
                         "rating": rating,
                         "rewatch": rewatch,
                         "tags": tags,
-                        "watched_date": self._first(
-                            item, "Watched Date", "watched_date", "Date", "date"
-                        ),
+                        "watched_date": watched_date_text,
+                        "diary_date": diary_date_text,
+                        "review_url": self._first(item, "Review URL", "review_url", "Review Link", "review_link"),
+                        "contains_spoilers": self._parse_bool(self._first(item, "Contains Spoilers", "contains_spoilers", "Spoilers", "spoiler")),
                         "review": review,
                     },
                     tags=tags,
@@ -167,7 +170,7 @@ class LetterboxdAdapter(SourceAdapter):
             return []
 
         tags: list[str] = []
-        for tag in re.split(r",", tags_str):
+        for tag in re.split(r"[,;|]", tags_str):
             normalized = tag.strip().lower()
             if normalized and normalized not in tags:
                 tags.append(normalized)
@@ -217,8 +220,11 @@ class LetterboxdAdapter(SourceAdapter):
         )
 
     def _first(self, item: dict[str, Any], *keys: str) -> str:
+        normalized = {self._normalize_key(key): value for key, value in item.items()}
         for key in keys:
             value = item.get(key)
+            if value is None:
+                value = normalized.get(self._normalize_key(key))
             if value is None:
                 continue
             if isinstance(value, (dict, list)):
@@ -227,6 +233,24 @@ class LetterboxdAdapter(SourceAdapter):
             if text:
                 return text
         return ""
+
+    def _normalize_key(self, value: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "", str(value).casefold())
+
+    def _date_metadata(self, item: dict[str, Any], *keys: str) -> str:
+        value = self._first(item, *keys)
+        parsed = self._parse_datetime(value)
+        return parsed.isoformat() if parsed else value
+
+    def _parse_bool(self, value: str) -> bool | None:
+        text = value.strip().casefold()
+        if not text:
+            return None
+        if text in {"1", "true", "yes", "y"}:
+            return True
+        if text in {"0", "false", "no", "n"}:
+            return False
+        return None
 
     def _parse_datetime(self, value: str) -> datetime | None:
         if not value:
