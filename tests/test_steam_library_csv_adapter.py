@@ -100,6 +100,38 @@ def test_steam_library_csv_playtime_buckets_and_invalid_values(tmp_path):
     assert "playtime_bucket" not in units["Malformed"].metadata
 
 
+def test_steam_library_csv_preserves_achievement_and_ownership_metadata(tmp_path):
+    export = tmp_path / "steam.csv"
+    _write_csv(
+        export,
+        [
+            {
+                "App ID": "730",
+                "Name": "Counter-Strike 2",
+                "Achievements Unlocked": "17",
+                "Achievements Total": "33",
+                "Completion Percent": "51.5%",
+                "First Played": "2024-03-04",
+                "Date Acquired": "2024-03-01T10:30:00-05:00",
+                "Review Score": "88.5",
+                "Owned Platforms": "Windows, macOS; Linux|Steam Deck",
+            }
+        ],
+    )
+
+    unit = SteamLibraryCsvAdapter(path=str(export)).ingest(entity_types=["game"]).units[0]
+
+    assert unit.metadata["achievements_unlocked"] == 17
+    assert unit.metadata["achievements_total"] == 33
+    assert unit.metadata["completion_percent"] == 51.5
+    assert unit.metadata["first_played"] == "2024-03-04T00:00:00+00:00"
+    assert unit.metadata["date_acquired"] == "2024-03-01T15:30:00+00:00"
+    assert unit.metadata["review_score"] == 88.5
+    assert unit.metadata["owned_platforms"] == ["windows", "macos", "linux", "steam deck"]
+    assert "Achievements: 17/33" in unit.content
+    assert "Completion: 51.5%" in unit.content
+
+
 def test_steam_library_csv_emits_genre_units_and_edges(tmp_path):
     export = tmp_path / "steam.csv"
     _write_csv(

@@ -97,6 +97,21 @@ class SteamLibraryCsvAdapter(SourceAdapter):
         platform = self._first(row, "platform", "Platform") or "steam"
         tags = self._tags(row)
         creators = self._creator_values(row)
+        achievements_unlocked = self._parse_int(
+            self._first(row, "achievements_unlocked", "Achievements Unlocked", "unlocked_achievements", "Unlocked Achievements")
+        )
+        achievements_total = self._parse_int(
+            self._first(row, "achievements_total", "Achievements Total", "total_achievements", "Total Achievements")
+        )
+        completion_percent = self._parse_float(
+            self._first(row, "completion_percent", "Completion Percent", "completion", "Completion", "Achievement Completion")
+        )
+        first_played_text = self._first(row, "first_played", "First Played", "first_played_at", "First Played At")
+        first_played = self._parse_datetime(first_played_text)
+        date_acquired_text = self._first(row, "date_acquired", "Date Acquired", "acquired_at", "Acquired At", "purchase_date", "Purchase Date")
+        date_acquired = self._parse_datetime(date_acquired_text)
+        review_score = self._parse_float(self._first(row, "review_score", "Review Score", "user_review_score", "User Review Score"))
+        owned_platforms = self._split_values(self._first(row, "owned_platforms", "Owned Platforms", "platforms", "Platforms"))
         now = datetime.now(timezone.utc)
 
         metadata = {
@@ -108,6 +123,13 @@ class SteamLibraryCsvAdapter(SourceAdapter):
             "platform": platform,
             "genres": self._genre_values(row),
             "creators": creators,
+            "achievements_unlocked": achievements_unlocked,
+            "achievements_total": achievements_total,
+            "completion_percent": completion_percent,
+            "first_played": first_played.isoformat() if first_played else first_played_text,
+            "date_acquired": date_acquired.isoformat() if date_acquired else date_acquired_text,
+            "review_score": review_score,
+            "owned_platforms": owned_platforms,
             "source_file": source_file,
             "row": dict(row),
         }
@@ -116,7 +138,16 @@ class SteamLibraryCsvAdapter(SourceAdapter):
             source_id=self._source_id(app_id, title),
             source_entity_type="game",
             title=title or f"Steam app {app_id}",
-            content=self._content(title or f"Steam app {app_id}", playtime, last_played, store_url, tags),
+            content=self._content(
+                title or f"Steam app {app_id}",
+                playtime,
+                last_played,
+                store_url,
+                tags,
+                achievements_unlocked,
+                achievements_total,
+                completion_percent,
+            ),
             content_type=ContentType.ARTIFACT,
             metadata={key: value for key, value in metadata.items() if value not in ("", None)},
             tags=tags,
@@ -130,12 +161,29 @@ class SteamLibraryCsvAdapter(SourceAdapter):
         digest = hashlib.sha256(title.encode("utf-8")).hexdigest()[:24]
         return f"steam_library_csv:{digest}"
 
-    def _content(self, title: str, playtime: int | None, last_played: datetime | None, store_url: str, tags: list[str]) -> str:
+    def _content(
+        self,
+        title: str,
+        playtime: int | None,
+        last_played: datetime | None,
+        store_url: str,
+        tags: list[str],
+        achievements_unlocked: int | None = None,
+        achievements_total: int | None = None,
+        completion_percent: float | None = None,
+    ) -> str:
         parts = [title]
         if playtime is not None:
             parts.append(f"Playtime: {playtime} minutes")
         if last_played is not None:
             parts.append(f"Last played: {last_played.isoformat()}")
+        if achievements_unlocked is not None or achievements_total is not None:
+            achievement_text = f"{achievements_unlocked or 0}"
+            if achievements_total is not None:
+                achievement_text = f"{achievement_text}/{achievements_total}"
+            parts.append(f"Achievements: {achievement_text}")
+        if completion_percent is not None:
+            parts.append(f"Completion: {completion_percent:g}%")
         if store_url:
             parts.append(f"Store URL: {store_url}")
         if tags:
@@ -170,6 +218,14 @@ class SteamLibraryCsvAdapter(SourceAdapter):
                 seen.add(normalized)
                 creators.append({"name": name, "normalized_name": normalized})
         return creators
+
+    def _split_values(self, value: str) -> list[str]:
+        values: list[str] = []
+        for item in re.split(r"[,;|]", value or ""):
+            text = " ".join(item.strip().casefold().split())
+            if text and text not in values:
+                values.append(text)
+        return values
 
     def _genre_units(self, games: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
         grouped: dict[str, list[KnowledgeUnit]] = {}
@@ -357,6 +413,34 @@ class SteamLibraryCsvAdapter(SourceAdapter):
             except ValueError:
                 return None
         return self._parse_playtime_minutes(self._first(row, "playtime", "Playtime"))
+
+    def _parse_int(self, value: str) -> int | None:
+        if not value:
+            return None
+        text = value.strip().replace(",", "")
+        try:
+            number = float(text.rstrip("%"))
+        except ValueError:
+            match = re.search(r"-?\d+(?:\.\d+)?", text)
+            if not match:
+                return None
+            number = float(match.group(0))
+        if number < 0:
+            return None
+        return int(round(number))
+
+    def _parse_float(self, value: str) -> float | None:
+        if not value:
+            return None
+        text = value.strip().replace(",", "")
+        try:
+            number = float(text.rstrip("%"))
+        except ValueError:
+            match = re.search(r"-?\d+(?:\.\d+)?", text)
+            if not match:
+                return None
+            number = float(match.group(0))
+        return number if number >= 0 else None
 
     def _playtime_bucket(self, minutes: int | None) -> str | None:
         if minutes is None:
