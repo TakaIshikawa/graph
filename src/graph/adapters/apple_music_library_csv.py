@@ -71,7 +71,12 @@ class AppleMusicLibraryCsvAdapter(SourceAdapter):
         genre = self._first(row, "Genre", "Genres")
         play_count = self._parse_int(self._first(row, "Play Count", "Plays", "Played Count", "Playcount"))
         rating = self._parse_int(self._first(row, "Rating", "My Rating", "Stars"))
-        last_played = self._parse_datetime(self._first(row, "Last Played", "Last Played Date", "Last Played At", "Played At", "Last Play"))
+        last_played_text = self._first(row, "Last Played", "Last Played Date", "Last Played At", "Played At", "Last Play")
+        last_played = self._parse_datetime(last_played_text)
+        date_added_text = self._first(row, "Date Added", "Added Date")
+        date_added = self._parse_datetime(date_added_text)
+        last_skipped_text = self._first(row, "Last Skipped", "Last Skipped Date")
+        last_skipped = self._parse_datetime(last_skipped_text)
         persistent_id = self._first(row, "Persistent ID", "Track ID", "ID", "Apple Music ID")
         if not title and not persistent_id:
             return None
@@ -82,7 +87,12 @@ class AppleMusicLibraryCsvAdapter(SourceAdapter):
             "genre": genre,
             "play_count": play_count,
             "rating": rating,
-            "last_played": last_played.isoformat() if last_played else self._first(row, "Last Played", "Last Played Date", "Last Played At", "Played At", "Last Play"),
+            "last_played": last_played.isoformat() if last_played else last_played_text,
+            "date_added": date_added.isoformat() if date_added else date_added_text,
+            "skip_count": self._parse_int(self._first(row, "Skip Count", "Skips")),
+            "last_skipped": last_skipped.isoformat() if last_skipped else last_skipped_text,
+            "loved": self._parse_bool(self._first(row, "Loved", "Favorite")),
+            "cloud_status": self._first(row, "Cloud Status"),
             "persistent_id": persistent_id,
             "source_file": source_file,
             "row": dict(row),
@@ -104,7 +114,19 @@ class AppleMusicLibraryCsvAdapter(SourceAdapter):
 
     def _content(self, title: str, artist: str, album: str, metadata: dict[str, Any]) -> str:
         parts = [title]
-        for key, label in (("artist", "Artist"), ("album", "Album"), ("genre", "Genre"), ("play_count", "Play count"), ("rating", "Rating"), ("last_played", "Last played")):
+        for key, label in (
+            ("artist", "Artist"),
+            ("album", "Album"),
+            ("genre", "Genre"),
+            ("play_count", "Play count"),
+            ("rating", "Rating"),
+            ("last_played", "Last played"),
+            ("date_added", "Date added"),
+            ("skip_count", "Skip count"),
+            ("last_skipped", "Last skipped"),
+            ("loved", "Loved"),
+            ("cloud_status", "Cloud status"),
+        ):
             if metadata.get(key) not in ("", None):
                 parts.append(f"{label}: {metadata[key]}")
         if artist and album:
@@ -133,6 +155,16 @@ class AppleMusicLibraryCsvAdapter(SourceAdapter):
             return int(float(value.strip()))
         except ValueError:
             return None
+
+    def _parse_bool(self, value: str) -> bool | None:
+        text = value.strip().casefold()
+        if not text:
+            return None
+        if text in {"1", "true", "yes", "y", "loved", "favorite", "favorited"}:
+            return True
+        if text in {"0", "false", "no", "n", "unloved", "not loved"}:
+            return False
+        return None
 
     def _parse_datetime(self, value: str) -> datetime | None:
         text = value.strip()

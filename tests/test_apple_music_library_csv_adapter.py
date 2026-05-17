@@ -50,6 +50,32 @@ def test_apple_music_library_csv_ingests_directory_aliases_and_skips_bad_files(t
     assert {unit.metadata["source_file"] for unit in result.units} == {"one.csv", "two.csv"}
 
 
+def test_apple_music_library_csv_preserves_added_skip_loved_and_cloud_metadata(tmp_path):
+    export = tmp_path / "library.csv"
+    export.write_text(
+        "\n".join(
+            [
+                "Name,Artist,Album,Date Added,Skip Count,Last Skipped,Loved,Cloud Status,Persistent ID",
+                "Song B,Grace,Album B,2025-02-03 04:05:06,3,not-a-date,Yes,Matched,DEF456",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = AppleMusicLibraryCsvAdapter(path=str(export)).ingest()
+
+    assert len(result.units) == 1
+    unit = result.units[0]
+    assert unit.metadata["date_added"] == "2025-02-03T04:05:06+00:00"
+    assert unit.metadata["skip_count"] == 3
+    assert unit.metadata["last_skipped"] == "not-a-date"
+    assert unit.metadata["loved"] is True
+    assert unit.metadata["cloud_status"] == "Matched"
+    assert "Date added: 2025-02-03T04:05:06+00:00" in unit.content
+    assert "Skip count: 3" in unit.content
+    assert "Cloud status: Matched" in unit.content
+
+
 def test_apple_music_library_csv_filters_since_and_entity_types_with_deterministic_ids(tmp_path):
     export = tmp_path / "library.csv"
     export.write_text(
