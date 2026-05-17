@@ -181,6 +181,14 @@ class SourceProject(StrEnum):
     COINBASE_TRANSACTIONS_CSV = "coinbase_transactions_csv"
     STRIPE_BALANCE_TRANSACTIONS_CSV = "stripe_balance_transactions_csv"
     QUICKEN_TRANSACTIONS_CSV = "quicken_transactions_csv"
+    YNAB_TRANSACTIONS_CSV = "ynab_transactions_csv"
+    MINT_TRANSACTIONS_CSV = "mint_transactions_csv"
+    ROBINHOOD_ACTIVITY_CSV = "robinhood_activity_csv"
+    FIDELITY_ACTIVITY_CSV = "fidelity_activity_csv"
+    SCHWAB_TRANSACTIONS_CSV = "schwab_transactions_csv"
+    ETRADE_TRANSACTIONS_CSV = "etrade_transactions_csv"
+    VANGUARD_ACTIVITY_CSV = "vanguard_activity_csv"
+    PLAID_TRANSACTIONS_CSV = "plaid_transactions_csv"
 
 
 class ContentType(StrEnum):

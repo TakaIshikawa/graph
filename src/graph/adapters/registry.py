@@ -31,6 +31,7 @@ from graph.adapters.diigo import DiigoAdapter
 from graph.adapters.discord_json import DiscordJsonAdapter
 from graph.adapters.email import EmailAdapter
 from graph.adapters.enex import EnexAdapter
+from graph.adapters.etrade_transactions_csv import EtradeTransactionsCsvAdapter
 from graph.adapters.feed import FeedAdapter
 from graph.adapters.forty_two import FortyTwoAdapter
 from graph.adapters.git_adapter import GitAdapter
@@ -91,15 +92,19 @@ from graph.adapters.apple_music_library_csv import AppleMusicLibraryCsvAdapter
 from graph.adapters.apple_podcasts_history_csv import ApplePodcastsHistoryCsvAdapter
 from graph.adapters.medium_bookmarks_json import MediumBookmarksJsonAdapter
 from graph.adapters.monzo_transactions_csv import MonzoTransactionsCsvAdapter
+from graph.adapters.mint_transactions_csv import MintTransactionsCsvAdapter
 from graph.adapters.overcast_starred_episodes_json import OvercastStarredEpisodesJsonAdapter
 from graph.adapters.paypal_activity_csv import PaypalActivityCsvAdapter
 from graph.adapters.revolut_transactions_csv import RevolutTransactionsCsvAdapter
+from graph.adapters.robinhood_activity_csv import RobinhoodActivityCsvAdapter
+from graph.adapters.schwab_transactions_csv import SchwabTransactionsCsvAdapter
 from graph.adapters.wise_activity_csv import WiseActivityCsvAdapter
 from graph.adapters.splitwise_expenses_csv import SplitwiseExpensesCsvAdapter
 from graph.adapters.venmo_transactions_csv import VenmoTransactionsCsvAdapter
 from graph.adapters.coinbase_transactions_csv import CoinbaseTransactionsCsvAdapter
 from graph.adapters.stripe_balance_transactions_csv import StripeBalanceTransactionsCsvAdapter
 from graph.adapters.quicken_transactions_csv import QuickenTransactionsCsvAdapter
+from graph.adapters.ynab_transactions_csv import YnabTransactionsCsvAdapter
 from graph.adapters.pocket_casts_listening_history_csv import PocketCastsListeningHistoryCsvAdapter
 from graph.adapters.product_hunt_bookmarks_json import ProductHuntBookmarksJsonAdapter
 from graph.adapters.apple_reminders_csv import AppleRemindersCsvAdapter
@@ -107,6 +112,7 @@ from graph.adapters.day_one_json import DayOneJsonAdapter
 from graph.adapters.firefox_places import FirefoxPlacesAdapter
 from graph.adapters.fitbit_daily_activity_csv import FitbitDailyActivityCsvAdapter
 from graph.adapters.foursquare_checkins_csv import FoursquareCheckinsCsvAdapter
+from graph.adapters.fidelity_activity_csv import FidelityActivityCsvAdapter
 from graph.adapters.google_search_history_json import GoogleSearchHistoryJsonAdapter
 from graph.adapters.things_csv import ThingsCsvAdapter
 from graph.adapters.simplenote_export import SimplenoteExportAdapter
@@ -131,6 +137,7 @@ from graph.adapters.pinboard import PinboardAdapter
 from graph.adapters.pinboard_html_export import PinboardHtmlExportAdapter
 from graph.adapters.peloton_workouts_csv import PelotonWorkoutsCsvAdapter
 from graph.adapters.plain_text import PlainTextAdapter
+from graph.adapters.plaid_transactions_csv import PlaidTransactionsCsvAdapter
 from graph.adapters.pocket import PocketAdapter
 from graph.adapters.pocket_csv import PocketCsvAdapter
 from graph.adapters.pocket_export import PocketExportAdapter
@@ -177,6 +184,7 @@ from graph.adapters.facebook_archive import FacebookArchiveAdapter
 from graph.adapters.instagram_archive import InstagramArchiveAdapter
 from graph.adapters.linkedin_archive import LinkedInArchiveAdapter
 from graph.adapters.vcard import VCardAdapter
+from graph.adapters.vanguard_activity_csv import VanguardActivityCsvAdapter
 from graph.adapters.wallabag import WallabagAdapter
 from graph.adapters.webvtt import WebVttAdapter
 from graph.adapters.yaml_adapter import YamlAdapter
@@ -249,8 +257,10 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "org": OrgAdapter,
     "pdf": PdfAdapter,
     "plain_text": PlainTextAdapter,
+    "plaid_transactions_csv": PlaidTransactionsCsvAdapter,
     "email": EmailAdapter,
     "enex": EnexAdapter,
+    "etrade_transactions_csv": EtradeTransactionsCsvAdapter,
     "text": TextAdapter,
     "text_outline": TextOutlineAdapter,
     "tana_paste": TanaPasteAdapter,
@@ -303,6 +313,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "sqlite_query_log": SqliteQueryLogAdapter,
     "slack_json": SlackJsonAdapter,
     "sleep_as_android_csv": SleepAsAndroidCsvAdapter,
+    "vanguard_activity_csv": VanguardActivityCsvAdapter,
     "vcard": VCardAdapter,
     "yaml_frontmatter": YamlFrontmatterAdapter,
     "foam_workspace": FoamWorkspaceAdapter,
@@ -321,6 +332,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "google_photos_takeout": GooglePhotosTakeoutAdapter,
     "activitywatch_json": ActivityWatchJsonAdapter,
     "audible_library_csv": AudibleLibraryCsvAdapter,
+    "fidelity_activity_csv": FidelityActivityCsvAdapter,
     "fitbit_daily_activity_csv": FitbitDailyActivityCsvAdapter,
     "fitbit_sleep_csv": FitbitSleepCsvAdapter,
     "spotify_streaming_history": SpotifyStreamingHistoryAdapter,
@@ -343,15 +355,19 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "google_maps_timeline_json": GoogleMapsTimelineJsonAdapter,
     "google_play_books_notes_csv": GooglePlayBooksNotesCsvAdapter,
     "libby_loans_csv": LibbyLoansCsvAdapter,
+    "mint_transactions_csv": MintTransactionsCsvAdapter,
     "monzo_transactions_csv": MonzoTransactionsCsvAdapter,
     "paypal_activity_csv": PaypalActivityCsvAdapter,
     "revolut_transactions_csv": RevolutTransactionsCsvAdapter,
+    "robinhood_activity_csv": RobinhoodActivityCsvAdapter,
+    "schwab_transactions_csv": SchwabTransactionsCsvAdapter,
     "wise_activity_csv": WiseActivityCsvAdapter,
     "splitwise_expenses_csv": SplitwiseExpensesCsvAdapter,
     "venmo_transactions_csv": VenmoTransactionsCsvAdapter,
     "coinbase_transactions_csv": CoinbaseTransactionsCsvAdapter,
     "stripe_balance_transactions_csv": StripeBalanceTransactionsCsvAdapter,
     "quicken_transactions_csv": QuickenTransactionsCsvAdapter,
+    "ynab_transactions_csv": YnabTransactionsCsvAdapter,
     "boardgamegeek_collection_csv": BoardGameGeekCollectionCsvAdapter,
     "reddit_saved_csv": RedditSavedCsvAdapter,
     "reddit_saved_json": RedditSavedJsonAdapter,
