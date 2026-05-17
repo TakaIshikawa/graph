@@ -182,7 +182,6 @@ class SourceProject(StrEnum):
     STRIPE_BALANCE_TRANSACTIONS_CSV = "stripe_balance_transactions_csv"
     QUICKEN_TRANSACTIONS_CSV = "quicken_transactions_csv"
     YNAB_TRANSACTIONS_CSV = "ynab_transactions_csv"
-    MINT_TRANSACTIONS_CSV = "mint_transactions_csv"
     ROBINHOOD_ACTIVITY_CSV = "robinhood_activity_csv"
     FIDELITY_ACTIVITY_CSV = "fidelity_activity_csv"
     SCHWAB_TRANSACTIONS_CSV = "schwab_transactions_csv"
