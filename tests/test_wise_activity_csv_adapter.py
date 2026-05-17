@@ -52,6 +52,35 @@ def test_wise_activity_csv_filters_since_and_skips_blank_rows(tmp_path):
     assert [unit.source_id for unit in result.units] == ["wise_activity_csv:W2"]
 
 
+def test_wise_activity_csv_emits_currency_aggregates_and_edges(tmp_path):
+    export = tmp_path / "wise.csv"
+    export.write_text(
+        "Date,Transfer ID,Type,Source Amount,Source Currency,Target Amount,Target Currency\n"
+        "2026-05-01,W1,Transfer,100,GBP,124.50,USD\n"
+        "2026-05-03,W2,Transfer,25,gbp,25,GBP\n",
+        encoding="utf-8",
+    )
+
+    result = WiseActivityCsvAdapter(path=str(export)).ingest(entity_types=["transaction", "currency"])
+
+    currencies = {unit.metadata["currency"]: unit for unit in result.units if unit.source_entity_type == "currency"}
+    assert sorted(currencies) == ["GBP", "USD"]
+    assert currencies["GBP"].metadata["activity_count"] == 2
+    assert currencies["GBP"].metadata["first_seen"] == "2026-05-01T00:00:00+00:00"
+    assert currencies["GBP"].metadata["last_seen"] == "2026-05-03T00:00:00+00:00"
+    assert currencies["GBP"].metadata["sent_total"] == 125.0
+    assert currencies["GBP"].metadata["received_total"] == 25.0
+    assert currencies["USD"].metadata["received_total"] == 124.5
+    assert {(edge.from_unit_id, edge.to_unit_id, edge.metadata["relation_type"]) for edge in result.edges} == {
+        ("wise_activity_csv:W1", currencies["GBP"].source_id, "transaction_currency"),
+        ("wise_activity_csv:W1", currencies["USD"].source_id, "transaction_currency"),
+        ("wise_activity_csv:W2", currencies["GBP"].source_id, "transaction_currency"),
+    }
+
+    assert [unit.source_entity_type for unit in WiseActivityCsvAdapter(path=str(export)).ingest(entity_types=["currency"]).units] == ["currency", "currency"]
+    assert WiseActivityCsvAdapter(path=str(export)).ingest(entity_types=["transaction"]).edges == []
+
+
 def test_wise_activity_csv_is_registered():
     assert "wise_activity_csv" in list_adapters()
     assert isinstance(get_adapter("wise-activity-csv"), WiseActivityCsvAdapter)
