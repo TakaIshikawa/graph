@@ -24,6 +24,7 @@ def test_google_contacts_csv_normalizes_repeated_fields(tmp_path):
                 "Name": "Ada Lovelace",
                 "Notes": "First programmer",
                 "E-mail 1 - Value": "ada@example.com",
+                "E-mail 3 - Value": "ADA@example.com",
                 "E-mail 2 - Value": "work@example.com",
                 "Phone 1 - Value": "+1 555 0100",
                 "Address 1 - Formatted": "1 Algorithm Ave",
@@ -47,6 +48,8 @@ def test_google_contacts_csv_normalizes_repeated_fields(tmp_path):
     assert unit.metadata["websites"] == ["https://ada.example"]
     assert unit.metadata["organization"]["name"] == "Analytical Engines"
     assert unit.metadata["organization"]["title"] == "Researcher"
+    assert unit.metadata["title"] == "Researcher"
+    assert unit.metadata["names"] == {"full": "Ada Lovelace", "given": "", "family": ""}
     assert unit.metadata["groups"] == ["My Contacts", "Friends"]
     assert "Friends" in unit.tags
 
@@ -67,6 +70,31 @@ def test_google_contacts_csv_handles_empty_rows_and_missing_names(tmp_path):
     assert len(contacts) == 1
     assert contacts[0].title == "unnamed@example.com"
     assert contacts[0].source_id.startswith("google_contacts_csv:")
+
+
+def test_google_contacts_csv_ingests_csv_files_from_directory(tmp_path):
+    exports = tmp_path / "exports"
+    exports.mkdir()
+    _write_csv(exports / "contacts-a.csv", [{"Name": "Ada Lovelace", "E-mail 1 - Value": "ada@example.com"}])
+    _write_csv(exports / "contacts-b.csv", [{"Name": "Grace Hopper", "E-mail 1 - Value": "grace@example.com"}])
+
+    result = GoogleContactsCsvAdapter(path=str(exports)).ingest(entity_types=["contact"])
+
+    contacts = sorted((unit for unit in result.units if unit.source_entity_type == "contact"), key=lambda unit: unit.title)
+    assert [unit.title for unit in contacts] == ["Ada Lovelace", "Grace Hopper"]
+    assert {unit.metadata["source_file"] for unit in contacts} == {"contacts-a.csv", "contacts-b.csv"}
+
+
+def test_google_contacts_csv_source_ids_prefer_contact_identity_over_file_position(tmp_path):
+    first = tmp_path / "first.csv"
+    second = tmp_path / "second.csv"
+    _write_csv(first, [{"Name": "Ada Lovelace", "E-mail 1 - Value": "ada@example.com"}])
+    _write_csv(second, [{"Name": "Ada Lovelace", "E-mail 1 - Value": "ada@example.com"}])
+
+    first_unit = GoogleContactsCsvAdapter(path=str(first)).ingest(entity_types=["contact"]).units[0]
+    second_unit = GoogleContactsCsvAdapter(path=str(second)).ingest(entity_types=["contact"]).units[0]
+
+    assert first_unit.source_id == second_unit.source_id
 
 
 def test_google_contacts_csv_filters_and_registry(tmp_path):
