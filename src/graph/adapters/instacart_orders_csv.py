@@ -79,6 +79,17 @@ class InstacartOrdersCsvAdapter(SourceAdapter):
             "order_id": order_id,
             "ordered_at": ordered_at.isoformat() if ordered_at else first(first_row, "ordered_at", "Ordered At"),
             "store_name": store,
+            "subtotal": self._first_money(rows, "subtotal", "Subtotal"),
+            "tax": self._first_money(rows, "tax", "Tax"),
+            "service_fee": self._first_money(rows, "service_fee", "Service Fee"),
+            "delivery_fee": self._first_money(rows, "delivery_fee", "Delivery Fee"),
+            "tip": self._first_money(rows, "tip", "Tip", "Driver Tip", "Shopper Tip"),
+            "discount": self._first_money(rows, "discount", "Discount", "Savings"),
+            "total_charged": self._first_money(rows, "total_charged", "Total Charged", "Order Total", "Total"),
+            "shopper_name": self._first_value(rows, "shopper_name", "Shopper Name", "Shopper"),
+            "delivery_start": self._first_datetime(rows, "delivery_start", "Delivery Start", "Delivery Window Start"),
+            "delivery_end": self._first_datetime(rows, "delivery_end", "Delivery End", "Delivery Window End"),
+            "delivery_address": self._first_value(rows, "delivery_address", "Delivery Address"),
             "item_count": len(items),
             "total_price": round(total, 2) if total else None,
             "departments": dict(sorted(departments.items())),
@@ -99,3 +110,19 @@ class InstacartOrdersCsvAdapter(SourceAdapter):
             created_at=ordered_at or now,
             updated_at=ordered_at or now,
         )
+
+    def _first_value(self, rows: list[dict[str, Any]], *keys: str) -> str:
+        for row in rows:
+            value = first(row, *keys)
+            if value:
+                return value
+        return ""
+
+    def _first_money(self, rows: list[dict[str, Any]], *keys: str) -> float | None:
+        value = self._first_value(rows, *keys)
+        return parse_money(value)
+
+    def _first_datetime(self, rows: list[dict[str, Any]], *keys: str) -> str:
+        value = self._first_value(rows, *keys)
+        parsed = parse_datetime(value)
+        return parsed.isoformat() if parsed else value
