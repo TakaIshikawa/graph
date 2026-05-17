@@ -99,10 +99,38 @@ def test_pocket_csv_status_and_time_metadata(tmp_path):
     assert unit.created_at == datetime(2024, 1, 1, tzinfo=timezone.utc)
     assert unit.updated_at == datetime(2024, 1, 2, tzinfo=timezone.utc)
     assert unit.metadata["time_added"] == "1704067200"
+    assert unit.metadata["added_at"] == "2024-01-01T00:00:00+00:00"
+    assert unit.metadata["time_read"] == "1704153600"
+    assert unit.metadata["read_at"] == "2024-01-02T00:00:00+00:00"
     assert unit.metadata["status"] == "archive"
     assert unit.metadata["archived"] is True
     assert unit.metadata["favorite"] is True
     assert unit.metadata["read"] is True
+
+
+def test_pocket_csv_derives_source_domain_and_accepts_iso_timestamps(tmp_path):
+    export = tmp_path / "pocket.csv"
+    export.write_text(
+        "Title,URL,Tags,Time Added,Time Read,Status,Favorite,Excerpt\n"
+        "Domain Story,https://www.example.com/articles/42,Research,2024-01-01T12:00:00Z,2024-01-02T13:30:00Z,read,true,Short excerpt\n",
+        encoding="utf-8",
+    )
+
+    result = PocketCsvAdapter(path=str(export)).ingest()
+
+    unit = result.units[0]
+    assert unit.title == "Domain Story"
+    assert unit.created_at == datetime(2024, 1, 1, 12, tzinfo=timezone.utc)
+    assert unit.updated_at == datetime(2024, 1, 2, 13, 30, tzinfo=timezone.utc)
+    assert unit.metadata["source_domain"] == "example.com"
+    assert unit.metadata["domain"] == "example.com"
+    assert unit.metadata["time_added"] == "2024-01-01T12:00:00Z"
+    assert unit.metadata["added_at"] == "2024-01-01T12:00:00+00:00"
+    assert unit.metadata["time_read"] == "2024-01-02T13:30:00Z"
+    assert unit.metadata["read_at"] == "2024-01-02T13:30:00+00:00"
+    assert unit.metadata["status"] == "read"
+    assert unit.metadata["favorite"] is True
+    assert unit.metadata["excerpt"] == "Short excerpt"
 
 
 def test_pocket_csv_since_filter_and_entity_filter(tmp_path):

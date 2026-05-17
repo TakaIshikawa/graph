@@ -7,6 +7,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from graph.adapters.base import IngestResult, SourceAdapter
 from graph.types.enums import ContentType, SourceProject
@@ -49,7 +50,7 @@ class PocketCsvAdapter(SourceAdapter):
 
                 title = self._first(row, "title", "given_title", "resolved_title", "item_title") or url
                 added_at = self._parse_datetime(
-                    self._first(row, "time_added", "added_at", "created_at")
+                    self._first(row, "time_added", "added_at", "created_at", "added")
                 )
                 updated_at = self._parse_datetime(
                     self._first(row, "time_updated", "updated_at", "time_read", "time_favorited")
@@ -122,10 +123,20 @@ class PocketCsvAdapter(SourceAdapter):
         tags: list[str],
     ) -> dict[str, Any]:
         status = self._first(row, "status", "state")
+        time_added = self._first(row, "time_added", "added_at", "created_at", "added")
+        time_read = self._first(row, "time_read", "read_at", "completed_at")
+        added_at = self._parse_datetime(time_added)
+        read_at = self._parse_datetime(time_read)
+        source_domain = self._source_domain(url)
         return {
             "title": title,
             "url": url,
-            "time_added": self._first(row, "time_added", "added_at", "created_at"),
+            "source_domain": source_domain,
+            "domain": source_domain,
+            "time_added": time_added,
+            "added_at": added_at.isoformat() if added_at else "",
+            "time_read": time_read,
+            "read_at": read_at.isoformat() if read_at else "",
             "status": status,
             "archived": self._is_archived(row, status),
             "favorite": self._is_truthy(self._first(row, "favorite", "is_favorite", "favorited")),
@@ -151,14 +162,23 @@ class PocketCsvAdapter(SourceAdapter):
         return tags
 
     def _first(self, row: dict[str, Any], *keys: str) -> str:
+        compact = {re.sub(r"[^a-z0-9]+", "", str(key).casefold()): value for key, value in row.items()}
         for key in keys:
             value = row.get(key)
+            if value is None:
+                value = compact.get(re.sub(r"[^a-z0-9]+", "", key.casefold()))
             if value is None:
                 continue
             text = str(value).strip()
             if text:
                 return text
         return ""
+
+    def _source_domain(self, url: str) -> str:
+        host = urlparse(url).netloc.casefold()
+        if host.startswith("www."):
+            host = host[4:]
+        return host
 
     def _is_archived(self, row: dict[str, Any], status: str) -> bool:
         archived = self._first(row, "archived", "is_archived")
