@@ -259,6 +259,56 @@ def test_labels_and_sections_populate_metadata_and_tags(tmp_path):
     assert unit.tags == ["deep-focus", "follow-up", "p1", "work"]
 
 
+def test_todoist_preserves_recurrence_reminder_project_and_section_metadata(tmp_path):
+    csv_path = _write_csv(
+        tmp_path / "tasks.csv",
+        [
+            {
+                "TYPE": "task",
+                "CONTENT": "Water plants",
+                "PRIORITY": "2",
+                "INDENT": "1",
+                "labels": "Home, Chores",
+                "recurring": "true",
+                "recurrence": "every monday",
+                "due_timezone": "America/Los_Angeles",
+                "reminder_at": "2026-05-04T15:30:00-07:00",
+                "reminder_timezone": "America/Los_Angeles",
+                "project_name": "House",
+                "section_name": "Weekly",
+            }
+        ],
+        columns=[
+            "TYPE",
+            "CONTENT",
+            "PRIORITY",
+            "INDENT",
+            "labels",
+            "recurring",
+            "recurrence",
+            "due_timezone",
+            "reminder_at",
+            "reminder_timezone",
+            "project_name",
+            "section_name",
+        ],
+    )
+
+    result = TodoistAdapter(path=str(csv_path)).ingest()
+
+    unit = result.units[0]
+    assert unit.metadata["recurring"] is True
+    assert unit.metadata["recurrence"] == "every monday"
+    assert unit.metadata["due_timezone"] == "America/Los_Angeles"
+    assert unit.metadata["reminder_at"] == "2026-05-04T22:30:00+00:00"
+    assert unit.metadata["reminder_timezone"] == "America/Los_Angeles"
+    assert unit.metadata["priority"] == 2
+    assert unit.metadata["labels"] == ["Home", "Chores"]
+    assert unit.metadata["project_name"] == "House"
+    assert unit.metadata["section_name"] == "Weekly"
+    assert unit.tags == ["chores", "home", "p2"]
+
+
 def test_author_column_emits_person_and_reference_edge(tmp_path):
     csv_path = _write_csv(tmp_path / "tasks.csv", [
         {"TYPE": "task", "CONTENT": "Draft brief", "PRIORITY": "", "INDENT": "1", "AUTHOR": "Alice Example"},

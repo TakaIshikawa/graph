@@ -6,6 +6,7 @@ import csv
 import hashlib
 import io
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 from graph.adapters.base import IngestResult, SourceAdapter
@@ -119,6 +120,13 @@ class TodoistAdapter(SourceAdapter):
                 date_lang = self._row_value(row, _COL_DATE_LANG) or None
                 tz = self._row_value(row, _COL_TIMEZONE) or None
                 section = self._row_value(row, _COL_SECTION) or None
+                recurring = self._parse_bool(self._first_row_value(row, "recurring", "Recurring", "is_recurring"))
+                recurrence = self._first_row_value(row, "recurrence", "Recurrence", "due_recurring", "Due Recurring") or None
+                due_timezone = self._first_row_value(row, "due_timezone", "Due Timezone", "Due Time Zone") or None
+                reminder_at = self._normalize_datetime(self._first_row_value(row, "reminder_at", "Reminder At", "Reminder", "Reminder Date"))
+                reminder_timezone = self._first_row_value(row, "reminder_timezone", "Reminder Timezone", "Reminder Time Zone") or None
+                project_name = self._first_row_value(row, "project_name", "Project Name", "Project") or None
+                section_name = self._first_row_value(row, "section_name", "Section Name") or None
 
                 metadata: dict = {
                     "indent": indent,
@@ -139,10 +147,24 @@ class TodoistAdapter(SourceAdapter):
                     metadata["date_lang"] = date_lang
                 if tz:
                     metadata["timezone"] = tz
+                if recurring is not None:
+                    metadata["recurring"] = recurring
+                if recurrence:
+                    metadata["recurrence"] = recurrence
+                if due_timezone:
+                    metadata["due_timezone"] = due_timezone
+                if reminder_at:
+                    metadata["reminder_at"] = reminder_at
+                if reminder_timezone:
+                    metadata["reminder_timezone"] = reminder_timezone
                 if labels:
                     metadata["labels"] = labels
+                if project_name:
+                    metadata["project_name"] = project_name
                 if section:
                     metadata["section"] = section
+                if section_name:
+                    metadata["section_name"] = section_name
 
                 unit = KnowledgeUnit(
                     source_project=SourceProject.TODOIST,
@@ -273,6 +295,52 @@ class TodoistAdapter(SourceAdapter):
         if value is None:
             value = lowered.get(column.casefold())
         return str(value or "").strip()
+
+    def _first_row_value(self, row: dict[str, str], *columns: str) -> str:
+        normalized = {self._normalize_key(str(key)): value for key, value in row.items()}
+        for column in columns:
+            value = row.get(column)
+            if value is None:
+                value = normalized.get(self._normalize_key(column))
+            if value is not None and str(value).strip():
+                return str(value).strip()
+        return ""
+
+    def _normalize_key(self, value: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "", value.casefold())
+
+    def _parse_bool(self, value: str) -> bool | None:
+        text = value.strip().casefold()
+        if not text:
+            return None
+        if text in {"1", "true", "yes", "y"}:
+            return True
+        if text in {"0", "false", "no", "n"}:
+            return False
+        return None
+
+    def _normalize_datetime(self, value: str) -> str:
+        parsed = self._parse_datetime(value)
+        return parsed.isoformat() if parsed else value
+
+    def _parse_datetime(self, value: str) -> datetime | None:
+        text = value.strip()
+        if not text:
+            return None
+        for candidate in (text, text.replace("Z", "+00:00")):
+            try:
+                parsed = datetime.fromisoformat(candidate)
+            except ValueError:
+                continue
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d", "%m/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M", "%m/%d/%Y"):
+            try:
+                return datetime.strptime(text, fmt).replace(tzinfo=timezone.utc)
+            except ValueError:
+                continue
+        return None
 
     def _labels(self, row: dict[str, str]) -> list[str]:
         raw = self._row_value(row, _COL_LABELS)
