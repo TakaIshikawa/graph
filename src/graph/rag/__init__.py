@@ -18,6 +18,7 @@ from graph.rag.evidence_density import score_evidence_density
 from graph.rag.keywords import extract_keywords
 from graph.rag.query_intent import classify_query_intent
 from graph.rag.query_source_strategy import plan_query_source_strategy
+from graph.rag.query_term_coverage import score_query_term_coverage
 from graph.rag.dedupe import rank_duplicate_candidates
 from graph.rag.facets import build_result_facets
 from graph.rag.citations import format_result_citations
@@ -32,6 +33,13 @@ from graph.rag.result_provenance_completeness import analyze_result_provenance_c
 from graph.rag.source_agreement import score_source_agreement
 from graph.rag.source_attribution import summarize_source_attribution
 from graph.rag.snippets import highlight_result_snippets
+from graph.rag.answer_citation_density import estimate_answer_citation_density
+from graph.rag.citation_target_plan import build_citation_target_plan
+from graph.rag.context_token_budget import allocate_context_token_budget
+from graph.rag.evidence_quote_quality import score_evidence_quote_quality
+from graph.rag.result_metadata_gaps import summarize_result_metadata_gaps
+from graph.rag.result_tag_coverage import analyze_result_tag_coverage
+from graph.rag.source_evidence_coverage import analyze_source_evidence_coverage
 from graph.rag.source_credibility import score_source_credibility
 from graph.rag.source_diversity_audit import audit_source_diversity
 from graph.rag.source_reliability import score_source_reliability
@@ -52,8 +60,11 @@ __all__ = [
     "analyze_query_drift",
     "analyze_result_date_coverage",
     "analyze_result_provenance_completeness",
+    "analyze_result_tag_coverage",
+    "analyze_source_evidence_coverage",
     "audit_source_diversity",
     "allocate_evidence_budget",
+    "allocate_context_token_budget",
     "decompose_query_for_retrieval",
     "build_answer_outline",
     "build_evidence_pack",
@@ -64,6 +75,7 @@ __all__ = [
     "build_result_facets",
     "build_source_timeline",
     "build_citation_trails",
+    "build_citation_target_plan",
     "build_claim_support_matrix",
     "classify_query_intent",
     "detect_contradiction_cues",
@@ -72,6 +84,7 @@ __all__ = [
     "extract_keywords",
     "extract_query_focus_terms",
     "estimate_reading_time",
+    "estimate_answer_citation_density",
     "explain_rag_results",
     "format_result_citations",
     "cluster_results_by_overlap",
@@ -86,7 +99,10 @@ __all__ = [
     "score_source_agreement",
     "score_source_credibility",
     "score_evidence_density",
+    "score_evidence_quote_quality",
+    "score_query_term_coverage",
     "score_source_reliability",
+    "summarize_result_metadata_gaps",
     "summarize_source_attribution",
     "suggest_tag_normalizations",
     "suggest_query_expansion_terms",
