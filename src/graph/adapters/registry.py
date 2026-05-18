@@ -75,6 +75,7 @@ from graph.adapters.markdown_links import MarkdownLinksAdapter
 from graph.adapters.markdown_notes import MarkdownNotesAdapter
 from graph.adapters.markdown_tasks import MarkdownTasksAdapter
 from graph.adapters.mastodon import MastodonAdapter
+from graph.adapters.mastodon_outbox_json import MastodonOutboxJsonAdapter
 from graph.adapters.matter import MatterAdapter
 from graph.adapters.max_adapter import MaxAdapter
 from graph.adapters.mbox import MboxAdapter
@@ -207,6 +208,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "markdown_notes": MarkdownNotesAdapter,
     "markdown_tasks": MarkdownTasksAdapter,
     "mastodon": MastodonAdapter,
+    "mastodon_outbox_json": MastodonOutboxJsonAdapter,
     "kindle": KindleAdapter,
     "kindle_clippings": KindleClippingsAdapter,
     "sota": SOTAAdapter,

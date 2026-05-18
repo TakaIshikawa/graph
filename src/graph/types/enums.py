@@ -14,6 +14,7 @@ class SourceProject(StrEnum):
     MARKDOWN_NOTES = "markdown_notes"
     MARKDOWN_TASKS = "markdown_tasks"
     MASTODON = "mastodon"
+    MASTODON_OUTBOX_JSON = "mastodon_outbox_json"
     KINDLE = "kindle"
     SOTA = "sota"
     BOOKMARKS = "bookmarks"
