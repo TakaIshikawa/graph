@@ -54,7 +54,9 @@ class BankOfAmericaTransactionsCsvAdapter(SourceAdapter):
         header_index = 0
         for index, line in enumerate(lines):
             normalized = {cell.strip().casefold() for cell in next(csv.reader([line]))}
-            if "date" in normalized and "description" in normalized and "amount" in normalized:
+            has_date = bool({"date", "posted date", "transaction date"} & normalized)
+            has_description = bool({"description", "payee"} & normalized)
+            if has_date and has_description and "amount" in normalized:
                 header_index = index
                 break
         reader = csv.DictReader(lines[header_index:])
@@ -63,41 +65,56 @@ class BankOfAmericaTransactionsCsvAdapter(SourceAdapter):
         return [{str(key).strip(): value for key, value in row.items() if key is not None} for row in reader]
 
     def _unit(self, row: dict[str, Any], source_file: str, index: int) -> KnowledgeUnit | None:
-        date_text = first(row, "Date", "Transaction Date")
-        timestamp = parse_datetime(date_text)
+        posted_date_text = first(row, "Posted Date", "Date", "Transaction Date")
+        timestamp = parse_datetime(posted_date_text)
+        payee = first(row, "Payee")
+        address = first(row, "Address")
         description = first(row, "Description")
+        memo = first(row, "Memo", "Notes")
         amount = self._amount(first(row, "Amount"))
         running_balance = self._amount(first(row, "Running Bal.", "Running Balance", "Balance"))
+        account = first(row, "Account", "Account Name")
+        category = first(row, "Category")
         status = first(row, "Status")
         transaction_type = first(row, "Transaction Type", "Type")
         reference_number = first(row, "Reference Number", "Reference")
-        if not any([date_text, description, amount is not None, running_balance is not None, status, transaction_type, reference_number]):
+        if not any([posted_date_text, payee, address, description, memo, amount is not None, running_balance is not None, account, category, status, transaction_type, reference_number]):
             return None
 
         now = datetime.now(timezone.utc)
         metadata = clean_metadata(
             {
-                "date": self._date(timestamp, date_text),
+                "posted_date": self._date(timestamp, posted_date_text),
+                "date": self._date(timestamp, posted_date_text),
+                "reference_number": reference_number,
+                "payee": payee,
+                "address": address,
                 "description": description,
+                "memo": memo,
                 "amount": amount,
                 "currency": "USD" if amount is not None else "",
                 "running_balance": running_balance,
+                "account": account,
+                "category": category,
                 "status": status,
                 "transaction_type": transaction_type,
-                "reference_number": reference_number,
                 "source_file": source_file,
                 "source_row": dict(row),
             }
         )
-        source_id = digest_source_id(
+        source_id = f"bank_of_america_transactions_csv:{reference_number}" if reference_number else digest_source_id(
             "bank_of_america_transactions_csv",
-            date_text,
+            posted_date_text,
+            payee,
+            address,
             description,
+            memo,
             amount,
             running_balance,
+            account,
+            category,
             status,
             transaction_type,
-            reference_number,
             index,
         )
         timestamp = timestamp or now
@@ -139,12 +156,17 @@ class BankOfAmericaTransactionsCsvAdapter(SourceAdapter):
 
     def _content(self, metadata: dict[str, Any]) -> str:
         parts = [
+            f"Payee: {metadata.get('payee')}" if metadata.get("payee") else "",
             f"Description: {metadata.get('description')}" if metadata.get("description") else "",
+            f"Memo: {metadata.get('memo')}" if metadata.get("memo") else "",
+            f"Category: {metadata.get('category')}" if metadata.get("category") else "",
             f"Type: {metadata.get('transaction_type')}" if metadata.get("transaction_type") else "",
             f"Status: {metadata.get('status')}" if metadata.get("status") else "",
             f"Amount: {metadata.get('amount')} {metadata.get('currency', '')}".strip() if metadata.get("amount") is not None else "",
             f"Running balance: {metadata.get('running_balance')}" if metadata.get("running_balance") is not None else "",
-            f"Date: {metadata.get('date')}" if metadata.get("date") else "",
+            f"Posted date: {metadata.get('posted_date')}" if metadata.get("posted_date") else "",
+            f"Account: {metadata.get('account')}" if metadata.get("account") else "",
+            f"Address: {metadata.get('address')}" if metadata.get("address") else "",
             f"Reference: {metadata.get('reference_number')}" if metadata.get("reference_number") else "",
         ]
         return "\n".join(part for part in parts if part)
