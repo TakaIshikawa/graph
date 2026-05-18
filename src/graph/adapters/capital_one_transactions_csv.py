@@ -58,8 +58,10 @@ class CapitalOneTransactionsCsvAdapter(SourceAdapter):
         debit = self._amount(first(row, "Debit"))
         credit = self._amount(first(row, "Credit"))
         explicit_amount = self._amount(first(row, "Amount"))
+        balance = self._amount(first(row, "Balance", "Running Balance", "Running Bal."))
+        transaction_id = first(row, "Transaction ID", "Transaction Id", "ID")
         amount = self._signed_amount(debit, credit, explicit_amount)
-        if not any([transaction_date_text, posted_date_text, card_number, description, category, debit is not None, credit is not None, explicit_amount is not None]):
+        if not any([transaction_date_text, posted_date_text, card_number, description, category, debit is not None, credit is not None, explicit_amount is not None, balance is not None, transaction_id]):
             return None
 
         now = datetime.now(timezone.utc)
@@ -74,12 +76,14 @@ class CapitalOneTransactionsCsvAdapter(SourceAdapter):
                 "debit": debit,
                 "credit": credit,
                 "amount": amount,
+                "balance": balance,
+                "transaction_id": transaction_id,
                 "currency": "USD" if amount is not None else "",
                 "source_file": source_file,
                 "source_row": dict(row),
             }
         )
-        source_id = digest_source_id(
+        source_id = f"capital_one_transactions_csv:{transaction_id}" if transaction_id else digest_source_id(
             "capital_one_transactions_csv",
             transaction_date_text,
             posted_date_text,
@@ -89,6 +93,7 @@ class CapitalOneTransactionsCsvAdapter(SourceAdapter):
             debit,
             credit,
             explicit_amount,
+            balance,
             index,
         )
         timestamp = transaction_timestamp or posted_timestamp or now
@@ -146,8 +151,10 @@ class CapitalOneTransactionsCsvAdapter(SourceAdapter):
             f"Amount: {metadata.get('amount')} {metadata.get('currency', '')}".strip() if metadata.get("amount") is not None else "",
             f"Debit: {metadata.get('debit')}" if metadata.get("debit") is not None else "",
             f"Credit: {metadata.get('credit')}" if metadata.get("credit") is not None else "",
+            f"Balance: {metadata.get('balance')}" if metadata.get("balance") is not None else "",
             f"Transaction date: {metadata.get('transaction_date')}" if metadata.get("transaction_date") else "",
             f"Posted date: {metadata.get('posted_date')}" if metadata.get("posted_date") else "",
             f"Card: {metadata.get('card_last_four')}" if metadata.get("card_last_four") else "",
+            f"Transaction ID: {metadata.get('transaction_id')}" if metadata.get("transaction_id") else "",
         ]
         return "\n".join(part for part in parts if part)
