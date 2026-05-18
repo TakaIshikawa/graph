@@ -49,6 +49,7 @@ from graph.adapters.google_calendar_json import GoogleCalendarJsonAdapter
 from graph.adapters.google_calendar_takeout import GoogleCalendarTakeoutAdapter
 from graph.adapters.google_photos_takeout import GooglePhotosTakeoutAdapter
 from graph.adapters.google_keep import GoogleKeepAdapter
+from graph.adapters.google_location_semantic_history_json import GoogleLocationSemanticHistoryJsonAdapter
 from graph.adapters.html import HtmlAdapter
 from graph.adapters.hacker_news_saved import HackerNewsSavedAdapter
 from graph.adapters.hypothesis import HypothesisAdapter
@@ -354,6 +355,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "jira_worklogs_csv": JiraWorklogsCsvAdapter,
     "trello_board_json": TrelloBoardJsonAdapter,
     "google_maps_timeline_json": GoogleMapsTimelineJsonAdapter,
+    "google_location_semantic_history_json": GoogleLocationSemanticHistoryJsonAdapter,
     "google_play_books_notes_csv": GooglePlayBooksNotesCsvAdapter,
     "libby_loans_csv": LibbyLoansCsvAdapter,
     "monzo_transactions_csv": MonzoTransactionsCsvAdapter,
