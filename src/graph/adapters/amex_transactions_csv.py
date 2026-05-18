@@ -86,7 +86,7 @@ class AmexTransactionsCsvAdapter(SourceAdapter):
                 "source_row": dict(row),
             }
         )
-        source_id = digest_source_id(
+        source_id = f"amex_transactions_csv:{reference}" if reference else digest_source_id(
             "amex_transactions_csv",
             date_text,
             description,
@@ -94,7 +94,6 @@ class AmexTransactionsCsvAdapter(SourceAdapter):
             account_number,
             amount,
             statement_descriptor,
-            reference,
             index,
         )
         timestamp = timestamp or now
@@ -142,6 +141,12 @@ class AmexTransactionsCsvAdapter(SourceAdapter):
             f"Amount: {metadata.get('amount')} {metadata.get('currency', '')}".strip() if metadata.get("amount") is not None else "",
             f"Date: {metadata.get('date')}" if metadata.get("date") else "",
             f"Card member: {metadata.get('card_member')}" if metadata.get("card_member") else "",
+            f"Account: {metadata.get('account_number')}" if metadata.get("account_number") else "",
+            f"Extended details: {metadata.get('extended_details')}" if metadata.get("extended_details") else "",
+            f"Address: {metadata.get('address')}" if metadata.get("address") else "",
+            f"City/State: {metadata.get('city_state')}" if metadata.get("city_state") else "",
+            f"Zip Code: {metadata.get('zip_code')}" if metadata.get("zip_code") else "",
+            f"Country: {metadata.get('country')}" if metadata.get("country") else "",
             f"Reference: {metadata.get('reference')}" if metadata.get("reference") else "",
         ]
         return "\n".join(part for part in parts if part)

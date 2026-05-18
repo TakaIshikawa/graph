@@ -19,6 +19,7 @@ def test_amex_transactions_csv_ingests_representative_rows(tmp_path):
     purchase, refund = result.units
     assert purchase.source_project == "amex_transactions_csv"
     assert purchase.source_entity_type == "transaction"
+    assert purchase.source_id == "amex_transactions_csv:A123"
     assert purchase.metadata["date"] == "2026-04-01"
     assert purchase.metadata["description"] == "CAFE"
     assert purchase.metadata["card_member"] == "ADA LOVELACE"
@@ -34,22 +35,30 @@ def test_amex_transactions_csv_ingests_representative_rows(tmp_path):
     assert purchase.metadata["reference"] == "A123"
     assert purchase.metadata["category"] == "Restaurant"
     assert purchase.metadata["source_row"]["Appears On Your Statement As"] == "CAFE CITY"
+    assert purchase.metadata["source_file"] == "amex.csv"
     assert purchase.tags[:3] == ["finance", "transaction", "amex"]
+    assert "CAFE" in purchase.title
+    assert "-4.5 USD" in purchase.content
+    assert "CAFE CITY" in purchase.content
+    assert "San Francisco CA" in purchase.content
     assert refund.metadata["amount"] == 19.99
     assert refund.metadata["reference"] == "A124"
 
 
-def test_amex_transactions_csv_source_ids_are_deterministic(tmp_path):
-    export = tmp_path / "amex.csv"
+def test_amex_transactions_csv_ingests_directories_and_uses_digest_fallback(tmp_path):
+    nested = tmp_path / "exports"
+    nested.mkdir()
+    export = nested / "amex.csv"
     export.write_text(
-        "Date,Description,Card Member,Account #,Amount,Appears On Your Statement As,Reference,Category\n"
-        "2026-04-01,CAFE,ADA LOVELACE,1001,($4.50),CAFE CITY,A123,Restaurant\n",
+        "Date,Description,Card Member,Account #,Amount,Appears On Your Statement As,Category\n"
+        "2026-04-01,CAFE,ADA LOVELACE,1001,($4.50),CAFE CITY,Restaurant\n",
         encoding="utf-8",
     )
 
-    first = AmexTransactionsCsvAdapter(path=str(export)).ingest().units[0]
-    second = AmexTransactionsCsvAdapter(path=str(export)).ingest().units[0]
+    first = AmexTransactionsCsvAdapter(path=str(tmp_path)).ingest().units[0]
+    second = AmexTransactionsCsvAdapter(path=str(tmp_path)).ingest().units[0]
 
     assert first.source_id == second.source_id
     assert first.source_id.startswith("amex_transactions_csv:")
     assert first.metadata["amount"] == -4.5
+    assert first.metadata["source_file"] == "amex.csv"
