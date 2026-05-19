@@ -128,6 +128,7 @@ from graph.export.unit_date_coverage_markdown import export_unit_date_coverage_m
 from graph.export.unit_datetime_precision_csv import export_unit_datetime_precision_csv
 from graph.export.unit_location_coverage_csv import export_unit_location_coverage_csv
 from graph.export.unit_attachment_inventory_csv import export_unit_attachment_inventory_csv
+from graph.export.unit_amount_outliers_csv import export_unit_amount_outliers_csv
 from graph.export.unit_amount_summary_csv import export_unit_amount_summary_csv
 from graph.export.unit_balance_timeline_csv import export_unit_balance_timeline_csv
 from graph.export.unit_transaction_cashflow_csv import export_unit_transaction_cashflow_csv
@@ -300,6 +301,7 @@ __all__ = [
     "export_task_board_markdown",
     "export_unit_backlinks_markdown",
     "export_unit_attachment_inventory_csv",
+    "export_unit_amount_outliers_csv",
     "export_unit_amount_summary_csv",
     "export_unit_balance_timeline_csv",
     "export_unit_transaction_cashflow_csv",
