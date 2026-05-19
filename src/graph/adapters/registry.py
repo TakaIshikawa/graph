@@ -174,6 +174,7 @@ from graph.adapters.storygraph_reading_history_csv import StoryGraphReadingHisto
 from graph.adapters.steam_library_csv import SteamLibraryCsvAdapter
 from graph.adapters.trello_board_json import TrelloBoardJsonAdapter
 from graph.adapters.trakt_watch_history_csv import TraktWatchHistoryCsvAdapter
+from graph.adapters.tastytrade_activity_csv import TastytradeActivityCsvAdapter
 from graph.adapters.libby_loans_csv import LibbyLoansCsvAdapter
 from graph.adapters.reddit_saved_csv import RedditSavedCsvAdapter
 from graph.adapters.reddit_saved_json import RedditSavedJsonAdapter
@@ -348,6 +349,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "spotify_streaming_history": SpotifyStreamingHistoryAdapter,
     "spotify_takeout": SpotifyTakeoutAdapter,
     "trakt_watch_history_csv": TraktWatchHistoryCsvAdapter,
+    "tastytrade_activity_csv": TastytradeActivityCsvAdapter,
     "netflix_viewing_activity_csv": NetflixViewingActivityCsvAdapter,
     "storygraph_reading_history_csv": StoryGraphReadingHistoryCsvAdapter,
     "myanimelist_xml": MyAnimeListXmlAdapter,
