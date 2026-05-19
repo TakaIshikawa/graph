@@ -82,6 +82,7 @@ from graph.adapters.text_outline import TextOutlineAdapter
 from graph.adapters.tana_paste import TanaPasteAdapter
 from graph.adapters.transcript import TranscriptAdapter
 from graph.adapters.twitter_archive import TwitterArchiveAdapter
+from graph.adapters.us_bank_transactions_csv import UsBankTransactionsCsvAdapter
 from graph.adapters.webvtt import WebVttAdapter
 from graph.adapters.yaml_adapter import YamlAdapter
 from graph.store.db import Store
@@ -2881,6 +2882,10 @@ class TestRegistry:
         twitter_archive_adapter = get_adapter("twitter_archive", path="/tmp/tweets.js")
         assert isinstance(twitter_archive_adapter, TwitterArchiveAdapter)
         assert twitter_archive_adapter.name == "twitter_archive"
+
+        us_bank_transactions_csv_adapter = get_adapter("us_bank_transactions_csv", path="/tmp/us-bank.csv")
+        assert isinstance(us_bank_transactions_csv_adapter, UsBankTransactionsCsvAdapter)
+        assert us_bank_transactions_csv_adapter.name == "us_bank_transactions_csv"
 
         webvtt_adapter = get_adapter("webvtt", path="/tmp/transcript.vtt")
         assert isinstance(webvtt_adapter, WebVttAdapter)

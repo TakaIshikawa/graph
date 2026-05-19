@@ -183,6 +183,7 @@ from graph.adapters.text_outline import TextOutlineAdapter
 from graph.adapters.tana_paste import TanaPasteAdapter
 from graph.adapters.transcript import TranscriptAdapter
 from graph.adapters.twitter_archive import TwitterArchiveAdapter
+from graph.adapters.us_bank_transactions_csv import UsBankTransactionsCsvAdapter
 from graph.adapters.facebook_archive import FacebookArchiveAdapter
 from graph.adapters.instagram_archive import InstagramArchiveAdapter
 from graph.adapters.linkedin_archive import LinkedInArchiveAdapter
@@ -284,6 +285,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "google_keep": GoogleKeepAdapter,
     "transcript": TranscriptAdapter,
     "twitter_archive": TwitterArchiveAdapter,
+    "us_bank_transactions_csv": UsBankTransactionsCsvAdapter,
     "facebook_archive": FacebookArchiveAdapter,
     "instagram_archive": InstagramArchiveAdapter,
     "linkedin_archive": LinkedInArchiveAdapter,
