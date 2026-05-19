@@ -29,6 +29,7 @@ from graph.adapters.csv_rows import CsvRowsAdapter
 from graph.adapters.crossref import CrossrefAdapter
 from graph.adapters.csl_json import CslJsonAdapter
 from graph.adapters.daily_journal import DailyJournalAdapter
+from graph.adapters.discover_credit_card_transactions_csv import DiscoverCreditCardTransactionsCsvAdapter
 from graph.adapters.discord_json import DiscordJsonAdapter
 from graph.adapters.email import EmailAdapter
 from graph.adapters.enex import EnexAdapter
@@ -2905,6 +2906,10 @@ class TestRegistry:
         citi_credit_card_transactions_csv_adapter = get_adapter("citi_credit_card_transactions_csv", path="/tmp/citi.csv")
         assert isinstance(citi_credit_card_transactions_csv_adapter, CitiCreditCardTransactionsCsvAdapter)
         assert citi_credit_card_transactions_csv_adapter.name == "citi_credit_card_transactions_csv"
+
+        discover_credit_card_transactions_csv_adapter = get_adapter("discover_credit_card_transactions_csv", path="/tmp/discover.csv")
+        assert isinstance(discover_credit_card_transactions_csv_adapter, DiscoverCreditCardTransactionsCsvAdapter)
+        assert discover_credit_card_transactions_csv_adapter.name == "discover_credit_card_transactions_csv"
 
         bookmarks_html_adapter = get_adapter("bookmarks_html", path="/tmp/bookmarks.html")
         assert isinstance(bookmarks_html_adapter, BookmarksHtmlAdapter)

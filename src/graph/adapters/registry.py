@@ -29,6 +29,7 @@ from graph.adapters.csl_json import CslJsonAdapter
 from graph.adapters.coursera_progress_csv import CourseraProgressCsvAdapter
 from graph.adapters.daily_journal import DailyJournalAdapter
 from graph.adapters.diigo import DiigoAdapter
+from graph.adapters.discover_credit_card_transactions_csv import DiscoverCreditCardTransactionsCsvAdapter
 from graph.adapters.discord_json import DiscordJsonAdapter
 from graph.adapters.email import EmailAdapter
 from graph.adapters.enex import EnexAdapter
@@ -226,6 +227,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "citi_credit_card_transactions_csv": CitiCreditCardTransactionsCsvAdapter,
     "confluence_pages_json": ConfluencePagesJsonAdapter,
     "chatgpt_json": ChatGptJsonAdapter,
+    "discover_credit_card_transactions_csv": DiscoverCreditCardTransactionsCsvAdapter,
     "discord_json": DiscordJsonAdapter,
     "csv": CsvAdapter,
     "csv_rows": CsvRowsAdapter,
