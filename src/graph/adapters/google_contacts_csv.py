@@ -143,6 +143,11 @@ class GoogleContactsCsvAdapter(SourceAdapter):
 
         metadata = {
             "name": name,
+            "names": {
+                "full": name,
+                "given": self._first(row, "Given Name"),
+                "family": self._first(row, "Family Name"),
+            },
             "given_name": self._first(row, "Given Name"),
             "family_name": self._first(row, "Family Name"),
             "notes": notes,
@@ -152,6 +157,7 @@ class GoogleContactsCsvAdapter(SourceAdapter):
             "websites": websites,
             "relationships": relationships,
             "organization": organization,
+            "title": organization.get("title", ""),
             "birthday": birthday,
             "groups": groups,
             "source_file": source_file,
@@ -184,6 +190,7 @@ class GoogleContactsCsvAdapter(SourceAdapter):
 
     def _repeated(self, row: dict[str, Any], *prefixes: str) -> list[str]:
         values: list[str] = []
+        seen: set[str] = set()
         for key, value in row.items():
             key_text = str(key)
             if not any(key_text.lower().startswith(prefix.lower()) for prefix in prefixes):
@@ -196,7 +203,9 @@ class GoogleContactsCsvAdapter(SourceAdapter):
             ):
                 continue
             text = str(value or "").strip()
-            if text and text not in values:
+            identity = " ".join(text.casefold().split())
+            if text and identity not in seen:
+                seen.add(identity)
                 values.append(text)
         return values
 
@@ -545,7 +554,13 @@ class GoogleContactsCsvAdapter(SourceAdapter):
         index: int,
     ) -> str:
         explicit = self._first(row, "ID", "Contact ID")
-        raw = explicit or "|".join([name.lower(), ",".join(emails), ",".join(phones), source_file, str(index)])
+        identity_parts = [part for part in [",".join(sorted(email.casefold() for email in emails)), name.casefold()] if part]
+        if explicit:
+            raw = f"id:{explicit}"
+        elif identity_parts:
+            raw = "identity:" + "|".join(identity_parts)
+        else:
+            raw = "|".join(["row", ",".join(phones), source_file, str(index)])
         digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
         return f"google_contacts_csv:{digest}"
 

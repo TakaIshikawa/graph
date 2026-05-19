@@ -46,7 +46,7 @@ class GithubStarsCsvAdapter(SourceAdapter):
             except (OSError, UnicodeDecodeError, csv.Error):
                 continue
             for row in rows:
-                unit = self._unit_from_row(row)
+                unit = self._unit_from_row(row, path.name)
                 if unit is None:
                     continue
                 if sync_at and unit.updated_at <= sync_at:
@@ -65,13 +65,16 @@ class GithubStarsCsvAdapter(SourceAdapter):
             result.edges.extend(self._owner_repository_edges(owners))
         if "topic" in allowed_types and "repository" in allowed_types:
             result.edges.extend(self._topic_repository_edges(topics))
-        result.units.sort(key=lambda unit: unit.source_id)
+        entity_order = {entity_type: index for index, entity_type in enumerate(self.entity_types)}
+        result.units.sort(key=lambda unit: (entity_order.get(unit.source_entity_type, 99), unit.source_id))
         result.edges.sort(key=lambda edge: edge.id)
         return result
 
-    def _unit_from_row(self, row: dict[str, Any]) -> KnowledgeUnit | None:
-        full_name = self._first(row, "full_name", "repo", "repository")
+    def _unit_from_row(self, row: dict[str, Any], source_file: str) -> KnowledgeUnit | None:
+        full_name = self._first(row, "full_name", "repo", "repository", "repository name", "name")
         html_url = self._first(row, "html_url", "url")
+        if not full_name and html_url:
+            full_name = self._full_name_from_url(html_url)
         if not full_name and not html_url:
             return None
         title = full_name or html_url
@@ -82,27 +85,35 @@ class GithubStarsCsvAdapter(SourceAdapter):
         pushed_at_text = self._first(row, "pushed_at", "Pushed At", "last_pushed_at", "Last Pushed At")
         pushed_at = self._parse_datetime(pushed_at_text)
         now = datetime.now(timezone.utc)
+        owner, repo = self._repo_parts(full_name, self._first(row, "owner"))
+        stars = self._parse_int(self._first(row, "stargazers_count", "stars", "star_count"))
         metadata = {
             "full_name": full_name,
+            "owner": owner,
+            "repo": repo,
             "description": self._first(row, "description"),
+            "url": html_url,
             "source_url": html_url,
             "external_url": html_url,
             "language": self._first(row, "language"),
             "topics": topics,
             "license": self._first(row, "license", "license_name", "License", "License Name"),
-            "archived": self._parse_bool(self._first(row, "archived", "Archived")),
+            "stars": stars,
+            "starred_at": starred_at_text,
+            "stargazers_count": stars,
+            "archived": self._parse_bool(self._first(row, "archived", "Archived", "is_archived")),
             "fork": self._parse_bool(self._first(row, "fork", "Fork", "is_fork", "Is Fork")),
             "private": self._parse_bool(self._first(row, "private", "Private", "is_private", "Is Private")),
-            "open_issues_count": self._parse_int(self._first(row, "open_issues_count", "Open Issues Count", "open_issues", "Open Issues")),
-            "owner": self._first(row, "owner") or full_name.split("/", 1)[0],
-            "starred_at": starred_at_text,
-            "stargazers_count": self._parse_int(self._first(row, "stargazers_count", "stars")),
+            "open_issues_count": self._parse_int(
+                self._first(row, "open_issues_count", "Open Issues Count", "open_issues", "Open Issues")
+            ),
             "pushed_at": pushed_at.isoformat() if pushed_at else pushed_at_text,
             "homepage": self._first(row, "homepage", "Homepage", "homepage_url", "Homepage URL"),
+            "source_file": source_file,
         }
         return KnowledgeUnit(
             source_project=SourceProject.GITHUB_STARS_CSV,
-            source_id=f"github_stars_csv:{full_name or html_url}",
+            source_id=self._repository_source_id(full_name, html_url),
             source_entity_type="repository",
             title=title,
             content=self._content(title, description, html_url, topics),
@@ -122,6 +133,28 @@ class GithubStarsCsvAdapter(SourceAdapter):
         if topics:
             parts.append(f"Topics: {', '.join(topics)}")
         return "\n".join(parts)
+
+    def _repository_source_id(self, full_name: str, url: str) -> str:
+        raw = full_name.casefold() if full_name else url.strip().casefold()
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+        return f"github_stars_csv:repository:{digest}"
+
+    def _full_name_from_url(self, url: str) -> str:
+        text = url.strip().rstrip("/")
+        marker = "github.com/"
+        if marker not in text.casefold():
+            return ""
+        path = text[text.casefold().index(marker) + len(marker):]
+        parts = [part for part in path.split("/") if part]
+        if len(parts) < 2:
+            return ""
+        return f"{parts[0]}/{parts[1]}"
+
+    def _repo_parts(self, full_name: str, owner: str) -> tuple[str, str]:
+        if "/" in full_name:
+            parsed_owner, repo = full_name.split("/", 1)
+            return owner or parsed_owner, repo
+        return owner, full_name
 
     def _owner_units(self, repositories: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
         grouped: dict[str, list[KnowledgeUnit]] = {}
@@ -363,12 +396,12 @@ class GithubStarsCsvAdapter(SourceAdapter):
             return None
 
     def _parse_bool(self, value: str) -> bool | None:
-        if not value:
+        text = str(value or "").strip().casefold()
+        if not text:
             return None
-        text = value.strip().casefold()
-        if text in {"true", "t", "yes", "y", "1"}:
+        if text in {"1", "true", "t", "yes", "y"}:
             return True
-        if text in {"false", "f", "no", "n", "0"}:
+        if text in {"0", "false", "f", "no", "n"}:
             return False
         return None
 
