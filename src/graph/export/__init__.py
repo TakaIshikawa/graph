@@ -141,6 +141,7 @@ from graph.export.unit_metadata_schema_csv import export_unit_metadata_schema_cs
 from graph.export.unit_metadata_value_frequency_csv import export_unit_metadata_value_frequency_csv
 from graph.export.unit_reference_density_csv import export_unit_reference_density_csv
 from graph.export.unit_reading_queue_csv import export_unit_reading_queue_csv
+from graph.export.unit_recurrence_candidates_csv import export_unit_recurrence_candidates_csv
 from graph.export.unit_review_readiness_csv import export_unit_review_readiness_csv
 from graph.export.unit_source_timeline_csv import export_unit_source_timeline_csv
 from graph.export.unit_staleness_csv import export_unit_staleness_csv
@@ -308,6 +309,7 @@ __all__ = [
     "export_unit_metadata_value_frequency_csv",
     "export_unit_reference_density_csv",
     "export_unit_reading_queue_csv",
+    "export_unit_recurrence_candidates_csv",
     "export_unit_review_readiness_csv",
     "export_unit_schema_inventory",
     "export_unit_source_diversity_csv",
