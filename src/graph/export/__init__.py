@@ -91,6 +91,7 @@ from graph.export.source_confidence_summary_csv import export_source_confidence_
 from graph.export.source_freshness_summary_csv import export_source_freshness_summary_csv
 from graph.export.source_date_gap_csv import export_source_date_gap_csv
 from graph.export.source_author_coverage_csv import export_source_author_coverage_csv
+from graph.export.source_account_summary_csv import export_source_account_summary_csv
 from graph.export.source_date_precision_csv import export_source_date_precision_csv
 from graph.export.source_domain_coverage_csv import export_source_domain_coverage_csv
 from graph.export.source_language_coverage_csv import export_source_language_coverage_csv
@@ -251,6 +252,7 @@ __all__ = [
     "export_source_gap_markdown",
     "export_source_inventory_csv",
     "export_source_confidence_summary_csv",
+    "export_source_account_summary_csv",
     "export_source_author_coverage_csv",
     "export_source_date_gap_csv",
     "export_source_date_precision_csv",
