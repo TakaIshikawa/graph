@@ -8,8 +8,8 @@ from typing import Any
 
 from graph.adapters._personal_exports import clean_metadata, digest_source_id, ensure_utc, first, iter_paths, parse_datetime, parse_money, read_csv_rows, split_values
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class MonzoTransactionsCsvAdapter(SourceAdapter):
@@ -19,16 +19,18 @@ class MonzoTransactionsCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["transaction"]
+        return ["transaction", "merchant"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
 
     def ingest(self, *, since: SyncState | None = None, entity_types: list[str] | None = None) -> IngestResult:
         result = IngestResult()
-        if entity_types is not None and "transaction" not in entity_types:
+        allowed_types = set(entity_types or ["transaction"])
+        if not allowed_types.intersection(self.entity_types):
             return result
         sync_at = ensure_utc(since.last_sync_at) if since else None
+        transactions: list[KnowledgeUnit] = []
 
         for path in iter_paths(self.path, {".csv"}):
             try:
@@ -41,9 +43,17 @@ class MonzoTransactionsCsvAdapter(SourceAdapter):
                     continue
                 if sync_at and unit.updated_at <= sync_at:
                     continue
-                result.units.append(unit)
+                transactions.append(unit)
+                if "transaction" in allowed_types:
+                    result.units.append(unit)
 
-        result.units.sort(key=lambda unit: (unit.created_at, unit.source_id))
+        merchants = self._merchant_units(transactions) if "merchant" in allowed_types else []
+        if "merchant" in allowed_types:
+            result.units.extend(merchants)
+        if {"transaction", "merchant"}.issubset(allowed_types):
+            result.edges.extend(self._merchant_edges(transactions, merchants))
+        result.units.sort(key=lambda unit: unit.source_id)
+        result.edges.sort(key=lambda edge: edge.id)
         return result
 
     def _unit(self, row: dict[str, Any], source_file: str, index: int) -> KnowledgeUnit | None:
@@ -122,3 +132,74 @@ class MonzoTransactionsCsvAdapter(SourceAdapter):
             f"Notes: {metadata.get('notes')}" if metadata.get("notes") else "",
         ]
         return "\n".join(part for part in parts if part)
+
+    def _merchant_units(self, transactions: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        labels: dict[str, str] = {}
+        for transaction in transactions:
+            merchant = str(transaction.metadata.get("merchant") or "").strip()
+            normalized = self._normalize_merchant(merchant)
+            if not normalized:
+                continue
+            grouped.setdefault(normalized, []).append(transaction)
+            labels.setdefault(normalized, merchant)
+
+        units: list[KnowledgeUnit] = []
+        for normalized, items in sorted(grouped.items()):
+            amounts = [float(item.metadata["amount"]) for item in items if isinstance(item.metadata.get("amount"), int | float)]
+            currencies = sorted({str(item.metadata.get("currency")) for item in items if item.metadata.get("currency")})
+            metadata = clean_metadata(
+                {
+                    "merchant": labels[normalized],
+                    "normalized_merchant": normalized,
+                    "transaction_count": len(items),
+                    "first_seen": min(item.created_at for item in items).isoformat(),
+                    "last_seen": max(item.created_at for item in items).isoformat(),
+                    "total_amount": sum(amounts) if amounts else None,
+                    "currency": currencies[0] if len(currencies) == 1 else None,
+                    "currencies": currencies if len(currencies) > 1 else None,
+                    "transaction_source_ids": sorted(item.source_id for item in items),
+                }
+            )
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.MONZO_TRANSACTIONS_CSV,
+                    source_id=self._merchant_source_id(normalized),
+                    source_entity_type="merchant",
+                    title=labels[normalized],
+                    content=f"Monzo merchant: {labels[normalized]}\nTransactions: {len(items)}",
+                    content_type=ContentType.METADATA,
+                    metadata=metadata,
+                    tags=["monzo", "merchant", labels[normalized]],
+                    created_at=min(item.created_at for item in items),
+                    updated_at=max(item.updated_at for item in items),
+                )
+            )
+        return units
+
+    def _merchant_edges(self, transactions: list[KnowledgeUnit], merchants: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        merchant_ids = {merchant.metadata["normalized_merchant"]: merchant.source_id for merchant in merchants}
+        edges: list[KnowledgeEdge] = []
+        for transaction in transactions:
+            normalized = self._normalize_merchant(transaction.metadata.get("merchant"))
+            merchant_id = merchant_ids.get(normalized)
+            if merchant_id:
+                edges.append(self._edge(transaction.source_id, merchant_id, "transaction_merchant"))
+        return list({edge.id: edge for edge in edges}.values())
+
+    def _edge(self, from_id: str, to_id: str, relation_type: str) -> KnowledgeEdge:
+        digest = digest_source_id("monzo_transactions_csv:edge", from_id, relation_type, to_id).rsplit(":", 1)[-1]
+        return KnowledgeEdge(
+            id=f"monzo_transactions_csv:edge:{digest}",
+            from_unit_id=from_id,
+            to_unit_id=to_id,
+            relation=EdgeRelation.RELATES_TO,
+            source=EdgeSource.SOURCE,
+            metadata={"source_project": SourceProject.MONZO_TRANSACTIONS_CSV.value, "relation_type": relation_type},
+        )
+
+    def _normalize_merchant(self, value: Any) -> str:
+        return " ".join(str(value or "").strip().casefold().split())
+
+    def _merchant_source_id(self, normalized: str) -> str:
+        return digest_source_id("monzo_transactions_csv:merchant", normalized)

@@ -9,8 +9,8 @@ from typing import Any
 
 from graph.adapters._personal_exports import clean_metadata, digest_source_id, ensure_utc, first, iter_paths, parse_datetime, read_csv_rows
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class VenmoTransactionsCsvAdapter(SourceAdapter):
@@ -20,16 +20,18 @@ class VenmoTransactionsCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["transaction"]
+        return ["transaction", "counterparty"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
 
     def ingest(self, *, since: SyncState | None = None, entity_types: list[str] | None = None) -> IngestResult:
         result = IngestResult()
-        if entity_types is not None and "transaction" not in entity_types:
+        allowed_types = set(entity_types or ["transaction"])
+        if not allowed_types.intersection(self.entity_types):
             return result
         sync_at = ensure_utc(since.last_sync_at) if since else None
+        transactions: list[KnowledgeUnit] = []
 
         for path in iter_paths(self.path, {".csv"}):
             try:
@@ -42,9 +44,17 @@ class VenmoTransactionsCsvAdapter(SourceAdapter):
                     continue
                 if sync_at and unit.updated_at <= sync_at:
                     continue
-                result.units.append(unit)
+                transactions.append(unit)
+                if "transaction" in allowed_types:
+                    result.units.append(unit)
 
-        result.units.sort(key=lambda unit: (unit.created_at, unit.source_id))
+        counterparties = self._counterparty_units(transactions) if "counterparty" in allowed_types else []
+        if "counterparty" in allowed_types:
+            result.units.extend(counterparties)
+        if {"transaction", "counterparty"}.issubset(allowed_types):
+            result.edges.extend(self._counterparty_edges(transactions, counterparties))
+        result.units.sort(key=lambda unit: unit.source_id)
+        result.edges.sort(key=lambda edge: edge.id)
         return result
 
     def _unit(self, row: dict[str, Any], source_file: str, index: int) -> KnowledgeUnit | None:
@@ -74,6 +84,7 @@ class VenmoTransactionsCsvAdapter(SourceAdapter):
                 "note": note,
                 "from": from_person,
                 "to": to_person,
+                "counterparty": self._counterparty(from_person, to_person, amount),
                 "amount": amount,
                 "fee": fee,
                 "funding_source": funding_source,
@@ -126,3 +137,77 @@ class VenmoTransactionsCsvAdapter(SourceAdapter):
             f"Fee: {metadata.get('fee')}" if metadata.get("fee") is not None else "",
         ]
         return "\n".join(part for part in parts if part)
+
+    def _counterparty(self, from_person: str, to_person: str, amount: float | None) -> str:
+        if from_person and to_person:
+            return to_person if amount is not None and amount < 0 else from_person
+        return from_person or to_person
+
+    def _counterparty_units(self, transactions: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        labels: dict[str, str] = {}
+        for transaction in transactions:
+            counterparty = str(transaction.metadata.get("counterparty") or "").strip()
+            normalized = self._normalize_counterparty(counterparty)
+            if not normalized:
+                continue
+            grouped.setdefault(normalized, []).append(transaction)
+            labels.setdefault(normalized, counterparty)
+
+        units: list[KnowledgeUnit] = []
+        for normalized, items in sorted(grouped.items()):
+            amounts = [float(item.metadata["amount"]) for item in items if isinstance(item.metadata.get("amount"), int | float)]
+            types = sorted({str(item.metadata.get("type")) for item in items if item.metadata.get("type")})
+            metadata = clean_metadata(
+                {
+                    "counterparty": labels[normalized],
+                    "normalized_counterparty": normalized,
+                    "transaction_count": len(items),
+                    "first_seen": min(item.created_at for item in items).isoformat(),
+                    "last_seen": max(item.created_at for item in items).isoformat(),
+                    "net_amount": sum(amounts) if amounts else None,
+                    "transaction_types": types,
+                    "transaction_source_ids": sorted(item.source_id for item in items),
+                }
+            )
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.VENMO_TRANSACTIONS_CSV,
+                    source_id=self._counterparty_source_id(normalized),
+                    source_entity_type="counterparty",
+                    title=labels[normalized],
+                    content=f"Venmo counterparty: {labels[normalized]}\nTransactions: {len(items)}",
+                    content_type=ContentType.METADATA,
+                    metadata=metadata,
+                    tags=["venmo", "counterparty", labels[normalized]],
+                    created_at=min(item.created_at for item in items),
+                    updated_at=max(item.updated_at for item in items),
+                )
+            )
+        return units
+
+    def _counterparty_edges(self, transactions: list[KnowledgeUnit], counterparties: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        counterparty_ids = {unit.metadata["normalized_counterparty"]: unit.source_id for unit in counterparties}
+        edges = []
+        for transaction in transactions:
+            target = counterparty_ids.get(self._normalize_counterparty(transaction.metadata.get("counterparty")))
+            if target:
+                edges.append(self._edge(transaction.source_id, target, "transaction_counterparty"))
+        return list({edge.id: edge for edge in edges}.values())
+
+    def _edge(self, from_id: str, to_id: str, relation_type: str) -> KnowledgeEdge:
+        digest = digest_source_id("venmo_transactions_csv:edge", from_id, relation_type, to_id).rsplit(":", 1)[-1]
+        return KnowledgeEdge(
+            id=f"venmo_transactions_csv:edge:{digest}",
+            from_unit_id=from_id,
+            to_unit_id=to_id,
+            relation=EdgeRelation.RELATES_TO,
+            source=EdgeSource.SOURCE,
+            metadata={"source_project": SourceProject.VENMO_TRANSACTIONS_CSV.value, "relation_type": relation_type},
+        )
+
+    def _normalize_counterparty(self, value: Any) -> str:
+        return " ".join(str(value or "").strip().casefold().split())
+
+    def _counterparty_source_id(self, normalized: str) -> str:
+        return digest_source_id("venmo_transactions_csv:counterparty", normalized)

@@ -52,6 +52,38 @@ def test_coinbase_transactions_csv_accepts_common_column_aliases(tmp_path):
     assert unit.metadata["fees"] == 0.0
 
 
+def test_coinbase_transactions_csv_emits_asset_aggregates_and_edges(tmp_path):
+    export = tmp_path / "coinbase.csv"
+    export.write_text(
+        "Date,Transaction ID,Type,Asset,Quantity,Total,Total Currency\n"
+        "2026-05-01,C1,Buy,BTC,0.01,610,USD\n"
+        "2026-05-03,C2,Sell,btc,-0.005,-350,USD\n"
+        "2026-05-04,C3,Reward,,1,20,USD\n",
+        encoding="utf-8",
+    )
+
+    result = CoinbaseTransactionsCsvAdapter(path=str(export)).ingest(entity_types=["transaction", "asset"])
+
+    assets = [unit for unit in result.units if unit.source_entity_type == "asset"]
+    assert len(assets) == 1
+    asset = assets[0]
+    assert asset.metadata["asset"] == "BTC"
+    assert asset.metadata["transaction_count"] == 2
+    assert asset.metadata["total_quantity"] == 0.005
+    assert asset.metadata["native_amount_total"] == 260.0
+    assert asset.metadata["native_currencies"] == ["USD"]
+    assert asset.metadata["first_seen"] == "2026-05-01T00:00:00+00:00"
+    assert asset.metadata["last_seen"] == "2026-05-03T00:00:00+00:00"
+    assert asset.metadata["transaction_types"] == ["Buy", "Sell"]
+    assert {(edge.from_unit_id, edge.to_unit_id, edge.metadata["relation_type"]) for edge in result.edges} == {
+        ("coinbase_transactions_csv:C1", asset.source_id, "transaction_asset"),
+        ("coinbase_transactions_csv:C2", asset.source_id, "transaction_asset"),
+    }
+
+    assert [unit.source_entity_type for unit in CoinbaseTransactionsCsvAdapter(path=str(export)).ingest(entity_types=["asset"]).units] == ["asset"]
+    assert CoinbaseTransactionsCsvAdapter(path=str(export)).ingest(entity_types=["transaction"]).edges == []
+
+
 def test_coinbase_transactions_csv_is_registered():
     assert "coinbase_transactions_csv" in list_adapters()
     assert isinstance(get_adapter("coinbase-transactions-csv"), CoinbaseTransactionsCsvAdapter)

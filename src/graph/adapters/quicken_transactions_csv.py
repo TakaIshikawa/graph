@@ -8,8 +8,8 @@ from typing import Any
 
 from graph.adapters._personal_exports import clean_metadata, digest_source_id, ensure_utc, first, iter_paths, parse_datetime, parse_float, read_csv_rows
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, SourceProject
-from graph.types.models import KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
+from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
 
 class QuickenTransactionsCsvAdapter(SourceAdapter):
@@ -19,16 +19,18 @@ class QuickenTransactionsCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["transaction"]
+        return ["transaction", "account"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
 
     def ingest(self, *, since: SyncState | None = None, entity_types: list[str] | None = None) -> IngestResult:
         result = IngestResult()
-        if entity_types is not None and "transaction" not in entity_types:
+        allowed_types = set(entity_types or ["transaction"])
+        if not allowed_types.intersection(self.entity_types):
             return result
         sync_at = ensure_utc(since.last_sync_at) if since else None
+        transactions: list[KnowledgeUnit] = []
 
         for path in iter_paths(self.path, {".csv"}):
             try:
@@ -41,9 +43,17 @@ class QuickenTransactionsCsvAdapter(SourceAdapter):
                     continue
                 if sync_at and unit.updated_at <= sync_at:
                     continue
-                result.units.append(unit)
+                transactions.append(unit)
+                if "transaction" in allowed_types:
+                    result.units.append(unit)
 
-        result.units.sort(key=lambda unit: (unit.created_at, unit.source_id))
+        accounts = self._account_units(transactions) if "account" in allowed_types else []
+        if "account" in allowed_types:
+            result.units.extend(accounts)
+        if {"transaction", "account"}.issubset(allowed_types):
+            result.edges.extend(self._account_edges(transactions, accounts))
+        result.units.sort(key=lambda unit: unit.source_id)
+        result.edges.sort(key=lambda edge: edge.id)
         return result
 
     def _unit(self, row: dict[str, Any], source_file: str, index: int) -> KnowledgeUnit | None:
@@ -122,3 +132,72 @@ class QuickenTransactionsCsvAdapter(SourceAdapter):
             f"Balance: {metadata.get('balance')}" if metadata.get("balance") is not None else "",
         ]
         return "\n".join(part for part in parts if part)
+
+    def _account_units(self, transactions: list[KnowledgeUnit]) -> list[KnowledgeUnit]:
+        grouped: dict[str, list[KnowledgeUnit]] = {}
+        labels: dict[str, str] = {}
+        for transaction in transactions:
+            account = str(transaction.metadata.get("account") or "").strip()
+            normalized = self._normalize_account(account)
+            if not normalized:
+                continue
+            grouped.setdefault(normalized, []).append(transaction)
+            labels.setdefault(normalized, account)
+
+        units: list[KnowledgeUnit] = []
+        for normalized, items in sorted(grouped.items()):
+            amounts = [float(item.metadata["amount"]) for item in items if isinstance(item.metadata.get("amount"), int | float)]
+            categories = sorted({str(item.metadata.get("category")) for item in items if item.metadata.get("category")})
+            metadata = clean_metadata(
+                {
+                    "account": labels[normalized],
+                    "normalized_account": normalized,
+                    "transaction_count": len(items),
+                    "first_seen": min(item.created_at for item in items).isoformat(),
+                    "last_seen": max(item.created_at for item in items).isoformat(),
+                    "net_amount": sum(amounts) if amounts else None,
+                    "categories": categories,
+                    "transaction_source_ids": sorted(item.source_id for item in items),
+                }
+            )
+            units.append(
+                KnowledgeUnit(
+                    source_project=SourceProject.QUICKEN_TRANSACTIONS_CSV,
+                    source_id=self._account_source_id(normalized),
+                    source_entity_type="account",
+                    title=labels[normalized],
+                    content=f"Quicken account: {labels[normalized]}\nTransactions: {len(items)}",
+                    content_type=ContentType.METADATA,
+                    metadata=metadata,
+                    tags=["quicken", "account", labels[normalized]],
+                    created_at=min(item.created_at for item in items),
+                    updated_at=max(item.updated_at for item in items),
+                )
+            )
+        return units
+
+    def _account_edges(self, transactions: list[KnowledgeUnit], accounts: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
+        account_ids = {account.metadata["normalized_account"]: account.source_id for account in accounts}
+        edges = []
+        for transaction in transactions:
+            account_id = account_ids.get(self._normalize_account(transaction.metadata.get("account")))
+            if account_id:
+                edges.append(self._edge(transaction.source_id, account_id, "transaction_account"))
+        return list({edge.id: edge for edge in edges}.values())
+
+    def _edge(self, from_id: str, to_id: str, relation_type: str) -> KnowledgeEdge:
+        digest = digest_source_id("quicken_transactions_csv:edge", from_id, relation_type, to_id).rsplit(":", 1)[-1]
+        return KnowledgeEdge(
+            id=f"quicken_transactions_csv:edge:{digest}",
+            from_unit_id=from_id,
+            to_unit_id=to_id,
+            relation=EdgeRelation.RELATES_TO,
+            source=EdgeSource.SOURCE,
+            metadata={"source_project": SourceProject.QUICKEN_TRANSACTIONS_CSV.value, "relation_type": relation_type},
+        )
+
+    def _normalize_account(self, value: Any) -> str:
+        return " ".join(str(value or "").strip().casefold().split())
+
+    def _account_source_id(self, normalized: str) -> str:
+        return digest_source_id("quicken_transactions_csv:account", normalized)

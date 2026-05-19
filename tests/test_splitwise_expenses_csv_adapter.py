@@ -41,6 +41,38 @@ def test_splitwise_expenses_csv_filters_entity_types(tmp_path):
     assert SplitwiseExpensesCsvAdapter(path=str(export)).ingest(entity_types=["transaction"]).units == []
 
 
+def test_splitwise_expenses_csv_emits_group_aggregates_and_edges(tmp_path):
+    export = tmp_path / "splitwise.csv"
+    export.write_text(
+        "Date,Expense ID,Description,Category,Cost,Currency,Group,Paid By,Owed By,Users\n"
+        "2026-05-01,EXP1,Dinner,Food,72.30,USD,Trip,Ada,\"Grace, Linus\",Ada;Grace;Linus\n"
+        "2026-05-03,EXP2,Taxi,Travel,30.00,USD, trip ,Grace,Ada,Ada;Grace\n"
+        "2026-05-04,EXP3,Coffee,Food,5.00,USD,,Ada,Grace,Ada;Grace\n",
+        encoding="utf-8",
+    )
+
+    result = SplitwiseExpensesCsvAdapter(path=str(export)).ingest(entity_types=["expense", "group"])
+
+    groups = [unit for unit in result.units if unit.source_entity_type == "group"]
+    assert len(groups) == 1
+    group = groups[0]
+    assert group.metadata["group"] == "Trip"
+    assert group.metadata["expense_count"] == 2
+    assert group.metadata["participants"] == ["Ada", "Grace", "Grace, Linus", "Linus"]
+    assert group.metadata["categories"] == ["Food", "Travel"]
+    assert group.metadata["total_cost"] == 102.3
+    assert group.metadata["currencies"] == ["USD"]
+    assert group.metadata["first_seen"] == "2026-05-01T00:00:00+00:00"
+    assert group.metadata["last_seen"] == "2026-05-03T00:00:00+00:00"
+    assert {(edge.from_unit_id, edge.to_unit_id, edge.metadata["relation_type"]) for edge in result.edges} == {
+        ("splitwise_expenses_csv:EXP1", group.source_id, "expense_group"),
+        ("splitwise_expenses_csv:EXP2", group.source_id, "expense_group"),
+    }
+
+    assert [unit.source_entity_type for unit in SplitwiseExpensesCsvAdapter(path=str(export)).ingest(entity_types=["group"]).units] == ["group"]
+    assert SplitwiseExpensesCsvAdapter(path=str(export)).ingest(entity_types=["expense"]).edges == []
+
+
 def test_splitwise_expenses_csv_is_registered():
     assert "splitwise_expenses_csv" in list_adapters()
     assert isinstance(get_adapter("splitwise-expenses-csv"), SplitwiseExpensesCsvAdapter)

@@ -54,6 +54,43 @@ def test_monzo_transactions_csv_tolerates_missing_optional_fields(tmp_path):
     assert "address" not in unit.metadata
 
 
+def test_monzo_transactions_csv_emits_merchant_aggregates_and_edges(tmp_path):
+    export = tmp_path / "monzo.csv"
+    export.write_text(
+        "Transaction ID,Date,Description,Merchant,Category,Amount,Currency\n"
+        "tx_1,2026-05-01,Coffee,Cafe,Expenses,-3.50,GBP\n"
+        "tx_2,2026-05-03,Lunch,  cafe  ,Expenses,-8.25,GBP\n"
+        "tx_3,2026-05-04,Transfer,,Transfers,20.00,GBP\n",
+        encoding="utf-8",
+    )
+
+    result = MonzoTransactionsCsvAdapter(path=str(export)).ingest(entity_types=["transaction", "merchant"])
+
+    merchants = [unit for unit in result.units if unit.source_entity_type == "merchant"]
+    assert len(merchants) == 1
+    merchant = merchants[0]
+    assert merchant.metadata["merchant"] == "Cafe"
+    assert merchant.metadata["normalized_merchant"] == "cafe"
+    assert merchant.metadata["transaction_count"] == 2
+    assert merchant.metadata["first_seen"] == "2026-05-01T00:00:00+00:00"
+    assert merchant.metadata["last_seen"] == "2026-05-03T00:00:00+00:00"
+    assert merchant.metadata["total_amount"] == -11.75
+    assert merchant.metadata["currency"] == "GBP"
+    assert merchant.metadata["transaction_source_ids"] == ["monzo_transactions_csv:tx_1", "monzo_transactions_csv:tx_2"]
+    assert {(edge.from_unit_id, edge.to_unit_id, edge.metadata["relation_type"]) for edge in result.edges} == {
+        ("monzo_transactions_csv:tx_1", merchant.source_id, "transaction_merchant"),
+        ("monzo_transactions_csv:tx_2", merchant.source_id, "transaction_merchant"),
+    }
+
+    transaction_only = MonzoTransactionsCsvAdapter(path=str(export)).ingest(entity_types=["transaction"])
+    merchant_only = MonzoTransactionsCsvAdapter(path=str(export)).ingest(entity_types=["merchant"])
+
+    assert [unit.source_entity_type for unit in transaction_only.units] == ["transaction", "transaction", "transaction"]
+    assert [unit.source_entity_type for unit in merchant_only.units] == ["merchant"]
+    assert transaction_only.edges == []
+    assert merchant_only.edges == []
+
+
 def test_monzo_transactions_csv_is_registered():
     assert "monzo_transactions_csv" in list_adapters()
     assert isinstance(get_adapter("monzo-transactions-csv"), MonzoTransactionsCsvAdapter)
