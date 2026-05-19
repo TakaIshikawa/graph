@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from graph.adapters.base import SourceAdapter
 from graph.adapters.activitywatch_json import ActivityWatchJsonAdapter
+from graph.adapters.acorns_activity_csv import AcornsActivityCsvAdapter
 from graph.adapters.amazon_orders_csv import AmazonOrdersCsvAdapter
 from graph.adapters.audible_library_csv import AudibleLibraryCsvAdapter
 from graph.adapters.asana_tasks_csv import AsanaTasksCsvAdapter
@@ -339,6 +340,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "google_calendar_takeout": GoogleCalendarTakeoutAdapter,
     "google_photos_takeout": GooglePhotosTakeoutAdapter,
     "activitywatch_json": ActivityWatchJsonAdapter,
+    "acorns_activity_csv": AcornsActivityCsvAdapter,
     "audible_library_csv": AudibleLibraryCsvAdapter,
     "fidelity_activity_csv": FidelityActivityCsvAdapter,
     "fitbit_daily_activity_csv": FitbitDailyActivityCsvAdapter,
