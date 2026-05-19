@@ -82,6 +82,7 @@ from graph.export.rss import export_units_to_rss
 from graph.export.schema_inventory import export_unit_schema_inventory
 from graph.export.source_collection_mix_csv import export_source_collection_mix_csv
 from graph.export.source_collection_matrix_csv import export_source_collection_matrix_csv
+from graph.export.source_content_format_csv import export_source_content_format_csv
 from graph.export.source_coverage import export_source_coverage_markdown
 from graph.export.source_entity_activity_markdown import export_source_entity_activity_markdown
 from graph.export.source_entity_type_heatmap_csv import export_source_entity_type_heatmap_csv
@@ -247,6 +248,7 @@ __all__ = [
     "export_units_to_rss",
     "export_source_collection_mix_csv",
     "export_source_collection_matrix_csv",
+    "export_source_content_format_csv",
     "export_source_coverage_markdown",
     "export_source_entity_activity_markdown",
     "export_source_entity_type_heatmap_csv",
