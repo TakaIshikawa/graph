@@ -101,6 +101,7 @@ from graph.adapters.monzo_transactions_csv import MonzoTransactionsCsvAdapter
 from graph.adapters.overcast_starred_episodes_json import OvercastStarredEpisodesJsonAdapter
 from graph.adapters.paypal_activity_csv import PaypalActivityCsvAdapter
 from graph.adapters.revolut_transactions_csv import RevolutTransactionsCsvAdapter
+from graph.adapters.rocket_money_transactions_csv import RocketMoneyTransactionsCsvAdapter
 from graph.adapters.robinhood_activity_csv import RobinhoodActivityCsvAdapter
 from graph.adapters.schwab_transactions_csv import SchwabTransactionsCsvAdapter
 from graph.adapters.wise_activity_csv import WiseActivityCsvAdapter
@@ -373,6 +374,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "monzo_transactions_csv": MonzoTransactionsCsvAdapter,
     "paypal_activity_csv": PaypalActivityCsvAdapter,
     "revolut_transactions_csv": RevolutTransactionsCsvAdapter,
+    "rocket_money_transactions_csv": RocketMoneyTransactionsCsvAdapter,
     "robinhood_activity_csv": RobinhoodActivityCsvAdapter,
     "schwab_transactions_csv": SchwabTransactionsCsvAdapter,
     "wise_activity_csv": WiseActivityCsvAdapter,
