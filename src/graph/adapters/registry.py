@@ -71,6 +71,7 @@ from graph.adapters.kobo_highlights_csv import KoboHighlightsCsvAdapter
 from graph.adapters.logseq import LogseqAdapter
 from graph.adapters.m1_finance_activity_csv import M1FinanceActivityCsvAdapter
 from graph.adapters.google_maps_timeline_json import GoogleMapsTimelineJsonAdapter
+from graph.adapters.google_maps_reviews_json import GoogleMapsReviewsJsonAdapter
 from graph.adapters.google_play_books_notes_csv import GooglePlayBooksNotesCsvAdapter
 from graph.adapters.markdown import MarkdownAdapter
 from graph.adapters.markdown_callouts import MarkdownCalloutsAdapter
@@ -375,6 +376,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "jira_worklogs_csv": JiraWorklogsCsvAdapter,
     "trello_board_json": TrelloBoardJsonAdapter,
     "google_maps_timeline_json": GoogleMapsTimelineJsonAdapter,
+    "google_maps_reviews_json": GoogleMapsReviewsJsonAdapter,
     "google_location_semantic_history_json": GoogleLocationSemanticHistoryJsonAdapter,
     "google_play_books_notes_csv": GooglePlayBooksNotesCsvAdapter,
     "libby_loans_csv": LibbyLoansCsvAdapter,

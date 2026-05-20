@@ -151,6 +151,7 @@ class SourceProject(StrEnum):
     TRELLO_BOARD_JSON = "trello_board_json"
     MIRO_BOARD_JSON = "miro_board_json"
     GOOGLE_MAPS_TIMELINE_JSON = "google_maps_timeline_json"
+    GOOGLE_MAPS_REVIEWS_JSON = "google_maps_reviews_json"
     GOOGLE_LOCATION_SEMANTIC_HISTORY_JSON = "google_location_semantic_history_json"
     LIBBY_LOANS_CSV = "libby_loans_csv"
     BOARDGAMEGEEK_COLLECTION_CSV = "boardgamegeek_collection_csv"
