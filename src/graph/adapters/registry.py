@@ -69,6 +69,7 @@ from graph.adapters.kindle import KindleAdapter
 from graph.adapters.kindle_clippings import KindleClippingsAdapter
 from graph.adapters.kobo_highlights_csv import KoboHighlightsCsvAdapter
 from graph.adapters.logseq import LogseqAdapter
+from graph.adapters.m1_finance_activity_csv import M1FinanceActivityCsvAdapter
 from graph.adapters.google_maps_timeline_json import GoogleMapsTimelineJsonAdapter
 from graph.adapters.google_play_books_notes_csv import GooglePlayBooksNotesCsvAdapter
 from graph.adapters.markdown import MarkdownAdapter
@@ -325,6 +326,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "wakatime": WakaTimeAdapter,
     "roam": RoamAdapter,
     "logseq": LogseqAdapter,
+    "m1_finance_activity_csv": M1FinanceActivityCsvAdapter,
     "sqlite_query_log": SqliteQueryLogAdapter,
     "slack_json": SlackJsonAdapter,
     "sleep_as_android_csv": SleepAsAndroidCsvAdapter,
