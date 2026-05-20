@@ -194,6 +194,7 @@ from graph.adapters.twitter_archive import TwitterArchiveAdapter
 from graph.adapters.us_bank_transactions_csv import UsBankTransactionsCsvAdapter
 from graph.adapters.facebook_archive import FacebookArchiveAdapter
 from graph.adapters.instagram_archive import InstagramArchiveAdapter
+from graph.adapters.interactive_brokers_activity_csv import InteractiveBrokersActivityCsvAdapter
 from graph.adapters.linkedin_archive import LinkedInArchiveAdapter
 from graph.adapters.vcard import VCardAdapter
 from graph.adapters.vanguard_activity_csv import VanguardActivityCsvAdapter
@@ -296,6 +297,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "us_bank_transactions_csv": UsBankTransactionsCsvAdapter,
     "facebook_archive": FacebookArchiveAdapter,
     "instagram_archive": InstagramArchiveAdapter,
+    "interactive_brokers_activity_csv": InteractiveBrokersActivityCsvAdapter,
     "linkedin_archive": LinkedInArchiveAdapter,
     "webvtt": WebVttAdapter,
     "pocket": PocketAdapter,
