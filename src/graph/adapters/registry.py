@@ -96,6 +96,7 @@ from graph.adapters.apple_health_workouts import AppleHealthWorkoutsAdapter
 from graph.adapters.apple_music_library_csv import AppleMusicLibraryCsvAdapter
 from graph.adapters.apple_podcasts_history_csv import ApplePodcastsHistoryCsvAdapter
 from graph.adapters.medium_bookmarks_json import MediumBookmarksJsonAdapter
+from graph.adapters.monarch_money_transactions_csv import MonarchMoneyTransactionsCsvAdapter
 from graph.adapters.monzo_transactions_csv import MonzoTransactionsCsvAdapter
 from graph.adapters.overcast_starred_episodes_json import OvercastStarredEpisodesJsonAdapter
 from graph.adapters.paypal_activity_csv import PaypalActivityCsvAdapter
@@ -368,6 +369,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "google_location_semantic_history_json": GoogleLocationSemanticHistoryJsonAdapter,
     "google_play_books_notes_csv": GooglePlayBooksNotesCsvAdapter,
     "libby_loans_csv": LibbyLoansCsvAdapter,
+    "monarch_money_transactions_csv": MonarchMoneyTransactionsCsvAdapter,
     "monzo_transactions_csv": MonzoTransactionsCsvAdapter,
     "paypal_activity_csv": PaypalActivityCsvAdapter,
     "revolut_transactions_csv": RevolutTransactionsCsvAdapter,
