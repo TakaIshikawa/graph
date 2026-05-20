@@ -4,7 +4,8 @@ import csv
 from datetime import datetime, timezone
 
 from graph.adapters.readwise_reader_documents_csv import ReadwiseReaderDocumentsCsvAdapter
-from graph.types.enums import ContentType
+from graph.adapters.registry import get_adapter, list_adapters
+from graph.types.enums import ContentType, SourceProject
 from graph.types.models import SyncState
 
 
@@ -60,6 +61,15 @@ def test_readwise_reader_documents_csv_ingests_document_metadata(tmp_path):
     assert unit.metadata["source_row"]["Title"] == "Long Article"
     assert unit.created_at == datetime(2026, 5, 1, 10, tzinfo=timezone.utc)
     assert unit.updated_at == datetime(2026, 5, 2, 12, 30, tzinfo=timezone.utc)
+
+
+def test_readwise_reader_documents_csv_is_registered(tmp_path):
+    adapter = get_adapter("readwise_reader_documents_csv", path=str(tmp_path))
+
+    assert SourceProject.READWISE_READER_DOCUMENTS_CSV == "readwise_reader_documents_csv"
+    assert isinstance(adapter, ReadwiseReaderDocumentsCsvAdapter)
+    assert adapter.name == SourceProject.READWISE_READER_DOCUMENTS_CSV
+    assert "readwise_reader_documents_csv" in list_adapters()
 
 
 def test_readwise_reader_documents_csv_uses_stable_fallback_id(tmp_path):

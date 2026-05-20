@@ -4,7 +4,8 @@ import json
 from datetime import datetime, timezone
 
 from graph.adapters.product_hunt_votes_json import ProductHuntVotesJsonAdapter
-from graph.types.enums import ContentType
+from graph.adapters.registry import get_adapter, list_adapters
+from graph.types.enums import ContentType, SourceProject
 from graph.types.models import SyncState
 
 
@@ -60,6 +61,15 @@ def test_product_hunt_votes_json_ingests_vote_metadata(tmp_path):
     assert unit.tags == ["producthunt", "product_vote", "Developer Tools", "Productivity"]
     assert unit.created_at == datetime(2026, 5, 1, tzinfo=timezone.utc)
     assert unit.updated_at == datetime(2026, 5, 2, 3, 4, 5, tzinfo=timezone.utc)
+
+
+def test_product_hunt_votes_json_is_registered(tmp_path):
+    adapter = get_adapter("product_hunt_votes_json", path=str(tmp_path))
+
+    assert SourceProject.PRODUCT_HUNT_VOTES_JSON == "product_hunt_votes_json"
+    assert isinstance(adapter, ProductHuntVotesJsonAdapter)
+    assert adapter.name == SourceProject.PRODUCT_HUNT_VOTES_JSON
+    assert "product_hunt_votes_json" in list_adapters()
 
 
 def test_product_hunt_votes_json_accepts_supported_containers_and_lists(tmp_path):
