@@ -67,29 +67,39 @@ class SplitwiseExpensesCsvAdapter(SourceAdapter):
         cost = parse_float(first(row, "Cost", "Amount", "Total"))
         currency = first(row, "Currency", "Currency Code")
         group = first(row, "Group", "Group Name")
+        created_by = first(row, "Created By", "Creator")
         paid_by = first(row, "Paid By", "Payer")
         owed_by = first(row, "Owed By", "Participants", "Split Between")
+        your_share = parse_float(first(row, "Your Share", "Share"))
+        net_balance = parse_float(first(row, "Net Balance", "Net Amount", "Balance"))
         users = split_values(first(row, "Users", "Members"))
-        comments = first(row, "Comments", "Comment", "Notes")
+        notes = first(row, "Notes", "Comments", "Comment")
+        url = first(row, "URL", "Expense URL", "Link")
         settled = first(row, "Settled", "Is Settled")
-        if not any([expense_id, date_text, description, category, cost is not None, group, paid_by, owed_by, comments]):
+        if not description:
             return None
 
         now = datetime.now(timezone.utc)
         metadata = clean_metadata(
             {
                 "expense_id": expense_id,
+                "date": timestamp.isoformat() if timestamp else date_text,
                 "timestamp": timestamp.isoformat() if timestamp else date_text,
                 "updated_at": updated_at.isoformat() if updated_at else updated_text,
                 "description": description,
                 "category": category,
                 "cost": cost,
+                "amount": cost,
                 "currency": currency,
                 "group": group,
+                "created_by": created_by,
                 "paid_by": paid_by,
                 "owed_by": owed_by,
+                "your_share": your_share,
+                "net_balance": net_balance,
                 "users": users,
-                "comments": comments,
+                "notes": notes,
+                "url": url,
                 "settled": settled,
                 "source_file": source_file,
             }
@@ -119,8 +129,11 @@ class SplitwiseExpensesCsvAdapter(SourceAdapter):
             f"Category: {metadata.get('category')}" if metadata.get("category") else "",
             f"Paid by: {metadata.get('paid_by')}" if metadata.get("paid_by") else "",
             f"Owed by: {metadata.get('owed_by')}" if metadata.get("owed_by") else "",
+            f"Your share: {metadata.get('your_share')}" if metadata.get("your_share") is not None else "",
+            f"Net balance: {metadata.get('net_balance')}" if metadata.get("net_balance") is not None else "",
             f"Users: {', '.join(metadata.get('users', []))}" if metadata.get("users") else "",
-            f"Comments: {metadata.get('comments')}" if metadata.get("comments") else "",
+            f"Notes: {metadata.get('notes')}" if metadata.get("notes") else "",
+            f"URL: {metadata.get('url')}" if metadata.get("url") else "",
         ]
         return "\n".join(part for part in parts if part)
 
