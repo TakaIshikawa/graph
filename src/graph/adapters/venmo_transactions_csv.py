@@ -67,10 +67,12 @@ class VenmoTransactionsCsvAdapter(SourceAdapter):
         from_person = first(row, "From", "From User")
         to_person = first(row, "To", "To User")
         amount = self._amount(first(row, "Amount", "Total"))
+        currency = first(row, "Currency")
         fee = self._amount(first(row, "Fee"))
         funding_source = first(row, "Funding Source", "Funding")
         destination = first(row, "Destination", "Bank/Card", "Bank")
         privacy = first(row, "Privacy", "Audience")
+        url = first(row, "URL", "Transaction URL", "Link")
         if not any([transaction_id, date_text, transaction_type, note, from_person, to_person, amount is not None]):
             return None
 
@@ -86,10 +88,12 @@ class VenmoTransactionsCsvAdapter(SourceAdapter):
                 "to": to_person,
                 "counterparty": self._counterparty(from_person, to_person, amount),
                 "amount": amount,
+                "currency": currency,
                 "fee": fee,
                 "funding_source": funding_source,
                 "destination": destination,
                 "privacy": privacy,
+                "url": url,
                 "source_file": source_file,
             }
         )
@@ -134,7 +138,9 @@ class VenmoTransactionsCsvAdapter(SourceAdapter):
             f"From: {metadata.get('from')}" if metadata.get("from") else "",
             f"To: {metadata.get('to')}" if metadata.get("to") else "",
             f"Amount: {metadata.get('amount')}" if metadata.get("amount") is not None else "",
+            f"Currency: {metadata.get('currency')}" if metadata.get("currency") else "",
             f"Fee: {metadata.get('fee')}" if metadata.get("fee") is not None else "",
+            f"URL: {metadata.get('url')}" if metadata.get("url") else "",
         ]
         return "\n".join(part for part in parts if part)
 

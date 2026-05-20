@@ -31,6 +31,21 @@ def test_venmo_transactions_csv_ingests_transaction_rows(tmp_path):
     assert unit.metadata["privacy"] == "Friends"
 
 
+def test_venmo_transactions_csv_preserves_currency_url_and_source_file(tmp_path):
+    export = tmp_path / "venmo.csv"
+    export.write_text(
+        "Date,Transaction ID,Type,Note,Amount,Currency,URL\n"
+        "2026-05-01,V1,Payment,Lunch,12.50,USD,https://venmo.example/tx/V1\n",
+        encoding="utf-8-sig",
+    )
+
+    unit = VenmoTransactionsCsvAdapter(path=str(export)).ingest().units[0]
+
+    assert unit.metadata["currency"] == "USD"
+    assert unit.metadata["url"] == "https://venmo.example/tx/V1"
+    assert unit.metadata["source_file"] == "venmo.csv"
+
+
 def test_venmo_transactions_csv_uses_digest_fallback_and_negative_amounts(tmp_path):
     export = tmp_path / "venmo.csv"
     export.write_text(
