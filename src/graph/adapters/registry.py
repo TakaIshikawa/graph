@@ -61,6 +61,7 @@ from graph.adapters.instapaper import InstapaperAdapter
 from graph.adapters.ipynb import IpynbAdapter
 from graph.adapters.jats import JatsAdapter
 from graph.adapters.jira_issues_csv import JiraIssuesCsvAdapter
+from graph.adapters.jira_projects_csv import JiraProjectsCsvAdapter
 from graph.adapters.jira_worklogs_csv import JiraWorklogsCsvAdapter
 from graph.adapters.linear_issues_json import LinearIssuesJsonAdapter
 from graph.adapters.jsonl_adapter import JsonlAdapter
@@ -95,6 +96,7 @@ from graph.adapters.evernote_export import EvernoteExportAdapter
 from graph.adapters.bear_export import BearExportAdapter
 from graph.adapters.apple_notes_export import AppleNotesExportAdapter
 from graph.adapters.apple_health_workouts import AppleHealthWorkoutsAdapter
+from graph.adapters.apple_calendar_events_csv import AppleCalendarEventsCsvAdapter
 from graph.adapters.apple_music_library_csv import AppleMusicLibraryCsvAdapter
 from graph.adapters.apple_podcasts_history_csv import ApplePodcastsHistoryCsvAdapter
 from graph.adapters.medium_bookmarks_json import MediumBookmarksJsonAdapter
@@ -176,6 +178,7 @@ from graph.adapters.sota import SOTAAdapter
 from graph.adapters.spotify_streaming_history import SpotifyStreamingHistoryAdapter
 from graph.adapters.spotify_takeout import SpotifyTakeoutAdapter
 from graph.adapters.stackoverflow_bookmarks_json import StackOverflowBookmarksJsonAdapter
+from graph.adapters.stackoverflow_answers_json import StackOverflowAnswersJsonAdapter
 from graph.adapters.strava_activities_json import StravaActivitiesJsonAdapter
 from graph.adapters.storygraph_reading_history_csv import StoryGraphReadingHistoryCsvAdapter
 from graph.adapters.steam_library_csv import SteamLibraryCsvAdapter
@@ -253,6 +256,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "bear_export": BearExportAdapter,
     "apple_notes_export": AppleNotesExportAdapter,
     "apple_health_workouts": AppleHealthWorkoutsAdapter,
+    "apple_calendar_events_csv": AppleCalendarEventsCsvAdapter,
     "apple_music_library_csv": AppleMusicLibraryCsvAdapter,
     "apple_podcasts_history_csv": ApplePodcastsHistoryCsvAdapter,
     "medium_bookmarks_json": MediumBookmarksJsonAdapter,
@@ -373,6 +377,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "gitlab_issues_json": GitlabIssuesJsonAdapter,
     "gitlab_merge_requests_json": GitlabMergeRequestsJsonAdapter,
     "jira_issues_csv": JiraIssuesCsvAdapter,
+    "jira_projects_csv": JiraProjectsCsvAdapter,
     "jira_worklogs_csv": JiraWorklogsCsvAdapter,
     "trello_board_json": TrelloBoardJsonAdapter,
     "google_maps_timeline_json": GoogleMapsTimelineJsonAdapter,
@@ -409,6 +414,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "linear_issues_json": LinearIssuesJsonAdapter,
     "peloton_workouts_csv": PelotonWorkoutsCsvAdapter,
     "podcasts_opml": PodcastsOpmlAdapter,
+    "stackoverflow_answers_json": StackOverflowAnswersJsonAdapter,
     "stackoverflow_bookmarks_json": StackOverflowBookmarksJsonAdapter,
     "youtube_playlists_json": YouTubePlaylistsJsonAdapter,
 }
