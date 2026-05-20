@@ -1,16 +1,25 @@
-"""Adapter for Amazon retail order CSV exports."""
+"""Adapter for Amazon order history CSV exports."""
 
 from __future__ import annotations
 
 import csv
-from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
-from graph.adapters._personal_exports import clean_metadata, digest_source_id, ensure_utc, first, iter_paths, parse_datetime, parse_int, parse_money, read_csv_rows
+from graph.adapters._personal_exports import (
+    clean_metadata,
+    digest_source_id,
+    ensure_utc,
+    first,
+    iter_paths,
+    parse_datetime,
+    parse_int,
+    parse_money,
+    read_csv_rows,
+)
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
-from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
+from graph.types.enums import ContentType, SourceProject
+from graph.types.models import KnowledgeUnit, SyncState
 
 
 class AmazonOrdersCsvAdapter(SourceAdapter):
@@ -20,7 +29,7 @@ class AmazonOrdersCsvAdapter(SourceAdapter):
 
     @property
     def entity_types(self) -> list[str]:
-        return ["order", "shipment", "item", "return", "seller"]
+        return ["order_item"]
 
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -28,331 +37,101 @@ class AmazonOrdersCsvAdapter(SourceAdapter):
     def ingest(self, *, since: SyncState | None = None, entity_types: list[str] | None = None) -> IngestResult:
         result = IngestResult()
         allowed = set(entity_types or self.entity_types)
-        if not allowed.intersection(self.entity_types):
+        if "order_item" not in allowed:
             return result
         sync_at = ensure_utc(since.last_sync_at) if since else None
-        groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        files: dict[str, set[str]] = defaultdict(set)
+
         for path in iter_paths(self.path, {".csv"}):
             try:
                 rows = read_csv_rows(path)
             except (OSError, UnicodeDecodeError, csv.Error):
                 continue
-            for row in rows:
-                order_id = first(row, "Order ID", "order_id", "Order Id")
-                if not order_id:
-                    order_id = digest_source_id("order", first(row, "Order Date"), first(row, "Title"))
-                groups[order_id].append(row)
-                files[order_id].add(path.name)
-        seller_items: list[KnowledgeUnit] = []
-        seller_orders: dict[str, KnowledgeUnit] = {}
-        for order_id, rows in groups.items():
-            order, shipments, items, returns = self._units(order_id, rows, sorted(files[order_id]))
-            if sync_at and order.updated_at <= sync_at:
-                continue
-            seller_items.extend(items)
-            seller_orders[order.source_id] = order
-            if "order" in allowed:
-                result.units.append(order)
-            if "shipment" in allowed:
-                result.units.extend(shipments)
-            if "item" in allowed:
-                result.units.extend(items)
-            if "return" in allowed:
-                result.units.extend(returns)
-            if {"order", "shipment"}.issubset(allowed):
-                for shipment in shipments:
-                    result.edges.append(self._edge(order.source_id, shipment.source_id))
-            if {"shipment", "item"}.issubset(allowed):
-                shipment_ids = {shipment.source_id for shipment in shipments}
-                for item in items:
-                    shipment_id = item.metadata.get("shipment_source_id")
-                    if shipment_id in shipment_ids:
-                        result.edges.append(self._edge(str(shipment_id), item.source_id))
-            if {"order", "item"}.issubset(allowed):
-                for item in items:
-                    if not item.metadata.get("shipment_source_id"):
-                        result.edges.append(self._edge(order.source_id, item.source_id))
-            if "return" in allowed:
-                if "order" in allowed:
-                    for return_unit in returns:
-                        result.edges.append(self._edge(order.source_id, return_unit.source_id))
-                if "item" in allowed:
-                    item_ids = {item.source_id for item in items}
-                    for return_unit in returns:
-                        item_source_id = return_unit.metadata.get("item_source_id")
-                        if item_source_id in item_ids:
-                            result.edges.append(self._edge(str(item_source_id), return_unit.source_id))
-        sellers = self._seller_units(seller_items, seller_orders) if "seller" in allowed else []
-        if "seller" in allowed:
-            result.units.extend(sellers)
-        if {"seller", "item"}.issubset(allowed):
-            result.edges.extend(self._seller_item_edges(sellers))
+            for index, row in enumerate(rows):
+                unit = self._unit(row, path.name, index)
+                if unit is None:
+                    continue
+                if sync_at and unit.updated_at <= sync_at:
+                    continue
+                result.units.append(unit)
+
         result.units.sort(key=lambda unit: unit.source_id)
-        result.edges.sort(key=lambda edge: edge.id)
         return result
 
-    def _units(
-        self, order_id: str, rows: list[dict[str, Any]], source_files: list[str]
-    ) -> tuple[KnowledgeUnit, list[KnowledgeUnit], list[KnowledgeUnit], list[KnowledgeUnit]]:
-        first_row = rows[0]
-        order_date = parse_datetime(first(first_row, "Order Date", "order_date"))
-        shipment_date = parse_datetime(first(first_row, "Shipment Date", "Ship Date"))
-        categories: Counter[str] = Counter()
-        total = 0.0
-        items: list[KnowledgeUnit] = []
-        returns: list[KnowledgeUnit] = []
-        shipment_rows: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        shipment_item_counts: Counter[str] = Counter()
-        now = datetime.now(timezone.utc)
-        for index, row in enumerate(rows):
-            category = first(row, "Category")
-            if category:
-                categories[category] += 1
-            owed = parse_money(first(row, "Total Owed", "Item Total", "Total"))
-            if owed is not None:
-                total += owed
-            item_metadata = {
-                "order_id": order_id,
-                "order_date": order_date.isoformat() if order_date else first(row, "Order Date"),
-                "shipment_date": shipment_date.isoformat() if shipment_date else first(row, "Shipment Date"),
-                "title": first(row, "Title", "Product Name"),
-                "category": category,
-                "asin": first(row, "ASIN", "ASIN/ISBN", "ISBN"),
-                "quantity": parse_int(first(row, "Quantity")),
-                "purchase_price_per_unit": parse_money(first(row, "Purchase Price Per Unit", "Unit Price")),
-                "total_owed": owed,
-                "seller": first(row, "Seller"),
-                "condition": first(row, "Condition"),
-                "product_url": first(row, "Product URL", "URL"),
-                "position": index + 1,
-            }
-            shipment_key = self._shipment_key(order_id, row)
-            if shipment_key:
-                shipment_source_id = digest_source_id("amazon_orders_csv:shipment", order_id, shipment_key)
-                item_metadata["shipment_source_id"] = shipment_source_id
-                item_metadata["shipment_id"] = first(row, "Shipment ID", "Shipment Id", "shipment_id")
-                item_metadata["tracking_number"] = first(row, "Tracking Number", "Tracking")
-                item_metadata["carrier"] = first(row, "Carrier", "Shipping Carrier")
-                shipment_rows[shipment_key].append(row)
-                shipment_item_counts[shipment_key] += 1
-            title = item_metadata["title"] or f"Amazon item {index + 1}"
-            item_source_id = digest_source_id("amazon_orders_csv:item", order_id, item_metadata.get("asin"), title, index)
-            item_unit = KnowledgeUnit(
-                    source_project=SourceProject.AMAZON_ORDERS_CSV,
-                    source_id=item_source_id,
-                    source_entity_type="item",
-                    title=str(title),
-                    content=str(title),
-                    content_type=ContentType.METADATA,
-                    metadata=clean_metadata(item_metadata),
-                    tags=list(dict.fromkeys(tag for tag in ["amazon", "item", category] if tag)),
-                    created_at=order_date or now,
-                    updated_at=shipment_date or order_date or now,
-                )
-            items.append(item_unit)
-            return_unit = self._return_unit(order_id, row, index, item_unit, order_date, now, source_files)
-            if return_unit is not None:
-                returns.append(return_unit)
-        shipments = [
-            self._shipment_unit(order_id, key, grouped_rows, shipment_item_counts[key], source_files, order_date, now)
-            for key, grouped_rows in sorted(shipment_rows.items())
-        ]
-        title = f"Amazon order {order_id}"
-        order = KnowledgeUnit(
-            source_project=SourceProject.AMAZON_ORDERS_CSV,
-            source_id=f"amazon_orders_csv:{order_id}",
-            source_entity_type="order",
-            title=title,
-            content=f"{title}\nItems: {len(items)}",
-            content_type=ContentType.METADATA,
-            metadata=clean_metadata({"order_id": order_id, "order_date": order_date.isoformat() if order_date else first(first_row, "Order Date"), "shipment_date": shipment_date.isoformat() if shipment_date else first(first_row, "Shipment Date"), "item_count": len(items), "total_owed": round(total, 2) if total else None, "categories": dict(sorted(categories.items())), "source_files": source_files}),
-            tags=list(dict.fromkeys(tag for tag in ["amazon", "order", *categories.keys()] if tag)),
-            created_at=order_date or now,
-            updated_at=shipment_date or order_date or now,
-        )
-        return order, shipments, items, returns
-
-    def _return_unit(
-        self,
-        order_id: str,
-        row: dict[str, Any],
-        index: int,
-        item_unit: KnowledgeUnit,
-        order_date: datetime | None,
-        now: datetime,
-        source_files: list[str],
-    ) -> KnowledgeUnit | None:
-        return_date_text = first(row, "Return Date", "Returned Date", "Refund Date")
-        reason = first(row, "Return Reason", "Refund Reason")
-        status = first(row, "Return Status", "Refund Status")
-        refund_amount = parse_money(first(row, "Refund Amount", "Refunded Amount", "Refund"))
-        if not any([return_date_text, reason, status, refund_amount is not None]):
+    def _unit(self, row: dict[str, Any], source_file: str, index: int) -> KnowledgeUnit | None:
+        order_id = first(row, "Order ID", "Order Id", "order_id")
+        order_date_text = first(row, "Order Date", "Purchase Date", "Date")
+        shipment_date_text = first(row, "Shipment Date", "Ship Date", "Shipped Date")
+        title = first(row, "Title", "Product Name", "Item Name", "Product")
+        asin_isbn = first(row, "ASIN/ISBN", "ASIN", "ISBN")
+        amount = parse_money(first(row, "Item Total", "Total Owed", "Total", "Amount"))
+        if not title:
             return None
-        return_date = parse_datetime(return_date_text)
-        title = f"Amazon return for {item_unit.title}"
+
+        order_date = parse_datetime(order_date_text)
+        shipment_date = parse_datetime(shipment_date_text)
+        currency = first(row, "Currency", "Currency Code")
         metadata = clean_metadata(
             {
                 "order_id": order_id,
-                "order_date": order_date.isoformat() if order_date else first(row, "Order Date"),
-                "item_source_id": item_unit.source_id,
-                "item_title": item_unit.title,
-                "asin": item_unit.metadata.get("asin"),
-                "position": index + 1,
-                "return_date": return_date.isoformat() if return_date else return_date_text,
-                "return_reason": reason,
-                "return_status": status,
-                "refund_amount": refund_amount,
-                "source_files": source_files,
+                "order_date": order_date.isoformat() if order_date else order_date_text,
+                "product_title": title,
+                "asin_isbn": asin_isbn,
+                "category": first(row, "Category"),
+                "seller": first(row, "Seller", "Seller Name"),
+                "quantity": parse_int(first(row, "Quantity", "Qty")),
+                "amount": amount,
+                "currency": currency,
+                "shipment_date": shipment_date.isoformat() if shipment_date else shipment_date_text,
+                "tracking_number": first(row, "Tracking Number", "Tracking"),
+                "ship_to": first(row, "Ship To", "Recipient", "Shipping Address Name"),
+                "url": first(row, "URL", "Product URL", "Order URL", "Link"),
+                "order_status": first(row, "Order Status", "Status"),
+                "source_file": source_file,
             }
         )
+        timestamp = shipment_date or order_date
+        now = datetime.now(timezone.utc)
         return KnowledgeUnit(
             source_project=SourceProject.AMAZON_ORDERS_CSV,
-            source_id=digest_source_id("amazon_orders_csv:return", order_id, item_unit.source_id, return_date_text, reason, status, refund_amount),
-            source_entity_type="return",
+            source_id=self._source_id(order_id, asin_isbn, title, order_date_text, index),
+            source_entity_type="order_item",
             title=title,
-            content=title,
+            content=self._content(metadata),
             content_type=ContentType.METADATA,
             metadata=metadata,
-            tags=list(dict.fromkeys(tag for tag in ["amazon", "return", status] if tag)),
-            created_at=return_date or order_date or now,
-            updated_at=return_date or order_date or now,
-        )
-
-    def _shipment_key(self, order_id: str, row: dict[str, Any]) -> str:
-        explicit = first(row, "Shipment ID", "Shipment Id", "shipment_id")
-        if explicit:
-            return explicit
-        tracking = first(row, "Tracking Number", "Tracking")
-        carrier = first(row, "Carrier", "Shipping Carrier")
-        shipment_date = first(row, "Shipment Date", "Ship Date")
-        if tracking:
-            return f"tracking:{tracking}"
-        if carrier or shipment_date:
-            return "|".join([order_id, shipment_date, carrier])
-        return ""
-
-    def _shipment_unit(
-        self,
-        order_id: str,
-        shipment_key: str,
-        rows: list[dict[str, Any]],
-        item_count: int,
-        source_files: list[str],
-        order_date: datetime | None,
-        now: datetime,
-    ) -> KnowledgeUnit:
-        first_row = rows[0]
-        shipment_date = parse_datetime(first(first_row, "Shipment Date", "Ship Date"))
-        shipment_id = first(first_row, "Shipment ID", "Shipment Id", "shipment_id") or shipment_key
-        carrier = first(first_row, "Carrier", "Shipping Carrier")
-        tracking_number = first(first_row, "Tracking Number", "Tracking")
-        title = f"Amazon shipment {shipment_id}"
-        return KnowledgeUnit(
-            source_project=SourceProject.AMAZON_ORDERS_CSV,
-            source_id=digest_source_id("amazon_orders_csv:shipment", order_id, shipment_key),
-            source_entity_type="shipment",
-            title=title,
-            content=f"{title}\nItems: {item_count}",
-            content_type=ContentType.METADATA,
-            metadata=clean_metadata(
-                {
-                    "order_id": order_id,
-                    "shipment_id": shipment_id,
-                    "shipment_date": shipment_date.isoformat() if shipment_date else first(first_row, "Shipment Date", "Ship Date"),
-                    "carrier": carrier,
-                    "tracking_number": tracking_number,
-                    "item_count": item_count,
-                    "source_files": source_files,
-                }
+            tags=list(
+                dict.fromkeys(
+                    tag
+                    for tag in [
+                        "amazon",
+                        "order_item",
+                        metadata.get("category"),
+                        metadata.get("seller"),
+                        metadata.get("order_status"),
+                    ]
+                    if tag
+                )
             ),
-            tags=list(dict.fromkeys(tag for tag in ["amazon", "shipment", carrier] if tag)),
-            created_at=shipment_date or order_date or now,
-            updated_at=shipment_date or order_date or now,
+            created_at=order_date or timestamp or now,
+            updated_at=timestamp or now,
         )
 
-    def _edge(self, order_id: str, item_id: str) -> KnowledgeEdge:
-        return KnowledgeEdge(id=digest_source_id("amazon_orders_csv:contains", order_id, item_id), from_unit_id=order_id, to_unit_id=item_id, relation=EdgeRelation.CONTAINS, source=EdgeSource.SOURCE, metadata={"source_project": SourceProject.AMAZON_ORDERS_CSV.value})
+    def _source_id(self, order_id: str, asin_isbn: str, title: str, order_date: str, index: int) -> str:
+        if order_id:
+            return digest_source_id("amazon_orders_csv", order_id, asin_isbn, title, index)
+        return digest_source_id("amazon_orders_csv", order_date, asin_isbn, title, index)
 
-    def _seller_units(self, items: list[KnowledgeUnit], orders: dict[str, KnowledgeUnit]) -> list[KnowledgeUnit]:
-        grouped: dict[str, list[KnowledgeUnit]] = defaultdict(list)
-        names: dict[str, str] = {}
-        for item in items:
-            seller = str(item.metadata.get("seller") or "").strip()
-            if not seller:
-                continue
-            normalized = self._normalize_seller(seller)
-            grouped[normalized].append(item)
-            names.setdefault(normalized, seller)
-
-        units: list[KnowledgeUnit] = []
-        for normalized, seller_items in sorted(grouped.items()):
-            order_source_ids = sorted(
-                {
-                    f"amazon_orders_csv:{item.metadata.get('order_id')}"
-                    for item in seller_items
-                    if item.metadata.get("order_id")
-                }
-            )
-            item_source_ids = sorted(item.source_id for item in seller_items)
-            categories = dict(
-                sorted(
-                    Counter(
-                        str(item.metadata.get("category") or "")
-                        for item in seller_items
-                        if item.metadata.get("category")
-                    ).items()
-                )
-            )
-            owed_values = [item.metadata.get("total_owed") for item in seller_items if isinstance(item.metadata.get("total_owed"), int | float)]
-            order_units = [orders[source_id] for source_id in order_source_ids if source_id in orders]
-            seller = names[normalized]
-            total_owed = round(sum(float(value) for value in owed_values), 2) if owed_values else None
-            units.append(
-                KnowledgeUnit(
-                    source_project=SourceProject.AMAZON_ORDERS_CSV,
-                    source_id=digest_source_id("amazon_orders_csv:seller", normalized),
-                    source_entity_type="seller",
-                    title=seller,
-                    content=f"Amazon seller: {seller}\nItems: {len(seller_items)}",
-                    content_type=ContentType.METADATA,
-                    metadata=clean_metadata(
-                        {
-                            "seller": seller,
-                            "normalized_seller": normalized,
-                            "item_count": len(seller_items),
-                            "order_count": len(order_source_ids),
-                            "total_owed": total_owed,
-                            "categories": categories,
-                            "order_source_ids": order_source_ids,
-                            "item_source_ids": item_source_ids,
-                        }
-                    ),
-                    tags=list(dict.fromkeys(tag for tag in ["amazon", "seller", seller, *categories.keys()] if tag)),
-                    created_at=min((item.created_at for item in seller_items), default=datetime.now(timezone.utc)),
-                    updated_at=max((unit.updated_at for unit in [*seller_items, *order_units]), default=datetime.now(timezone.utc)),
-                )
-            )
-        return units
-
-    def _seller_item_edges(self, sellers: list[KnowledgeUnit]) -> list[KnowledgeEdge]:
-        edges: list[KnowledgeEdge] = []
-        for seller in sellers:
-            for item_source_id in seller.metadata.get("item_source_ids") or []:
-                edges.append(
-                    KnowledgeEdge(
-                        id=digest_source_id("amazon_orders_csv:seller_contains_item", seller.source_id, str(item_source_id)),
-                        from_unit_id=seller.source_id,
-                        to_unit_id=str(item_source_id),
-                        relation=EdgeRelation.CONTAINS,
-                        source=EdgeSource.SOURCE,
-                        metadata={
-                            "source_project": SourceProject.AMAZON_ORDERS_CSV.value,
-                            "relation_type": "seller_contains_item",
-                        },
-                    )
-                )
-        return edges
-
-    def _normalize_seller(self, seller: str) -> str:
-        return " ".join(seller.split()).casefold()
+    def _content(self, metadata: dict[str, Any]) -> str:
+        parts = [
+            metadata.get("product_title", ""),
+            f"Order ID: {metadata.get('order_id')}" if metadata.get("order_id") else "",
+            f"Seller: {metadata.get('seller')}" if metadata.get("seller") else "",
+            f"Category: {metadata.get('category')}" if metadata.get("category") else "",
+            f"Amount: {metadata.get('amount')} {metadata.get('currency', '')}".strip()
+            if metadata.get("amount") is not None
+            else "",
+            f"Status: {metadata.get('order_status')}" if metadata.get("order_status") else "",
+            f"Tracking: {metadata.get('tracking_number')}" if metadata.get("tracking_number") else "",
+            f"URL: {metadata.get('url')}" if metadata.get("url") else "",
+        ]
+        return "\n".join(part for part in parts if part)
