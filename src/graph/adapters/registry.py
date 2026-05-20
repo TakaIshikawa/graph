@@ -104,6 +104,7 @@ from graph.adapters.revolut_transactions_csv import RevolutTransactionsCsvAdapte
 from graph.adapters.rocket_money_transactions_csv import RocketMoneyTransactionsCsvAdapter
 from graph.adapters.robinhood_activity_csv import RobinhoodActivityCsvAdapter
 from graph.adapters.schwab_transactions_csv import SchwabTransactionsCsvAdapter
+from graph.adapters.simplifi_transactions_csv import SimplifiTransactionsCsvAdapter
 from graph.adapters.wise_activity_csv import WiseActivityCsvAdapter
 from graph.adapters.splitwise_expenses_csv import SplitwiseExpensesCsvAdapter
 from graph.adapters.venmo_transactions_csv import VenmoTransactionsCsvAdapter
@@ -377,6 +378,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "rocket_money_transactions_csv": RocketMoneyTransactionsCsvAdapter,
     "robinhood_activity_csv": RobinhoodActivityCsvAdapter,
     "schwab_transactions_csv": SchwabTransactionsCsvAdapter,
+    "simplifi_transactions_csv": SimplifiTransactionsCsvAdapter,
     "wise_activity_csv": WiseActivityCsvAdapter,
     "splitwise_expenses_csv": SplitwiseExpensesCsvAdapter,
     "venmo_transactions_csv": VenmoTransactionsCsvAdapter,
