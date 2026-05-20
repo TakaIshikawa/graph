@@ -99,6 +99,8 @@ class SourceProject(StrEnum):
     OVERCAST_STARRED_EPISODES_JSON = "overcast_starred_episodes_json"
     MEDIUM_BOOKMARKS_JSON = "medium_bookmarks_json"
     PRODUCT_HUNT_BOOKMARKS_JSON = "product_hunt_bookmarks_json"
+    PRODUCT_HUNT_VOTES_JSON = "product_hunt_votes_json"
+    READWISE_READER_DOCUMENTS_CSV = "readwise_reader_documents_csv"
     GOOGLE_SEARCH_HISTORY_JSON = "google_search_history_json"
     OPENLIBRARY_READING_LOG_CSV = "openlibrary_reading_log_csv"
     FOURSQUARE_CHECKINS_CSV = "foursquare_checkins_csv"

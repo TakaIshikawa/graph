@@ -8,14 +8,14 @@ from typing import Any
 
 from graph.adapters._personal_exports import clean_metadata, digest_source_id, ensure_utc, first, iter_paths, parse_datetime, parse_float, read_csv_rows, split_values
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType
+from graph.types.enums import ContentType, SourceProject
 from graph.types.models import KnowledgeUnit, SyncState
 
 
 class ReadwiseReaderDocumentsCsvAdapter(SourceAdapter):
     @property
     def name(self) -> str:
-        return "readwise_reader_documents_csv"
+        return SourceProject.READWISE_READER_DOCUMENTS_CSV
 
     @property
     def entity_types(self) -> list[str]:
@@ -93,7 +93,7 @@ class ReadwiseReaderDocumentsCsvAdapter(SourceAdapter):
             }
         )
         return KnowledgeUnit(
-            source_project="readwise_reader_documents_csv",
+            source_project=SourceProject.READWISE_READER_DOCUMENTS_CSV,
             source_id=self._source_id(document_id, url, title, index),
             source_entity_type="reader_document",
             title=title or url or "Readwise Reader document",

@@ -9,14 +9,14 @@ from typing import Any
 
 from graph.adapters._personal_exports import clean_metadata, digest_source_id, ensure_utc, iter_paths, parse_datetime, parse_int
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType
+from graph.types.enums import ContentType, SourceProject
 from graph.types.models import KnowledgeUnit, SyncState
 
 
 class ProductHuntVotesJsonAdapter(SourceAdapter):
     @property
     def name(self) -> str:
-        return "product_hunt_votes_json"
+        return SourceProject.PRODUCT_HUNT_VOTES_JSON
 
     @property
     def entity_types(self) -> list[str]:
@@ -100,7 +100,7 @@ class ProductHuntVotesJsonAdapter(SourceAdapter):
             }
         )
         return KnowledgeUnit(
-            source_project="product_hunt_votes_json",
+            source_project=SourceProject.PRODUCT_HUNT_VOTES_JSON,
             source_id=self._source_id(vote_id, product_id, url, name, voted_at or voted_text, source_file, index),
             source_entity_type="product_vote",
             title=name or url or f"Product Hunt vote {vote_id or product_id}",

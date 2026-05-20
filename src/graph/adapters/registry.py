@@ -119,6 +119,7 @@ from graph.adapters.quicken_transactions_csv import QuickenTransactionsCsvAdapte
 from graph.adapters.ynab_transactions_csv import YnabTransactionsCsvAdapter
 from graph.adapters.pocket_casts_listening_history_csv import PocketCastsListeningHistoryCsvAdapter
 from graph.adapters.product_hunt_bookmarks_json import ProductHuntBookmarksJsonAdapter
+from graph.adapters.product_hunt_votes_json import ProductHuntVotesJsonAdapter
 from graph.adapters.apple_reminders_csv import AppleRemindersCsvAdapter
 from graph.adapters.day_one_json import DayOneJsonAdapter
 from graph.adapters.firefox_places import FirefoxPlacesAdapter
@@ -162,6 +163,7 @@ from graph.adapters.raindrop_csv import RaindropCsvAdapter
 from graph.adapters.raindrop_json import RaindropJsonAdapter
 from graph.adapters.readwise import ReadwiseAdapter
 from graph.adapters.readwise_csv import ReadwiseCsvAdapter
+from graph.adapters.readwise_reader_documents_csv import ReadwiseReaderDocumentsCsvAdapter
 from graph.adapters.goodreads import GoodreadsAdapter
 from graph.adapters.letterboxd import LetterboxdAdapter
 from graph.adapters.rescuetime import RescueTimeAdapter
@@ -263,6 +265,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "overcast_starred_episodes_json": OvercastStarredEpisodesJsonAdapter,
     "pocket_casts_listening_history_csv": PocketCastsListeningHistoryCsvAdapter,
     "product_hunt_bookmarks_json": ProductHuntBookmarksJsonAdapter,
+    "product_hunt_votes_json": ProductHuntVotesJsonAdapter,
     "apple_reminders_csv": AppleRemindersCsvAdapter,
     "day_one_json": DayOneJsonAdapter,
     "things_csv": ThingsCsvAdapter,
@@ -324,6 +327,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "hypothesis": HypothesisAdapter,
     "readwise": ReadwiseAdapter,
     "readwise_csv": ReadwiseCsvAdapter,
+    "readwise_reader_documents_csv": ReadwiseReaderDocumentsCsvAdapter,
     "matter": MatterAdapter,
     "goodreads": GoodreadsAdapter,
     "goodreads_library": GoodreadsLibraryAdapter,
