@@ -93,7 +93,7 @@ class AsanaTasksCsvAdapter(SourceAdapter):
         task_id = first(row, "Task ID", "ID", "Task Id", "gid")
         name = first(row, "Name", "Task Name", "Title")
         notes = first(row, "Notes", "Description")
-        if not task_id and not name and not notes:
+        if not name:
             return None
         created = parse_datetime(first(row, "Created At", "Created"))
         modified = parse_datetime(first(row, "Modified At", "Last Modified", "Updated At")) or created

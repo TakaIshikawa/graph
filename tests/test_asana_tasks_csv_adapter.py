@@ -109,6 +109,31 @@ def test_asana_tasks_csv_empty_files_and_registry_lookup(tmp_path):
     assert get_adapter("asana_tasks_csv", path=str(export)).name == "asana_tasks_csv"
 
 
+def test_asana_tasks_csv_directory_bom_invalid_rows_and_stable_ids(tmp_path):
+    first_export = tmp_path / "first.csv"
+    second_export = tmp_path / "second.csv"
+    first_export.write_text(
+        "\ufeffTask ID,Name,Assignee,Project,Modified At,URL\n"
+        "A1,Plan import,Ada,Graph,2026-05-01T00:00:00Z,https://app.asana.com/0/1/A1\n"
+        "BROKEN,,Ada,Graph,2026-05-02T00:00:00Z,\n",
+        encoding="utf-8",
+    )
+    second_export.write_text(
+        "Task ID,Name,Project,Modified At\n"
+        "A2,Write tests,Graph,2026-05-03T00:00:00Z\n",
+        encoding="utf-8",
+    )
+
+    first_result = AsanaTasksCsvAdapter(path=str(tmp_path)).ingest(entity_types=["task"])
+    second_result = AsanaTasksCsvAdapter(path=str(tmp_path)).ingest(entity_types=["task"])
+
+    tasks = [unit for unit in first_result.units if unit.source_entity_type == "task"]
+    assert [unit.source_id for unit in tasks] == ["asana_tasks_csv:A1", "asana_tasks_csv:A2"]
+    assert [unit.source_id for unit in second_result.units] == [unit.source_id for unit in first_result.units]
+    assert tasks[0].metadata["source_file"] == "first.csv"
+    assert tasks[0].metadata["url"] == "https://app.asana.com/0/1/A1"
+
+
 def test_asana_tasks_csv_ingests_assignee_project_and_workspace_entities(tmp_path):
     export = tmp_path / "asana.csv"
     _write_csv(
