@@ -101,22 +101,30 @@ class AsanaTasksCsvAdapter(SourceAdapter):
         completed = parse_datetime(first(row, "Completed At", "Completion Date"))
         projects = split_values(first(row, "Projects", "Project"))
         tags = split_values(first(row, "Tags", "Tag"))
+        section = first(row, "Section", "Column", "Section/Column")
+        completed_text = first(row, "Completed", "Complete")
         status = self._normalize_status("completed" if completed else first(row, "Status", "Completed"))
+        is_completed = status == "completed"
+        task_url = first(row, "Task URL", "URL", "Link")
         metadata = {
             "task_id": task_id,
             "name": name,
             "notes": notes,
             "assignee": first(row, "Assignee", "Assigned To"),
             "workspace": first(row, "Workspace", "Workspace Name"),
+            "project": projects[0] if projects else "",
             "projects": projects,
+            "section": section,
             "tags": tags,
             "status": status,
+            "completed": is_completed if completed or completed_text else None,
             "created_at": created.isoformat() if created else first(row, "Created At", "Created"),
             "modified_at": modified.isoformat() if modified else first(row, "Modified At", "Updated At"),
             "due_date": due.isoformat() if due else first(row, "Due Date", "Due On", "Due At"),
             "completed_at": completed.isoformat() if completed else first(row, "Completed At", "Completion Date"),
             "parent_task_id": first(row, "Parent Task ID", "Parent ID", "Parent"),
-            "task_url": first(row, "Task URL", "URL", "Link"),
+            "task_url": task_url,
+            "url": task_url,
             "source_file": source_file,
         }
         now = datetime.now(timezone.utc)

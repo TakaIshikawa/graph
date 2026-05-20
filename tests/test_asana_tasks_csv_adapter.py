@@ -30,11 +30,13 @@ def test_asana_tasks_csv_ingests_tasks_metadata_tags_and_parent_edges(tmp_path):
                 "Notes": "Parent task",
                 "Assignee": "Ada",
                 "Projects": "Imports, Graph",
+                "Section": "Backlog",
                 "Tags": "backend;csv",
                 "Created At": "2026-05-01T10:00:00Z",
                 "Modified At": "2026-05-02T10:00:00Z",
                 "Due Date": "2026-05-05",
                 "Completed At": "",
+                "Completed": "false",
                 "Parent Task ID": "",
                 "Task URL": "https://app.asana.com/0/1/1",
             },
@@ -44,11 +46,13 @@ def test_asana_tasks_csv_ingests_tasks_metadata_tags_and_parent_edges(tmp_path):
                 "Notes": "Child task",
                 "Assignee": "Grace",
                 "Projects": "Imports",
+                "Section": "",
                 "Tags": "csv",
                 "Created At": "2026-05-01T11:00:00Z",
                 "Modified At": "2026-05-03T10:00:00Z",
                 "Due Date": "",
                 "Completed At": "2026-05-04T10:00:00Z",
+                "Completed": "",
                 "Parent Task ID": "1",
                 "Task URL": "",
             },
@@ -64,11 +68,16 @@ def test_asana_tasks_csv_ingests_tasks_metadata_tags_and_parent_edges(tmp_path):
     assert parent.source_project == SourceProject.ASANA_TASKS_CSV
     assert parent.source_entity_type == "task"
     assert parent.metadata["assignee"] == "Ada"
+    assert parent.metadata["project"] == "Imports"
     assert parent.metadata["projects"] == ["Imports", "Graph"]
+    assert parent.metadata["section"] == "Backlog"
     assert parent.metadata["tags"] == ["backend", "csv"]
+    assert parent.metadata["completed"] is False
     assert parent.metadata["due_date"] == "2026-05-05T00:00:00+00:00"
+    assert parent.metadata["url"] == "https://app.asana.com/0/1/1"
     assert parent.updated_at == datetime(2026, 5, 2, 10, tzinfo=timezone.utc)
     assert child.metadata["status"] == "completed"
+    assert child.metadata["completed"] is True
     assert {"asana", "task", "Imports", "csv"}.issubset(set(child.tags))
     parent_edge = next(edge for edge in result.edges if edge.relation == EdgeRelation.CONTAINS)
     assert parent_edge.from_unit_id == parent.source_id
