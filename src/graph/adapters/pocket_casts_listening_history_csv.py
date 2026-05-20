@@ -36,8 +36,8 @@ class PocketCastsListeningHistoryCsvAdapter(SourceAdapter):
                 rows = self._read_rows(path)
             except (OSError, UnicodeDecodeError, csv.Error):
                 continue
-            for row in rows:
-                unit = self._unit_from_row(row, path.name)
+            for index, row in enumerate(rows, start=1):
+                unit = self._unit_from_row(row, path.name, index)
                 if unit is None:
                     continue
                 if sync_at and unit.updated_at <= sync_at:
@@ -63,16 +63,23 @@ class PocketCastsListeningHistoryCsvAdapter(SourceAdapter):
                 return []
             return [{str(key).strip(): value for key, value in row.items() if key is not None} for row in reader]
 
-    def _unit_from_row(self, row: dict[str, Any], source_file: str) -> KnowledgeUnit | None:
+    def _unit_from_row(self, row: dict[str, Any], source_file: str, source_row: int) -> KnowledgeUnit | None:
         podcast = self._first(row, "podcast", "podcast_title", "Podcast", "Podcast Title", "Show", "Show Title")
         episode = self._first(row, "episode", "episode_title", "Episode", "Episode Title", "Title")
         url = self._first(row, "url", "episode_url", "URL", "Episode URL", "Link")
-        played_at = self._parse_datetime(self._first(row, "played_at", "Played At", "Last Played", "Date Played"))
-        completed_at = self._parse_datetime(self._first(row, "completed_at", "Completed At", "Finished At"))
-        duration = self._parse_duration(self._first(row, "duration", "Duration", "Duration Seconds", "Length"))
-        progress = self._parse_number_or_duration(self._first(row, "progress", "Progress", "Position", "Played Seconds"))
+        podcast_url = self._first(row, "podcast_url", "Podcast URL", "Podcast Link", "Feed URL", "RSS URL")
+        author = self._first(row, "author", "Author", "Podcast Author", "Creator")
+        publisher = self._first(row, "publisher", "Publisher", "Network")
+        played_text = self._first(row, "played_at", "listened_at", "Listened At", "Played At", "Last Played", "Date Played", "Date")
+        completed_text = self._first(row, "completed_at", "Completed At", "Finished At")
+        played_at = self._parse_datetime(played_text)
+        completed_at = self._parse_datetime(completed_text)
+        duration = self._parse_duration(self._first(row, "duration", "Duration", "Duration Seconds", "Length", "Episode Duration"))
+        progress = self._parse_number_or_duration(
+            self._first(row, "progress", "Progress", "Position", "Played Seconds", "Played Duration", "Listened Duration")
+        )
         archived = self._parse_bool(self._first(row, "archived", "Archived", "Is Archived"))
-        favorite = self._parse_bool(self._first(row, "favorite", "favourite", "Favorite", "Starred"))
+        favorite = self._parse_bool(self._first(row, "favorite", "favourite", "Favorite", "Starred", "starred", "is_favorite"))
         if not podcast and not episode and not url:
             return None
         updated_at = completed_at or played_at
@@ -80,13 +87,17 @@ class PocketCastsListeningHistoryCsvAdapter(SourceAdapter):
             "podcast": podcast,
             "episode": episode,
             "url": url,
+            "podcast_url": podcast_url,
+            "author": author,
+            "publisher": publisher,
             "duration": duration,
             "progress": progress,
-            "played_at": played_at.isoformat() if played_at else self._first(row, "played_at", "Played At", "Last Played", "Date Played"),
-            "completed_at": completed_at.isoformat() if completed_at else self._first(row, "completed_at", "Completed At", "Finished At"),
+            "played_at": played_at.isoformat() if played_at else played_text,
+            "completed_at": completed_at.isoformat() if completed_at else completed_text,
             "archived": archived,
             "favorite": favorite,
             "source_file": source_file,
+            "source_row": source_row,
             "row": dict(row),
         }
         now = datetime.now(timezone.utc)
@@ -105,7 +116,17 @@ class PocketCastsListeningHistoryCsvAdapter(SourceAdapter):
 
     def _content(self, podcast: str, episode: str, metadata: dict[str, Any]) -> str:
         parts = [episode or podcast]
-        for key, label in (("podcast", "Podcast"), ("duration", "Duration"), ("progress", "Progress"), ("played_at", "Played"), ("completed_at", "Completed"), ("url", "URL")):
+        for key, label in (
+            ("podcast", "Podcast"),
+            ("author", "Author"),
+            ("publisher", "Publisher"),
+            ("duration", "Duration"),
+            ("progress", "Progress"),
+            ("played_at", "Played"),
+            ("completed_at", "Completed"),
+            ("url", "URL"),
+            ("podcast_url", "Podcast URL"),
+        ):
             if metadata.get(key) not in ("", None):
                 parts.append(f"{label}: {metadata[key]}")
         return "\n".join(str(part) for part in parts if part)
