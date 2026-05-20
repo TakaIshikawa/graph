@@ -169,6 +169,7 @@ from graph.adapters.safari_bookmarks import SafariBookmarksAdapter
 from graph.adapters.safari_history import SafariHistoryAdapter
 from graph.adapters.slack_json import SlackJsonAdapter
 from graph.adapters.sleep_as_android_csv import SleepAsAndroidCsvAdapter
+from graph.adapters.sofi_activity_csv import SofiActivityCsvAdapter
 from graph.adapters.sota import SOTAAdapter
 from graph.adapters.spotify_streaming_history import SpotifyStreamingHistoryAdapter
 from graph.adapters.spotify_takeout import SpotifyTakeoutAdapter
@@ -327,6 +328,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "sqlite_query_log": SqliteQueryLogAdapter,
     "slack_json": SlackJsonAdapter,
     "sleep_as_android_csv": SleepAsAndroidCsvAdapter,
+    "sofi_activity_csv": SofiActivityCsvAdapter,
     "vanguard_activity_csv": VanguardActivityCsvAdapter,
     "vcard": VCardAdapter,
     "yaml_frontmatter": YamlFrontmatterAdapter,
