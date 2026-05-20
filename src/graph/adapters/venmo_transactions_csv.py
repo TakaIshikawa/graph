@@ -66,6 +66,7 @@ class VenmoTransactionsCsvAdapter(SourceAdapter):
         note = first(row, "Note", "Description", "Memo")
         from_person = first(row, "From", "From User")
         to_person = first(row, "To", "To User")
+        counterparty = first(row, "Counterparty", "Other Party")
         amount = self._amount(first(row, "Amount", "Total"))
         currency = first(row, "Currency")
         fee = self._amount(first(row, "Fee"))
@@ -73,7 +74,7 @@ class VenmoTransactionsCsvAdapter(SourceAdapter):
         destination = first(row, "Destination", "Bank/Card", "Bank")
         privacy = first(row, "Privacy", "Audience")
         url = first(row, "URL", "Transaction URL", "Link")
-        if not any([transaction_id, date_text, transaction_type, note, from_person, to_person, amount is not None]):
+        if amount is None or not any([transaction_id, date_text, transaction_type, note, from_person, to_person, counterparty]):
             return None
 
         now = datetime.now(timezone.utc)
@@ -86,7 +87,7 @@ class VenmoTransactionsCsvAdapter(SourceAdapter):
                 "note": note,
                 "from": from_person,
                 "to": to_person,
-                "counterparty": self._counterparty(from_person, to_person, amount),
+                "counterparty": counterparty or self._counterparty(from_person, to_person, amount),
                 "amount": amount,
                 "currency": currency,
                 "fee": fee,

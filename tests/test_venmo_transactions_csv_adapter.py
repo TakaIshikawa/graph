@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from graph.adapters.registry import get_adapter, list_adapters
 from graph.adapters.venmo_transactions_csv import VenmoTransactionsCsvAdapter
 from graph.types.enums import SourceProject
+from graph.types.models import SyncState
 
 
 def test_venmo_transactions_csv_ingests_transaction_rows(tmp_path):
@@ -28,6 +31,8 @@ def test_venmo_transactions_csv_ingests_transaction_rows(tmp_path):
     assert unit.metadata["amount"] == 12.5
     assert unit.metadata["fee"] == 0.25
     assert unit.metadata["funding_source"] == "Bank"
+    assert unit.metadata["destination"] == "Venmo balance"
+    assert unit.metadata["counterparty"] == "Ada"
     assert unit.metadata["privacy"] == "Friends"
 
 
@@ -62,6 +67,39 @@ def test_venmo_transactions_csv_uses_digest_fallback_and_negative_amounts(tmp_pa
     assert unit.source_id != "venmo_transactions_csv:"
     assert unit.metadata["amount"] == -500.0
     assert "fee" not in unit.metadata
+
+
+def test_venmo_transactions_csv_directory_bom_invalid_rows_stable_ids_counterparty_and_since(tmp_path):
+    first_export = tmp_path / "first.csv"
+    second_export = tmp_path / "second.csv"
+    first_export.write_text(
+        "\ufeffDate,ID,Type,Status,Counterparty,Note,Amount,Currency,URL\n"
+        "2026-05-01,V1,Payment,Complete,Grace,Lunch,$12.50,USD,https://venmo.example/tx/V1\n"
+        "2026-05-02,V2,Payment,Complete,Linus,Coffee,,USD,\n",
+        encoding="utf-8",
+    )
+    second_export.write_text(
+        "Datetime,ID,Type,Status,From,To,Description,Amount,Currency\n"
+        "2026-05-03T08:00:00Z,V3,Charge,Complete,Grace,Ada,Rent,($500.00),USD\n",
+        encoding="utf-8",
+    )
+    since = SyncState(
+        source_project="venmo_transactions_csv",
+        source_entity_type="transaction",
+        last_sync_at=datetime(2026, 5, 2, tzinfo=timezone.utc),
+    )
+
+    all_result = VenmoTransactionsCsvAdapter(path=str(tmp_path)).ingest(entity_types=["transaction"])
+    second_result = VenmoTransactionsCsvAdapter(path=str(tmp_path)).ingest(entity_types=["transaction"])
+    since_result = VenmoTransactionsCsvAdapter(path=str(tmp_path)).ingest(since=since, entity_types=["transaction"])
+
+    assert sorted(unit.metadata["transaction_id"] for unit in all_result.units) == ["V1", "V3"]
+    assert [unit.source_id for unit in second_result.units] == [unit.source_id for unit in all_result.units]
+    first = next(unit for unit in all_result.units if unit.metadata["transaction_id"] == "V1")
+    assert first.metadata["counterparty"] == "Grace"
+    assert first.metadata["source_file"] == "first.csv"
+    assert first.metadata["url"] == "https://venmo.example/tx/V1"
+    assert [unit.metadata["transaction_id"] for unit in since_result.units] == ["V3"]
 
 
 def test_venmo_transactions_csv_emits_counterparty_aggregates_and_edges(tmp_path):
