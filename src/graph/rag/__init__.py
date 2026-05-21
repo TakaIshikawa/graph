@@ -51,6 +51,7 @@ from graph.rag.source_diversity_audit import audit_source_diversity
 from graph.rag.source_reliability import score_source_reliability
 from graph.rag.source_timeline import build_source_timeline
 from graph.rag.query_focus_terms import extract_query_focus_terms
+from graph.rag.query_entity_focus import extract_query_entity_focus
 from graph.rag.query_drift import analyze_query_drift
 from graph.rag.query_expansion import suggest_query_expansion_terms
 from graph.rag.evidence_tension_map import map_evidence_tensions
@@ -92,6 +93,7 @@ __all__ = [
     "detect_citation_gaps",
     "extract_keywords",
     "extract_query_focus_terms",
+    "extract_query_entity_focus",
     "estimate_reading_time",
     "estimate_answer_citation_density",
     "extract_evidence_quote_spans",
