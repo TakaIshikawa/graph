@@ -5,16 +5,21 @@ from graph.rag.contradictions import detect_contradiction_cues
 from graph.rag.context_gaps import detect_context_gaps
 from graph.rag.coverage import build_result_coverage_checklist
 from graph.rag.citation_coverage import analyze_citation_coverage
+from graph.rag.citation_diversity import analyze_citation_diversity
 from graph.rag.citation_gap_detector import detect_citation_gaps
 from graph.rag.citation_trails import build_citation_trails
 from graph.rag.claim_support_matrix import build_claim_support_matrix
+from graph.rag.context_window_packing import plan_context_window_packing
 from graph.rag.date_coverage import analyze_result_date_coverage
 from graph.rag.query_decomposition import decompose_query_for_retrieval
 from graph.rag.diversity import rerank_for_source_diversity
+from graph.rag.answer_hedging import audit_answer_hedging
 from graph.rag.evidence_pack import build_evidence_pack
 from graph.rag.evidence_packets import build_evidence_packets
 from graph.rag.evidence_budget import allocate_evidence_budget
 from graph.rag.evidence_density import score_evidence_density
+from graph.rag.evidence_quote_spans import extract_evidence_quote_spans
+from graph.rag.evidence_specificity import score_evidence_specificity
 from graph.rag.keywords import extract_keywords
 from graph.rag.query_intent import classify_query_intent
 from graph.rag.query_source_strategy import plan_query_source_strategy
@@ -28,6 +33,7 @@ from graph.rag.reading_order import plan_reading_order
 from graph.rag.reading_queue import build_reading_queue
 from graph.rag.reading_time import estimate_reading_time
 from graph.rag.result_clusters import cluster_results_by_overlap
+from graph.rag.result_actionability import classify_result_actionability
 from graph.rag.result_explanations import explain_rag_results
 from graph.rag.result_provenance_completeness import analyze_result_provenance_completeness
 from graph.rag.source_agreement import score_source_agreement
@@ -57,14 +63,17 @@ __all__ = [
     "build_tag_cooccurrence_matrix",
     "build_tag_hierarchy",
     "analyze_citation_coverage",
+    "analyze_citation_diversity",
     "analyze_query_drift",
     "analyze_result_date_coverage",
     "analyze_result_provenance_completeness",
     "analyze_result_tag_coverage",
     "analyze_source_evidence_coverage",
     "audit_source_diversity",
+    "audit_answer_hedging",
     "allocate_evidence_budget",
     "allocate_context_token_budget",
+    "classify_result_actionability",
     "decompose_query_for_retrieval",
     "build_answer_outline",
     "build_evidence_pack",
@@ -85,12 +94,14 @@ __all__ = [
     "extract_query_focus_terms",
     "estimate_reading_time",
     "estimate_answer_citation_density",
+    "extract_evidence_quote_spans",
     "explain_rag_results",
     "format_result_citations",
     "cluster_results_by_overlap",
     "highlight_result_snippets",
     "map_evidence_tensions",
     "plan_reading_order",
+    "plan_context_window_packing",
     "plan_query_source_strategy",
     "plan_tag_reading_path",
     "rank_duplicate_candidates",
@@ -99,6 +110,7 @@ __all__ = [
     "score_source_agreement",
     "score_source_credibility",
     "score_evidence_density",
+    "score_evidence_specificity",
     "score_evidence_quote_quality",
     "score_query_term_coverage",
     "score_source_reliability",
