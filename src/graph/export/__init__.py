@@ -109,7 +109,9 @@ from graph.export.source_language_distribution_csv import export_source_language
 from graph.export.source_metadata_density_csv import export_source_metadata_density_csv
 from graph.export.source_metadata_outliers_markdown import export_source_metadata_outliers_markdown
 from graph.export.source_quality_markdown import export_source_quality_markdown
+from graph.export.source_link_rot_risk_csv import export_source_link_rot_risk_csv
 from graph.export.source_record_volume_csv import export_source_record_volume_csv
+from graph.export.source_recency_decay_csv import export_source_recency_decay_csv
 from graph.export.source_tag_entropy_csv import export_source_tag_entropy_csv
 from graph.export.source_tag_vocabulary_csv import export_source_tag_vocabulary_csv
 from graph.export.source_duplicate_url_csv import export_source_duplicate_url_csv
@@ -122,6 +124,7 @@ from graph.export.source_type_coverage_csv import export_source_type_coverage_cs
 from graph.export.slack_participation_csv import export_units_to_slack_participation_csv
 from graph.export.sqlite_snapshot import export_graph_sqlite
 from graph.export.tag_activity_markdown import export_tag_activity_markdown
+from graph.export.tag_alias_candidates_csv import export_tag_alias_candidates_csv
 from graph.export.tag_cooccurrence_csv import export_tag_cooccurrence_csv
 from graph.export.tag_cooccurrence_markdown import export_tag_cooccurrence_markdown
 from graph.export.tag_confidence_csv import export_tag_confidence_csv
@@ -138,6 +141,8 @@ from graph.export.unit_csv import export_units_to_csv
 from graph.export.unit_date_coverage_markdown import export_unit_date_coverage_markdown
 from graph.export.unit_datetime_precision_csv import export_unit_datetime_precision_csv
 from graph.export.unit_location_coverage_csv import export_unit_location_coverage_csv
+from graph.export.unit_geospatial_cluster_csv import export_unit_geospatial_cluster_csv
+from graph.export.unit_attachment_gap_csv import export_unit_attachment_gap_csv
 from graph.export.unit_attachment_inventory_csv import export_unit_attachment_inventory_csv
 from graph.export.unit_amount_outliers_csv import export_unit_amount_outliers_csv
 from graph.export.unit_amount_summary_csv import export_unit_amount_summary_csv
@@ -146,6 +151,7 @@ from graph.export.unit_backlink_density_csv import export_unit_backlink_density_
 from graph.export.unit_transaction_cashflow_csv import export_unit_transaction_cashflow_csv
 from graph.export.unit_calendar_event_inventory_csv import export_unit_calendar_event_inventory_csv
 from graph.export.unit_citation_inventory_csv import export_unit_citation_inventory_csv
+from graph.export.unit_citation_readiness_csv import export_unit_citation_readiness_csv
 from graph.export.unit_content_language_hint_csv import export_unit_content_language_hint_csv
 from graph.export.unit_content_length_csv import export_unit_content_length_csv
 from graph.export.unit_content_length_summary_csv import export_unit_content_length_summary_csv
@@ -160,6 +166,7 @@ from graph.export.unit_merchant_summary_csv import export_unit_merchant_summary_
 from graph.export.unit_markdown_table import export_units_to_markdown_table
 from graph.export.unit_metadata_schema_csv import export_unit_metadata_schema_csv
 from graph.export.unit_metadata_conflicts_csv import export_unit_metadata_conflicts_csv
+from graph.export.unit_metadata_entropy_csv import export_unit_metadata_entropy_csv
 from graph.export.unit_metadata_freshness_csv import export_unit_metadata_freshness_csv
 from graph.export.unit_metadata_value_frequency_csv import export_unit_metadata_value_frequency_csv
 from graph.export.unit_provenance_completeness_csv import export_unit_provenance_completeness_csv
@@ -308,7 +315,9 @@ __all__ = [
     "export_source_metadata_density_csv",
     "export_source_metadata_outliers_markdown",
     "export_source_quality_markdown",
+    "export_source_link_rot_risk_csv",
     "export_source_record_volume_csv",
+    "export_source_recency_decay_csv",
     "export_source_duplicate_url_csv",
     "export_source_tag_entropy_csv",
     "export_source_tag_vocabulary_csv",
@@ -324,6 +333,7 @@ __all__ = [
     "render_search_html_report",
     "render_graph_overview_html",
     "export_tag_activity_markdown",
+    "export_tag_alias_candidates_csv",
     "export_tag_cooccurrence_csv",
     "export_tag_cooccurrence_markdown",
     "export_tag_confidence_csv",
@@ -335,6 +345,7 @@ __all__ = [
     "export_tag_timeline_csv",
     "export_task_board_markdown",
     "export_unit_backlinks_markdown",
+    "export_unit_attachment_gap_csv",
     "export_unit_attachment_inventory_csv",
     "export_unit_amount_outliers_csv",
     "export_unit_amount_summary_csv",
@@ -343,6 +354,7 @@ __all__ = [
     "export_unit_transaction_cashflow_csv",
     "export_unit_calendar_event_inventory_csv",
     "export_unit_citation_inventory_csv",
+    "export_unit_citation_readiness_csv",
     "export_unit_content_language_hint_csv",
     "export_unit_content_length_csv",
     "export_unit_content_length_summary_csv",
@@ -351,6 +363,7 @@ __all__ = [
     "export_unit_date_range_csv",
     "export_unit_datetime_precision_csv",
     "export_unit_location_coverage_csv",
+    "export_unit_geospatial_cluster_csv",
     "export_unit_duplicate_title_csv",
     "export_unit_evidence_markdown",
     "export_unit_external_link_domain_matrix_csv",
@@ -358,6 +371,7 @@ __all__ = [
     "export_unit_link_inventory_csv",
     "export_unit_merchant_summary_csv",
     "export_unit_metadata_conflicts_csv",
+    "export_unit_metadata_entropy_csv",
     "export_unit_metadata_freshness_csv",
     "export_unit_metadata_schema_csv",
     "export_unit_metadata_value_frequency_csv",
