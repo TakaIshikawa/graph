@@ -73,6 +73,7 @@ from graph.adapters.logseq import LogseqAdapter
 from graph.adapters.m1_finance_activity_csv import M1FinanceActivityCsvAdapter
 from graph.adapters.google_maps_timeline_json import GoogleMapsTimelineJsonAdapter
 from graph.adapters.google_maps_reviews_json import GoogleMapsReviewsJsonAdapter
+from graph.adapters.google_pay_transactions_csv import GooglePayTransactionsCsvAdapter
 from graph.adapters.google_play_books_notes_csv import GooglePlayBooksNotesCsvAdapter
 from graph.adapters.markdown import MarkdownAdapter
 from graph.adapters.markdown_callouts import MarkdownCalloutsAdapter
@@ -103,15 +104,21 @@ from graph.adapters.medium_bookmarks_json import MediumBookmarksJsonAdapter
 from graph.adapters.monarch_money_transactions_csv import MonarchMoneyTransactionsCsvAdapter
 from graph.adapters.monzo_transactions_csv import MonzoTransactionsCsvAdapter
 from graph.adapters.overcast_starred_episodes_json import OvercastStarredEpisodesJsonAdapter
+from graph.adapters.patreon_memberships_csv import PatreonMembershipsCsvAdapter
 from graph.adapters.paypal_activity_csv import PaypalActivityCsvAdapter
 from graph.adapters.personal_capital_transactions_csv import PersonalCapitalTransactionsCsvAdapter
 from graph.adapters.revolut_transactions_csv import RevolutTransactionsCsvAdapter
 from graph.adapters.rocket_money_transactions_csv import RocketMoneyTransactionsCsvAdapter
+from graph.adapters.robinhood_account_activity_csv import RobinhoodAccountActivityCsvAdapter
 from graph.adapters.robinhood_activity_csv import RobinhoodActivityCsvAdapter
+from graph.adapters.runkeeper_activities_csv import RunkeeperActivitiesCsvAdapter
+from graph.adapters.schwab_brokerage_transactions_csv import SchwabBrokerageTransactionsCsvAdapter
 from graph.adapters.schwab_transactions_csv import SchwabTransactionsCsvAdapter
+from graph.adapters.shopify_orders_csv import ShopifyOrdersCsvAdapter
 from graph.adapters.simplifi_transactions_csv import SimplifiTransactionsCsvAdapter
 from graph.adapters.wise_activity_csv import WiseActivityCsvAdapter
 from graph.adapters.splitwise_expenses_csv import SplitwiseExpensesCsvAdapter
+from graph.adapters.square_sales_csv import SquareSalesCsvAdapter
 from graph.adapters.venmo_transactions_csv import VenmoTransactionsCsvAdapter
 from graph.adapters.coinbase_transactions_csv import CoinbaseTransactionsCsvAdapter
 from graph.adapters.stripe_balance_transactions_csv import StripeBalanceTransactionsCsvAdapter
@@ -167,6 +174,7 @@ from graph.adapters.readwise_reader_documents_csv import ReadwiseReaderDocuments
 from graph.adapters.goodreads import GoodreadsAdapter
 from graph.adapters.letterboxd import LetterboxdAdapter
 from graph.adapters.rescuetime import RescueTimeAdapter
+from graph.adapters.rescuetime_daily_csv import RescueTimeDailyCsvAdapter
 from graph.adapters.toggl import TogglAdapter
 from graph.adapters.wakatime import WakaTimeAdapter
 from graph.adapters.roam import RoamAdapter
@@ -184,6 +192,7 @@ from graph.adapters.stackoverflow_answers_json import StackOverflowAnswersJsonAd
 from graph.adapters.strava_activities_json import StravaActivitiesJsonAdapter
 from graph.adapters.storygraph_reading_history_csv import StoryGraphReadingHistoryCsvAdapter
 from graph.adapters.steam_library_csv import SteamLibraryCsvAdapter
+from graph.adapters.tiller_transactions_csv import TillerTransactionsCsvAdapter
 from graph.adapters.trello_board_json import TrelloBoardJsonAdapter
 from graph.adapters.trakt_watch_history_csv import TraktWatchHistoryCsvAdapter
 from graph.adapters.tastytrade_activity_csv import TastytradeActivityCsvAdapter
@@ -205,6 +214,7 @@ from graph.adapters.linkedin_archive import LinkedInArchiveAdapter
 from graph.adapters.vcard import VCardAdapter
 from graph.adapters.vanguard_activity_csv import VanguardActivityCsvAdapter
 from graph.adapters.wallabag import WallabagAdapter
+from graph.adapters.webull_brokerage_transactions_csv import WebullBrokerageTransactionsCsvAdapter
 from graph.adapters.webvtt import WebVttAdapter
 from graph.adapters.yaml_adapter import YamlAdapter
 from graph.adapters.yaml_frontmatter import YamlFrontmatterAdapter
@@ -387,19 +397,26 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "google_maps_timeline_json": GoogleMapsTimelineJsonAdapter,
     "google_maps_reviews_json": GoogleMapsReviewsJsonAdapter,
     "google_location_semantic_history_json": GoogleLocationSemanticHistoryJsonAdapter,
+    "google_pay_transactions_csv": GooglePayTransactionsCsvAdapter,
     "google_play_books_notes_csv": GooglePlayBooksNotesCsvAdapter,
     "libby_loans_csv": LibbyLoansCsvAdapter,
     "monarch_money_transactions_csv": MonarchMoneyTransactionsCsvAdapter,
     "monzo_transactions_csv": MonzoTransactionsCsvAdapter,
     "paypal_activity_csv": PaypalActivityCsvAdapter,
+    "patreon_memberships_csv": PatreonMembershipsCsvAdapter,
     "personal_capital_transactions_csv": PersonalCapitalTransactionsCsvAdapter,
     "revolut_transactions_csv": RevolutTransactionsCsvAdapter,
     "rocket_money_transactions_csv": RocketMoneyTransactionsCsvAdapter,
+    "robinhood_account_activity_csv": RobinhoodAccountActivityCsvAdapter,
     "robinhood_activity_csv": RobinhoodActivityCsvAdapter,
+    "runkeeper_activities_csv": RunkeeperActivitiesCsvAdapter,
+    "schwab_brokerage_transactions_csv": SchwabBrokerageTransactionsCsvAdapter,
     "schwab_transactions_csv": SchwabTransactionsCsvAdapter,
+    "shopify_orders_csv": ShopifyOrdersCsvAdapter,
     "simplifi_transactions_csv": SimplifiTransactionsCsvAdapter,
     "wise_activity_csv": WiseActivityCsvAdapter,
     "splitwise_expenses_csv": SplitwiseExpensesCsvAdapter,
+    "square_sales_csv": SquareSalesCsvAdapter,
     "venmo_transactions_csv": VenmoTransactionsCsvAdapter,
     "coinbase_transactions_csv": CoinbaseTransactionsCsvAdapter,
     "stripe_balance_transactions_csv": StripeBalanceTransactionsCsvAdapter,
@@ -412,9 +429,12 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "archivebox_index_json": ArchiveBoxIndexJsonAdapter,
     "asana_tasks_csv": AsanaTasksCsvAdapter,
     "strava_activities_json": StravaActivitiesJsonAdapter,
+    "rescuetime_daily_csv": RescueTimeDailyCsvAdapter,
     "garmin_activities_csv": GarminActivitiesCsvAdapter,
     "instacart_orders_csv": InstacartOrdersCsvAdapter,
     "amazon_orders_csv": AmazonOrdersCsvAdapter,
+    "tiller_transactions_csv": TillerTransactionsCsvAdapter,
+    "webull_brokerage_transactions_csv": WebullBrokerageTransactionsCsvAdapter,
     "linear_issues_json": LinearIssuesJsonAdapter,
     "peloton_workouts_csv": PelotonWorkoutsCsvAdapter,
     "podcasts_opml": PodcastsOpmlAdapter,
