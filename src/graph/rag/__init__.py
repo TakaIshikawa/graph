@@ -36,6 +36,7 @@ from graph.rag.reading_time import estimate_reading_time
 from graph.rag.result_clusters import cluster_results_by_overlap
 from graph.rag.result_actionability import classify_result_actionability
 from graph.rag.result_explanations import explain_rag_results
+from graph.rag.result_evidence_method_mix import analyze_result_evidence_method_mix
 from graph.rag.result_provenance_completeness import analyze_result_provenance_completeness
 from graph.rag.source_agreement import score_source_agreement
 from graph.rag.source_attribution import summarize_source_attribution
@@ -68,6 +69,7 @@ __all__ = [
     "analyze_citation_diversity",
     "analyze_query_drift",
     "analyze_result_date_coverage",
+    "analyze_result_evidence_method_mix",
     "analyze_result_provenance_completeness",
     "analyze_result_tag_coverage",
     "analyze_source_evidence_coverage",
