@@ -8,6 +8,7 @@ from graph.rag.citation_coverage import analyze_citation_coverage
 from graph.rag.citation_diversity import analyze_citation_diversity
 from graph.rag.citation_gap_detector import detect_citation_gaps
 from graph.rag.citation_trails import build_citation_trails
+from graph.rag.answer_citation_anchor import audit_answer_citation_anchors
 from graph.rag.claim_support_matrix import build_claim_support_matrix
 from graph.rag.context_window_packing import plan_context_window_packing
 from graph.rag.date_coverage import analyze_result_date_coverage
@@ -71,6 +72,7 @@ __all__ = [
     "analyze_result_tag_coverage",
     "analyze_source_evidence_coverage",
     "audit_source_diversity",
+    "audit_answer_citation_anchors",
     "audit_answer_hedging",
     "allocate_evidence_budget",
     "allocate_context_token_budget",
