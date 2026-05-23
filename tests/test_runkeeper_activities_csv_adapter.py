@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from graph.adapters.registry import get_adapter
 from graph.adapters.runkeeper_activities_csv import RunkeeperActivitiesCsvAdapter
 from graph.types.enums import EdgeRelation
 from graph.types.models import SyncState
@@ -118,3 +119,7 @@ def test_runkeeper_activities_csv_handles_empty_missing_and_malformed_files(tmp_
     assert RunkeeperActivitiesCsvAdapter(path=str(empty)).ingest().units == []
     assert RunkeeperActivitiesCsvAdapter(path=str(tmp_path / "missing.csv")).ingest().units == []
     assert RunkeeperActivitiesCsvAdapter(path=str(malformed)).ingest().units == []
+
+
+def test_runkeeper_activities_csv_is_registered():
+    assert isinstance(get_adapter("runkeeper_activities_csv"), RunkeeperActivitiesCsvAdapter)
