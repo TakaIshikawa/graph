@@ -19,6 +19,7 @@ from graph.rag.evidence_pack import build_evidence_pack
 from graph.rag.evidence_packets import build_evidence_packets
 from graph.rag.evidence_budget import allocate_evidence_budget
 from graph.rag.evidence_density import score_evidence_density
+from graph.rag.evidence_peer_review_status import classify_evidence_peer_review_status
 from graph.rag.evidence_quote_spans import extract_evidence_quote_spans
 from graph.rag.evidence_specificity import score_evidence_specificity
 from graph.rag.keywords import extract_keywords
@@ -92,6 +93,7 @@ __all__ = [
     "build_citation_target_plan",
     "build_claim_support_matrix",
     "classify_query_intent",
+    "classify_evidence_peer_review_status",
     "detect_contradiction_cues",
     "detect_context_gaps",
     "detect_citation_gaps",
