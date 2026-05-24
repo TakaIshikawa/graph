@@ -41,7 +41,6 @@ from graph.export.edge_type_matrix_csv import export_edge_type_matrix_csv
 from graph.export.edge_weight_outliers_csv import export_edge_weight_outliers_csv
 from graph.export.edge_weight_distribution_csv import export_edge_weight_distribution_csv
 from graph.export.edge_confidence_decay_csv import export_edge_confidence_decay_csv
-from graph.export.edge_cycle_participation_csv import export_edge_cycle_participation_csv
 from graph.export.external_domain_summary_markdown import export_external_domain_summary_markdown
 from graph.export.flashcards_markdown import export_units_to_flashcards_markdown
 from graph.export.geojson import export_units_to_geojson
@@ -76,6 +75,7 @@ from graph.export.orphan_units import export_orphan_units_markdown
 from graph.export.relation_bridge_candidates_csv import export_relation_bridge_candidates_csv
 from graph.export.relation_type_pair_matrix_csv import export_relation_type_pair_matrix_csv
 from graph.export.relation_confidence_buckets_csv import export_relation_confidence_buckets_csv
+from graph.export.relation_confidence_trend_csv import export_relation_confidence_trend_csv
 from graph.export.relation_evidence import export_relation_evidence_markdown
 from graph.export.relation_confidence_matrix_csv import export_relation_confidence_matrix_csv
 from graph.export.relation_date_lag_csv import export_relation_date_lag_csv
@@ -123,6 +123,7 @@ from graph.export.source_fetch_freshness_csv import export_source_fetch_freshnes
 from graph.export.source_language_coverage_csv import export_source_language_coverage_csv
 from graph.export.source_language_distribution_csv import export_source_language_distribution_csv
 from graph.export.source_language_inventory_csv import export_source_language_inventory_csv
+from graph.export.source_license_coverage_csv import export_source_license_coverage_csv
 from graph.export.source_metadata_density_csv import export_source_metadata_density_csv
 from graph.export.source_metadata_outliers_markdown import export_source_metadata_outliers_markdown
 from graph.export.source_quality_markdown import export_source_quality_markdown
@@ -138,8 +139,10 @@ from graph.export.source_url_duplicates_csv import export_source_url_duplicates_
 from graph.export.source_title_similarity_csv import export_source_title_similarity_csv
 from graph.export.source_title_quality_csv import export_source_title_quality_csv
 from graph.export.source_hostname_inventory_csv import export_source_hostname_inventory_csv
+from graph.export.source_http_method_inventory_csv import export_source_http_method_inventory_csv
 from graph.export.source_url_scheme_inventory_csv import export_source_url_scheme_inventory_csv
 from graph.export.source_robots_policy_csv import export_source_robots_policy_csv
+from graph.export.source_ssl_expiry_csv import export_source_ssl_expiry_csv
 from graph.export.source_tag_summary_markdown import export_source_tag_summary_markdown
 from graph.export.source_timeline_csv import export_source_timeline_csv
 from graph.export.source_type_coverage_csv import export_source_type_coverage_csv
@@ -167,6 +170,7 @@ from graph.export.unit_location_coverage_csv import export_unit_location_coverag
 from graph.export.unit_geospatial_cluster_csv import export_unit_geospatial_cluster_csv
 from graph.export.unit_attachment_gap_csv import export_unit_attachment_gap_csv
 from graph.export.unit_attachment_inventory_csv import export_unit_attachment_inventory_csv
+from graph.export.unit_attachment_size_inventory_csv import export_unit_attachment_size_inventory_csv
 from graph.export.unit_amount_outliers_csv import export_unit_amount_outliers_csv
 from graph.export.unit_amount_summary_csv import export_unit_amount_summary_csv
 from graph.export.unit_accessibility_metadata_csv import export_unit_accessibility_metadata_csv
@@ -176,11 +180,13 @@ from graph.export.unit_transaction_cashflow_csv import export_unit_transaction_c
 from graph.export.unit_calendar_event_inventory_csv import export_unit_calendar_event_inventory_csv
 from graph.export.unit_citation_inventory_csv import export_unit_citation_inventory_csv
 from graph.export.unit_citation_readiness_csv import export_unit_citation_readiness_csv
+from graph.export.unit_citation_style_inventory_csv import export_unit_citation_style_inventory_csv
 from graph.export.unit_contact_inventory_csv import export_unit_contact_inventory_csv
 from graph.export.unit_content_language_hint_csv import export_unit_content_language_hint_csv
 from graph.export.unit_content_length_csv import export_unit_content_length_csv
 from graph.export.unit_content_length_summary_csv import export_unit_content_length_summary_csv
 from graph.export.unit_content_length_outliers_csv import export_unit_content_length_outliers_csv
+from graph.export.unit_currency_exposure_csv import export_unit_currency_exposure_csv
 from graph.export.unit_date_range_csv import export_unit_date_range_csv
 from graph.export.unit_duplicate_title_csv import export_unit_duplicate_title_csv
 from graph.export.unit_doi_inventory_csv import export_unit_doi_inventory_csv
@@ -232,6 +238,18 @@ from graph.export.unit_url_scheme_inventory_csv import export_unit_url_scheme_in
 from graph.export.units_jsonl import export_units_to_jsonl
 from graph.export.vegalite_timeline import export_units_to_vegalite_timeline
 from graph.export.zettelkasten_index import export_zettelkasten_index_markdown
+
+try:
+    from graph.export.edge_cycle_participation_csv import export_edge_cycle_participation_csv
+except ModuleNotFoundError as exc:
+    if exc.name != "networkx":
+        raise
+
+    def export_edge_cycle_participation_csv(*args, **kwargs):
+        from graph.export.edge_cycle_participation_csv import export_edge_cycle_participation_csv as _export_edge_cycle_participation_csv
+
+        return _export_edge_cycle_participation_csv(*args, **kwargs)
+
 
 try:
     from graph.export.gexf import export_graph_gexf
@@ -319,6 +337,7 @@ __all__ = [
     "export_relation_type_pair_matrix_csv",
     "export_relation_confidence_buckets_csv",
     "export_relation_confidence_matrix_csv",
+    "export_relation_confidence_trend_csv",
     "export_relation_date_lag_csv",
     "export_relation_direction_imbalance_csv",
     "export_relation_evidence_consistency_csv",
@@ -360,6 +379,7 @@ __all__ = [
     "export_source_language_coverage_csv",
     "export_source_language_distribution_csv",
     "export_source_language_inventory_csv",
+    "export_source_license_coverage_csv",
     "export_source_metadata_density_csv",
     "export_source_metadata_outliers_markdown",
     "export_source_quality_markdown",
@@ -372,7 +392,9 @@ __all__ = [
     "export_source_url_duplicates_csv",
     "export_source_title_similarity_csv",
     "export_source_title_quality_csv",
+    "export_source_http_method_inventory_csv",
     "export_source_tag_summary_markdown",
+    "export_source_ssl_expiry_csv",
     "export_source_timeline_csv",
     "export_source_type_coverage_csv",
     "export_units_to_slack_participation_csv",
@@ -395,6 +417,7 @@ __all__ = [
     "export_unit_backlinks_markdown",
     "export_unit_attachment_gap_csv",
     "export_unit_attachment_inventory_csv",
+    "export_unit_attachment_size_inventory_csv",
     "export_unit_amount_outliers_csv",
     "export_unit_amount_summary_csv",
     "export_unit_balance_timeline_csv",
@@ -403,10 +426,12 @@ __all__ = [
     "export_unit_calendar_event_inventory_csv",
     "export_unit_citation_inventory_csv",
     "export_unit_citation_readiness_csv",
+    "export_unit_citation_style_inventory_csv",
     "export_unit_content_language_hint_csv",
     "export_unit_content_length_csv",
     "export_unit_content_length_summary_csv",
     "export_unit_content_length_outliers_csv",
+    "export_unit_currency_exposure_csv",
     "export_unit_date_coverage_markdown",
     "export_unit_date_range_csv",
     "export_unit_datetime_precision_csv",
