@@ -39,6 +39,7 @@ from graph.rag.result_actionability import classify_result_actionability
 from graph.rag.result_explanations import explain_rag_results
 from graph.rag.result_evidence_method_mix import analyze_result_evidence_method_mix
 from graph.rag.result_provenance_completeness import analyze_result_provenance_completeness
+from graph.rag.result_format_coverage import analyze_result_format_coverage
 from graph.rag.source_agreement import score_source_agreement
 from graph.rag.source_attribution import summarize_source_attribution
 from graph.rag.snippets import highlight_result_snippets
@@ -77,6 +78,7 @@ __all__ = [
     "analyze_query_drift",
     "analyze_result_date_coverage",
     "analyze_result_evidence_method_mix",
+    "analyze_result_format_coverage",
     "analyze_result_provenance_completeness",
     "analyze_retrieval_overlap",
     "analyze_result_tag_coverage",
