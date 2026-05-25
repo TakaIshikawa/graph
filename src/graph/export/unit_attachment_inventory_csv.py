@@ -1,131 +1,93 @@
-"""CSV export for attachment-like unit metadata."""
+"""CSV export for per-unit attachment metadata."""
 
 from __future__ import annotations
 
-import csv
-import re
 from collections.abc import Iterable, Mapping
-from io import StringIO
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
-from graph.types.models import KnowledgeUnit
+from graph.export._report_csv import field_value, get, metadata, normalized_key, render_csv, sort_key, unit_id, write_csv
 
 _FIELDNAMES = [
     "unit_id",
-    "source_project",
-    "source_entity_type",
-    "metadata_key",
-    "value_type",
-    "value",
+    "attachment_count",
+    "attachment_paths",
+    "attachment_extensions",
+    "has_images",
+    "has_documents",
+    "missing_attachment_metadata",
 ]
-_ATTACHMENT_KEYS = {
-    "url",
-    "urls",
-    "link",
-    "links",
-    "file",
-    "files",
-    "path",
-    "paths",
-    "attachment",
-    "attachments",
-}
-_WHITESPACE_RE = re.compile(r"\s+")
+_ATTACHMENT_KEYS = {"attachment", "attachments", "file", "files", "asset", "assets", "enclosure", "enclosures", "path", "paths"}
+_PATH_KEYS = {"path", "url", "href", "uri", "src", "file", "filename", "name"}
+_IMAGE_EXTENSIONS = {".apng", ".avif", ".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp"}
+_DOCUMENT_EXTENSIONS = {".csv", ".doc", ".docx", ".epub", ".md", ".pdf", ".ppt", ".pptx", ".rtf", ".txt", ".xls", ".xlsx"}
+
+
+def export_units_to_attachment_inventory_csv(
+    units: Iterable[Mapping[str, Any] | object],
+    path: str | Path | None = None,
+) -> str | dict[str, Any]:
+    """Return or write one attachment inventory row per unit."""
+    unit_list = list(units)
+    rows = sorted((_row(unit) for unit in unit_list), key=lambda row: sort_key(row["unit_id"]))
+    text = render_csv(rows, _FIELDNAMES)
+    if path is None:
+        return text
+    output_path, bytes_written = write_csv(path, text)
+    return {"path": output_path, "unit_count": len(unit_list), "rows_exported": len(rows), "bytes_written": bytes_written}
 
 
 def export_unit_attachment_inventory_csv(
-    units: Iterable[KnowledgeUnit],
+    units: Iterable[Mapping[str, Any] | object],
     path: str | Path | None = None,
 ) -> str | dict[str, Any]:
-    """Return or write one row per attachment-like metadata value."""
-    unit_list = list(units)
-    rows = _attachment_rows(unit_list)
-    text = _render_csv(rows)
+    """Backward-compatible alias for attachment inventory export."""
+    return export_units_to_attachment_inventory_csv(units, path)
 
-    if path is None:
-        return text
 
-    output_path = Path(path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(text, encoding="utf-8", newline="")
+def _row(unit: Mapping[str, Any] | object) -> dict[str, str | int]:
+    paths = sorted(set(_attachment_paths(unit)), key=sort_key)
+    extensions = sorted({_extension(path) for path in paths if _extension(path)}, key=sort_key)
     return {
-        "path": str(output_path),
-        "unit_count": len(unit_list),
-        "rows_exported": len(rows),
-        "bytes_written": output_path.stat().st_size,
+        "unit_id": unit_id(unit),
+        "attachment_count": len(paths),
+        "attachment_paths": "; ".join(paths),
+        "attachment_extensions": "; ".join(extensions),
+        "has_images": _flag(any(extension in _IMAGE_EXTENSIONS for extension in extensions)),
+        "has_documents": _flag(any(extension in _DOCUMENT_EXTENSIONS for extension in extensions)),
+        "missing_attachment_metadata": _flag(not _has_attachment_metadata(unit)),
     }
 
 
-def _attachment_rows(units: list[KnowledgeUnit]) -> list[dict[str, str]]:
-    rows: list[dict[str, str]] = []
-    for unit in units:
-        metadata = unit.metadata if isinstance(unit.metadata, Mapping) else {}
-        for key, value in metadata.items():
-            key_text = _field_value(key)
-            if _normalized_key(key_text) not in _ATTACHMENT_KEYS:
-                continue
-            for item in _iter_values(value):
-                text = _inline_text(item)
-                if not text:
-                    continue
-                rows.append(
-                    {
-                        "unit_id": _field_value(unit.id),
-                        "source_project": _field_value(unit.source_project) or "Unknown",
-                        "source_entity_type": _field_value(unit.source_entity_type) or "Unknown",
-                        "metadata_key": key_text,
-                        "value_type": _value_type(text),
-                        "value": text,
-                    }
-                )
-    return sorted(
-        rows,
-        key=lambda row: (
-            _sort_key(row["unit_id"]),
-            _sort_key(row["metadata_key"]),
-            _sort_key(row["value"]),
-        ),
-    )
+def _has_attachment_metadata(unit: Mapping[str, Any] | object) -> bool:
+    return any(normalized_key(key) in _ATTACHMENT_KEYS for key in metadata(unit))
 
 
-def _iter_values(value: object) -> list[object]:
+def _attachment_paths(unit: Mapping[str, Any] | object) -> list[str]:
+    paths: list[str] = []
+    for key, value in metadata(unit).items():
+        if normalized_key(key) in _ATTACHMENT_KEYS:
+            paths.extend(_extract_paths(value))
+    return [path for path in paths if path]
+
+
+def _extract_paths(value: object) -> list[str]:
+    if value is None or isinstance(value, bytes):
+        return []
+    if isinstance(value, Mapping):
+        direct = [field_value(value.get(key)) for key in _PATH_KEYS if field_value(value.get(key))]
+        nested = [item for key, child in value.items() if normalized_key(key) not in _PATH_KEYS for item in _extract_paths(child)]
+        return direct + nested
     if isinstance(value, list | tuple | set):
-        return list(value)
-    return [value]
+        return [item for child in value for item in _extract_paths(child)]
+    return [field_value(value)]
 
 
-def _value_type(value: str) -> str:
-    parsed = urlparse(value)
-    if parsed.scheme.casefold() in {"http", "https"} and parsed.netloc:
-        return "url"
-    if value.startswith(("/", "./", "../", "~")) or "/" in value or "\\" in value:
-        return "path"
-    return "text"
+def _extension(value: str) -> str:
+    name = field_value(value).split("?", 1)[0].split("#", 1)[0].rstrip("/")
+    suffix = Path(name).suffix.casefold()
+    return suffix
 
 
-def _render_csv(rows: list[dict[str, str]]) -> str:
-    output = StringIO()
-    writer = csv.DictWriter(output, fieldnames=_FIELDNAMES, lineterminator="\n")
-    writer.writeheader()
-    writer.writerows(rows)
-    return output.getvalue()
-
-
-def _normalized_key(value: str) -> str:
-    return value.casefold().replace("-", "_").replace(" ", "_")
-
-
-def _field_value(value: object) -> str:
-    return _inline_text(getattr(value, "value", value))
-
-
-def _inline_text(value: object) -> str:
-    text = "" if value is None else str(value)
-    return _WHITESPACE_RE.sub(" ", text).strip()
-
-
-def _sort_key(value: object) -> tuple[str, str]:
-    text = _inline_text(value)
-    return (text.casefold(), text)
+def _flag(value: bool) -> str:
+    return "true" if value else "false"
