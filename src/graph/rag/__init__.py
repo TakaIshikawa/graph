@@ -43,10 +43,15 @@ from graph.rag.source_agreement import score_source_agreement
 from graph.rag.source_attribution import summarize_source_attribution
 from graph.rag.snippets import highlight_result_snippets
 from graph.rag.answer_citation_density import estimate_answer_citation_density
+from graph.rag.answer_counterargument_balance import audit_answer_counterargument_balance
+from graph.rag.answer_source_attribution_integrity import audit_answer_source_attribution_integrity
 from graph.rag.citation_target_plan import build_citation_target_plan
 from graph.rag.context_token_budget import allocate_context_token_budget
+from graph.rag.context_gap_prioritizer import prioritize_context_gaps
+from graph.rag.evidence_claim_types import classify_evidence_claim_types
 from graph.rag.evidence_quote_quality import score_evidence_quote_quality
 from graph.rag.result_metadata_gaps import summarize_result_metadata_gaps
+from graph.rag.result_retrieval_overlap import analyze_retrieval_overlap
 from graph.rag.result_tag_coverage import analyze_result_tag_coverage
 from graph.rag.source_evidence_coverage import analyze_source_evidence_coverage
 from graph.rag.source_credibility import score_source_credibility
@@ -57,6 +62,7 @@ from graph.rag.query_focus_terms import extract_query_focus_terms
 from graph.rag.query_entity_focus import extract_query_entity_focus
 from graph.rag.query_drift import analyze_query_drift
 from graph.rag.query_expansion import suggest_query_expansion_terms
+from graph.rag.query_output_constraints import detect_query_output_constraints
 from graph.rag.evidence_tension_map import map_evidence_tensions
 from graph.rag.tag_cooccurrence import build_tag_cooccurrence_matrix
 from graph.rag.tag_hierarchy import build_tag_hierarchy
@@ -72,11 +78,14 @@ __all__ = [
     "analyze_result_date_coverage",
     "analyze_result_evidence_method_mix",
     "analyze_result_provenance_completeness",
+    "analyze_retrieval_overlap",
     "analyze_result_tag_coverage",
     "analyze_source_evidence_coverage",
     "audit_source_diversity",
     "audit_answer_citation_anchors",
+    "audit_answer_counterargument_balance",
     "audit_answer_hedging",
+    "audit_answer_source_attribution_integrity",
     "allocate_evidence_budget",
     "allocate_context_token_budget",
     "classify_result_actionability",
@@ -93,10 +102,12 @@ __all__ = [
     "build_citation_target_plan",
     "build_claim_support_matrix",
     "classify_query_intent",
+    "classify_evidence_claim_types",
     "classify_evidence_peer_review_status",
     "detect_contradiction_cues",
     "detect_context_gaps",
     "detect_citation_gaps",
+    "detect_query_output_constraints",
     "extract_keywords",
     "extract_query_focus_terms",
     "extract_query_entity_focus",
@@ -112,6 +123,7 @@ __all__ = [
     "plan_context_window_packing",
     "plan_query_source_strategy",
     "plan_tag_reading_path",
+    "prioritize_context_gaps",
     "rank_duplicate_candidates",
     "rerank_for_recency",
     "rerank_for_source_diversity",
