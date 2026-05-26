@@ -8,7 +8,10 @@ from graph.rag.citation_coverage import analyze_citation_coverage
 from graph.rag.citation_diversity import analyze_citation_diversity
 from graph.rag.citation_gap_detector import detect_citation_gaps
 from graph.rag.citation_trails import build_citation_trails
+from graph.rag.answer_actionability import audit_answer_actionability
 from graph.rag.answer_citation_anchor import audit_answer_citation_anchors
+from graph.rag.answer_citation_freshness import audit_answer_citation_freshness
+from graph.rag.answer_numeric_claims import audit_answer_numeric_claims
 from graph.rag.claim_support_matrix import build_claim_support_matrix
 from graph.rag.context_window_packing import plan_context_window_packing
 from graph.rag.date_coverage import analyze_result_date_coverage
@@ -20,6 +23,8 @@ from graph.rag.evidence_packets import build_evidence_packets
 from graph.rag.evidence_budget import allocate_evidence_budget
 from graph.rag.evidence_density import score_evidence_density
 from graph.rag.evidence_peer_review_status import classify_evidence_peer_review_status
+from graph.rag.evidence_primary_source_ratio import analyze_evidence_primary_source_ratio
+from graph.rag.evidence_quote_density import score_evidence_quote_density
 from graph.rag.evidence_quote_spans import extract_evidence_quote_spans
 from graph.rag.evidence_specificity import score_evidence_specificity
 from graph.rag.keywords import extract_keywords
@@ -36,6 +41,7 @@ from graph.rag.reading_queue import build_reading_queue
 from graph.rag.reading_time import estimate_reading_time
 from graph.rag.result_clusters import cluster_results_by_overlap
 from graph.rag.result_actionability import classify_result_actionability
+from graph.rag.result_authority_signals import analyze_result_authority_signals
 from graph.rag.result_explanations import explain_rag_results
 from graph.rag.result_evidence_method_mix import analyze_result_evidence_method_mix
 from graph.rag.result_provenance_completeness import analyze_result_provenance_completeness
@@ -63,7 +69,9 @@ from graph.rag.query_focus_terms import extract_query_focus_terms
 from graph.rag.query_entity_focus import extract_query_entity_focus
 from graph.rag.query_drift import analyze_query_drift
 from graph.rag.query_expansion import suggest_query_expansion_terms
+from graph.rag.query_comparison_axes import detect_query_comparison_axes
 from graph.rag.query_output_constraints import detect_query_output_constraints
+from graph.rag.query_temporal_anchors import detect_query_temporal_anchors
 from graph.rag.evidence_tension_map import map_evidence_tensions
 from graph.rag.tag_cooccurrence import build_tag_cooccurrence_matrix
 from graph.rag.tag_hierarchy import build_tag_hierarchy
@@ -75,7 +83,9 @@ __all__ = [
     "build_tag_hierarchy",
     "analyze_citation_coverage",
     "analyze_citation_diversity",
+    "analyze_evidence_primary_source_ratio",
     "analyze_query_drift",
+    "analyze_result_authority_signals",
     "analyze_result_date_coverage",
     "analyze_result_evidence_method_mix",
     "analyze_result_format_coverage",
@@ -84,9 +94,12 @@ __all__ = [
     "analyze_result_tag_coverage",
     "analyze_source_evidence_coverage",
     "audit_source_diversity",
+    "audit_answer_actionability",
     "audit_answer_citation_anchors",
+    "audit_answer_citation_freshness",
     "audit_answer_counterargument_balance",
     "audit_answer_hedging",
+    "audit_answer_numeric_claims",
     "audit_answer_source_attribution_integrity",
     "allocate_evidence_budget",
     "allocate_context_token_budget",
@@ -109,7 +122,9 @@ __all__ = [
     "detect_contradiction_cues",
     "detect_context_gaps",
     "detect_citation_gaps",
+    "detect_query_comparison_axes",
     "detect_query_output_constraints",
+    "detect_query_temporal_anchors",
     "extract_keywords",
     "extract_query_focus_terms",
     "extract_query_entity_focus",
@@ -132,6 +147,7 @@ __all__ = [
     "score_source_agreement",
     "score_source_credibility",
     "score_evidence_density",
+    "score_evidence_quote_density",
     "score_evidence_specificity",
     "score_evidence_quote_quality",
     "score_query_term_coverage",
