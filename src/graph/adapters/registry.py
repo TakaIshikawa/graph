@@ -40,6 +40,7 @@ from graph.adapters.feed import FeedAdapter
 from graph.adapters.forty_two import FortyTwoAdapter
 from graph.adapters.git_adapter import GitAdapter
 from graph.adapters.github_gists_json import GithubGistsJsonAdapter
+from graph.adapters.github_commits_json import GithubCommitsJsonAdapter
 from graph.adapters.github_discussions_json import GithubDiscussionsJsonAdapter
 from graph.adapters.github_issues_json import GithubIssuesJsonAdapter
 from graph.adapters.github_notifications_json import GithubNotificationsJsonAdapter
@@ -420,6 +421,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "inaturalist_observations_csv": INaturalistObservationsCsvAdapter,
     "steam_library_csv": SteamLibraryCsvAdapter,
     "github_gists_json": GithubGistsJsonAdapter,
+    "github_commits_json": GithubCommitsJsonAdapter,
     "github_discussions_json": GithubDiscussionsJsonAdapter,
     "github_issues_json": GithubIssuesJsonAdapter,
     "github_notifications_json": GithubNotificationsJsonAdapter,
