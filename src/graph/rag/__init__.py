@@ -4,6 +4,7 @@ from graph.rag.cooccurrence import build_keyphrase_cooccurrence
 from graph.rag.contradictions import detect_contradiction_cues
 from graph.rag.context_gaps import detect_context_gaps
 from graph.rag.context_coverage_map import build_context_coverage_map
+from graph.rag.context_table_coverage import analyze_context_table_coverage
 from graph.rag.coverage import build_result_coverage_checklist
 from graph.rag.citation_coverage import analyze_citation_coverage
 from graph.rag.citation_diversity import analyze_citation_diversity
@@ -84,6 +85,7 @@ from graph.rag.tag_path import plan_tag_reading_path
 __all__ = [
     "build_tag_cooccurrence_matrix",
     "build_tag_hierarchy",
+    "analyze_context_table_coverage",
     "analyze_citation_coverage",
     "analyze_citation_diversity",
     "analyze_evidence_primary_source_ratio",
