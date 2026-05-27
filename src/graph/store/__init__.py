@@ -1,4 +1,5 @@
 from graph.store.backup import export_store_backup
+from graph.store.collection_metadata_completeness_summary import summarize_collection_metadata_completeness
 from graph.store.collection_metadata_drift_summary import summarize_collection_metadata_drift
 from graph.store.collection_tag_overlap_summary import summarize_collection_tag_overlap
 from graph.store.relation_metadata_key_frequency_summary import summarize_relation_metadata_key_frequency
@@ -12,6 +13,7 @@ from graph.store.unit_callout_usage_summary import summarize_unit_callout_usage
 from graph.store.unit_code_fence_info_attribute_summary import summarize_unit_code_fence_info_attributes
 from graph.store.unit_content_encoding_issue_summary import summarize_unit_content_encoding_issues
 from graph.store.unit_bare_url_summary import summarize_unit_bare_urls
+from graph.store.unit_duplicate_source_path_summary import summarize_unit_duplicate_source_paths
 from graph.store.unit_duplicate_content_hash_summary import summarize_unit_duplicate_content_hashes
 from graph.store.unit_duplicate_title_summary import summarize_unit_duplicate_titles
 from graph.store.unit_duplicate_external_id_summary import summarize_unit_duplicate_external_ids
@@ -45,15 +47,23 @@ from graph.store.unit_yaml_alias_anchor_summary import summarize_unit_yaml_alias
 from graph.store.unit_markdown_definition_list_summary import summarize_unit_markdown_definition_lists
 from graph.store.unit_markdown_comment_directive_summary import summarize_unit_markdown_comment_directives
 from graph.store.unit_metadata_secret_hint_summary import summarize_unit_metadata_secret_hints
+from graph.store.unit_metadata_cardinality_summary import summarize_unit_metadata_cardinality
 from graph.store.unit_notebook_cell_marker_summary import summarize_unit_notebook_cell_markers
 from graph.store.unit_pandoc_citation_key_summary import summarize_unit_pandoc_citation_keys
 from graph.store.unit_tag_cardinality_summary import summarize_unit_tag_cardinality
+from graph.store.unit_tag_hygiene_summary import summarize_unit_tag_hygiene
 from graph.store.unit_tag_prefix_summary import summarize_unit_tag_prefixes
+from graph.store.unit_temporal_range_summary import summarize_unit_temporal_ranges
+from graph.store.unit_timestamp_consistency_summary import summarize_unit_timestamp_consistency
+from graph.store.unit_timeline_gap_summary import summarize_unit_timeline_gaps
+from graph.store.unit_source_scheme_summary import summarize_unit_source_schemes
+from graph.store.unit_language_coverage_summary import summarize_unit_language_coverage
 from graph.store.unit_word_count_distribution_summary import summarize_unit_word_count_distribution
 from graph.store.unit_yaml_nested_depth_summary import summarize_unit_yaml_nested_depth
 
 __all__ = [
     "export_store_backup",
+    "summarize_collection_metadata_completeness",
     "summarize_collection_metadata_drift",
     "summarize_collection_tag_overlap",
     "summarize_relation_metadata_key_frequency",
@@ -67,6 +77,7 @@ __all__ = [
     "summarize_unit_code_fence_info_attributes",
     "summarize_unit_content_encoding_issues",
     "summarize_unit_bare_urls",
+    "summarize_unit_duplicate_source_paths",
     "summarize_unit_duplicate_content_hashes",
     "summarize_unit_duplicate_titles",
     "summarize_unit_duplicate_external_ids",
@@ -102,8 +113,15 @@ __all__ = [
     "summarize_unit_hashtags",
     "summarize_unit_markdown_math",
     "summarize_unit_metadata_secret_hints",
+    "summarize_unit_metadata_cardinality",
     "summarize_unit_tag_cardinality",
+    "summarize_unit_tag_hygiene",
     "summarize_unit_tag_prefixes",
+    "summarize_unit_temporal_ranges",
+    "summarize_unit_timestamp_consistency",
+    "summarize_unit_timeline_gaps",
+    "summarize_unit_source_schemes",
+    "summarize_unit_language_coverage",
     "summarize_unit_word_count_distribution",
     "summarize_unit_yaml_nested_depth",
 ]
