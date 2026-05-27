@@ -56,6 +56,7 @@ from graph.adapters.google_location_semantic_history_json import GoogleLocationS
 from graph.adapters.html import HtmlAdapter
 from graph.adapters.hacker_news_saved import HackerNewsSavedAdapter
 from graph.adapters.hypothesis import HypothesisAdapter
+from graph.adapters.hypothesis_annotations_json import HypothesisAnnotationsJsonAdapter
 from graph.adapters.ical import ICalAdapter
 from graph.adapters.instapaper import InstapaperAdapter
 from graph.adapters.ipynb import IpynbAdapter
@@ -95,6 +96,7 @@ from graph.adapters.notion_markdown import NotionMarkdownAdapter
 from graph.adapters.notion_export import NotionExportAdapter
 from graph.adapters.evernote_export import EvernoteExportAdapter
 from graph.adapters.bear_export import BearExportAdapter
+from graph.adapters.bear_notes_markdown import BearNotesMarkdownAdapter
 from graph.adapters.apple_notes_export import AppleNotesExportAdapter
 from graph.adapters.apple_health_workouts import AppleHealthWorkoutsAdapter
 from graph.adapters.apple_calendar_events_csv import AppleCalendarEventsCsvAdapter
@@ -139,6 +141,7 @@ from graph.adapters.simplenote_export import SimplenoteExportAdapter
 from graph.adapters.foam import FoamWorkspaceAdapter
 from graph.adapters.tana import TanaAdapter
 from graph.adapters.todoist import TodoistAdapter
+from graph.adapters.todoist_tasks_csv import TodoistTasksCsvAdapter
 from graph.adapters.are_na import AreNaAdapter
 from graph.adapters.zotero_csv import ZoteroCsvAdapter
 from graph.adapters.google_tasks import GoogleTasksAdapter
@@ -150,6 +153,7 @@ from graph.adapters.archivebox_index_json import ArchiveBoxIndexJsonAdapter
 from graph.adapters.opml import OpmlAdapter
 from graph.adapters.obsidian_canvas import ObsidianCanvasAdapter
 from graph.adapters.omnivore_json import OmnivoreJsonAdapter
+from graph.adapters.omnivore_highlights_json import OmnivoreHighlightsJsonAdapter
 from graph.adapters.openlibrary_reading_log_csv import OpenLibraryReadingLogCsvAdapter
 from graph.adapters.org import OrgAdapter
 from graph.adapters.pdf import PdfAdapter
@@ -162,6 +166,7 @@ from graph.adapters.pocket import PocketAdapter
 from graph.adapters.pocket_csv import PocketCsvAdapter
 from graph.adapters.pocket_export import PocketExportAdapter
 from graph.adapters.pocket_reading_list_csv import PocketReadingListCsvAdapter
+from graph.adapters.pocket_articles_csv import PocketArticlesCsvAdapter
 from graph.adapters.podcasts_opml import PodcastsOpmlAdapter
 from graph.adapters.presence import PresenceAdapter
 from graph.adapters.raindrop import RaindropAdapter
@@ -274,6 +279,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "notion_export": NotionExportAdapter,
     "evernote_export": EvernoteExportAdapter,
     "bear_export": BearExportAdapter,
+    "bear_notes_markdown": BearNotesMarkdownAdapter,
     "apple_notes_export": AppleNotesExportAdapter,
     "apple_health_workouts": AppleHealthWorkoutsAdapter,
     "apple_calendar_events_csv": AppleCalendarEventsCsvAdapter,
@@ -295,6 +301,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "opml": OpmlAdapter,
     "obsidian_canvas": ObsidianCanvasAdapter,
     "omnivore_json": OmnivoreJsonAdapter,
+    "omnivore_highlights_json": OmnivoreHighlightsJsonAdapter,
     "openlibrary_reading_log_csv": OpenLibraryReadingLogCsvAdapter,
     "org": OrgAdapter,
     "pdf": PdfAdapter,
@@ -330,6 +337,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "pocket_csv": PocketCsvAdapter,
     "pocket_export": PocketExportAdapter,
     "pocket_reading_list_csv": PocketReadingListCsvAdapter,
+    "pocket_articles_csv": PocketArticlesCsvAdapter,
     "instapaper": InstapaperAdapter,
     "pinboard": PinboardAdapter,
     "pinboard_html_export": PinboardHtmlExportAdapter,
@@ -343,6 +351,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "safari_history": SafariHistoryAdapter,
     "zotero_rdf": ZoteroRdfAdapter,
     "hypothesis": HypothesisAdapter,
+    "hypothesis_annotations_json": HypothesisAnnotationsJsonAdapter,
     "readwise": ReadwiseAdapter,
     "readwise_csv": ReadwiseCsvAdapter,
     "readwise_reader_documents_csv": ReadwiseReaderDocumentsCsvAdapter,
@@ -366,6 +375,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "foam_workspace": FoamWorkspaceAdapter,
     "tana": TanaAdapter,
     "todoist": TodoistAdapter,
+    "todoist_tasks_csv": TodoistTasksCsvAdapter,
     "are_na": AreNaAdapter,
     "zotero_csv": ZoteroCsvAdapter,
     "zotero_library_csv": ZoteroLibraryCsvAdapter,
