@@ -12,6 +12,7 @@ from graph.store.relation_duplicate_edge_summary import summarize_relation_dupli
 from graph.store.relation_self_loop_summary import summarize_relation_self_loops
 from graph.store.source_ingest_frequency_summary import summarize_source_ingest_frequency
 from graph.store.source_error_message_summary import summarize_source_error_messages
+from graph.store.source_response_time_summary import summarize_source_response_times
 from graph.store.source_unit_count_summary import summarize_source_unit_counts
 from graph.store.source_url_domain_summary import summarize_source_url_domains
 from graph.store.unit_attachment_extension_summary import summarize_unit_attachment_extensions
@@ -122,6 +123,7 @@ __all__ = [
     "summarize_relation_self_loops",
     "summarize_source_ingest_frequency",
     "summarize_source_error_messages",
+    "summarize_source_response_times",
     "summarize_source_unit_counts",
     "summarize_source_url_domains",
     "summarize_unit_attachment_extensions",
