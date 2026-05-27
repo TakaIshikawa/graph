@@ -171,6 +171,7 @@ from graph.export.task_board_markdown import export_task_board_markdown
 from graph.export.timelinejs import export_units_to_timelinejs
 from graph.export.tiddlywiki_json import export_units_to_tiddlywiki_json
 from graph.export.unit_csv import export_units_to_csv
+from graph.export.unit_abbreviation_inventory_csv import export_units_to_abbreviation_inventory_csv
 from graph.export.unit_checkbox_task_status_csv import export_units_to_checkbox_task_status_csv
 from graph.export.unit_heading_duplicate_csv import export_units_to_heading_duplicate_csv
 from graph.export.unit_heading_hierarchy_csv import export_units_to_heading_hierarchy_csv
@@ -365,6 +366,7 @@ __all__ = [
     "export_graph_adjacency_markdown",
     "export_units_to_activity_heatmap_csv",
     "export_units_to_activitywatch_focus_sessions_csv",
+    "export_units_to_abbreviation_inventory_csv",
     "export_graph_cypher",
     "export_units_to_chatgpt_digest_markdown",
     "export_units_to_flashcards_markdown",
