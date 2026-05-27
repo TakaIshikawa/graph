@@ -26,10 +26,16 @@ def test_summarize_unit_content_structure_counts_unit_indicators_and_average_hea
         {
             "source": "docs",
             "unit_count": 2,
+            "heading_count": 2,
+            "list_count": 2,
+            "table_count": 2,
+            "code_block_count": 1,
+            "link_count": 0,
             "units_with_headings": 1,
             "units_with_lists": 2,
             "units_with_tables": 1,
             "units_with_code_blocks": 1,
+            "units_with_links": 0,
             "average_heading_count": "1.00",
         }
     ]
