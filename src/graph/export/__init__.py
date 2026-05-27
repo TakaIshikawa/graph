@@ -182,6 +182,8 @@ from graph.export.unit_checkbox_task_status_csv import export_units_to_checkbox_
 from graph.export.unit_heading_duplicate_csv import export_units_to_heading_duplicate_csv
 from graph.export.unit_heading_hierarchy_csv import export_units_to_heading_hierarchy_csv
 from graph.export.unit_html_link_target_csv import export_units_to_html_link_target_csv
+from graph.export.unit_html_aria_attribute_csv import export_units_to_html_aria_attribute_csv
+from graph.export.unit_html_microdata_csv import export_units_to_html_microdata_csv
 from graph.export.unit_link_text_quality_csv import export_units_to_link_text_quality_csv
 from graph.export.unit_local_file_reference_csv import export_units_to_local_file_reference_csv
 from graph.export.unit_anchor_link_csv import export_units_to_anchor_link_csv
@@ -210,6 +212,9 @@ from graph.export.unit_markdown_link_relation_csv import export_unit_markdown_li
 from graph.export.unit_markdown_setext_heading_csv import export_unit_markdown_setext_heading_csv
 from graph.export.unit_markdown_toc_entry_csv import export_unit_markdown_toc_entry_csv
 from graph.export.unit_markdown_image_dimension_hint_csv import export_units_to_markdown_image_dimension_hint_csv
+from graph.export.unit_markdown_details_inventory_csv import export_units_to_markdown_details_inventory_csv
+from graph.export.unit_markdown_reference_label_case_csv import export_units_to_markdown_reference_label_case_csv
+from graph.export.unit_markdown_superscript_inventory_csv import export_units_to_markdown_superscript_inventory_csv
 from graph.export.unit_frontmatter_alias_csv import export_unit_frontmatter_alias_csv
 from graph.export.unit_frontmatter_nested_key_csv import export_unit_frontmatter_nested_key_csv
 from graph.export.unit_code_fence_filename_csv import export_unit_code_fence_filename_csv
@@ -554,6 +559,8 @@ __all__ = [
     "export_unit_frontmatter_duplicate_key_csv",
     "export_units_to_heading_duplicate_csv",
     "export_units_to_html_link_target_csv",
+    "export_units_to_html_aria_attribute_csv",
+    "export_units_to_html_microdata_csv",
     "export_unit_html_data_attribute_csv",
     "export_units_to_markdown_admonition_csv",
     "export_units_to_markdown_admonition_inventory_csv",
@@ -564,9 +571,12 @@ __all__ = [
     "export_units_to_markdown_inline_code_csv",
     "export_units_to_markdown_link_context_csv",
     "export_units_to_markdown_link_scheme_csv",
+    "export_units_to_markdown_details_inventory_csv",
     "export_unit_markdown_footnote_backref_csv",
     "export_unit_markdown_heading_trailing_hash_csv",
     "export_units_to_markdown_list_structure_csv",
+    "export_units_to_markdown_reference_label_case_csv",
+    "export_units_to_markdown_superscript_inventory_csv",
     "export_units_to_markdown_tag_csv",
     "export_unit_markdown_setext_heading_csv",
     "export_unit_markdown_reference_definition_csv",
