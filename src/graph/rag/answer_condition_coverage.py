@@ -17,8 +17,13 @@ _TYPES: tuple[tuple[str, re.Pattern[str]], ...] = (
 _RECOMMEND_RE = re.compile(r"\b(?:should|must|recommend|use|choose)\b", re.I)
 
 
-def audit_answer_condition_coverage(answer: str, evidence: Iterable[Any] | None = None) -> dict[str, Any]:
+def audit_answer_condition_coverage(answer: str, evidence: Iterable[Any] | None = None) -> dict[str, Any] | list[dict[str, str]]:
     """Return condition cues and missing condition types."""
+    if evidence is not None:
+        evidence_items = list(evidence)
+        if all(isinstance(item, str) for item in evidence_items):
+            return _audit_required_conditions(answer, evidence_items)
+        evidence = evidence_items
     text = " ".join(str(answer or "").split())
     answer_types = _matched_types(text)
     evidence_rows = []
@@ -44,3 +49,22 @@ def audit_answer_condition_coverage(answer: str, evidence: Iterable[Any] | None 
 
 def _matched_types(text: str) -> set[str]:
     return {name for name, pattern in _TYPES if pattern.search(text)}
+
+
+def _audit_required_conditions(answer: str, required_conditions: list[str]) -> list[dict[str, str]]:
+    text = _normalize_condition(answer)
+    findings = []
+    for condition in required_conditions:
+        if _normalize_condition(condition) not in text:
+            findings.append(
+                {
+                    "missing_condition": condition,
+                    "severity": "medium",
+                    "recommendation": f"Mention the required condition: {condition}.",
+                }
+            )
+    return findings
+
+
+def _normalize_condition(value: str) -> str:
+    return " ".join(re.findall(r"[a-z0-9]+", str(value).casefold()))
