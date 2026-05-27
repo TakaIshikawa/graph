@@ -32,6 +32,7 @@ from graph.store.unit_heading_hierarchy_summary import summarize_unit_heading_hi
 from graph.store.unit_html_heading_anchor_summary import summarize_unit_html_heading_anchors
 from graph.store.unit_html_entity_summary import summarize_unit_html_entities
 from graph.store.unit_html_tag_usage_summary import summarize_unit_html_tag_usage
+from graph.store.unit_html_data_attribute_summary import summarize_unit_html_data_attributes
 from graph.store.unit_inline_code_usage_summary import summarize_unit_inline_code_usage
 from graph.store.unit_local_file_reference_summary import summarize_unit_local_file_references
 from graph.store.unit_markdown_abbreviation_summary import summarize_unit_markdown_abbreviations
@@ -40,9 +41,11 @@ from graph.store.unit_markdown_custom_id_summary import summarize_unit_markdown_
 from graph.store.unit_markdown_escape_summary import summarize_unit_markdown_escapes
 from graph.store.unit_markdown_hard_break_summary import summarize_unit_markdown_hard_breaks
 from graph.store.unit_markdown_heading_duplicate_summary import summarize_unit_markdown_heading_duplicates
+from graph.store.unit_markdown_footnote_backref_summary import summarize_unit_markdown_footnote_backrefs
 from graph.store.unit_markdown_highlight_summary import summarize_unit_markdown_highlights
 from graph.store.unit_markdown_image_alt_text_summary import summarize_unit_markdown_image_alt_text
 from graph.store.unit_markdown_link_scheme_summary import summarize_unit_markdown_link_schemes
+from graph.store.unit_markdown_link_title_summary import summarize_unit_markdown_link_titles
 from graph.store.unit_markdown_reference_usage_summary import summarize_unit_markdown_reference_usage
 from graph.store.unit_markdown_horizontal_rule_summary import summarize_unit_markdown_horizontal_rules
 from graph.store.unit_markdown_block_id_summary import summarize_unit_markdown_block_ids
@@ -50,6 +53,7 @@ from graph.store.unit_markdown_table_alignment_summary import summarize_unit_mar
 from graph.store.unit_markdown_toc_summary import summarize_unit_markdown_toc
 from graph.store.unit_markdown_task_list_summary import summarize_unit_markdown_task_lists
 from graph.store.unit_markdown_strikethrough_summary import summarize_unit_markdown_strikethrough
+from graph.store.unit_markdown_setext_heading_summary import summarize_unit_markdown_setext_headings
 from graph.store.unit_markdown_task_priority_summary import summarize_unit_markdown_task_priorities
 from graph.store.unit_markdown_math_summary import summarize_unit_markdown_math
 from graph.store.unit_markdown_admonition_summary import summarize_unit_markdown_admonitions
@@ -117,6 +121,7 @@ __all__ = [
     "summarize_unit_html_heading_anchors",
     "summarize_unit_html_entities",
     "summarize_unit_html_tag_usage",
+    "summarize_unit_html_data_attributes",
     "summarize_unit_inline_code_usage",
     "summarize_unit_local_file_references",
     "summarize_unit_markdown_abbreviations",
@@ -126,9 +131,11 @@ __all__ = [
     "summarize_unit_markdown_escapes",
     "summarize_unit_markdown_hard_breaks",
     "summarize_unit_markdown_heading_duplicates",
+    "summarize_unit_markdown_footnote_backrefs",
     "summarize_unit_markdown_highlights",
     "summarize_unit_markdown_image_alt_text",
     "summarize_unit_markdown_link_schemes",
+    "summarize_unit_markdown_link_titles",
     "summarize_unit_markdown_reference_usage",
     "summarize_unit_markdown_horizontal_rules",
     "summarize_unit_markdown_block_ids",
@@ -136,6 +143,7 @@ __all__ = [
     "summarize_unit_markdown_toc",
     "summarize_unit_markdown_task_lists",
     "summarize_unit_markdown_strikethrough",
+    "summarize_unit_markdown_setext_headings",
     "summarize_unit_markdown_task_priorities",
     "summarize_unit_markdown_comment_directives",
     "summarize_unit_markdown_definition_lists",

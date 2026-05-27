@@ -186,6 +186,8 @@ from graph.export.unit_link_text_quality_csv import export_units_to_link_text_qu
 from graph.export.unit_local_file_reference_csv import export_units_to_local_file_reference_csv
 from graph.export.unit_anchor_link_csv import export_units_to_anchor_link_csv
 from graph.export.unit_bare_url_csv import export_units_to_bare_url_csv
+from graph.export.unit_frontmatter_comment_csv import export_unit_frontmatter_comment_csv
+from graph.export.unit_frontmatter_duplicate_key_csv import export_unit_frontmatter_duplicate_key_csv
 from graph.export.unit_markdown_admonition_csv import export_units_to_markdown_admonition_csv
 from graph.export.unit_markdown_admonition_inventory_csv import export_units_to_markdown_admonition_inventory_csv
 from graph.export.unit_markdown_custom_id_inventory_csv import export_units_to_markdown_custom_id_inventory_csv
@@ -195,7 +197,11 @@ from graph.export.unit_markdown_list_structure_csv import export_units_to_markdo
 from graph.export.unit_markdown_reference_definition_csv import export_unit_markdown_reference_definition_csv
 from graph.export.unit_markdown_reference_usage_csv import export_unit_markdown_reference_usage_csv
 from graph.export.unit_markdown_link_fragment_csv import export_unit_markdown_link_fragment_csv
+from graph.export.unit_markdown_footnote_backref_csv import export_unit_markdown_footnote_backref_csv
+from graph.export.unit_html_data_attribute_csv import export_unit_html_data_attribute_csv
+from graph.export.unit_markdown_heading_trailing_hash_csv import export_unit_markdown_heading_trailing_hash_csv
 from graph.export.unit_markdown_link_relation_csv import export_unit_markdown_link_relation_csv
+from graph.export.unit_markdown_setext_heading_csv import export_unit_markdown_setext_heading_csv
 from graph.export.unit_markdown_toc_entry_csv import export_unit_markdown_toc_entry_csv
 from graph.export.unit_frontmatter_alias_csv import export_unit_frontmatter_alias_csv
 from graph.export.unit_frontmatter_nested_key_csv import export_unit_frontmatter_nested_key_csv
@@ -532,13 +538,19 @@ __all__ = [
     "export_unit_citation_style_inventory_csv",
     "export_units_to_callout_inventory_csv",
     "export_units_to_bare_url_csv",
+    "export_unit_frontmatter_comment_csv",
+    "export_unit_frontmatter_duplicate_key_csv",
     "export_units_to_heading_duplicate_csv",
     "export_units_to_html_link_target_csv",
+    "export_unit_html_data_attribute_csv",
     "export_units_to_markdown_admonition_csv",
     "export_units_to_markdown_admonition_inventory_csv",
     "export_units_to_markdown_emphasis_inventory_csv",
     "export_units_to_markdown_link_context_csv",
+    "export_unit_markdown_footnote_backref_csv",
+    "export_unit_markdown_heading_trailing_hash_csv",
     "export_units_to_markdown_list_structure_csv",
+    "export_unit_markdown_setext_heading_csv",
     "export_unit_markdown_reference_definition_csv",
     "export_unit_markdown_unicode_emoji_csv",
     "export_units_to_mermaid_diagram_inventory_csv",
