@@ -32,6 +32,7 @@ from graph.adapters.daily_journal import DailyJournalAdapter
 from graph.adapters.diigo import DiigoAdapter
 from graph.adapters.discover_credit_card_transactions_csv import DiscoverCreditCardTransactionsCsvAdapter
 from graph.adapters.discord_json import DiscordJsonAdapter
+from graph.adapters.discord_threads_json import DiscordThreadsJsonAdapter
 from graph.adapters.email import EmailAdapter
 from graph.adapters.enex import EnexAdapter
 from graph.adapters.etrade_transactions_csv import EtradeTransactionsCsvAdapter
@@ -39,6 +40,7 @@ from graph.adapters.feed import FeedAdapter
 from graph.adapters.forty_two import FortyTwoAdapter
 from graph.adapters.git_adapter import GitAdapter
 from graph.adapters.github_gists_json import GithubGistsJsonAdapter
+from graph.adapters.github_discussions_json import GithubDiscussionsJsonAdapter
 from graph.adapters.github_issues_json import GithubIssuesJsonAdapter
 from graph.adapters.github_notifications_json import GithubNotificationsJsonAdapter
 from graph.adapters.gitlab_issues_json import GitlabIssuesJsonAdapter
@@ -50,6 +52,7 @@ from graph.adapters.inaturalist_observations_csv import INaturalistObservationsC
 from graph.adapters.instacart_orders_csv import InstacartOrdersCsvAdapter
 from graph.adapters.google_calendar_json import GoogleCalendarJsonAdapter
 from graph.adapters.google_calendar_takeout import GoogleCalendarTakeoutAdapter
+from graph.adapters.google_docs_takeout_html import GoogleDocsTakeoutHtmlAdapter
 from graph.adapters.google_photos_takeout import GooglePhotosTakeoutAdapter
 from graph.adapters.google_keep import GoogleKeepAdapter
 from graph.adapters.google_location_semantic_history_json import GoogleLocationSemanticHistoryJsonAdapter
@@ -65,11 +68,14 @@ from graph.adapters.jira_issues_csv import JiraIssuesCsvAdapter
 from graph.adapters.jira_projects_csv import JiraProjectsCsvAdapter
 from graph.adapters.jira_worklogs_csv import JiraWorklogsCsvAdapter
 from graph.adapters.linear_issues_json import LinearIssuesJsonAdapter
+from graph.adapters.linear_comments_json import LinearCommentsJsonAdapter
 from graph.adapters.jsonl_adapter import JsonlAdapter
 from graph.adapters.jsonl_notes import JsonlNotesAdapter
 from graph.adapters.kindle import KindleAdapter
+from graph.adapters.kindle_vocabulary_csv import KindleVocabularyCsvAdapter
 from graph.adapters.kindle_clippings import KindleClippingsAdapter
 from graph.adapters.kobo_highlights_csv import KoboHighlightsCsvAdapter
+from graph.adapters.kobo_reading_stats_csv import KoboReadingStatsCsvAdapter
 from graph.adapters.logseq import LogseqAdapter
 from graph.adapters.m1_finance_activity_csv import M1FinanceActivityCsvAdapter
 from graph.adapters.google_maps_timeline_json import GoogleMapsTimelineJsonAdapter
@@ -187,6 +193,7 @@ from graph.adapters.rss_reader_starred_json import RssReaderStarredJsonAdapter
 from graph.adapters.safari_bookmarks import SafariBookmarksAdapter
 from graph.adapters.safari_history import SafariHistoryAdapter
 from graph.adapters.slack_json import SlackJsonAdapter
+from graph.adapters.slack_threads_json import SlackThreadsJsonAdapter
 from graph.adapters.sleep_as_android_csv import SleepAsAndroidCsvAdapter
 from graph.adapters.sofi_activity_csv import SofiActivityCsvAdapter
 from graph.adapters.sota import SOTAAdapter
@@ -234,6 +241,8 @@ from graph.adapters.pocket_casts_queue_csv import PocketCastsQueueCsvAdapter
 from graph.adapters.substack_posts_csv import SubstackPostsCsvAdapter
 from graph.adapters.zotero_notes_markdown import ZoteroNotesMarkdownAdapter
 from graph.adapters.zotero_rdf import ZoteroRdfAdapter
+from graph.adapters.zotero_better_bibtex_json import ZoteroBetterBibtexJsonAdapter
+from graph.adapters.workflowy_opml import WorkflowyOpmlAdapter
 
 _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "atom": AtomAdapter,
@@ -253,6 +262,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "mastodon_outbox_json": MastodonOutboxJsonAdapter,
     "kindle": KindleAdapter,
     "kindle_clippings": KindleClippingsAdapter,
+    "kindle_vocabulary_csv": KindleVocabularyCsvAdapter,
     "sota": SOTAAdapter,
     "feed": FeedAdapter,
     "mbox": MboxAdapter,
@@ -268,6 +278,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "chatgpt_json": ChatGptJsonAdapter,
     "discover_credit_card_transactions_csv": DiscoverCreditCardTransactionsCsvAdapter,
     "discord_json": DiscordJsonAdapter,
+    "discord_threads_json": DiscordThreadsJsonAdapter,
     "csv": CsvAdapter,
     "csv_rows": CsvRowsAdapter,
     "jsonl": JsonlAdapter,
@@ -299,6 +310,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "simplenote_export": SimplenoteExportAdapter,
     "google_keep_export": GoogleKeepExportAdapter,
     "opml": OpmlAdapter,
+    "workflowy_opml": WorkflowyOpmlAdapter,
     "obsidian_canvas": ObsidianCanvasAdapter,
     "omnivore_json": OmnivoreJsonAdapter,
     "omnivore_highlights_json": OmnivoreHighlightsJsonAdapter,
@@ -350,6 +362,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "safari_bookmarks": SafariBookmarksAdapter,
     "safari_history": SafariHistoryAdapter,
     "zotero_rdf": ZoteroRdfAdapter,
+    "zotero_better_bibtex_json": ZoteroBetterBibtexJsonAdapter,
     "hypothesis": HypothesisAdapter,
     "hypothesis_annotations_json": HypothesisAnnotationsJsonAdapter,
     "readwise": ReadwiseAdapter,
@@ -367,6 +380,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "m1_finance_activity_csv": M1FinanceActivityCsvAdapter,
     "sqlite_query_log": SqliteQueryLogAdapter,
     "slack_json": SlackJsonAdapter,
+    "slack_threads_json": SlackThreadsJsonAdapter,
     "sleep_as_android_csv": SleepAsAndroidCsvAdapter,
     "sofi_activity_csv": SofiActivityCsvAdapter,
     "vanguard_activity_csv": VanguardActivityCsvAdapter,
@@ -386,6 +400,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "airtable_csv": AirtableCsvAdapter,
     "google_calendar_json": GoogleCalendarJsonAdapter,
     "google_calendar_takeout": GoogleCalendarTakeoutAdapter,
+    "google_docs_takeout_html": GoogleDocsTakeoutHtmlAdapter,
     "google_photos_takeout": GooglePhotosTakeoutAdapter,
     "activitywatch_json": ActivityWatchJsonAdapter,
     "acorns_activity_csv": AcornsActivityCsvAdapter,
@@ -401,9 +416,11 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "storygraph_reading_history_csv": StoryGraphReadingHistoryCsvAdapter,
     "myanimelist_xml": MyAnimeListXmlAdapter,
     "kobo_highlights_csv": KoboHighlightsCsvAdapter,
+    "kobo_reading_stats_csv": KoboReadingStatsCsvAdapter,
     "inaturalist_observations_csv": INaturalistObservationsCsvAdapter,
     "steam_library_csv": SteamLibraryCsvAdapter,
     "github_gists_json": GithubGistsJsonAdapter,
+    "github_discussions_json": GithubDiscussionsJsonAdapter,
     "github_issues_json": GithubIssuesJsonAdapter,
     "github_notifications_json": GithubNotificationsJsonAdapter,
     "gitlab_issues_json": GitlabIssuesJsonAdapter,
@@ -411,6 +428,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "jira_issues_csv": JiraIssuesCsvAdapter,
     "jira_projects_csv": JiraProjectsCsvAdapter,
     "jira_worklogs_csv": JiraWorklogsCsvAdapter,
+    "linear_comments_json": LinearCommentsJsonAdapter,
     "trello_board_json": TrelloBoardJsonAdapter,
     "google_maps_timeline_json": GoogleMapsTimelineJsonAdapter,
     "google_maps_reviews_json": GoogleMapsReviewsJsonAdapter,
