@@ -5,42 +5,73 @@ from __future__ import annotations
 import re
 from typing import Any
 
-_EXPLICIT_SECTION_RE = re.compile(r"(?:^|\n)\s*(?:#+\s*)?(assumptions?|key assumptions?)\s*:?", re.I)
-_ASSUMPTION_PHRASES = (
-    r"\bassum(?:e|ing|ption)s?\b",
-    r"\bon the assumption that\b",
-    r"\bprovided that\b",
-    r"\bif we assume\b",
-    r"\bholding .* constant\b",
+_EXPLICIT_SECTION_RE = re.compile(r"(?:^|\n)\s*(?:[-*]\s*)?(?:#+\s*)?(assumptions?|key assumptions?)\s*:?", re.I)
+_EXPLICIT_PHRASES: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("section", _EXPLICIT_SECTION_RE),
+    ("assumption_phrase", re.compile(r"\b(?:assume|assumption|assumptions|if\s+we\s+assume|on\s+the\s+assumption\s+that|provided\s+that)\b", re.I)),
+    ("held_constant", re.compile(r"\bholding\s+[^.?!;]{1,80}?\s+constant\b", re.I)),
 )
-_RISKY_QUERY_RE = re.compile(r"\b(?:estimate|forecast|predict|projection|compare|best|recommend|should|scenario)\b", re.I)
+_IMPLICIT_CUES: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("assuming", re.compile(r"\bassuming\b", re.I)),
+    ("if_we_treat", re.compile(r"\bif\s+we\s+treat\b", re.I)),
+    ("this_implies", re.compile(r"\bthis\s+implies\b", re.I)),
+    ("likely_means", re.compile(r"\blikely\s+means\b", re.I)),
+)
 
 
-def audit_answer_assumption_disclosure(query: str, answer: str) -> dict[str, Any]:
-    """Return assumption disclosure signals and missing-assumption risk."""
-    normalized_query = " ".join(str(query or "").split())
-    normalized_answer = " ".join(str(answer or "").split())
-    explicit = bool(_EXPLICIT_SECTION_RE.search(str(answer or "")))
-    inline = _phrases(normalized_answer, _ASSUMPTION_PHRASES)
-    query_needs_assumptions = bool(_RISKY_QUERY_RE.search(normalized_query))
-    disclosed = explicit or bool(inline)
-    risk_score = 0.0
-    if query_needs_assumptions:
-        risk_score = 0.75 if not disclosed else 0.15
-    elif normalized_answer and not disclosed:
-        risk_score = 0.1
+def audit_answer_assumption_disclosure(answer: str, legacy_answer: str | None = None) -> dict[str, Any]:
+    """Return explicit assumptions and implicit assumption cues.
+
+    ``legacy_answer`` keeps older two-argument callers working; new callers pass
+    only the answer text.
+    """
+    text = _inline_text(answer if legacy_answer is None else legacy_answer)
+    disclosed = _disclosed_assumptions(text)
+    implicit = _implicit_cues(text)
     return {
-        "query_needs_assumptions": query_needs_assumptions,
-        "has_assumption_disclosure": disclosed,
-        "explicit_assumption_section": explicit,
-        "inline_assumption_phrases": inline,
-        "missing_assumption_risk": round(risk_score, 2),
-        "risk_level": "high" if risk_score >= 0.7 else "medium" if risk_score >= 0.35 else "low",
+        "assumption_count": len(disclosed),
+        "disclosed_assumptions": disclosed,
+        "implicit_cues": implicit,
+        "needs_disclosure": bool(implicit and not disclosed),
     }
 
 
-def _phrases(text: str, patterns: tuple[str, ...]) -> list[str]:
-    found: list[str] = []
-    for pattern in patterns:
-        found.extend(match.group(0).strip() for match in re.finditer(pattern, text, re.I))
-    return found
+def _disclosed_assumptions(text: str) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for cue_type, pattern in _EXPLICIT_PHRASES:
+        for match in pattern.finditer(text):
+            rows.append({"type": cue_type, "cue": match.group(0).strip(" \t:"), "span": [match.start(), match.end()]})
+    return _remove_overlaps(sorted(_dedupe(rows), key=lambda row: (row["span"][0], -(row["span"][1] - row["span"][0]), row["type"])))
+
+
+def _implicit_cues(text: str) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for cue_type, pattern in _IMPLICIT_CUES:
+        for match in pattern.finditer(text):
+            rows.append({"type": cue_type, "cue": match.group(0).strip(" \t:"), "span": [match.start(), match.end()]})
+    return sorted(_dedupe(rows), key=lambda row: (row["span"][0], row["span"][1], row["type"]))
+
+
+def _dedupe(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[tuple[str, str, int, int]] = set()
+    unique: list[dict[str, Any]] = []
+    for row in rows:
+        key = (row["type"], row["cue"].casefold(), row["span"][0], row["span"][1])
+        if key not in seen:
+            seen.add(key)
+            unique.append(row)
+    return unique
+
+
+def _remove_overlaps(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    kept: list[dict[str, Any]] = []
+    for row in rows:
+        start, end = row["span"]
+        if any(start < kept_row["span"][1] and end > kept_row["span"][0] for kept_row in kept):
+            continue
+        kept.append(row)
+    return sorted(kept, key=lambda row: (row["span"][0], row["span"][1], row["type"]))
+
+
+def _inline_text(value: object) -> str:
+    return " ".join(("" if value is None else str(value)).split())
