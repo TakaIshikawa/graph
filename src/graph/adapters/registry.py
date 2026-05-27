@@ -220,6 +220,14 @@ from graph.adapters.yaml_adapter import YamlAdapter
 from graph.adapters.yaml_frontmatter import YamlFrontmatterAdapter
 from graph.adapters.youtube_playlists_json import YouTubePlaylistsJsonAdapter
 from graph.adapters.zotero_library_csv import ZoteroLibraryCsvAdapter
+from graph.adapters.clickup_tasks_csv import ClickUpTasksCsvAdapter
+from graph.adapters.google_drive_files_csv import GoogleDriveFilesCsvAdapter
+from graph.adapters.instapaper_highlights_csv import InstapaperHighlightsCsvAdapter
+from graph.adapters.microsoft_edge_bookmarks_json import MicrosoftEdgeBookmarksJsonAdapter
+from graph.adapters.notion_database_csv import NotionDatabaseCsvAdapter
+from graph.adapters.pocket_casts_queue_csv import PocketCastsQueueCsvAdapter
+from graph.adapters.substack_posts_csv import SubstackPostsCsvAdapter
+from graph.adapters.zotero_notes_markdown import ZoteroNotesMarkdownAdapter
 from graph.adapters.zotero_rdf import ZoteroRdfAdapter
 
 _ADAPTERS: dict[str, type[SourceAdapter]] = {
@@ -441,6 +449,14 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "stackoverflow_answers_json": StackOverflowAnswersJsonAdapter,
     "stackoverflow_bookmarks_json": StackOverflowBookmarksJsonAdapter,
     "youtube_playlists_json": YouTubePlaylistsJsonAdapter,
+    "clickup_tasks_csv": ClickUpTasksCsvAdapter,
+    "google_drive_files_csv": GoogleDriveFilesCsvAdapter,
+    "instapaper_highlights_csv": InstapaperHighlightsCsvAdapter,
+    "microsoft_edge_bookmarks_json": MicrosoftEdgeBookmarksJsonAdapter,
+    "notion_database_csv": NotionDatabaseCsvAdapter,
+    "pocket_casts_queue_csv": PocketCastsQueueCsvAdapter,
+    "substack_posts_csv": SubstackPostsCsvAdapter,
+    "zotero_notes_markdown": ZoteroNotesMarkdownAdapter,
 }
 
 
