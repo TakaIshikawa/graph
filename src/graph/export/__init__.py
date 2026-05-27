@@ -96,6 +96,7 @@ from graph.export.relation_reciprocity_gaps_csv import export_relation_reciproci
 from graph.export.relation_reciprocity_csv import export_relation_reciprocity_csv
 from graph.export.relation_hub_endpoints_csv import export_relation_hub_endpoints_csv
 from graph.export.relation_polarity_conflict_csv import export_relation_polarity_conflict_csv
+from graph.export.relation_self_loop_csv import export_relation_self_loop_csv
 from graph.export.relation_tag_bridge_csv import export_relation_tag_bridge_csv
 from graph.export.relation_tag_pair_matrix_csv import export_relation_tag_pair_matrix_csv
 from graph.export.rdf_turtle import export_graph_rdf_turtle
@@ -194,8 +195,10 @@ from graph.export.unit_checklist_state_csv import export_units_to_checklist_stat
 from graph.export.unit_mermaid_diagram_inventory_csv import export_units_to_mermaid_diagram_inventory_csv
 from graph.export.unit_mermaid_node_label_csv import export_units_to_mermaid_node_label_csv
 from graph.export.unit_metadata_boolean_flags_csv import export_unit_metadata_boolean_flags_csv
+from graph.export.unit_metadata_url_inventory_csv import export_units_to_metadata_url_inventory_csv
 from graph.export.unit_metadata_url_scheme_csv import export_unit_metadata_url_scheme_csv
 from graph.export.unit_phone_number_hint_csv import export_units_to_phone_number_hint_csv
+from graph.export.unit_sensitive_token_hint_csv import export_units_to_sensitive_token_hint_csv
 from graph.export.unit_date_coverage_markdown import export_unit_date_coverage_markdown
 from graph.export.unit_datetime_precision_csv import export_unit_datetime_precision_csv
 from graph.export.unit_location_coverage_csv import export_unit_location_coverage_csv
@@ -419,6 +422,7 @@ __all__ = [
     "export_relation_provenance_matrix_csv",
     "export_relation_reciprocity_gaps_csv",
     "export_relation_reciprocity_csv",
+    "export_relation_self_loop_csv",
     "export_relation_hub_endpoints_csv",
     "export_relation_tag_bridge_csv",
     "export_relation_tag_pair_matrix_csv",
@@ -512,8 +516,10 @@ __all__ = [
     "export_units_to_markdown_list_structure_csv",
     "export_units_to_mermaid_diagram_inventory_csv",
     "export_unit_metadata_boolean_flags_csv",
+    "export_units_to_metadata_url_inventory_csv",
     "export_unit_metadata_url_scheme_csv",
     "export_units_to_phone_number_hint_csv",
+    "export_units_to_sensitive_token_hint_csv",
     "export_unit_content_language_hint_csv",
     "export_unit_content_length_csv",
     "export_unit_content_length_summary_csv",
