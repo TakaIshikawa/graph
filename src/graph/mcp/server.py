@@ -89,6 +89,7 @@ from graph.rag import (
 )
 from graph.rag.search import sort_search_results
 from graph.store.db import Store
+from graph.store.unit_content_structure_summary import summarize_unit_content_structure
 from graph.types.enums import ContentType, EdgeRelation, EdgeSource, SourceProject
 from graph.types.models import KnowledgeEdge, KnowledgeUnit, SyncState
 
@@ -581,6 +582,18 @@ def _metadata_completeness_payload(store: Store, arguments: dict) -> dict:
         content_type=arguments.get("content_type"),
         limit=limit,
     )
+
+
+def _unit_content_structure_payload(store: Store, arguments: dict) -> dict[str, object]:
+    limit = arguments.get("limit", 1000000000)
+    if limit is not None:
+        _validate_non_negative_integer(limit, name="limit")
+
+    units = store.get_all_units(limit=limit)
+    source_project = arguments.get("source_project")
+    if source_project:
+        units = [unit for unit in units if str(unit.source_project) == source_project]
+    return summarize_unit_content_structure(units)
 
 
 _MCP_TIMELINE_DATE_KEY = "_timeline_date"
@@ -4215,6 +4228,26 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="unit_content_structure_summary",
+            description=(
+                "Summarize markdown structure counts in knowledge unit content, grouped by source."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "source_project": {
+                        "type": "string",
+                        "description": "Optional source project filter",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "Maximum units to inspect",
+                    },
+                },
+            },
+        ),
+        Tool(
             name="unit_creation_rate",
             description=(
                 "Report unit creation rate over time as a time-series. "
@@ -5719,6 +5752,13 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             ]
 
             return [TextContent(type="text", text=json.dumps(distribution))]
+
+        elif name == "unit_content_structure_summary":
+            try:
+                payload = _unit_content_structure_payload(store, arguments)
+            except ValueError as exc:
+                payload = {"error": str(exc), "rows": [], "source_summaries": [], "total_units": 0}
+            return [TextContent(type="text", text=json.dumps(payload, default=str))]
 
         elif name == "unit_creation_rate":
             bucket = arguments.get("bucket", "monthly")

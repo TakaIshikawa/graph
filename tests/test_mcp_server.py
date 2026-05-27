@@ -5701,6 +5701,48 @@ def test_edge_relation_distribution_tool_handles_mixed_relations(tmp_path, monke
     assert payload[2]["count"] == 1
 
 
+def test_unit_content_structure_summary_tool_counts_markdown_by_source(tmp_path, monkeypatch):
+    db_path = tmp_path / "graph.db"
+    store = Store(str(db_path))
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.MAX,
+            source_id="markdown",
+            source_entity_type="insight",
+            title="Markdown",
+            content="# Heading\n- item\n[docs](https://example.com)\n| A | B |\n| - | - |\n```python\nprint('x')\n```",
+            content_type=ContentType.INSIGHT,
+        )
+    )
+    store.insert_unit(
+        KnowledgeUnit(
+            source_project=SourceProject.FORTY_TWO,
+            source_id="plain",
+            source_entity_type="knowledge_node",
+            title="Plain",
+            content="Plain content",
+            content_type=ContentType.FINDING,
+        )
+    )
+    store.close()
+
+    monkeypatch.setattr(mcp_server, "_get_store", lambda: Store(str(db_path)))
+
+    tools = asyncio.run(mcp_server.list_tools())
+    assert next(tool for tool in tools if tool.name == "unit_content_structure_summary")
+
+    response = asyncio.run(mcp_server.call_tool("unit_content_structure_summary", {}))
+    payload = json.loads(response[0].text)
+
+    assert [row["source"] for row in payload["rows"]] == ["forty_two", "max"]
+    max_row = payload["rows"][1]
+    assert max_row["heading_count"] == 1
+    assert max_row["list_count"] == 1
+    assert max_row["table_count"] == 2
+    assert max_row["code_block_count"] == 1
+    assert max_row["link_count"] == 1
+
+
 def test_unit_creation_rate_tool_returns_empty_for_empty_graph(tmp_path, monkeypatch):
     db_path = tmp_path / "graph.db"
     store = Store(str(db_path))
