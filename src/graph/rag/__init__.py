@@ -10,6 +10,7 @@ from graph.rag.citation_diversity import analyze_citation_diversity
 from graph.rag.citation_gap_detector import detect_citation_gaps
 from graph.rag.citation_trails import build_citation_trails
 from graph.rag.answer_actionability import audit_answer_actionability
+from graph.rag.answer_action_owner_audit import audit_answer_action_owners
 from graph.rag.answer_citation_anchor import audit_answer_citation_anchors
 from graph.rag.answer_citation_freshness import audit_answer_citation_freshness
 from graph.rag.answer_numeric_claims import audit_answer_numeric_claims
@@ -47,6 +48,7 @@ from graph.rag.result_explanations import explain_rag_results
 from graph.rag.result_evidence_method_mix import analyze_result_evidence_method_mix
 from graph.rag.result_provenance_completeness import analyze_result_provenance_completeness
 from graph.rag.result_format_coverage import analyze_result_format_coverage
+from graph.rag.result_format_mismatch_audit import audit_result_format_mismatch
 from graph.rag.source_agreement import score_source_agreement
 from graph.rag.source_attribution import summarize_source_attribution
 from graph.rag.snippets import highlight_result_snippets
@@ -96,12 +98,14 @@ __all__ = [
     "analyze_source_evidence_coverage",
     "audit_source_diversity",
     "audit_answer_actionability",
+    "audit_answer_action_owners",
     "audit_answer_citation_anchors",
     "audit_answer_citation_freshness",
     "audit_answer_counterargument_balance",
     "audit_answer_hedging",
     "audit_answer_numeric_claims",
     "audit_answer_source_attribution_integrity",
+    "audit_result_format_mismatch",
     "allocate_evidence_budget",
     "allocate_context_token_budget",
     "classify_result_actionability",
