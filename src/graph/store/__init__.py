@@ -17,6 +17,7 @@ from graph.store.source_url_domain_summary import summarize_source_url_domains
 from graph.store.unit_attachment_extension_summary import summarize_unit_attachment_extensions
 from graph.store.unit_blockquote_usage_summary import summarize_unit_blockquote_usage
 from graph.store.unit_callout_usage_summary import summarize_unit_callout_usage
+from graph.store.unit_code_fence_filename_summary import summarize_unit_code_fence_filenames
 from graph.store.unit_code_fence_info_attribute_summary import summarize_unit_code_fence_info_attributes
 from graph.store.unit_content_encoding_issue_summary import summarize_unit_content_encoding_issues
 from graph.store.unit_content_length_bucket_summary import summarize_unit_content_length_buckets
@@ -53,9 +54,11 @@ from graph.store.unit_markdown_escape_summary import summarize_unit_markdown_esc
 from graph.store.unit_markdown_hard_break_summary import summarize_unit_markdown_hard_breaks
 from graph.store.unit_markdown_heading_anchor_summary import summarize_unit_markdown_heading_anchors
 from graph.store.unit_markdown_heading_duplicate_summary import summarize_unit_markdown_heading_duplicates
+from graph.store.unit_markdown_heading_outline_summary import summarize_unit_markdown_heading_outlines
 from graph.store.unit_markdown_footnote_backref_summary import summarize_unit_markdown_footnote_backrefs
 from graph.store.unit_markdown_highlight_summary import summarize_unit_markdown_highlights
 from graph.store.unit_markdown_image_alt_text_summary import summarize_unit_markdown_image_alt_text
+from graph.store.unit_markdown_link_fragment_summary import summarize_unit_markdown_link_fragments
 from graph.store.unit_markdown_link_scheme_summary import summarize_unit_markdown_link_schemes
 from graph.store.unit_markdown_link_title_summary import summarize_unit_markdown_link_titles
 from graph.store.unit_markdown_reference_usage_summary import summarize_unit_markdown_reference_usage
@@ -67,6 +70,7 @@ from graph.store.unit_markdown_task_list_summary import summarize_unit_markdown_
 from graph.store.unit_markdown_strikethrough_summary import summarize_unit_markdown_strikethrough
 from graph.store.unit_markdown_setext_heading_summary import summarize_unit_markdown_setext_headings
 from graph.store.unit_markdown_task_priority_summary import summarize_unit_markdown_task_priorities
+from graph.store.unit_markdown_unicode_emoji_summary import summarize_unit_markdown_unicode_emoji
 from graph.store.unit_markdown_math_summary import summarize_unit_markdown_math
 from graph.store.unit_markdown_admonition_summary import summarize_unit_markdown_admonitions
 from graph.store.unit_markdown_embed_summary import summarize_unit_markdown_embeds
@@ -91,6 +95,7 @@ from graph.store.unit_pdf_reference_summary import summarize_unit_pdf_references
 from graph.store.unit_tag_cardinality_summary import summarize_unit_tag_cardinality
 from graph.store.unit_tag_hygiene_summary import summarize_unit_tag_hygiene
 from graph.store.unit_tag_prefix_summary import summarize_unit_tag_prefixes
+from graph.store.unit_task_inventory_summary import summarize_unit_task_inventory
 from graph.store.unit_temporal_range_summary import summarize_unit_temporal_ranges
 from graph.store.unit_timestamp_consistency_summary import summarize_unit_timestamp_consistency
 from graph.store.unit_timeline_gap_summary import summarize_unit_timeline_gaps
@@ -122,6 +127,7 @@ __all__ = [
     "summarize_unit_attachment_extensions",
     "summarize_unit_blockquote_usage",
     "summarize_unit_callout_usage",
+    "summarize_unit_code_fence_filenames",
     "summarize_unit_code_fence_info_attributes",
     "summarize_unit_content_encoding_issues",
     "summarize_unit_content_length_buckets",
@@ -160,9 +166,11 @@ __all__ = [
     "summarize_unit_markdown_hard_breaks",
     "summarize_unit_markdown_heading_anchors",
     "summarize_unit_markdown_heading_duplicates",
+    "summarize_unit_markdown_heading_outlines",
     "summarize_unit_markdown_footnote_backrefs",
     "summarize_unit_markdown_highlights",
     "summarize_unit_markdown_image_alt_text",
+    "summarize_unit_markdown_link_fragments",
     "summarize_unit_markdown_link_schemes",
     "summarize_unit_markdown_link_titles",
     "summarize_unit_markdown_reference_usage",
@@ -174,6 +182,7 @@ __all__ = [
     "summarize_unit_markdown_strikethrough",
     "summarize_unit_markdown_setext_headings",
     "summarize_unit_markdown_task_priorities",
+    "summarize_unit_markdown_unicode_emoji",
     "summarize_unit_markdown_comment_directives",
     "summarize_unit_markdown_definition_lists",
     "summarize_unit_notebook_cell_markers",
@@ -196,6 +205,7 @@ __all__ = [
     "summarize_unit_tag_cardinality",
     "summarize_unit_tag_hygiene",
     "summarize_unit_tag_prefixes",
+    "summarize_unit_task_inventory",
     "summarize_unit_temporal_ranges",
     "summarize_unit_timestamp_consistency",
     "summarize_unit_timeline_gaps",
