@@ -14,6 +14,7 @@ from graph.store.relation_type_frequency_summary import summarize_relation_type_
 from graph.store.relation_duplicate_edge_summary import summarize_relation_duplicate_edges
 from graph.store.relation_self_loop_summary import summarize_relation_self_loops
 from graph.store.source_ingest_frequency_summary import summarize_source_ingest_frequency
+from graph.store.source_authentication_hint_summary import summarize_source_authentication_hints
 from graph.store.source_metadata_completeness_summary import summarize_source_metadata_completeness
 from graph.store.source_error_message_summary import summarize_source_error_messages
 from graph.store.source_unit_count_summary import summarize_source_unit_counts
@@ -35,6 +36,7 @@ from graph.store.unit_duplicate_external_id_summary import summarize_unit_duplic
 from graph.store.unit_empty_content_summary import summarize_unit_empty_content
 from graph.store.unit_emoji_shortcode_summary import summarize_unit_emoji_shortcodes
 from graph.store.unit_frontmatter_boolean_field_summary import summarize_unit_frontmatter_boolean_fields
+from graph.store.unit_frontmatter_numeric_field_summary import summarize_unit_frontmatter_numeric_fields
 from graph.store.unit_frontmatter_empty_array_summary import summarize_unit_frontmatter_empty_arrays
 from graph.store.unit_frontmatter_tag_format_summary import summarize_unit_frontmatter_tag_formats
 from graph.store.unit_frontmatter_null_summary import summarize_unit_frontmatter_nulls
@@ -62,6 +64,9 @@ from graph.store.unit_markdown_heading_duplicate_summary import summarize_unit_m
 from graph.store.unit_markdown_heading_outline_summary import summarize_unit_markdown_heading_outlines
 from graph.store.unit_markdown_footnote_backref_summary import summarize_unit_markdown_footnote_backrefs
 from graph.store.unit_markdown_highlight_summary import summarize_unit_markdown_highlights
+from graph.store.unit_markdown_details_summary import summarize_unit_markdown_details
+from graph.store.unit_markdown_kbd_summary import summarize_unit_markdown_kbd_usage
+from graph.store.unit_markdown_subscript_summary import summarize_unit_markdown_subscripts
 from graph.store.unit_markdown_image_alt_text_summary import summarize_unit_markdown_image_alt_text
 from graph.store.unit_markdown_link_fragment_summary import summarize_unit_markdown_link_fragments
 from graph.store.unit_markdown_link_scheme_summary import summarize_unit_markdown_link_schemes
@@ -129,6 +134,7 @@ __all__ = [
     "summarize_relation_duplicate_edges",
     "summarize_relation_self_loops",
     "summarize_source_ingest_frequency",
+    "summarize_source_authentication_hints",
     "summarize_source_error_messages",
     "summarize_source_unit_counts",
     "summarize_source_url_domains",
@@ -149,6 +155,7 @@ __all__ = [
     "summarize_unit_empty_content",
     "summarize_unit_emoji_shortcodes",
     "summarize_unit_frontmatter_boolean_fields",
+    "summarize_unit_frontmatter_numeric_fields",
     "summarize_unit_frontmatter_empty_arrays",
     "summarize_unit_frontmatter_tag_formats",
     "summarize_unit_frontmatter_nulls",
@@ -178,6 +185,9 @@ __all__ = [
     "summarize_unit_markdown_heading_outlines",
     "summarize_unit_markdown_footnote_backrefs",
     "summarize_unit_markdown_highlights",
+    "summarize_unit_markdown_details",
+    "summarize_unit_markdown_kbd_usage",
+    "summarize_unit_markdown_subscripts",
     "summarize_unit_markdown_image_alt_text",
     "summarize_unit_markdown_link_fragments",
     "summarize_unit_markdown_link_schemes",
