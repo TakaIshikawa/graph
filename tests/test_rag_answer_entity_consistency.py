@@ -15,7 +15,9 @@ def test_answer_entity_consistency_reports_supported_and_unsupported_entities():
     )
 
     assert report["answer_entities"] == ["Ada Lovelace", "Charles Babbage", "Example Labs"]
+    assert report["evidence_entities"] == ["Ada Lovelace", "Charles Babbage", "Example Labs"]
     assert report["unsupported_entities"] == []
+    assert report["support_ratio"] == 1.0
     assert report["supported_entities"][0]["entity"] == "Ada Lovelace"
     assert report["supported_entities"][0]["supporting_result_ids"] == ["r1"]
     assert {row["result_id"]: row["supported_entity_count"] for row in report["per_result_support"]} == {"r1": 2, "r2": 1}
@@ -30,4 +32,5 @@ def test_answer_entity_consistency_warns_for_empty_inputs_and_absent_entity():
         {"entity": "Unknown Institute", "reason": "entity_absent_from_evidence"},
     ]
     assert report["warnings"] == ["no_evidence"]
+    assert report["support_ratio"] == 0.0
     assert audit_answer_entity_consistency("", [])["warnings"] == ["empty_answer", "no_evidence"]

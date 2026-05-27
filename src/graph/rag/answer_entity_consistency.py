@@ -52,6 +52,10 @@ def audit_answer_entity_consistency(answer: str, results: Iterable[Any]) -> dict
         per_result.append({"result_id": rid, "supported_entity_count": len(supported), "supported_entities": supported})
 
     supported_entities = sorted(evidence_by_entity.values(), key=lambda row: _sort_key(row["entity"]))
+    evidence_entities = sorted(
+        {entity for result in result_list for entity in _display_entities_from_result(result)},
+        key=_sort_key,
+    )
     unsupported = [
         {"entity": entity, "reason": "entity_absent_from_evidence"}
         for entity in sorted(answer_entities, key=_sort_key)
@@ -65,8 +69,10 @@ def audit_answer_entity_consistency(answer: str, results: Iterable[Any]) -> dict
 
     return {
         "answer_entities": sorted(answer_entities, key=_sort_key),
+        "evidence_entities": evidence_entities,
         "supported_entities": supported_entities,
         "unsupported_entities": unsupported,
+        "support_ratio": round(len(supported_entities) / len(answer_entities), 3) if answer_entities else 1.0,
         "per_result_support": per_result,
         "warnings": warnings,
     }
@@ -82,6 +88,19 @@ def _entities_from_result(result: Any) -> set[str]:
         for text in iter_strings(value(result, key)):
             entities.add(_norm(text))
             entities.update(_norm(entity) for entity in _entities_from_text(text))
+    return entities
+
+
+def _display_entities_from_result(result: Any) -> set[str]:
+    entities: set[str] = set()
+    for key in _TEXT_KEYS:
+        text = string(value(result, key))
+        if text:
+            entities.update(_entities_from_text(text))
+    for key in _ENTITY_KEYS:
+        for text in iter_strings(value(result, key)):
+            entities.add(text)
+            entities.update(_entities_from_text(text))
     return entities
 
 
