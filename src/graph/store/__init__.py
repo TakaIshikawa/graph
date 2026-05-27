@@ -1,9 +1,11 @@
 from graph.store.backup import export_store_backup
+from graph.store.collection_duplicate_title_summary import summarize_collection_duplicate_titles
 from graph.store.collection_metadata_completeness_summary import summarize_collection_metadata_completeness
 from graph.store.collection_metadata_drift_summary import summarize_collection_metadata_drift
 from graph.store.collection_empty_title_summary import summarize_collection_empty_titles
 from graph.store.collection_member_source_mix_summary import summarize_collection_member_source_mix
 from graph.store.collection_orphan_summary import summarize_collection_orphans
+from graph.store.collection_stale_member_summary import summarize_collection_stale_members
 from graph.store.collection_tag_overlap_summary import summarize_collection_tag_overlap
 from graph.store.relation_cycle_summary import summarize_relation_cycles
 from graph.store.relation_metadata_key_frequency_summary import summarize_relation_metadata_key_frequency
@@ -42,6 +44,7 @@ from graph.store.unit_frontmatter_array_field_summary import summarize_unit_fron
 from graph.store.unit_frontmatter_multiline_field_summary import summarize_unit_frontmatter_multiline_fields
 from graph.store.unit_frontmatter_required_key_summary import summarize_unit_frontmatter_required_keys
 from graph.store.unit_frontmatter_scalar_field_summary import summarize_unit_frontmatter_scalar_fields
+from graph.store.unit_frontmatter_type_summary import summarize_unit_frontmatter_types
 from graph.store.unit_heading_hierarchy_summary import summarize_unit_heading_hierarchy
 from graph.store.unit_html_heading_anchor_summary import summarize_unit_html_heading_anchors
 from graph.store.unit_html_entity_summary import summarize_unit_html_entities
@@ -103,6 +106,7 @@ from graph.store.unit_timestamp_consistency_summary import summarize_unit_timest
 from graph.store.unit_timeline_gap_summary import summarize_unit_timeline_gaps
 from graph.store.unit_source_scheme_summary import summarize_unit_source_schemes
 from graph.store.unit_language_coverage_summary import summarize_unit_language_coverage
+from graph.store.unit_reading_time_bucket_summary import summarize_unit_reading_time_buckets
 from graph.store.unit_word_count_distribution_summary import summarize_unit_word_count_distribution
 from graph.store.unit_yaml_nested_depth_summary import summarize_unit_yaml_nested_depth
 from graph.store.unit_video_embed_summary import summarize_unit_video_embeds
@@ -111,11 +115,13 @@ from graph.store.unit_internal_anchor_target_summary import summarize_unit_inter
 
 __all__ = [
     "export_store_backup",
+    "summarize_collection_duplicate_titles",
     "summarize_collection_metadata_completeness",
     "summarize_collection_metadata_drift",
     "summarize_collection_empty_titles",
     "summarize_collection_member_source_mix",
     "summarize_collection_orphans",
+    "summarize_collection_stale_members",
     "summarize_collection_tag_overlap",
     "summarize_relation_cycles",
     "summarize_relation_metadata_key_frequency",
@@ -152,6 +158,7 @@ __all__ = [
     "summarize_unit_frontmatter_multiline_fields",
     "summarize_unit_frontmatter_required_keys",
     "summarize_unit_frontmatter_scalar_fields",
+    "summarize_unit_frontmatter_types",
     "summarize_unit_heading_hierarchy",
     "summarize_unit_html_heading_anchors",
     "summarize_unit_html_entities",
@@ -213,6 +220,7 @@ __all__ = [
     "summarize_unit_timeline_gaps",
     "summarize_unit_source_schemes",
     "summarize_unit_language_coverage",
+    "summarize_unit_reading_time_buckets",
     "summarize_unit_word_count_distribution",
     "summarize_unit_yaml_nested_depth",
     "summarize_unit_video_embeds",
