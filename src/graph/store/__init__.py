@@ -19,6 +19,12 @@ from graph.store.unit_html_heading_anchor_summary import summarize_unit_html_hea
 from graph.store.unit_inline_code_usage_summary import summarize_unit_inline_code_usage
 from graph.store.unit_local_file_reference_summary import summarize_unit_local_file_references
 from graph.store.unit_markdown_abbreviation_summary import summarize_unit_markdown_abbreviations
+from graph.store.unit_markdown_custom_id_summary import summarize_unit_markdown_custom_ids
+from graph.store.unit_markdown_escape_summary import summarize_unit_markdown_escapes
+from graph.store.unit_markdown_hard_break_summary import summarize_unit_markdown_hard_breaks
+from graph.store.unit_markdown_highlight_summary import summarize_unit_markdown_highlights
+from graph.store.unit_markdown_horizontal_rule_summary import summarize_unit_markdown_horizontal_rules
+from graph.store.unit_markdown_strikethrough_summary import summarize_unit_markdown_strikethrough
 from graph.store.unit_markdown_task_priority_summary import summarize_unit_markdown_task_priorities
 from graph.store.unit_metadata_secret_hint_summary import summarize_unit_metadata_secret_hints
 from graph.store.unit_tag_cardinality_summary import summarize_unit_tag_cardinality
@@ -48,6 +54,12 @@ __all__ = [
     "summarize_unit_inline_code_usage",
     "summarize_unit_local_file_references",
     "summarize_unit_markdown_abbreviations",
+    "summarize_unit_markdown_custom_ids",
+    "summarize_unit_markdown_escapes",
+    "summarize_unit_markdown_hard_breaks",
+    "summarize_unit_markdown_highlights",
+    "summarize_unit_markdown_horizontal_rules",
+    "summarize_unit_markdown_strikethrough",
     "summarize_unit_markdown_task_priorities",
     "summarize_unit_metadata_secret_hints",
     "summarize_unit_tag_cardinality",
