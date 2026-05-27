@@ -3,6 +3,7 @@
 from graph.rag.cooccurrence import build_keyphrase_cooccurrence
 from graph.rag.contradictions import detect_contradiction_cues
 from graph.rag.context_gaps import detect_context_gaps
+from graph.rag.context_coverage_map import build_context_coverage_map
 from graph.rag.coverage import build_result_coverage_checklist
 from graph.rag.citation_coverage import analyze_citation_coverage
 from graph.rag.citation_diversity import analyze_citation_diversity
@@ -116,6 +117,7 @@ __all__ = [
     "build_citation_trails",
     "build_citation_target_plan",
     "build_claim_support_matrix",
+    "build_context_coverage_map",
     "classify_query_intent",
     "classify_evidence_claim_types",
     "classify_evidence_peer_review_status",
