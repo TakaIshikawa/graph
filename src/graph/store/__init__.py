@@ -2,6 +2,7 @@ from graph.store.backup import export_store_backup
 from graph.store.collection_metadata_drift_summary import summarize_collection_metadata_drift
 from graph.store.collection_tag_overlap_summary import summarize_collection_tag_overlap
 from graph.store.relation_metadata_key_frequency_summary import summarize_relation_metadata_key_frequency
+from graph.store.relation_self_loop_summary import summarize_relation_self_loops
 from graph.store.source_ingest_frequency_summary import summarize_source_ingest_frequency
 from graph.store.source_error_message_summary import summarize_source_error_messages
 from graph.store.source_url_domain_summary import summarize_source_url_domains
@@ -56,6 +57,7 @@ __all__ = [
     "summarize_collection_metadata_drift",
     "summarize_collection_tag_overlap",
     "summarize_relation_metadata_key_frequency",
+    "summarize_relation_self_loops",
     "summarize_source_ingest_frequency",
     "summarize_source_error_messages",
     "summarize_source_url_domains",
