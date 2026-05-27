@@ -3,6 +3,7 @@ from graph.store.collection_metadata_completeness_summary import summarize_colle
 from graph.store.collection_metadata_drift_summary import summarize_collection_metadata_drift
 from graph.store.collection_tag_overlap_summary import summarize_collection_tag_overlap
 from graph.store.relation_metadata_key_frequency_summary import summarize_relation_metadata_key_frequency
+from graph.store.relation_duplicate_edge_summary import summarize_relation_duplicate_edges
 from graph.store.relation_self_loop_summary import summarize_relation_self_loops
 from graph.store.source_ingest_frequency_summary import summarize_source_ingest_frequency
 from graph.store.source_error_message_summary import summarize_source_error_messages
@@ -19,6 +20,7 @@ from graph.store.unit_duplicate_title_summary import summarize_unit_duplicate_ti
 from graph.store.unit_duplicate_external_id_summary import summarize_unit_duplicate_external_ids
 from graph.store.unit_empty_content_summary import summarize_unit_empty_content
 from graph.store.unit_emoji_shortcode_summary import summarize_unit_emoji_shortcodes
+from graph.store.unit_frontmatter_boolean_field_summary import summarize_unit_frontmatter_boolean_fields
 from graph.store.unit_external_url_domain_summary import summarize_unit_external_url_domains
 from graph.store.unit_footnote_orphan_summary import summarize_unit_footnote_orphans
 from graph.store.unit_frontmatter_array_field_summary import summarize_unit_frontmatter_array_fields
@@ -35,7 +37,10 @@ from graph.store.unit_markdown_autolink_summary import summarize_unit_markdown_a
 from graph.store.unit_markdown_custom_id_summary import summarize_unit_markdown_custom_ids
 from graph.store.unit_markdown_escape_summary import summarize_unit_markdown_escapes
 from graph.store.unit_markdown_hard_break_summary import summarize_unit_markdown_hard_breaks
+from graph.store.unit_markdown_heading_duplicate_summary import summarize_unit_markdown_heading_duplicates
 from graph.store.unit_markdown_highlight_summary import summarize_unit_markdown_highlights
+from graph.store.unit_markdown_image_alt_text_summary import summarize_unit_markdown_image_alt_text
+from graph.store.unit_markdown_link_scheme_summary import summarize_unit_markdown_link_schemes
 from graph.store.unit_markdown_horizontal_rule_summary import summarize_unit_markdown_horizontal_rules
 from graph.store.unit_markdown_table_alignment_summary import summarize_unit_markdown_table_alignments
 from graph.store.unit_markdown_strikethrough_summary import summarize_unit_markdown_strikethrough
@@ -52,6 +57,7 @@ from graph.store.unit_metadata_secret_hint_summary import summarize_unit_metadat
 from graph.store.unit_metadata_cardinality_summary import summarize_unit_metadata_cardinality
 from graph.store.unit_notebook_cell_marker_summary import summarize_unit_notebook_cell_markers
 from graph.store.unit_pandoc_citation_key_summary import summarize_unit_pandoc_citation_keys
+from graph.store.unit_pdf_reference_summary import summarize_unit_pdf_references
 from graph.store.unit_tag_cardinality_summary import summarize_unit_tag_cardinality
 from graph.store.unit_tag_hygiene_summary import summarize_unit_tag_hygiene
 from graph.store.unit_tag_prefix_summary import summarize_unit_tag_prefixes
@@ -62,6 +68,9 @@ from graph.store.unit_source_scheme_summary import summarize_unit_source_schemes
 from graph.store.unit_language_coverage_summary import summarize_unit_language_coverage
 from graph.store.unit_word_count_distribution_summary import summarize_unit_word_count_distribution
 from graph.store.unit_yaml_nested_depth_summary import summarize_unit_yaml_nested_depth
+from graph.store.unit_video_embed_summary import summarize_unit_video_embeds
+from graph.store.unit_yaml_block_scalar_summary import summarize_unit_yaml_block_scalars
+from graph.store.unit_internal_anchor_target_summary import summarize_unit_internal_anchor_targets
 
 __all__ = [
     "export_store_backup",
@@ -69,6 +78,7 @@ __all__ = [
     "summarize_collection_metadata_drift",
     "summarize_collection_tag_overlap",
     "summarize_relation_metadata_key_frequency",
+    "summarize_relation_duplicate_edges",
     "summarize_relation_self_loops",
     "summarize_source_ingest_frequency",
     "summarize_source_error_messages",
@@ -85,6 +95,7 @@ __all__ = [
     "summarize_unit_duplicate_external_ids",
     "summarize_unit_empty_content",
     "summarize_unit_emoji_shortcodes",
+    "summarize_unit_frontmatter_boolean_fields",
     "summarize_unit_external_url_domains",
     "summarize_unit_footnote_orphans",
     "summarize_unit_frontmatter_array_fields",
@@ -101,7 +112,10 @@ __all__ = [
     "summarize_unit_markdown_custom_ids",
     "summarize_unit_markdown_escapes",
     "summarize_unit_markdown_hard_breaks",
+    "summarize_unit_markdown_heading_duplicates",
     "summarize_unit_markdown_highlights",
+    "summarize_unit_markdown_image_alt_text",
+    "summarize_unit_markdown_link_schemes",
     "summarize_unit_markdown_horizontal_rules",
     "summarize_unit_markdown_table_alignments",
     "summarize_unit_markdown_strikethrough",
@@ -110,6 +124,7 @@ __all__ = [
     "summarize_unit_markdown_definition_lists",
     "summarize_unit_notebook_cell_markers",
     "summarize_unit_pandoc_citation_keys",
+    "summarize_unit_pdf_references",
     "summarize_unit_yaml_alias_anchors",
     "summarize_unit_math_notation",
     "summarize_unit_doi_hints",
@@ -128,4 +143,7 @@ __all__ = [
     "summarize_unit_language_coverage",
     "summarize_unit_word_count_distribution",
     "summarize_unit_yaml_nested_depth",
+    "summarize_unit_video_embeds",
+    "summarize_unit_yaml_block_scalars",
+    "summarize_unit_internal_anchor_targets",
 ]
