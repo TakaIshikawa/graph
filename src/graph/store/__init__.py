@@ -3,6 +3,7 @@ from graph.store.collection_metadata_drift_summary import summarize_collection_m
 from graph.store.collection_tag_overlap_summary import summarize_collection_tag_overlap
 from graph.store.relation_metadata_key_frequency_summary import summarize_relation_metadata_key_frequency
 from graph.store.source_ingest_frequency_summary import summarize_source_ingest_frequency
+from graph.store.source_error_message_summary import summarize_source_error_messages
 from graph.store.source_url_domain_summary import summarize_source_url_domains
 from graph.store.unit_attachment_extension_summary import summarize_unit_attachment_extensions
 from graph.store.unit_blockquote_usage_summary import summarize_unit_blockquote_usage
@@ -10,6 +11,7 @@ from graph.store.unit_callout_usage_summary import summarize_unit_callout_usage
 from graph.store.unit_code_fence_info_attribute_summary import summarize_unit_code_fence_info_attributes
 from graph.store.unit_content_encoding_issue_summary import summarize_unit_content_encoding_issues
 from graph.store.unit_duplicate_content_hash_summary import summarize_unit_duplicate_content_hashes
+from graph.store.unit_duplicate_external_id_summary import summarize_unit_duplicate_external_ids
 from graph.store.unit_empty_content_summary import summarize_unit_empty_content
 from graph.store.unit_external_url_domain_summary import summarize_unit_external_url_domains
 from graph.store.unit_footnote_orphan_summary import summarize_unit_footnote_orphans
@@ -46,6 +48,7 @@ __all__ = [
     "summarize_collection_tag_overlap",
     "summarize_relation_metadata_key_frequency",
     "summarize_source_ingest_frequency",
+    "summarize_source_error_messages",
     "summarize_source_url_domains",
     "summarize_unit_attachment_extensions",
     "summarize_unit_blockquote_usage",
@@ -53,6 +56,7 @@ __all__ = [
     "summarize_unit_code_fence_info_attributes",
     "summarize_unit_content_encoding_issues",
     "summarize_unit_duplicate_content_hashes",
+    "summarize_unit_duplicate_external_ids",
     "summarize_unit_empty_content",
     "summarize_unit_external_url_domains",
     "summarize_unit_footnote_orphans",
