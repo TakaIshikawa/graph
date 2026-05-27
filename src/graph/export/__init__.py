@@ -172,6 +172,15 @@ from graph.export.timelinejs import export_units_to_timelinejs
 from graph.export.tiddlywiki_json import export_units_to_tiddlywiki_json
 from graph.export.unit_csv import export_units_to_csv
 from graph.export.unit_checkbox_task_status_csv import export_units_to_checkbox_task_status_csv
+from graph.export.unit_heading_duplicate_csv import export_units_to_heading_duplicate_csv
+from graph.export.unit_html_link_target_csv import export_units_to_html_link_target_csv
+from graph.export.unit_markdown_admonition_inventory_csv import export_units_to_markdown_admonition_inventory_csv
+from graph.export.unit_markdown_emphasis_inventory_csv import export_units_to_markdown_emphasis_inventory_csv
+from graph.export.unit_markdown_link_context_csv import export_units_to_markdown_link_context_csv
+from graph.export.unit_mermaid_diagram_inventory_csv import export_units_to_mermaid_diagram_inventory_csv
+from graph.export.unit_metadata_boolean_flags_csv import export_unit_metadata_boolean_flags_csv
+from graph.export.unit_metadata_url_scheme_csv import export_unit_metadata_url_scheme_csv
+from graph.export.unit_phone_number_hint_csv import export_units_to_phone_number_hint_csv
 from graph.export.unit_date_coverage_markdown import export_unit_date_coverage_markdown
 from graph.export.unit_datetime_precision_csv import export_unit_datetime_precision_csv
 from graph.export.unit_location_coverage_csv import export_unit_location_coverage_csv
@@ -476,6 +485,15 @@ __all__ = [
     "export_unit_citation_readiness_csv",
     "export_unit_citation_style_inventory_csv",
     "export_units_to_callout_inventory_csv",
+    "export_units_to_heading_duplicate_csv",
+    "export_units_to_html_link_target_csv",
+    "export_units_to_markdown_admonition_inventory_csv",
+    "export_units_to_markdown_emphasis_inventory_csv",
+    "export_units_to_markdown_link_context_csv",
+    "export_units_to_mermaid_diagram_inventory_csv",
+    "export_unit_metadata_boolean_flags_csv",
+    "export_unit_metadata_url_scheme_csv",
+    "export_units_to_phone_number_hint_csv",
     "export_unit_content_language_hint_csv",
     "export_unit_content_length_csv",
     "export_unit_content_length_summary_csv",
