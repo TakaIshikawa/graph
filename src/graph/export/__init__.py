@@ -190,6 +190,7 @@ from graph.export.unit_citation_inventory_csv import export_unit_citation_invent
 from graph.export.unit_citation_readiness_csv import export_unit_citation_readiness_csv
 from graph.export.unit_citation_style_inventory_csv import export_unit_citation_style_inventory_csv
 from graph.export.unit_contact_inventory_csv import export_unit_contact_inventory_csv
+from graph.export.unit_callout_inventory_csv import export_units_to_callout_inventory_csv
 from graph.export.unit_code_block_inventory_csv import export_units_to_code_block_inventory_csv
 from graph.export.unit_content_encoding_hint_csv import export_units_to_content_encoding_hint_csv
 from graph.export.unit_content_language_hint_csv import export_unit_content_language_hint_csv
@@ -201,10 +202,17 @@ from graph.export.unit_currency_exposure_csv import export_unit_currency_exposur
 from graph.export.unit_date_range_csv import export_unit_date_range_csv
 from graph.export.unit_duplicate_title_csv import export_unit_duplicate_title_csv
 from graph.export.unit_doi_inventory_csv import export_unit_doi_inventory_csv
+from graph.export.unit_definition_list_inventory_csv import export_units_to_definition_list_inventory_csv
+from graph.export.unit_embed_reference_inventory_csv import export_units_to_embed_reference_inventory_csv
 from graph.export.unit_identifier_quality_csv import export_units_to_identifier_quality_csv
 from graph.export.unit_ingest_latency_csv import export_units_to_ingest_latency_csv
+from graph.export.unit_footnote_inventory_csv import export_units_to_footnote_inventory_csv
+from graph.export.unit_html_element_inventory_csv import export_units_to_html_element_inventory_csv
+from graph.export.unit_image_reference_inventory_csv import export_units_to_image_reference_inventory_csv
+from graph.export.unit_inline_code_inventory_csv import export_units_to_inline_code_inventory_csv
 from graph.export.unit_internal_wikilink_inventory_csv import export_units_to_internal_wikilink_inventory_csv
 from graph.export.unit_language_confidence_csv import export_units_to_language_confidence_csv
+from graph.export.unit_math_inventory_csv import export_units_to_math_inventory_csv
 from graph.export.unit_markdown_heading_outline_csv import export_units_to_markdown_heading_outline_csv
 from graph.export.unit_metadata_key_coverage_csv import export_units_to_metadata_key_coverage_csv
 from graph.export.unit_outbound_reference_csv import export_units_to_outbound_reference_csv
@@ -240,6 +248,7 @@ from graph.export.unit_reading_time_csv import export_unit_reading_time_csv
 from graph.export.unit_reading_time_estimate_csv import export_units_to_reading_time_estimate_csv
 from graph.export.unit_recurrence_candidates_csv import export_unit_recurrence_candidates_csv
 from graph.export.unit_quote_inventory_csv import export_units_to_quote_inventory_csv
+from graph.export.unit_section_length_csv import export_units_to_section_length_csv
 from graph.export.unit_review_readiness_csv import export_unit_review_readiness_csv
 from graph.export.unit_review_priority_csv import export_unit_review_priority_csv
 from graph.export.unit_search_snippet_csv import export_unit_search_snippet_csv
@@ -457,6 +466,7 @@ __all__ = [
     "export_unit_citation_inventory_csv",
     "export_unit_citation_readiness_csv",
     "export_unit_citation_style_inventory_csv",
+    "export_units_to_callout_inventory_csv",
     "export_unit_content_language_hint_csv",
     "export_unit_content_length_csv",
     "export_unit_content_length_summary_csv",
@@ -466,11 +476,18 @@ __all__ = [
     "export_unit_date_coverage_markdown",
     "export_unit_date_range_csv",
     "export_unit_datetime_precision_csv",
+    "export_units_to_definition_list_inventory_csv",
+    "export_units_to_embed_reference_inventory_csv",
     "export_unit_location_coverage_csv",
     "export_unit_geospatial_cluster_csv",
+    "export_units_to_footnote_inventory_csv",
+    "export_units_to_html_element_inventory_csv",
+    "export_units_to_image_reference_inventory_csv",
     "export_units_to_identifier_quality_csv",
+    "export_units_to_inline_code_inventory_csv",
     "export_unit_duplicate_title_csv",
     "export_units_to_language_confidence_csv",
+    "export_units_to_math_inventory_csv",
     "export_units_to_markdown_heading_outline_csv",
     "export_units_to_outbound_reference_csv",
     "export_units_to_timestamp_completeness_csv",
@@ -491,6 +508,7 @@ __all__ = [
     "export_unit_reading_time_csv",
     "export_units_to_reading_time_estimate_csv",
     "export_unit_recurrence_candidates_csv",
+    "export_units_to_section_length_csv",
     "export_unit_review_readiness_csv",
     "export_unit_sensitive_metadata_csv",
     "export_unit_schema_inventory",
