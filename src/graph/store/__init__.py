@@ -18,11 +18,13 @@ from graph.store.unit_duplicate_content_hash_summary import summarize_unit_dupli
 from graph.store.unit_duplicate_title_summary import summarize_unit_duplicate_titles
 from graph.store.unit_duplicate_external_id_summary import summarize_unit_duplicate_external_ids
 from graph.store.unit_empty_content_summary import summarize_unit_empty_content
+from graph.store.unit_emoji_shortcode_summary import summarize_unit_emoji_shortcodes
 from graph.store.unit_external_url_domain_summary import summarize_unit_external_url_domains
 from graph.store.unit_footnote_orphan_summary import summarize_unit_footnote_orphans
 from graph.store.unit_frontmatter_array_field_summary import summarize_unit_frontmatter_array_fields
 from graph.store.unit_frontmatter_multiline_field_summary import summarize_unit_frontmatter_multiline_fields
 from graph.store.unit_frontmatter_required_key_summary import summarize_unit_frontmatter_required_keys
+from graph.store.unit_frontmatter_scalar_field_summary import summarize_unit_frontmatter_scalar_fields
 from graph.store.unit_heading_hierarchy_summary import summarize_unit_heading_hierarchy
 from graph.store.unit_html_heading_anchor_summary import summarize_unit_html_heading_anchors
 from graph.store.unit_html_tag_usage_summary import summarize_unit_html_tag_usage
@@ -82,11 +84,13 @@ __all__ = [
     "summarize_unit_duplicate_titles",
     "summarize_unit_duplicate_external_ids",
     "summarize_unit_empty_content",
+    "summarize_unit_emoji_shortcodes",
     "summarize_unit_external_url_domains",
     "summarize_unit_footnote_orphans",
     "summarize_unit_frontmatter_array_fields",
     "summarize_unit_frontmatter_multiline_fields",
     "summarize_unit_frontmatter_required_keys",
+    "summarize_unit_frontmatter_scalar_fields",
     "summarize_unit_heading_hierarchy",
     "summarize_unit_html_heading_anchors",
     "summarize_unit_html_tag_usage",
