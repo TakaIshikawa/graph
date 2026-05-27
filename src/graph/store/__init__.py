@@ -26,6 +26,14 @@ from graph.store.unit_markdown_highlight_summary import summarize_unit_markdown_
 from graph.store.unit_markdown_horizontal_rule_summary import summarize_unit_markdown_horizontal_rules
 from graph.store.unit_markdown_strikethrough_summary import summarize_unit_markdown_strikethrough
 from graph.store.unit_markdown_task_priority_summary import summarize_unit_markdown_task_priorities
+from graph.store.unit_markdown_math_summary import summarize_unit_markdown_math
+from graph.store.unit_hashtag_summary import summarize_unit_hashtags
+from graph.store.unit_checklist_state_summary import summarize_unit_checklist_states
+from graph.store.unit_doi_hint_summary import summarize_unit_doi_hints
+from graph.store.unit_math_notation_summary import summarize_unit_math_notation
+from graph.store.unit_yaml_alias_anchor_summary import summarize_unit_yaml_alias_anchors
+from graph.store.unit_markdown_definition_list_summary import summarize_unit_markdown_definition_lists
+from graph.store.unit_markdown_comment_directive_summary import summarize_unit_markdown_comment_directives
 from graph.store.unit_metadata_secret_hint_summary import summarize_unit_metadata_secret_hints
 from graph.store.unit_tag_cardinality_summary import summarize_unit_tag_cardinality
 from graph.store.unit_tag_prefix_summary import summarize_unit_tag_prefixes
@@ -61,6 +69,14 @@ __all__ = [
     "summarize_unit_markdown_horizontal_rules",
     "summarize_unit_markdown_strikethrough",
     "summarize_unit_markdown_task_priorities",
+    "summarize_unit_markdown_comment_directives",
+    "summarize_unit_markdown_definition_lists",
+    "summarize_unit_yaml_alias_anchors",
+    "summarize_unit_math_notation",
+    "summarize_unit_doi_hints",
+    "summarize_unit_checklist_states",
+    "summarize_unit_hashtags",
+    "summarize_unit_markdown_math",
     "summarize_unit_metadata_secret_hints",
     "summarize_unit_tag_cardinality",
     "summarize_unit_tag_prefixes",
