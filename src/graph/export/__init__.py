@@ -214,6 +214,7 @@ from graph.export.unit_internal_wikilink_inventory_csv import export_units_to_in
 from graph.export.unit_language_confidence_csv import export_units_to_language_confidence_csv
 from graph.export.unit_math_inventory_csv import export_units_to_math_inventory_csv
 from graph.export.unit_markdown_heading_outline_csv import export_units_to_markdown_heading_outline_csv
+from graph.export.unit_math_notation_csv import export_units_to_math_notation_csv
 from graph.export.unit_metadata_key_coverage_csv import export_units_to_metadata_key_coverage_csv
 from graph.export.unit_outbound_reference_csv import export_units_to_outbound_reference_csv
 from graph.export.unit_timestamp_completeness_csv import export_units_to_timestamp_completeness_csv
@@ -489,6 +490,7 @@ __all__ = [
     "export_units_to_language_confidence_csv",
     "export_units_to_math_inventory_csv",
     "export_units_to_markdown_heading_outline_csv",
+    "export_units_to_math_notation_csv",
     "export_units_to_outbound_reference_csv",
     "export_units_to_timestamp_completeness_csv",
     "export_unit_evidence_markdown",
