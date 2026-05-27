@@ -171,6 +171,7 @@ from graph.export.task_board_markdown import export_task_board_markdown
 from graph.export.timelinejs import export_units_to_timelinejs
 from graph.export.tiddlywiki_json import export_units_to_tiddlywiki_json
 from graph.export.unit_csv import export_units_to_csv
+from graph.export.unit_checkbox_task_status_csv import export_units_to_checkbox_task_status_csv
 from graph.export.unit_date_coverage_markdown import export_unit_date_coverage_markdown
 from graph.export.unit_datetime_precision_csv import export_unit_datetime_precision_csv
 from graph.export.unit_location_coverage_csv import export_unit_location_coverage_csv
