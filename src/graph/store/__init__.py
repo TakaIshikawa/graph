@@ -17,6 +17,7 @@ from graph.store.unit_bare_url_summary import summarize_unit_bare_urls
 from graph.store.unit_duplicate_source_path_summary import summarize_unit_duplicate_source_paths
 from graph.store.unit_duplicate_content_hash_summary import summarize_unit_duplicate_content_hashes
 from graph.store.unit_duplicate_title_summary import summarize_unit_duplicate_titles
+from graph.store.unit_duplicate_slug_summary import summarize_unit_duplicate_slugs
 from graph.store.unit_duplicate_external_id_summary import summarize_unit_duplicate_external_ids
 from graph.store.unit_empty_content_summary import summarize_unit_empty_content
 from graph.store.unit_emoji_shortcode_summary import summarize_unit_emoji_shortcodes
@@ -51,6 +52,10 @@ from graph.store.unit_markdown_task_list_summary import summarize_unit_markdown_
 from graph.store.unit_markdown_strikethrough_summary import summarize_unit_markdown_strikethrough
 from graph.store.unit_markdown_task_priority_summary import summarize_unit_markdown_task_priorities
 from graph.store.unit_markdown_math_summary import summarize_unit_markdown_math
+from graph.store.unit_markdown_admonition_summary import summarize_unit_markdown_admonitions
+from graph.store.unit_math_block_summary import summarize_unit_math_blocks
+from graph.store.unit_mermaid_diagram_summary import summarize_unit_mermaid_diagrams
+from graph.store.unit_citation_key_summary import summarize_unit_citation_keys
 from graph.store.unit_hashtag_summary import summarize_unit_hashtags
 from graph.store.unit_checklist_state_summary import summarize_unit_checklist_states
 from graph.store.unit_doi_hint_summary import summarize_unit_doi_hints
@@ -97,6 +102,7 @@ __all__ = [
     "summarize_unit_duplicate_source_paths",
     "summarize_unit_duplicate_content_hashes",
     "summarize_unit_duplicate_titles",
+    "summarize_unit_duplicate_slugs",
     "summarize_unit_duplicate_external_ids",
     "summarize_unit_empty_content",
     "summarize_unit_emoji_shortcodes",
@@ -114,6 +120,7 @@ __all__ = [
     "summarize_unit_inline_code_usage",
     "summarize_unit_local_file_references",
     "summarize_unit_markdown_abbreviations",
+    "summarize_unit_markdown_admonitions",
     "summarize_unit_markdown_autolinks",
     "summarize_unit_markdown_custom_ids",
     "summarize_unit_markdown_escapes",
@@ -137,6 +144,9 @@ __all__ = [
     "summarize_unit_pdf_references",
     "summarize_unit_yaml_alias_anchors",
     "summarize_unit_math_notation",
+    "summarize_unit_math_blocks",
+    "summarize_unit_mermaid_diagrams",
+    "summarize_unit_citation_keys",
     "summarize_unit_doi_hints",
     "summarize_unit_checklist_states",
     "summarize_unit_hashtags",
