@@ -187,10 +187,12 @@ from graph.export.unit_markdown_custom_id_inventory_csv import export_units_to_m
 from graph.export.unit_markdown_emphasis_inventory_csv import export_units_to_markdown_emphasis_inventory_csv
 from graph.export.unit_markdown_link_context_csv import export_units_to_markdown_link_context_csv
 from graph.export.unit_markdown_list_structure_csv import export_units_to_markdown_list_structure_csv
+from graph.export.unit_markdown_reference_definition_csv import export_unit_markdown_reference_definition_csv
 from graph.export.unit_markdown_strikethrough_inventory_csv import export_units_to_markdown_strikethrough_inventory_csv
 from graph.export.unit_markdown_symbol_density_csv import export_units_to_markdown_symbol_density_csv
 from graph.export.unit_markdown_task_priority_csv import export_units_to_markdown_task_priority_csv
 from graph.export.unit_markdown_table_inventory_csv import export_units_to_markdown_table_inventory_csv
+from graph.export.unit_markdown_unicode_emoji_csv import export_unit_markdown_unicode_emoji_csv
 from graph.export.unit_word_count_csv import export_units_to_word_count_csv
 from graph.export.unit_checklist_state_csv import export_units_to_checklist_state_csv
 from graph.export.unit_mermaid_diagram_inventory_csv import export_units_to_mermaid_diagram_inventory_csv
@@ -515,6 +517,8 @@ __all__ = [
     "export_units_to_markdown_emphasis_inventory_csv",
     "export_units_to_markdown_link_context_csv",
     "export_units_to_markdown_list_structure_csv",
+    "export_unit_markdown_reference_definition_csv",
+    "export_unit_markdown_unicode_emoji_csv",
     "export_units_to_mermaid_diagram_inventory_csv",
     "export_unit_metadata_boolean_flags_csv",
     "export_units_to_metadata_url_inventory_csv",
