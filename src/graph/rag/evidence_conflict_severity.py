@@ -51,6 +51,39 @@ def score_evidence_conflict_severity(results: Iterable[Any]) -> dict[str, Any]:
     return {"conflicts": conflicts, "severity_counts": dict(counts), "max_severity": max_severity}
 
 
+def classify_evidence_conflict_severity(conflicts: list[dict] | list[str]) -> dict[str, Any]:
+    """Classify explicit conflict descriptions as low, medium, or high severity."""
+    classifications = []
+    counts: Counter[str] = Counter()
+    for index, conflict in enumerate(conflicts):
+        text = content_text(conflict) if isinstance(conflict, dict) else str(conflict)
+        severity, reasons = _classify_text(text)
+        counts[severity] += 1
+        classifications.append({"index": index, "severity": severity, "reasons": reasons, "text": text})
+    return {"severity_counts": dict(counts), "classifications": classifications}
+
+
+def _classify_text(text: str) -> tuple[str, list[str]]:
+    reasons = []
+    lowered = text.casefold()
+    severity = "low"
+    if re.search(r"\b(direct contradiction|contradicts?|opposite|cannot both be true)\b", lowered):
+        reasons.append("direct_contradiction")
+        severity = "high"
+    if re.search(r"\b(numeric disagreement|number mismatch|large difference|[0-9].*(?:vs|versus).*[0-9])\b", lowered):
+        reasons.append("numeric_disagreement")
+        severity = "high"
+    if re.search(r"\b(date mismatch|different dates?|timing mismatch)\b", lowered):
+        reasons.append("date_mismatch")
+        severity = "high" if severity == "high" else "medium"
+    if re.search(r"\b(source disagreement|sources disagree|publisher disagreement)\b", lowered):
+        reasons.append("source_disagreement")
+        severity = "high" if severity == "high" else "medium"
+    if not reasons:
+        reasons.append("minor_wording_difference")
+    return severity, reasons
+
+
 def _analyze(result: Any, index: int) -> dict[str, Any]:
     text = content_text(result)
     polarity = None
