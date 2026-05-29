@@ -12,10 +12,15 @@ from graph.rag.citation_gap_detector import detect_citation_gaps
 from graph.rag.citation_trails import build_citation_trails
 from graph.rag.answer_actionability import audit_answer_actionability
 from graph.rag.answer_action_owner_audit import audit_answer_action_owners
+from graph.rag.answer_accessibility_disclosure import audit_answer_accessibility_disclosure
 from graph.rag.answer_citation_anchor import audit_answer_citation_anchors
 from graph.rag.answer_citation_freshness import audit_answer_citation_freshness
+from graph.rag.answer_compliance_boundary_audit import audit_answer_compliance_boundaries
+from graph.rag.answer_jargon import audit_answer_jargon
 from graph.rag.answer_numeric_claims import audit_answer_numeric_claims
+from graph.rag.answer_step_order import audit_answer_step_order
 from graph.rag.claim_support_matrix import build_claim_support_matrix
+from graph.rag.context_accessibility_signal import analyze_context_accessibility_signals
 from graph.rag.context_window_packing import plan_context_window_packing
 from graph.rag.date_coverage import analyze_result_date_coverage
 from graph.rag.query_decomposition import decompose_query_for_retrieval
@@ -26,12 +31,15 @@ from graph.rag.evidence_packets import build_evidence_packets
 from graph.rag.evidence_budget import allocate_evidence_budget
 from graph.rag.evidence_density import score_evidence_density
 from graph.rag.evidence_peer_review_status import classify_evidence_peer_review_status
+from graph.rag.evidence_license_signal import analyze_evidence_license_signal
 from graph.rag.evidence_primary_source_ratio import analyze_evidence_primary_source_ratio
 from graph.rag.evidence_quote_density import score_evidence_quote_density
 from graph.rag.evidence_quote_spans import extract_evidence_quote_spans
 from graph.rag.evidence_specificity import score_evidence_specificity
 from graph.rag.keywords import extract_keywords
 from graph.rag.query_intent import classify_query_intent
+from graph.rag.query_confidentiality_requirement import detect_query_confidentiality_requirement
+from graph.rag.query_latency_sla_requirement import detect_query_latency_sla_requirement
 from graph.rag.query_source_strategy import plan_query_source_strategy
 from graph.rag.query_term_coverage import score_query_term_coverage
 from graph.rag.dedupe import rank_duplicate_candidates
@@ -44,6 +52,7 @@ from graph.rag.reading_queue import build_reading_queue
 from graph.rag.reading_time import estimate_reading_time
 from graph.rag.result_clusters import cluster_results_by_overlap
 from graph.rag.result_actionability import classify_result_actionability
+from graph.rag.result_accessibility_coverage import analyze_result_accessibility_coverage
 from graph.rag.result_authority_signals import analyze_result_authority_signals
 from graph.rag.result_explanations import explain_rag_results
 from graph.rag.result_evidence_method_mix import analyze_result_evidence_method_mix
@@ -85,11 +94,14 @@ from graph.rag.tag_path import plan_tag_reading_path
 __all__ = [
     "build_tag_cooccurrence_matrix",
     "build_tag_hierarchy",
+    "analyze_context_accessibility_signals",
     "analyze_context_table_coverage",
     "analyze_citation_coverage",
     "analyze_citation_diversity",
+    "analyze_evidence_license_signal",
     "analyze_evidence_primary_source_ratio",
     "analyze_query_drift",
+    "analyze_result_accessibility_coverage",
     "analyze_result_authority_signals",
     "analyze_result_date_coverage",
     "analyze_result_evidence_method_mix",
@@ -101,12 +113,16 @@ __all__ = [
     "audit_source_diversity",
     "audit_answer_actionability",
     "audit_answer_action_owners",
+    "audit_answer_accessibility_disclosure",
     "audit_answer_citation_anchors",
     "audit_answer_citation_freshness",
+    "audit_answer_compliance_boundaries",
     "audit_answer_counterargument_balance",
     "audit_answer_hedging",
+    "audit_answer_jargon",
     "audit_answer_numeric_claims",
     "audit_answer_source_attribution_integrity",
+    "audit_answer_step_order",
     "audit_result_format_mismatch",
     "allocate_evidence_budget",
     "allocate_context_token_budget",
@@ -131,6 +147,8 @@ __all__ = [
     "detect_context_gaps",
     "detect_citation_gaps",
     "detect_query_comparison_axes",
+    "detect_query_confidentiality_requirement",
+    "detect_query_latency_sla_requirement",
     "detect_query_output_constraints",
     "detect_query_temporal_anchors",
     "extract_keywords",
