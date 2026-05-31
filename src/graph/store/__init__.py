@@ -18,6 +18,7 @@ from graph.store.source_authentication_hint_summary import summarize_source_auth
 from graph.store.source_metadata_completeness_summary import summarize_source_metadata_completeness
 from graph.store.source_error_message_summary import summarize_source_error_messages
 from graph.store.source_response_time_summary import summarize_source_response_times
+from graph.store.source_redirect_hint_summary import summarize_source_redirect_hints
 from graph.store.source_unit_count_summary import summarize_source_unit_counts
 from graph.store.source_url_domain_summary import summarize_source_url_domains
 from graph.store.unit_attachment_extension_summary import summarize_unit_attachment_extensions
@@ -149,6 +150,7 @@ __all__ = [
     "summarize_source_authentication_hints",
     "summarize_source_error_messages",
     "summarize_source_response_times",
+    "summarize_source_redirect_hints",
     "summarize_source_unit_counts",
     "summarize_source_url_domains",
     "summarize_unit_attachment_extensions",
