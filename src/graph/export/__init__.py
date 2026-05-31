@@ -192,11 +192,13 @@ from graph.export.unit_bare_url_csv import export_units_to_bare_url_csv
 from graph.export.unit_frontmatter_comment_csv import export_unit_frontmatter_comment_csv
 from graph.export.unit_frontmatter_boolean_field_csv import export_units_to_frontmatter_boolean_field_csv
 from graph.export.unit_frontmatter_duplicate_key_csv import export_unit_frontmatter_duplicate_key_csv
+from graph.export.unit_frontmatter_reference_field_csv import export_units_to_frontmatter_reference_field_csv
 from graph.export.unit_markdown_comment_directive_csv import export_units_to_markdown_comment_directive_csv
 from graph.export.unit_markdown_admonition_csv import export_units_to_markdown_admonition_csv
 from graph.export.unit_markdown_admonition_inventory_csv import export_units_to_markdown_admonition_inventory_csv
 from graph.export.unit_markdown_abbreviation_inventory_csv import export_units_to_markdown_abbreviation_inventory_csv
 from graph.export.unit_markdown_code_fence_attribute_csv import export_units_to_markdown_code_fence_attribute_csv
+from graph.export.unit_markdown_collapsed_section_csv import export_units_to_markdown_collapsed_section_csv
 from graph.export.unit_markdown_custom_id_inventory_csv import export_units_to_markdown_custom_id_inventory_csv
 from graph.export.unit_markdown_emphasis_inventory_csv import export_units_to_markdown_emphasis_inventory_csv
 from graph.export.unit_markdown_footnote_definition_csv import export_unit_markdown_footnote_definition_csv
@@ -204,6 +206,7 @@ from graph.export.unit_markdown_heading_anchor_csv import export_units_to_markdo
 from graph.export.unit_markdown_horizontal_rule_csv import export_units_to_markdown_horizontal_rule_csv
 from graph.export.unit_markdown_inline_code_csv import export_units_to_markdown_inline_code_csv
 from graph.export.unit_markdown_link_scheme_csv import export_units_to_markdown_link_scheme_csv
+from graph.export.unit_markdown_link_definition_title_csv import export_units_to_markdown_link_definition_title_csv
 from graph.export.unit_markdown_link_context_csv import export_units_to_markdown_link_context_csv
 from graph.export.unit_markdown_list_structure_csv import export_units_to_markdown_list_structure_csv
 from graph.export.unit_markdown_reference_definition_csv import export_unit_markdown_reference_definition_csv
@@ -216,6 +219,7 @@ from graph.export.unit_markdown_link_relation_csv import export_unit_markdown_li
 from graph.export.unit_markdown_setext_heading_csv import export_unit_markdown_setext_heading_csv
 from graph.export.unit_markdown_toc_entry_csv import export_unit_markdown_toc_entry_csv
 from graph.export.unit_markdown_image_dimension_hint_csv import export_units_to_markdown_image_dimension_hint_csv
+from graph.export.unit_markdown_image_dimension_csv import export_units_to_markdown_image_dimension_csv
 from graph.export.unit_markdown_details_inventory_csv import export_units_to_markdown_details_inventory_csv
 from graph.export.unit_markdown_reference_label_case_csv import export_units_to_markdown_reference_label_case_csv
 from graph.export.unit_markdown_superscript_inventory_csv import export_units_to_markdown_superscript_inventory_csv
@@ -286,6 +290,8 @@ from graph.export.unit_identifier_quality_csv import export_units_to_identifier_
 from graph.export.unit_ingest_latency_csv import export_units_to_ingest_latency_csv
 from graph.export.unit_footnote_inventory_csv import export_units_to_footnote_inventory_csv
 from graph.export.unit_html_element_inventory_csv import export_units_to_html_element_inventory_csv
+from graph.export.unit_html_figure_inventory_csv import export_units_to_html_figure_inventory_csv
+from graph.export.unit_html_iframe_inventory_csv import export_units_to_html_iframe_inventory_csv
 from graph.export.unit_image_reference_inventory_csv import export_units_to_image_reference_inventory_csv
 from graph.export.unit_inline_code_inventory_csv import export_units_to_inline_code_inventory_csv
 from graph.export.unit_internal_wikilink_inventory_csv import export_units_to_internal_wikilink_inventory_csv
@@ -560,24 +566,30 @@ __all__ = [
     "export_units_to_callout_inventory_csv",
     "export_units_to_bare_url_csv",
     "export_units_to_frontmatter_boolean_field_csv",
+    "export_units_to_frontmatter_reference_field_csv",
     "export_unit_frontmatter_comment_csv",
     "export_unit_frontmatter_duplicate_key_csv",
     "export_units_to_heading_duplicate_csv",
     "export_units_to_html_link_target_csv",
     "export_units_to_html_aria_attribute_csv",
     "export_units_to_html_microdata_csv",
+    "export_units_to_html_figure_inventory_csv",
+    "export_units_to_html_iframe_inventory_csv",
     "export_unit_html_data_attribute_csv",
     "export_units_to_markdown_admonition_csv",
     "export_units_to_markdown_admonition_inventory_csv",
     "export_units_to_markdown_comment_directive_csv",
     "export_units_to_markdown_code_fence_attribute_csv",
+    "export_units_to_markdown_collapsed_section_csv",
     "export_units_to_markdown_emphasis_inventory_csv",
     "export_units_to_markdown_heading_anchor_csv",
     "export_units_to_markdown_horizontal_rule_csv",
     "export_units_to_markdown_inline_code_csv",
     "export_units_to_markdown_link_context_csv",
+    "export_units_to_markdown_link_definition_title_csv",
     "export_units_to_markdown_link_scheme_csv",
     "export_units_to_markdown_details_inventory_csv",
+    "export_units_to_markdown_image_dimension_csv",
     "export_unit_markdown_footnote_backref_csv",
     "export_unit_markdown_footnote_definition_csv",
     "export_unit_markdown_heading_trailing_hash_csv",

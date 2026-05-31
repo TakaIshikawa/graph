@@ -70,6 +70,8 @@ from graph.store.unit_markdown_footnote_backref_summary import summarize_unit_ma
 from graph.store.unit_markdown_footnote_definition_summary import summarize_unit_markdown_footnote_definitions
 from graph.store.unit_markdown_highlight_summary import summarize_unit_markdown_highlights
 from graph.store.unit_markdown_details_summary import summarize_unit_markdown_details
+from graph.store.unit_markdown_empty_link_summary import summarize_unit_markdown_empty_links
+from graph.store.unit_markdown_heading_depth_summary import summarize_unit_markdown_heading_depths
 from graph.store.unit_markdown_kbd_summary import summarize_unit_markdown_kbd_usage
 from graph.store.unit_markdown_subscript_summary import summarize_unit_markdown_subscripts
 from graph.store.unit_markdown_image_alt_text_summary import summarize_unit_markdown_image_alt_text
@@ -93,6 +95,7 @@ from graph.store.unit_markdown_math_span_summary import summarize_unit_markdown_
 from graph.store.unit_markdown_admonition_summary import summarize_unit_markdown_admonitions
 from graph.store.unit_markdown_embed_summary import summarize_unit_markdown_embeds
 from graph.store.unit_markdown_inline_code_summary import summarize_unit_markdown_inline_code
+from graph.store.unit_markdown_ordered_list_marker_summary import summarize_unit_markdown_ordered_list_markers
 from graph.store.unit_markdown_tag_summary import summarize_unit_markdown_tags
 from graph.store.unit_math_block_summary import summarize_unit_math_blocks
 from graph.store.unit_mermaid_diagram_summary import summarize_unit_mermaid_diagrams
@@ -124,6 +127,7 @@ from graph.store.unit_word_count_distribution_summary import summarize_unit_word
 from graph.store.unit_yaml_nested_depth_summary import summarize_unit_yaml_nested_depth
 from graph.store.unit_video_embed_summary import summarize_unit_video_embeds
 from graph.store.unit_yaml_block_scalar_summary import summarize_unit_yaml_block_scalars
+from graph.store.unit_yaml_frontmatter_fence_summary import summarize_unit_yaml_frontmatter_fences
 from graph.store.unit_internal_anchor_target_summary import summarize_unit_internal_anchor_targets
 
 __all__ = [
@@ -199,6 +203,8 @@ __all__ = [
     "summarize_unit_markdown_footnote_definitions",
     "summarize_unit_markdown_highlights",
     "summarize_unit_markdown_details",
+    "summarize_unit_markdown_empty_links",
+    "summarize_unit_markdown_heading_depths",
     "summarize_unit_markdown_kbd_usage",
     "summarize_unit_markdown_subscripts",
     "summarize_unit_markdown_image_alt_text",
@@ -231,6 +237,7 @@ __all__ = [
     "summarize_unit_checklist_states",
     "summarize_unit_hashtags",
     "summarize_unit_markdown_inline_code",
+    "summarize_unit_markdown_ordered_list_markers",
     "summarize_unit_markdown_math",
     "summarize_unit_markdown_math_spans",
     "summarize_unit_markdown_tags",
@@ -251,5 +258,6 @@ __all__ = [
     "summarize_unit_yaml_nested_depth",
     "summarize_unit_video_embeds",
     "summarize_unit_yaml_block_scalars",
+    "summarize_unit_yaml_frontmatter_fences",
     "summarize_unit_internal_anchor_targets",
 ]
