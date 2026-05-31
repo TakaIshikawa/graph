@@ -3,7 +3,9 @@ from graph.store.collection_duplicate_title_summary import summarize_collection_
 from graph.store.collection_metadata_completeness_summary import summarize_collection_metadata_completeness
 from graph.store.collection_metadata_drift_summary import summarize_collection_metadata_drift
 from graph.store.collection_empty_title_summary import summarize_collection_empty_titles
+from graph.store.collection_member_duplicate_url_summary import summarize_collection_member_duplicate_urls
 from graph.store.collection_member_source_mix_summary import summarize_collection_member_source_mix
+from graph.store.collection_member_tag_density_summary import summarize_collection_member_tag_density
 from graph.store.collection_orphan_summary import summarize_collection_orphans
 from graph.store.collection_stale_member_summary import summarize_collection_stale_members
 from graph.store.collection_tag_overlap_summary import summarize_collection_tag_overlap
@@ -47,6 +49,7 @@ from graph.store.unit_external_url_domain_summary import summarize_unit_external
 from graph.store.unit_footnote_orphan_summary import summarize_unit_footnote_orphans
 from graph.store.unit_frontmatter_array_field_summary import summarize_unit_frontmatter_array_fields
 from graph.store.unit_frontmatter_multiline_field_summary import summarize_unit_frontmatter_multiline_fields
+from graph.store.unit_frontmatter_required_field_summary import summarize_unit_frontmatter_required_fields
 from graph.store.unit_frontmatter_required_key_summary import summarize_unit_frontmatter_required_keys
 from graph.store.unit_frontmatter_scalar_field_summary import summarize_unit_frontmatter_scalar_fields
 from graph.store.unit_frontmatter_type_summary import summarize_unit_frontmatter_types
@@ -121,6 +124,8 @@ from graph.store.unit_temporal_range_summary import summarize_unit_temporal_rang
 from graph.store.unit_timestamp_consistency_summary import summarize_unit_timestamp_consistency
 from graph.store.unit_timeline_gap_summary import summarize_unit_timeline_gaps
 from graph.store.unit_source_scheme_summary import summarize_unit_source_schemes
+from graph.store.unit_source_title_overlap_summary import summarize_unit_source_title_overlap
+from graph.store.unit_external_url_scheme_summary import summarize_unit_external_url_schemes
 from graph.store.unit_language_coverage_summary import summarize_unit_language_coverage
 from graph.store.unit_reading_time_bucket_summary import summarize_unit_reading_time_buckets
 from graph.store.unit_word_count_distribution_summary import summarize_unit_word_count_distribution
@@ -136,7 +141,9 @@ __all__ = [
     "summarize_collection_metadata_completeness",
     "summarize_collection_metadata_drift",
     "summarize_collection_empty_titles",
+    "summarize_collection_member_duplicate_urls",
     "summarize_collection_member_source_mix",
+    "summarize_collection_member_tag_density",
     "summarize_collection_orphans",
     "summarize_collection_stale_members",
     "summarize_collection_tag_overlap",
@@ -178,6 +185,7 @@ __all__ = [
     "summarize_unit_footnote_orphans",
     "summarize_unit_frontmatter_array_fields",
     "summarize_unit_frontmatter_multiline_fields",
+    "summarize_unit_frontmatter_required_fields",
     "summarize_unit_frontmatter_required_keys",
     "summarize_unit_frontmatter_scalar_fields",
     "summarize_unit_frontmatter_types",
@@ -252,6 +260,8 @@ __all__ = [
     "summarize_unit_timestamp_consistency",
     "summarize_unit_timeline_gaps",
     "summarize_unit_source_schemes",
+    "summarize_unit_source_title_overlap",
+    "summarize_unit_external_url_schemes",
     "summarize_unit_language_coverage",
     "summarize_unit_reading_time_buckets",
     "summarize_unit_word_count_distribution",
