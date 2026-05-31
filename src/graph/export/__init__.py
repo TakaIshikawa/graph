@@ -196,8 +196,10 @@ from graph.export.unit_markdown_comment_directive_csv import export_units_to_mar
 from graph.export.unit_markdown_admonition_csv import export_units_to_markdown_admonition_csv
 from graph.export.unit_markdown_admonition_inventory_csv import export_units_to_markdown_admonition_inventory_csv
 from graph.export.unit_markdown_abbreviation_inventory_csv import export_units_to_markdown_abbreviation_inventory_csv
+from graph.export.unit_markdown_code_fence_attribute_csv import export_units_to_markdown_code_fence_attribute_csv
 from graph.export.unit_markdown_custom_id_inventory_csv import export_units_to_markdown_custom_id_inventory_csv
 from graph.export.unit_markdown_emphasis_inventory_csv import export_units_to_markdown_emphasis_inventory_csv
+from graph.export.unit_markdown_footnote_definition_csv import export_unit_markdown_footnote_definition_csv
 from graph.export.unit_markdown_heading_anchor_csv import export_units_to_markdown_heading_anchor_csv
 from graph.export.unit_markdown_horizontal_rule_csv import export_units_to_markdown_horizontal_rule_csv
 from graph.export.unit_markdown_inline_code_csv import export_units_to_markdown_inline_code_csv
@@ -217,6 +219,7 @@ from graph.export.unit_markdown_image_dimension_hint_csv import export_units_to_
 from graph.export.unit_markdown_details_inventory_csv import export_units_to_markdown_details_inventory_csv
 from graph.export.unit_markdown_reference_label_case_csv import export_units_to_markdown_reference_label_case_csv
 from graph.export.unit_markdown_superscript_inventory_csv import export_units_to_markdown_superscript_inventory_csv
+from graph.export.unit_markdown_wikilink_inventory_csv import export_units_to_markdown_wikilink_inventory_csv
 from graph.export.unit_frontmatter_alias_csv import export_unit_frontmatter_alias_csv
 from graph.export.unit_frontmatter_nested_key_csv import export_unit_frontmatter_nested_key_csv
 from graph.export.unit_code_fence_filename_csv import export_unit_code_fence_filename_csv
@@ -567,6 +570,7 @@ __all__ = [
     "export_units_to_markdown_admonition_csv",
     "export_units_to_markdown_admonition_inventory_csv",
     "export_units_to_markdown_comment_directive_csv",
+    "export_units_to_markdown_code_fence_attribute_csv",
     "export_units_to_markdown_emphasis_inventory_csv",
     "export_units_to_markdown_heading_anchor_csv",
     "export_units_to_markdown_horizontal_rule_csv",
@@ -575,6 +579,7 @@ __all__ = [
     "export_units_to_markdown_link_scheme_csv",
     "export_units_to_markdown_details_inventory_csv",
     "export_unit_markdown_footnote_backref_csv",
+    "export_unit_markdown_footnote_definition_csv",
     "export_unit_markdown_heading_trailing_hash_csv",
     "export_units_to_markdown_list_structure_csv",
     "export_units_to_markdown_reference_label_case_csv",
@@ -665,6 +670,7 @@ __all__ = [
     "export_units_to_markdown_table_csv",
     "export_units_to_markdown_table_inventory_csv",
     "export_units_to_markdown_wikilink_csv",
+    "export_units_to_markdown_wikilink_inventory_csv",
     "export_units_to_checklist_state_csv",
     "export_units_to_mermaid_mindmap",
     "export_units_to_ndjson",

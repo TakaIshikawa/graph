@@ -21,6 +21,7 @@ from graph.store.source_response_time_summary import summarize_source_response_t
 from graph.store.source_unit_count_summary import summarize_source_unit_counts
 from graph.store.source_url_domain_summary import summarize_source_url_domains
 from graph.store.unit_attachment_extension_summary import summarize_unit_attachment_extensions
+from graph.store.unit_attachment_orphan_file_summary import summarize_unit_attachment_orphan_files
 from graph.store.unit_blockquote_usage_summary import summarize_unit_blockquote_usage
 from graph.store.unit_callout_usage_summary import summarize_unit_callout_usage
 from graph.store.unit_code_fence_filename_summary import summarize_unit_code_fence_filenames
@@ -37,6 +38,7 @@ from graph.store.unit_duplicate_external_id_summary import summarize_unit_duplic
 from graph.store.unit_empty_content_summary import summarize_unit_empty_content
 from graph.store.unit_emoji_shortcode_summary import summarize_unit_emoji_shortcodes
 from graph.store.unit_frontmatter_boolean_field_summary import summarize_unit_frontmatter_boolean_fields
+from graph.store.unit_frontmatter_alias_collision_summary import summarize_unit_frontmatter_alias_collisions
 from graph.store.unit_frontmatter_numeric_field_summary import summarize_unit_frontmatter_numeric_fields
 from graph.store.unit_frontmatter_empty_array_summary import summarize_unit_frontmatter_empty_arrays
 from graph.store.unit_frontmatter_tag_format_summary import summarize_unit_frontmatter_tag_formats
@@ -56,6 +58,7 @@ from graph.store.unit_html_data_attribute_summary import summarize_unit_html_dat
 from graph.store.unit_inline_code_usage_summary import summarize_unit_inline_code_usage
 from graph.store.unit_local_file_reference_summary import summarize_unit_local_file_references
 from graph.store.unit_markdown_abbreviation_summary import summarize_unit_markdown_abbreviations
+from graph.store.unit_markdown_blockquote_attribution_summary import summarize_unit_markdown_blockquote_attributions
 from graph.store.unit_markdown_autolink_summary import summarize_unit_markdown_autolinks
 from graph.store.unit_markdown_custom_id_summary import summarize_unit_markdown_custom_ids
 from graph.store.unit_markdown_escape_summary import summarize_unit_markdown_escapes
@@ -64,6 +67,7 @@ from graph.store.unit_markdown_heading_anchor_summary import summarize_unit_mark
 from graph.store.unit_markdown_heading_duplicate_summary import summarize_unit_markdown_heading_duplicates
 from graph.store.unit_markdown_heading_outline_summary import summarize_unit_markdown_heading_outlines
 from graph.store.unit_markdown_footnote_backref_summary import summarize_unit_markdown_footnote_backrefs
+from graph.store.unit_markdown_footnote_definition_summary import summarize_unit_markdown_footnote_definitions
 from graph.store.unit_markdown_highlight_summary import summarize_unit_markdown_highlights
 from graph.store.unit_markdown_details_summary import summarize_unit_markdown_details
 from graph.store.unit_markdown_kbd_summary import summarize_unit_markdown_kbd_usage
@@ -76,13 +80,16 @@ from graph.store.unit_markdown_reference_usage_summary import summarize_unit_mar
 from graph.store.unit_markdown_horizontal_rule_summary import summarize_unit_markdown_horizontal_rules
 from graph.store.unit_markdown_block_id_summary import summarize_unit_markdown_block_ids
 from graph.store.unit_markdown_table_alignment_summary import summarize_unit_markdown_table_alignments
+from graph.store.unit_markdown_table_caption_summary import summarize_unit_markdown_table_captions
 from graph.store.unit_markdown_toc_summary import summarize_unit_markdown_toc
 from graph.store.unit_markdown_task_list_summary import summarize_unit_markdown_task_lists
 from graph.store.unit_markdown_strikethrough_summary import summarize_unit_markdown_strikethrough
 from graph.store.unit_markdown_setext_heading_summary import summarize_unit_markdown_setext_headings
 from graph.store.unit_markdown_task_priority_summary import summarize_unit_markdown_task_priorities
+from graph.store.unit_markdown_task_due_date_summary import summarize_unit_markdown_task_due_dates
 from graph.store.unit_markdown_unicode_emoji_summary import summarize_unit_markdown_unicode_emoji
 from graph.store.unit_markdown_math_summary import summarize_unit_markdown_math
+from graph.store.unit_markdown_math_span_summary import summarize_unit_markdown_math_spans
 from graph.store.unit_markdown_admonition_summary import summarize_unit_markdown_admonitions
 from graph.store.unit_markdown_embed_summary import summarize_unit_markdown_embeds
 from graph.store.unit_markdown_inline_code_summary import summarize_unit_markdown_inline_code
@@ -141,6 +148,7 @@ __all__ = [
     "summarize_source_unit_counts",
     "summarize_source_url_domains",
     "summarize_unit_attachment_extensions",
+    "summarize_unit_attachment_orphan_files",
     "summarize_unit_blockquote_usage",
     "summarize_unit_callout_usage",
     "summarize_unit_code_fence_filenames",
@@ -157,6 +165,7 @@ __all__ = [
     "summarize_unit_empty_content",
     "summarize_unit_emoji_shortcodes",
     "summarize_unit_frontmatter_boolean_fields",
+    "summarize_unit_frontmatter_alias_collisions",
     "summarize_unit_frontmatter_numeric_fields",
     "summarize_unit_frontmatter_empty_arrays",
     "summarize_unit_frontmatter_tag_formats",
@@ -176,6 +185,7 @@ __all__ = [
     "summarize_unit_inline_code_usage",
     "summarize_unit_local_file_references",
     "summarize_unit_markdown_abbreviations",
+    "summarize_unit_markdown_blockquote_attributions",
     "summarize_unit_markdown_admonitions",
     "summarize_unit_markdown_embeds",
     "summarize_unit_markdown_autolinks",
@@ -186,6 +196,7 @@ __all__ = [
     "summarize_unit_markdown_heading_duplicates",
     "summarize_unit_markdown_heading_outlines",
     "summarize_unit_markdown_footnote_backrefs",
+    "summarize_unit_markdown_footnote_definitions",
     "summarize_unit_markdown_highlights",
     "summarize_unit_markdown_details",
     "summarize_unit_markdown_kbd_usage",
@@ -198,11 +209,13 @@ __all__ = [
     "summarize_unit_markdown_horizontal_rules",
     "summarize_unit_markdown_block_ids",
     "summarize_unit_markdown_table_alignments",
+    "summarize_unit_markdown_table_captions",
     "summarize_unit_markdown_toc",
     "summarize_unit_markdown_task_lists",
     "summarize_unit_markdown_strikethrough",
     "summarize_unit_markdown_setext_headings",
     "summarize_unit_markdown_task_priorities",
+    "summarize_unit_markdown_task_due_dates",
     "summarize_unit_markdown_unicode_emoji",
     "summarize_unit_markdown_comment_directives",
     "summarize_unit_markdown_definition_lists",
@@ -219,6 +232,7 @@ __all__ = [
     "summarize_unit_hashtags",
     "summarize_unit_markdown_inline_code",
     "summarize_unit_markdown_math",
+    "summarize_unit_markdown_math_spans",
     "summarize_unit_markdown_tags",
     "summarize_unit_metadata_secret_hints",
     "summarize_unit_metadata_empty_values",
