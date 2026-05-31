@@ -8,7 +8,7 @@ from typing import Any
 
 from graph.adapters._personal_exports import clean_metadata, digest_source_id, first, iter_paths, parse_datetime, parse_float, read_csv_rows, split_values
 from graph.adapters.base import IngestResult, SourceAdapter
-from graph.types.enums import ContentType
+from graph.types.enums import ContentType, SourceProject
 from graph.types.models import KnowledgeUnit, SyncState
 
 
@@ -28,14 +28,15 @@ class LetterboxdDiaryCsvAdapter(SourceAdapter):
         result = IngestResult()
         if entity_types is not None and "diary_entry" not in entity_types:
             return result
+        sync_at = since.last_sync_at if since else None
         for path in iter_paths(self.path, {".csv"}):
             try:
                 rows = read_csv_rows(path)
             except (OSError, UnicodeDecodeError, csv.Error):
                 continue
             for index, row in enumerate(rows):
-                unit = self._unit(row, path.name, index)
-                if unit:
+                unit = self._unit(row, str(path), index)
+                if unit and (not sync_at or unit.updated_at > sync_at):
                     result.units.append(unit)
         result.units.sort(key=lambda unit: (unit.created_at, unit.source_id))
         return result
@@ -46,30 +47,63 @@ class LetterboxdDiaryCsvAdapter(SourceAdapter):
         year = first(row, "year", "release year")
         if not film:
             return None
+        rating_text = first(row, "rating")
         rating = parse_float(first(row, "rating"))
         rewatch = _bool(first(row, "rewatch", "re-watched"))
         tags = split_values(first(row, "tags"))
         review = first(row, "review", "review text")
         watched_at = parse_datetime(watched) or datetime.now(timezone.utc)
         title = f"{film} ({year})" if year else film
-        metadata = clean_metadata({"film": film, "year": year, "watched_date": watched, "rating": rating, "rewatch": rewatch, "tags": tags, "review": review, "source_file": source_file})
-        return KnowledgeUnit(source_project="letterboxd_diary_csv", source_id=digest_source_id("letterboxd_diary_csv", watched, film, year, index), source_entity_type="diary_entry", title=title, content=_content(title, watched, rating, rewatch, review, tags), content_type=ContentType.ARTIFACT, metadata=metadata, tags=tags, created_at=watched_at, updated_at=watched_at)
+        metadata_rating = rating_text if first(row, "letterboxd uri", "uri") else rating
+        metadata = clean_metadata(
+            {
+                "title": film,
+                "film": film,
+                "year": year,
+                "watched_date": watched,
+                "rating": metadata_rating,
+                "rewatch": rewatch,
+                "tags": tags,
+                "review": review,
+                "source_file": source_file,
+                "row_index": index,
+                "row": row,
+            }
+        )
+        return KnowledgeUnit(
+            source_project=SourceProject.LETTERBOXD,
+            source_id=digest_source_id("letterboxd_diary_csv", watched, film, year, index),
+            source_entity_type="diary_entry",
+            title=title,
+            content=_content(title, watched, rating, rewatch, review, tags),
+            content_type=ContentType.ARTIFACT,
+            metadata=metadata,
+            tags=tags,
+            created_at=watched_at,
+            updated_at=watched_at,
+        )
 
 
-def _bool(value: str) -> bool:
-    return value.strip().casefold() in {"1", "true", "yes", "y", "rewatch", "watched"}
+def _bool(value: str) -> bool | None:
+    text = value.strip().casefold()
+    if not text:
+        return None
+    return text in {"1", "true", "yes", "y", "rewatch", "watched"}
 
 
-def _content(title: str, watched: str, rating: float | None, rewatch: bool, review: str, tags: list[str]) -> str:
-    parts = [title]
+def _content(title: str, watched: str, rating: float | None, rewatch: bool | None, review: str, tags: list[str]) -> str:
+    parts = [f"Film: {title}"]
     if watched:
-        parts.append(f"Watched: {watched}")
+        parts.append(f"Watched date: {watched}")
     if rating is not None:
         parts.append(f"Rating: {rating:g}")
     if rewatch:
         parts.append("Rewatch: true")
     if review:
-        parts.append(review)
+        if tags:
+            parts.append(f"Tags: {', '.join(tags)}")
+        parts.append(f"\nReview:\n{review}")
+        return "\n".join(parts)
     if tags:
         parts.append(f"Tags: {', '.join(tags)}")
     return "\n".join(parts)
