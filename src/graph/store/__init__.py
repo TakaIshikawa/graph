@@ -11,6 +11,7 @@ from graph.store.collection_orphan_summary import summarize_collection_orphans
 from graph.store.collection_stale_member_summary import summarize_collection_stale_members
 from graph.store.collection_tag_overlap_summary import summarize_collection_tag_overlap
 from graph.store.relation_cycle_summary import summarize_relation_cycles
+from graph.store.relation_evidence_status_code_summary import summarize_relation_evidence_status_codes
 from graph.store.relation_evidence_url_domain_summary import summarize_relation_evidence_url_domains
 from graph.store.relation_metadata_key_frequency_summary import summarize_relation_metadata_key_frequency
 from graph.store.relation_metadata_empty_value_summary import summarize_relation_metadata_empty_values
@@ -51,6 +52,7 @@ from graph.store.unit_duplicate_external_id_summary import summarize_unit_duplic
 from graph.store.unit_empty_content_summary import summarize_unit_empty_content
 from graph.store.unit_emoji_shortcode_summary import summarize_unit_emoji_shortcodes
 from graph.store.unit_frontmatter_boolean_field_summary import summarize_unit_frontmatter_boolean_fields
+from graph.store.unit_frontmatter_alias_summary import summarize_unit_frontmatter_aliases
 from graph.store.unit_frontmatter_alias_collision_summary import summarize_unit_frontmatter_alias_collisions
 from graph.store.unit_frontmatter_numeric_field_summary import summarize_unit_frontmatter_numeric_fields
 from graph.store.unit_frontmatter_empty_array_summary import summarize_unit_frontmatter_empty_arrays
@@ -87,6 +89,7 @@ from graph.store.unit_markdown_heading_outline_summary import summarize_unit_mar
 from graph.store.unit_markdown_footnote_backref_summary import summarize_unit_markdown_footnote_backrefs
 from graph.store.unit_markdown_footnote_definition_summary import summarize_unit_markdown_footnote_definitions
 from graph.store.unit_markdown_highlight_summary import summarize_unit_markdown_highlights
+from graph.store.unit_markdown_html_mark_summary import summarize_unit_markdown_html_marks
 from graph.store.unit_markdown_details_summary import summarize_unit_markdown_details
 from graph.store.unit_markdown_empty_link_summary import summarize_unit_markdown_empty_links
 from graph.store.unit_markdown_heading_depth_summary import summarize_unit_markdown_heading_depths
@@ -97,6 +100,7 @@ from graph.store.unit_markdown_link_fragment_summary import summarize_unit_markd
 from graph.store.unit_markdown_link_scheme_summary import summarize_unit_markdown_link_schemes
 from graph.store.unit_markdown_link_title_summary import summarize_unit_markdown_link_titles
 from graph.store.unit_markdown_link_title_attribute_summary import summarize_unit_markdown_link_title_attributes
+from graph.store.unit_markdown_link_attribute_summary import summarize_unit_markdown_link_attributes
 from graph.store.unit_markdown_reference_usage_summary import summarize_unit_markdown_reference_usage
 from graph.store.unit_markdown_horizontal_rule_summary import summarize_unit_markdown_horizontal_rules
 from graph.store.unit_markdown_block_id_summary import summarize_unit_markdown_block_ids
@@ -115,6 +119,7 @@ from graph.store.unit_markdown_math_span_summary import summarize_unit_markdown_
 from graph.store.unit_markdown_admonition_summary import summarize_unit_markdown_admonitions
 from graph.store.unit_markdown_embed_summary import summarize_unit_markdown_embeds
 from graph.store.unit_markdown_inline_code_summary import summarize_unit_markdown_inline_code
+from graph.store.unit_markdown_mention_handle_summary import summarize_unit_markdown_mention_handles
 from graph.store.unit_markdown_ordered_list_marker_summary import summarize_unit_markdown_ordered_list_markers
 from graph.store.unit_markdown_tag_summary import summarize_unit_markdown_tags
 from graph.store.unit_math_block_summary import summarize_unit_math_blocks
@@ -170,6 +175,7 @@ __all__ = [
     "summarize_collection_stale_members",
     "summarize_collection_tag_overlap",
     "summarize_relation_cycles",
+    "summarize_relation_evidence_status_codes",
     "summarize_relation_evidence_url_domains",
     "summarize_relation_metadata_key_frequency",
     "summarize_relation_temporal_metadata",
@@ -208,6 +214,7 @@ __all__ = [
     "summarize_unit_empty_content",
     "summarize_unit_emoji_shortcodes",
     "summarize_unit_frontmatter_boolean_fields",
+    "summarize_unit_frontmatter_aliases",
     "summarize_unit_frontmatter_alias_collisions",
     "summarize_unit_frontmatter_numeric_fields",
     "summarize_unit_frontmatter_empty_arrays",
@@ -246,6 +253,7 @@ __all__ = [
     "summarize_unit_markdown_footnote_backrefs",
     "summarize_unit_markdown_footnote_definitions",
     "summarize_unit_markdown_highlights",
+    "summarize_unit_markdown_html_marks",
     "summarize_unit_markdown_details",
     "summarize_unit_markdown_empty_links",
     "summarize_unit_markdown_heading_depths",
@@ -255,6 +263,7 @@ __all__ = [
     "summarize_unit_markdown_link_fragments",
     "summarize_unit_markdown_link_schemes",
     "summarize_unit_markdown_link_titles",
+    "summarize_unit_markdown_link_attributes",
     "summarize_unit_markdown_link_title_attributes",
     "summarize_unit_markdown_reference_usage",
     "summarize_unit_markdown_horizontal_rules",
@@ -285,6 +294,7 @@ __all__ = [
     "summarize_unit_checklist_states",
     "summarize_unit_hashtags",
     "summarize_unit_markdown_inline_code",
+    "summarize_unit_markdown_mention_handles",
     "summarize_unit_markdown_ordered_list_markers",
     "summarize_unit_markdown_math",
     "summarize_unit_markdown_math_spans",

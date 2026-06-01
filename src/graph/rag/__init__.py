@@ -41,9 +41,14 @@ from graph.rag.evidence_specificity import score_evidence_specificity
 from graph.rag.keywords import extract_keywords
 from graph.rag.query_intent import classify_query_intent
 from graph.rag.query_citation_requirement import detect_query_citation_requirement
+from graph.rag.query_authorization_scope_requirement import detect_query_authorization_scope_requirements
 from graph.rag.query_confidentiality_requirement import detect_query_confidentiality_requirement
+from graph.rag.query_device_posture_requirement import detect_query_device_posture_requirements
 from graph.rag.query_geographic_scope import detect_query_geographic_scope
+from graph.rag.query_ip_allowlist_requirement import detect_query_ip_allowlist_requirements
 from graph.rag.query_latency_sla_requirement import detect_query_latency_sla_requirement
+from graph.rag.query_password_policy_requirement import detect_query_password_policy_requirements
+from graph.rag.query_privileged_access_requirement import detect_query_privileged_access_requirements
 from graph.rag.query_privacy_constraint import detect_query_privacy_constraints
 from graph.rag.query_source_strategy import plan_query_source_strategy
 from graph.rag.query_term_coverage import score_query_term_coverage
@@ -158,10 +163,15 @@ __all__ = [
     "detect_context_gaps",
     "detect_citation_gaps",
     "detect_query_comparison_axes",
+    "detect_query_authorization_scope_requirements",
     "detect_query_citation_requirement",
     "detect_query_confidentiality_requirement",
+    "detect_query_device_posture_requirements",
     "detect_query_geographic_scope",
+    "detect_query_ip_allowlist_requirements",
     "detect_query_latency_sla_requirement",
+    "detect_query_password_policy_requirements",
+    "detect_query_privileged_access_requirements",
     "detect_query_privacy_constraints",
     "detect_query_output_constraints",
     "detect_query_temporal_anchors",
