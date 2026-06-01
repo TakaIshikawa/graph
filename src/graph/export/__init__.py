@@ -195,6 +195,7 @@ from graph.export.unit_frontmatter_boolean_field_csv import export_units_to_fron
 from graph.export.unit_frontmatter_duplicate_key_csv import export_unit_frontmatter_duplicate_key_csv
 from graph.export.unit_frontmatter_reference_field_csv import export_units_to_frontmatter_reference_field_csv
 from graph.export.unit_markdown_comment_directive_csv import export_units_to_markdown_comment_directive_csv
+from graph.export.unit_markdown_definition_list_csv import export_units_to_markdown_definition_list_csv
 from graph.export.unit_markdown_admonition_csv import export_units_to_markdown_admonition_csv
 from graph.export.unit_markdown_admonition_inventory_csv import export_units_to_markdown_admonition_inventory_csv
 from graph.export.unit_markdown_abbreviation_inventory_csv import export_units_to_markdown_abbreviation_inventory_csv
@@ -611,6 +612,7 @@ __all__ = [
     "export_units_to_markdown_inline_code_csv",
     "export_units_to_markdown_html_class_csv",
     "export_units_to_markdown_link_context_csv",
+    "export_units_to_markdown_definition_list_csv",
     "export_units_to_markdown_link_definition_title_csv",
     "export_units_to_markdown_link_title_csv",
     "export_units_to_markdown_link_scheme_csv",
