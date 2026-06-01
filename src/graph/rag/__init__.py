@@ -14,6 +14,7 @@ from graph.rag.answer_actionability import audit_answer_actionability
 from graph.rag.answer_action_owner_audit import audit_answer_action_owners
 from graph.rag.answer_accessibility_disclosure import audit_answer_accessibility_disclosure
 from graph.rag.answer_citation_anchor import audit_answer_citation_anchors
+from graph.rag.answer_citation_overclaim import audit_answer_citation_overclaims
 from graph.rag.answer_citation_freshness import audit_answer_citation_freshness
 from graph.rag.answer_compliance_boundary_audit import audit_answer_compliance_boundaries
 from graph.rag.answer_jargon import audit_answer_jargon
@@ -21,6 +22,7 @@ from graph.rag.answer_numeric_claims import audit_answer_numeric_claims
 from graph.rag.answer_step_order import audit_answer_step_order
 from graph.rag.claim_support_matrix import build_claim_support_matrix
 from graph.rag.context_accessibility_signal import analyze_context_accessibility_signals
+from graph.rag.context_numeric_evidence_signal import analyze_context_numeric_evidence_signals
 from graph.rag.context_window_packing import plan_context_window_packing
 from graph.rag.date_coverage import analyze_result_date_coverage
 from graph.rag.query_decomposition import decompose_query_for_retrieval
@@ -38,8 +40,11 @@ from graph.rag.evidence_quote_spans import extract_evidence_quote_spans
 from graph.rag.evidence_specificity import score_evidence_specificity
 from graph.rag.keywords import extract_keywords
 from graph.rag.query_intent import classify_query_intent
+from graph.rag.query_citation_requirement import detect_query_citation_requirement
 from graph.rag.query_confidentiality_requirement import detect_query_confidentiality_requirement
+from graph.rag.query_geographic_scope import detect_query_geographic_scope
 from graph.rag.query_latency_sla_requirement import detect_query_latency_sla_requirement
+from graph.rag.query_privacy_constraint import detect_query_privacy_constraints
 from graph.rag.query_source_strategy import plan_query_source_strategy
 from graph.rag.query_term_coverage import score_query_term_coverage
 from graph.rag.dedupe import rank_duplicate_candidates
@@ -56,6 +61,7 @@ from graph.rag.result_accessibility_coverage import analyze_result_accessibility
 from graph.rag.result_authority_signals import analyze_result_authority_signals
 from graph.rag.result_explanations import explain_rag_results
 from graph.rag.result_evidence_method_mix import analyze_result_evidence_method_mix
+from graph.rag.result_conflict_signal import analyze_result_conflict_signals
 from graph.rag.result_provenance_completeness import analyze_result_provenance_completeness
 from graph.rag.result_format_coverage import analyze_result_format_coverage
 from graph.rag.result_format_mismatch_audit import audit_result_format_mismatch
@@ -65,6 +71,7 @@ from graph.rag.snippets import highlight_result_snippets
 from graph.rag.answer_citation_density import estimate_answer_citation_density
 from graph.rag.answer_counterargument_balance import audit_answer_counterargument_balance
 from graph.rag.answer_source_attribution_integrity import audit_answer_source_attribution_integrity
+from graph.rag.answer_source_disagreement_disclosure import audit_answer_source_disagreement_disclosure
 from graph.rag.citation_target_plan import build_citation_target_plan
 from graph.rag.context_token_budget import allocate_context_token_budget
 from graph.rag.context_gap_prioritizer import prioritize_context_gaps
@@ -95,6 +102,7 @@ __all__ = [
     "build_tag_cooccurrence_matrix",
     "build_tag_hierarchy",
     "analyze_context_accessibility_signals",
+    "analyze_context_numeric_evidence_signals",
     "analyze_context_table_coverage",
     "analyze_citation_coverage",
     "analyze_citation_diversity",
@@ -105,6 +113,7 @@ __all__ = [
     "analyze_result_authority_signals",
     "analyze_result_date_coverage",
     "analyze_result_evidence_method_mix",
+    "analyze_result_conflict_signals",
     "analyze_result_format_coverage",
     "analyze_result_provenance_completeness",
     "analyze_retrieval_overlap",
@@ -115,6 +124,7 @@ __all__ = [
     "audit_answer_action_owners",
     "audit_answer_accessibility_disclosure",
     "audit_answer_citation_anchors",
+    "audit_answer_citation_overclaims",
     "audit_answer_citation_freshness",
     "audit_answer_compliance_boundaries",
     "audit_answer_counterargument_balance",
@@ -122,6 +132,7 @@ __all__ = [
     "audit_answer_jargon",
     "audit_answer_numeric_claims",
     "audit_answer_source_attribution_integrity",
+    "audit_answer_source_disagreement_disclosure",
     "audit_answer_step_order",
     "audit_result_format_mismatch",
     "allocate_evidence_budget",
@@ -147,8 +158,11 @@ __all__ = [
     "detect_context_gaps",
     "detect_citation_gaps",
     "detect_query_comparison_axes",
+    "detect_query_citation_requirement",
     "detect_query_confidentiality_requirement",
+    "detect_query_geographic_scope",
     "detect_query_latency_sla_requirement",
+    "detect_query_privacy_constraints",
     "detect_query_output_constraints",
     "detect_query_temporal_anchors",
     "extract_keywords",

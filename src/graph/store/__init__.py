@@ -75,6 +75,7 @@ from graph.store.unit_inline_code_usage_summary import summarize_unit_inline_cod
 from graph.store.unit_local_file_reference_summary import summarize_unit_local_file_references
 from graph.store.unit_markdown_abbreviation_summary import summarize_unit_markdown_abbreviations
 from graph.store.unit_markdown_blockquote_attribution_summary import summarize_unit_markdown_blockquote_attributions
+from graph.store.unit_markdown_blockquote_depth_summary import summarize_unit_markdown_blockquote_depths
 from graph.store.unit_markdown_autolink_summary import summarize_unit_markdown_autolinks
 from graph.store.unit_markdown_custom_id_summary import summarize_unit_markdown_custom_ids
 from graph.store.unit_markdown_escape_summary import summarize_unit_markdown_escapes
@@ -101,6 +102,7 @@ from graph.store.unit_markdown_horizontal_rule_summary import summarize_unit_mar
 from graph.store.unit_markdown_block_id_summary import summarize_unit_markdown_block_ids
 from graph.store.unit_markdown_table_alignment_summary import summarize_unit_markdown_table_alignments
 from graph.store.unit_markdown_table_caption_summary import summarize_unit_markdown_table_captions
+from graph.store.unit_markdown_table_empty_cell_summary import summarize_unit_markdown_table_empty_cells
 from graph.store.unit_markdown_toc_summary import summarize_unit_markdown_toc
 from graph.store.unit_markdown_task_list_summary import summarize_unit_markdown_task_lists
 from graph.store.unit_markdown_strikethrough_summary import summarize_unit_markdown_strikethrough
@@ -126,6 +128,7 @@ from graph.store.unit_yaml_alias_anchor_summary import summarize_unit_yaml_alias
 from graph.store.unit_markdown_definition_list_summary import summarize_unit_markdown_definition_lists
 from graph.store.unit_markdown_comment_directive_summary import summarize_unit_markdown_comment_directives
 from graph.store.unit_markdown_html_comment_summary import summarize_unit_markdown_html_comments
+from graph.store.unit_markdown_html_underline_summary import summarize_unit_markdown_html_underlines
 from graph.store.unit_metadata_secret_hint_summary import summarize_unit_metadata_secret_hints
 from graph.store.unit_metadata_empty_value_summary import summarize_unit_metadata_empty_values
 from graph.store.unit_metadata_cardinality_summary import summarize_unit_metadata_cardinality
@@ -229,6 +232,7 @@ __all__ = [
     "summarize_unit_local_file_references",
     "summarize_unit_markdown_abbreviations",
     "summarize_unit_markdown_blockquote_attributions",
+    "summarize_unit_markdown_blockquote_depths",
     "summarize_unit_markdown_admonitions",
     "summarize_unit_markdown_embeds",
     "summarize_unit_markdown_autolinks",
@@ -257,6 +261,7 @@ __all__ = [
     "summarize_unit_markdown_block_ids",
     "summarize_unit_markdown_table_alignments",
     "summarize_unit_markdown_table_captions",
+    "summarize_unit_markdown_table_empty_cells",
     "summarize_unit_markdown_toc",
     "summarize_unit_markdown_task_lists",
     "summarize_unit_markdown_strikethrough",
@@ -266,6 +271,7 @@ __all__ = [
     "summarize_unit_markdown_unicode_emoji",
     "summarize_unit_markdown_comment_directives",
     "summarize_unit_markdown_html_comments",
+    "summarize_unit_markdown_html_underlines",
     "summarize_unit_markdown_definition_lists",
     "summarize_unit_notebook_cell_markers",
     "summarize_unit_pandoc_citation_keys",
