@@ -29,6 +29,10 @@ from graph.store.source_redirect_chain_depth_summary import summarize_source_red
 from graph.store.source_etag_summary import summarize_source_etags
 from graph.store.source_unit_count_summary import summarize_source_unit_counts
 from graph.store.source_url_domain_summary import summarize_source_url_domains
+from graph.store.source_ssl_expiry_summary import summarize_source_ssl_expiry
+from graph.store.source_robots_policy_summary import summarize_source_robots_policies
+from graph.store.source_http_method_summary import summarize_source_http_methods
+from graph.store.source_canonical_url_conflict_summary import summarize_source_canonical_url_conflicts
 from graph.store.unit_attachment_extension_summary import summarize_unit_attachment_extensions
 from graph.store.unit_attachment_orphan_file_summary import summarize_unit_attachment_orphan_files
 from graph.store.unit_blockquote_usage_summary import summarize_unit_blockquote_usage
@@ -179,6 +183,10 @@ __all__ = [
     "summarize_source_etags",
     "summarize_source_unit_counts",
     "summarize_source_url_domains",
+    "summarize_source_ssl_expiry",
+    "summarize_source_robots_policies",
+    "summarize_source_http_methods",
+    "summarize_source_canonical_url_conflicts",
     "summarize_unit_attachment_extensions",
     "summarize_unit_attachment_orphan_files",
     "summarize_unit_blockquote_usage",
