@@ -19,3 +19,13 @@ def test_html_block_summary_groups_block_tags_case_insensitively():
         ("table", 1, 1),
     ]
     assert summary["html_blocks"][1]["examples"][0]["snippet"] == "<DIV class=x>"
+
+
+def test_html_block_summary_counts_requested_tags_and_unsafe_blocks():
+    summary = summarize_unit_markdown_html_blocks(
+        [{"id": "u", "content": "<script>\n<style>\n<summary>Short</summary>\n<iframe src=x></iframe>"}]
+    )
+
+    assert summary["tag_counts"] == {"iframe": 1, "script": 1, "style": 1, "summary": 1}
+    assert summary["unsafe_block_count"] == 3
+    assert summary["unsafe_tags"] == ["iframe", "script", "style"]
