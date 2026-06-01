@@ -218,6 +218,13 @@ from graph.export.unit_html_data_attribute_csv import export_unit_html_data_attr
 from graph.export.unit_markdown_heading_trailing_hash_csv import export_unit_markdown_heading_trailing_hash_csv
 from graph.export.unit_markdown_link_relation_csv import export_unit_markdown_link_relation_csv
 from graph.export.unit_markdown_image_alt_text_inventory_csv import export_units_to_markdown_image_alt_text_inventory_csv
+from graph.export.unit_markdown_internal_anchor_target_csv import export_units_to_markdown_internal_anchor_target_csv
+from graph.export.unit_markdown_mermaid_diagram_csv import export_units_to_markdown_mermaid_diagram_csv
+from graph.export.unit_markdown_embed_inventory_csv import export_units_to_markdown_embed_inventory_csv
+from graph.export.unit_yaml_alias_anchor_csv import export_units_to_yaml_alias_anchor_csv
+from graph.export.unit_markdown_autolink_csv import export_units_to_markdown_autolink_csv
+from graph.export.unit_markdown_strikethrough_csv import export_units_to_markdown_strikethrough_csv
+from graph.export.unit_markdown_footnote_reference_csv import export_units_to_markdown_footnote_reference_csv
 from graph.export.unit_markdown_setext_heading_csv import export_unit_markdown_setext_heading_csv
 from graph.export.unit_markdown_toc_entry_csv import export_unit_markdown_toc_entry_csv
 from graph.export.unit_markdown_image_dimension_hint_csv import export_units_to_markdown_image_dimension_hint_csv
@@ -580,16 +587,22 @@ __all__ = [
     "export_unit_html_data_attribute_csv",
     "export_units_to_markdown_admonition_csv",
     "export_units_to_markdown_admonition_inventory_csv",
+    "export_units_to_markdown_autolink_csv",
     "export_units_to_markdown_comment_directive_csv",
     "export_units_to_markdown_code_fence_attribute_csv",
     "export_units_to_markdown_collapsed_section_csv",
+    "export_units_to_markdown_embed_inventory_csv",
     "export_units_to_markdown_emphasis_inventory_csv",
+    "export_units_to_markdown_footnote_reference_csv",
     "export_units_to_markdown_heading_anchor_csv",
     "export_units_to_markdown_horizontal_rule_csv",
+    "export_units_to_markdown_internal_anchor_target_csv",
     "export_units_to_markdown_inline_code_csv",
     "export_units_to_markdown_link_context_csv",
     "export_units_to_markdown_link_definition_title_csv",
     "export_units_to_markdown_link_scheme_csv",
+    "export_units_to_markdown_mermaid_diagram_csv",
+    "export_units_to_markdown_strikethrough_csv",
     "export_units_to_markdown_details_inventory_csv",
     "export_units_to_markdown_image_dimension_csv",
     "export_unit_markdown_footnote_backref_csv",
@@ -692,6 +705,7 @@ __all__ = [
     "export_units_to_opml",
     "export_units_to_org",
     "export_units_to_yaml",
+    "export_units_to_yaml_alias_anchor_csv",
     "export_units_to_ics",
     "export_units_to_ical_timeline",
     "export_units_to_vegalite_timeline",
