@@ -21,6 +21,7 @@ from graph.store.relation_duplicate_edge_summary import summarize_relation_dupli
 from graph.store.relation_self_loop_summary import summarize_relation_self_loops
 from graph.store.source_ingest_frequency_summary import summarize_source_ingest_frequency
 from graph.store.source_authentication_hint_summary import summarize_source_authentication_hints
+from graph.store.source_content_security_policy_summary import summarize_source_content_security_policies
 from graph.store.source_oauth_scope_summary import summarize_source_oauth_scopes
 from graph.store.source_metadata_completeness_summary import summarize_source_metadata_completeness
 from graph.store.source_error_message_summary import summarize_source_error_messages
@@ -184,6 +185,7 @@ __all__ = [
     "summarize_relation_self_loops",
     "summarize_source_ingest_frequency",
     "summarize_source_authentication_hints",
+    "summarize_source_content_security_policies",
     "summarize_source_oauth_scopes",
     "summarize_source_error_messages",
     "summarize_source_response_times",

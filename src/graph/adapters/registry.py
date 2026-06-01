@@ -113,6 +113,7 @@ from graph.adapters.medium_bookmarks_json import MediumBookmarksJsonAdapter
 from graph.adapters.monarch_money_transactions_csv import MonarchMoneyTransactionsCsvAdapter
 from graph.adapters.monzo_transactions_csv import MonzoTransactionsCsvAdapter
 from graph.adapters.overcast_starred_episodes_json import OvercastStarredEpisodesJsonAdapter
+from graph.adapters.paprika_recipes_json import PaprikaRecipesJsonAdapter
 from graph.adapters.patreon_memberships_csv import PatreonMembershipsCsvAdapter
 from graph.adapters.paypal_activity_csv import PaypalActivityCsvAdapter
 from graph.adapters.personal_capital_transactions_csv import PersonalCapitalTransactionsCsvAdapter
@@ -238,12 +239,14 @@ from graph.adapters.google_drive_files_csv import GoogleDriveFilesCsvAdapter
 from graph.adapters.instapaper_highlights_csv import InstapaperHighlightsCsvAdapter
 from graph.adapters.microsoft_edge_bookmarks_json import MicrosoftEdgeBookmarksJsonAdapter
 from graph.adapters.notion_database_csv import NotionDatabaseCsvAdapter
+from graph.adapters.notion_pages_csv import NotionPagesCsvAdapter
 from graph.adapters.pocket_casts_queue_csv import PocketCastsQueueCsvAdapter
 from graph.adapters.substack_posts_csv import SubstackPostsCsvAdapter
 from graph.adapters.zotero_notes_markdown import ZoteroNotesMarkdownAdapter
 from graph.adapters.zotero_rdf import ZoteroRdfAdapter
 from graph.adapters.zotero_better_bibtex_json import ZoteroBetterBibtexJsonAdapter
 from graph.adapters.workflowy_opml import WorkflowyOpmlAdapter
+from graph.adapters.wikipedia_reading_list_csv import WikipediaReadingListCsvAdapter
 
 _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "atom": AtomAdapter,
@@ -299,6 +302,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "apple_podcasts_history_csv": ApplePodcastsHistoryCsvAdapter,
     "medium_bookmarks_json": MediumBookmarksJsonAdapter,
     "overcast_starred_episodes_json": OvercastStarredEpisodesJsonAdapter,
+    "paprika_recipes_json": PaprikaRecipesJsonAdapter,
     "pocket_casts_listening_history_csv": PocketCastsListeningHistoryCsvAdapter,
     "product_hunt_bookmarks_json": ProductHuntBookmarksJsonAdapter,
     "product_hunt_votes_json": ProductHuntVotesJsonAdapter,
@@ -312,6 +316,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "google_keep_export": GoogleKeepExportAdapter,
     "opml": OpmlAdapter,
     "workflowy_opml": WorkflowyOpmlAdapter,
+    "wikipedia_reading_list_csv": WikipediaReadingListCsvAdapter,
     "obsidian_canvas": ObsidianCanvasAdapter,
     "omnivore_json": OmnivoreJsonAdapter,
     "omnivore_highlights_json": OmnivoreHighlightsJsonAdapter,
@@ -484,6 +489,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "instapaper_highlights_csv": InstapaperHighlightsCsvAdapter,
     "microsoft_edge_bookmarks_json": MicrosoftEdgeBookmarksJsonAdapter,
     "notion_database_csv": NotionDatabaseCsvAdapter,
+    "notion_pages_csv": NotionPagesCsvAdapter,
     "pocket_casts_queue_csv": PocketCastsQueueCsvAdapter,
     "substack_posts_csv": SubstackPostsCsvAdapter,
     "zotero_notes_markdown": ZoteroNotesMarkdownAdapter,
