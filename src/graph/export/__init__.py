@@ -221,6 +221,7 @@ from graph.export.unit_html_data_attribute_csv import export_unit_html_data_attr
 from graph.export.unit_markdown_heading_trailing_hash_csv import export_unit_markdown_heading_trailing_hash_csv
 from graph.export.unit_markdown_link_relation_csv import export_unit_markdown_link_relation_csv
 from graph.export.unit_markdown_link_title_attribute_csv import export_unit_markdown_link_title_attributes_to_csv
+from graph.export.unit_markdown_link_title_csv import export_units_to_markdown_link_title_csv
 from graph.export.unit_markdown_image_alt_text_inventory_csv import export_units_to_markdown_image_alt_text_inventory_csv
 from graph.export.unit_external_link_domain_csv import export_unit_external_link_domains_to_csv
 from graph.export.unit_markdown_internal_anchor_target_csv import export_units_to_markdown_internal_anchor_target_csv
@@ -244,6 +245,7 @@ from graph.export.unit_code_fence_filename_csv import export_unit_code_fence_fil
 from graph.export.unit_notebook_cell_marker_csv import export_units_to_notebook_cell_marker_csv
 from graph.export.unit_yaml_tag_directive_csv import export_unit_yaml_tag_directive_csv
 from graph.export.unit_markdown_html_comment_csv import export_unit_markdown_html_comment_csv
+from graph.export.unit_markdown_html_class_csv import export_units_to_markdown_html_class_csv
 from graph.export.unit_markdown_escape_csv import export_unit_markdown_escape_csv
 from graph.export.unit_markdown_hard_break_csv import export_unit_markdown_hard_break_csv
 from graph.export.unit_markdown_highlight_csv import export_unit_markdown_highlight_csv
@@ -607,8 +609,10 @@ __all__ = [
     "export_units_to_markdown_horizontal_rule_csv",
     "export_units_to_markdown_internal_anchor_target_csv",
     "export_units_to_markdown_inline_code_csv",
+    "export_units_to_markdown_html_class_csv",
     "export_units_to_markdown_link_context_csv",
     "export_units_to_markdown_link_definition_title_csv",
+    "export_units_to_markdown_link_title_csv",
     "export_units_to_markdown_link_scheme_csv",
     "export_units_to_markdown_mermaid_diagram_csv",
     "export_units_to_markdown_strikethrough_csv",
