@@ -44,12 +44,18 @@ from graph.rag.query_citation_requirement import detect_query_citation_requireme
 from graph.rag.query_authorization_scope_requirement import detect_query_authorization_scope_requirements
 from graph.rag.query_confidentiality_requirement import detect_query_confidentiality_requirement
 from graph.rag.query_device_posture_requirement import detect_query_device_posture_requirements
+from graph.rag.query_dpa_requirement import detect_query_dpa_requirement
+from graph.rag.query_gdpr_requirement import detect_query_gdpr_requirement
 from graph.rag.query_geographic_scope import detect_query_geographic_scope
+from graph.rag.query_hipaa_requirement import detect_query_hipaa_requirement
 from graph.rag.query_ip_allowlist_requirement import detect_query_ip_allowlist_requirements
 from graph.rag.query_latency_sla_requirement import detect_query_latency_sla_requirement
+from graph.rag.query_oncall_escalation_requirement import detect_query_oncall_escalation_requirement
 from graph.rag.query_password_policy_requirement import detect_query_password_policy_requirements
 from graph.rag.query_privileged_access_requirement import detect_query_privileged_access_requirements
 from graph.rag.query_privacy_constraint import detect_query_privacy_constraints
+from graph.rag.query_soc2_requirement import detect_query_soc2_requirement
+from graph.rag.query_uptime_sla_requirement import detect_query_uptime_sla_requirement
 from graph.rag.query_source_strategy import plan_query_source_strategy
 from graph.rag.query_term_coverage import score_query_term_coverage
 from graph.rag.dedupe import rank_duplicate_candidates
@@ -167,14 +173,20 @@ __all__ = [
     "detect_query_citation_requirement",
     "detect_query_confidentiality_requirement",
     "detect_query_device_posture_requirements",
+    "detect_query_dpa_requirement",
+    "detect_query_gdpr_requirement",
     "detect_query_geographic_scope",
+    "detect_query_hipaa_requirement",
     "detect_query_ip_allowlist_requirements",
     "detect_query_latency_sla_requirement",
+    "detect_query_oncall_escalation_requirement",
     "detect_query_password_policy_requirements",
     "detect_query_privileged_access_requirements",
     "detect_query_privacy_constraints",
+    "detect_query_soc2_requirement",
     "detect_query_output_constraints",
     "detect_query_temporal_anchors",
+    "detect_query_uptime_sla_requirement",
     "extract_keywords",
     "extract_query_focus_terms",
     "extract_query_entity_focus",
