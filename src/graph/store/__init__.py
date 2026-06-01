@@ -35,6 +35,13 @@ from graph.store.source_ssl_expiry_summary import summarize_source_ssl_expiry
 from graph.store.source_robots_policy_summary import summarize_source_robots_policies
 from graph.store.source_http_method_summary import summarize_source_http_methods
 from graph.store.source_canonical_url_conflict_summary import summarize_source_canonical_url_conflicts
+from graph.store.source_cache_header_summary import summarize_source_cache_headers
+from graph.store.source_charset_summary import summarize_source_charsets
+from graph.store.source_compression_encoding_summary import summarize_source_compression_encodings
+from graph.store.source_duplicate_identifier_summary import summarize_source_duplicate_identifiers
+from graph.store.source_last_modified_summary import summarize_source_last_modified
+from graph.store.source_link_rot_risk_summary import summarize_source_link_rot_risks
+from graph.store.source_rate_limit_hint_summary import summarize_source_rate_limit_hints
 from graph.store.unit_attachment_extension_summary import summarize_unit_attachment_extensions
 from graph.store.unit_attachment_orphan_file_summary import summarize_unit_attachment_orphan_files
 from graph.store.unit_blockquote_usage_summary import summarize_unit_blockquote_usage
@@ -198,6 +205,13 @@ __all__ = [
     "summarize_source_robots_policies",
     "summarize_source_http_methods",
     "summarize_source_canonical_url_conflicts",
+    "summarize_source_cache_headers",
+    "summarize_source_charsets",
+    "summarize_source_compression_encodings",
+    "summarize_source_duplicate_identifiers",
+    "summarize_source_last_modified",
+    "summarize_source_link_rot_risks",
+    "summarize_source_rate_limit_hints",
     "summarize_unit_attachment_extensions",
     "summarize_unit_attachment_orphan_files",
     "summarize_unit_blockquote_usage",
