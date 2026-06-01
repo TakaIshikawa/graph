@@ -251,6 +251,8 @@ from graph.export.unit_markdown_strikethrough_inventory_csv import export_units_
 from graph.export.unit_markdown_symbol_density_csv import export_units_to_markdown_symbol_density_csv
 from graph.export.unit_markdown_tag_csv import export_units_to_markdown_tag_csv
 from graph.export.unit_markdown_task_priority_csv import export_units_to_markdown_task_priority_csv
+from graph.export.unit_markdown_todo_due_date_csv import export_units_to_markdown_todo_due_date_csv
+from graph.export.unit_markdown_math_block_csv import export_unit_markdown_math_blocks_to_csv
 from graph.export.unit_markdown_table_csv import export_units_to_markdown_table_csv
 from graph.export.unit_markdown_table_alignment_csv import export_units_to_markdown_table_alignment_csv
 from graph.export.unit_markdown_table_inventory_csv import export_units_to_markdown_table_inventory_csv
@@ -619,6 +621,8 @@ __all__ = [
     "export_units_to_markdown_reference_label_case_csv",
     "export_units_to_markdown_superscript_inventory_csv",
     "export_units_to_markdown_tag_csv",
+    "export_units_to_markdown_todo_due_date_csv",
+    "export_unit_markdown_math_blocks_to_csv",
     "export_unit_markdown_thematic_breaks_to_csv",
     "export_unit_markdown_setext_heading_csv",
     "export_unit_markdown_reference_definition_csv",
