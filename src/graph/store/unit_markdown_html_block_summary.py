@@ -9,7 +9,25 @@ from typing import Any
 from graph.export._report_csv import field_value, get, sort_key, unit_id
 
 _FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
-_BLOCK_TAGS = {"article", "aside", "details", "div", "figure", "footer", "form", "header", "iframe", "main", "nav", "section", "table"}
+_BLOCK_TAGS = {
+    "article",
+    "aside",
+    "details",
+    "div",
+    "figure",
+    "footer",
+    "form",
+    "header",
+    "iframe",
+    "main",
+    "nav",
+    "script",
+    "section",
+    "style",
+    "summary",
+    "table",
+}
+_UNSAFE_TAGS = {"iframe", "script", "style"}
 _TAG_RE = re.compile(r"^\s{0,3}</?([A-Za-z][A-Za-z0-9:-]*)(?:\s|>|/>)")
 
 
@@ -34,7 +52,13 @@ def summarize_unit_markdown_html_blocks(units: Iterable[Any], sample_limit: int 
         for row in grouped.values()
     ]
     tags.sort(key=lambda row: (-int(row["block_count"]), sort_key(row["tag"])))
-    return {"total_units": total, "html_blocks": tags}
+    return {
+        "total_units": total,
+        "html_blocks": tags,
+        "tag_counts": {row["tag"]: row["block_count"] for row in sorted(tags, key=lambda row: sort_key(row["tag"]))},
+        "unsafe_block_count": sum(int(row["block_count"]) for row in tags if row["tag"] in _UNSAFE_TAGS),
+        "unsafe_tags": [row["tag"] for row in sorted(tags, key=lambda row: sort_key(row["tag"])) if row["tag"] in _UNSAFE_TAGS],
+    }
 
 
 def _blocks(content: str) -> list[tuple[int, str, str]]:
