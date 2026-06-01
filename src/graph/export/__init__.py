@@ -205,6 +205,7 @@ from graph.export.unit_markdown_custom_id_inventory_csv import export_units_to_m
 from graph.export.unit_markdown_emphasis_inventory_csv import export_units_to_markdown_emphasis_inventory_csv
 from graph.export.unit_markdown_footnote_definition_csv import export_unit_markdown_footnote_definition_csv
 from graph.export.unit_markdown_heading_anchor_csv import export_units_to_markdown_heading_anchor_csv
+from graph.export.unit_markdown_heading_depth_csv import export_unit_markdown_heading_depths_to_csv
 from graph.export.unit_markdown_horizontal_rule_csv import export_units_to_markdown_horizontal_rule_csv
 from graph.export.unit_markdown_inline_code_csv import export_units_to_markdown_inline_code_csv
 from graph.export.unit_markdown_link_scheme_csv import export_units_to_markdown_link_scheme_csv
@@ -253,6 +254,7 @@ from graph.export.unit_markdown_task_priority_csv import export_units_to_markdow
 from graph.export.unit_markdown_table_csv import export_units_to_markdown_table_csv
 from graph.export.unit_markdown_table_alignment_csv import export_units_to_markdown_table_alignment_csv
 from graph.export.unit_markdown_table_inventory_csv import export_units_to_markdown_table_inventory_csv
+from graph.export.unit_markdown_thematic_break_csv import export_unit_markdown_thematic_breaks_to_csv
 from graph.export.unit_markdown_wikilink_csv import export_units_to_markdown_wikilink_csv
 from graph.export.unit_markdown_unicode_emoji_csv import export_unit_markdown_unicode_emoji_csv
 from graph.export.unit_word_count_csv import export_units_to_word_count_csv
@@ -599,6 +601,7 @@ __all__ = [
     "export_units_to_markdown_emphasis_inventory_csv",
     "export_units_to_markdown_footnote_reference_csv",
     "export_units_to_markdown_heading_anchor_csv",
+    "export_unit_markdown_heading_depths_to_csv",
     "export_units_to_markdown_horizontal_rule_csv",
     "export_units_to_markdown_internal_anchor_target_csv",
     "export_units_to_markdown_inline_code_csv",
@@ -616,6 +619,7 @@ __all__ = [
     "export_units_to_markdown_reference_label_case_csv",
     "export_units_to_markdown_superscript_inventory_csv",
     "export_units_to_markdown_tag_csv",
+    "export_unit_markdown_thematic_breaks_to_csv",
     "export_unit_markdown_setext_heading_csv",
     "export_unit_markdown_reference_definition_csv",
     "export_unit_markdown_unicode_emoji_csv",
