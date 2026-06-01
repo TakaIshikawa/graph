@@ -11,13 +11,16 @@ from graph.store.collection_orphan_summary import summarize_collection_orphans
 from graph.store.collection_stale_member_summary import summarize_collection_stale_members
 from graph.store.collection_tag_overlap_summary import summarize_collection_tag_overlap
 from graph.store.relation_cycle_summary import summarize_relation_cycles
+from graph.store.relation_evidence_url_domain_summary import summarize_relation_evidence_url_domains
 from graph.store.relation_metadata_key_frequency_summary import summarize_relation_metadata_key_frequency
 from graph.store.relation_metadata_empty_value_summary import summarize_relation_metadata_empty_values
+from graph.store.relation_temporal_metadata_summary import summarize_relation_temporal_metadata
 from graph.store.relation_type_frequency_summary import summarize_relation_type_frequency
 from graph.store.relation_duplicate_edge_summary import summarize_relation_duplicate_edges
 from graph.store.relation_self_loop_summary import summarize_relation_self_loops
 from graph.store.source_ingest_frequency_summary import summarize_source_ingest_frequency
 from graph.store.source_authentication_hint_summary import summarize_source_authentication_hints
+from graph.store.source_oauth_scope_summary import summarize_source_oauth_scopes
 from graph.store.source_metadata_completeness_summary import summarize_source_metadata_completeness
 from graph.store.source_error_message_summary import summarize_source_error_messages
 from graph.store.source_response_time_summary import summarize_source_response_times
@@ -49,6 +52,7 @@ from graph.store.unit_frontmatter_numeric_field_summary import summarize_unit_fr
 from graph.store.unit_frontmatter_empty_array_summary import summarize_unit_frontmatter_empty_arrays
 from graph.store.unit_frontmatter_tag_format_summary import summarize_unit_frontmatter_tag_formats
 from graph.store.unit_frontmatter_tag_cardinality_summary import summarize_unit_frontmatter_tag_cardinality
+from graph.store.unit_frontmatter_url_field_summary import summarize_unit_frontmatter_url_fields
 from graph.store.unit_frontmatter_null_summary import summarize_unit_frontmatter_nulls
 from graph.store.unit_external_url_domain_summary import summarize_unit_external_url_domains
 from graph.store.unit_footnote_orphan_summary import summarize_unit_footnote_orphans
@@ -159,12 +163,15 @@ __all__ = [
     "summarize_collection_stale_members",
     "summarize_collection_tag_overlap",
     "summarize_relation_cycles",
+    "summarize_relation_evidence_url_domains",
     "summarize_relation_metadata_key_frequency",
+    "summarize_relation_temporal_metadata",
     "summarize_relation_type_frequency",
     "summarize_relation_duplicate_edges",
     "summarize_relation_self_loops",
     "summarize_source_ingest_frequency",
     "summarize_source_authentication_hints",
+    "summarize_source_oauth_scopes",
     "summarize_source_error_messages",
     "summarize_source_response_times",
     "summarize_source_redirect_hints",
@@ -195,6 +202,7 @@ __all__ = [
     "summarize_unit_frontmatter_empty_arrays",
     "summarize_unit_frontmatter_tag_formats",
     "summarize_unit_frontmatter_tag_cardinality",
+    "summarize_unit_frontmatter_url_fields",
     "summarize_unit_frontmatter_nulls",
     "summarize_unit_external_url_domains",
     "summarize_unit_footnote_orphans",
