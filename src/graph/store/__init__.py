@@ -76,7 +76,7 @@ from graph.store.source_digest_header_summary import summarize_source_digest_hea
 from graph.store.source_content_digest_summary import summarize_source_content_digests
 from graph.store.source_content_md5_summary import summarize_source_content_md5s
 from graph.store.source_x_robots_tag_summary import summarize_source_x_robots_tags
-from graph.store.source_accept_ch_summary import summarize_source_accept_ch_hints
+from graph.store.source_accept_ch_summary import summarize_source_accept_ch_headers, summarize_source_accept_ch_hints
 from graph.store.source_open_graph_meta_summary import summarize_source_open_graph_meta
 from graph.store.source_json_ld_summary import summarize_source_json_ld
 from graph.store.source_trailer_header_summary import summarize_source_trailer_headers
@@ -286,6 +286,7 @@ __all__ = [
     "summarize_source_content_digests",
     "summarize_source_content_md5s",
     "summarize_source_x_robots_tags",
+    "summarize_source_accept_ch_headers",
     "summarize_source_accept_ch_hints",
     "summarize_source_open_graph_meta",
     "summarize_source_json_ld",
