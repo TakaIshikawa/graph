@@ -43,6 +43,7 @@ from graph.rag.query_intent import classify_query_intent
 from graph.rag.query_citation_requirement import detect_query_citation_requirement
 from graph.rag.query_authorization_scope_requirement import detect_query_authorization_scope_requirements
 from graph.rag.query_authentication_method_requirement import detect_query_authentication_method_requirements
+from graph.rag.query_secrets_rotation_requirement import detect_query_secrets_rotation_requirement, detect_query_secrets_rotation_requirements
 from graph.rag.query_access_review_requirement import detect_query_access_review_requirement
 from graph.rag.query_business_continuity_requirement import detect_query_business_continuity_requirement
 from graph.rag.query_change_management_requirement import detect_query_change_management_requirement
@@ -202,6 +203,8 @@ __all__ = [
     "detect_query_privileged_access_requirements",
     "detect_query_privacy_constraints",
     "detect_query_secure_development_requirement",
+    "detect_query_secrets_rotation_requirement",
+    "detect_query_secrets_rotation_requirements",
     "detect_query_soc2_requirement",
     "detect_query_third_party_access_requirement",
     "detect_query_output_constraints",

@@ -65,6 +65,7 @@ from graph.store.source_origin_agent_cluster_summary import summarize_source_ori
 from graph.store.source_x_permitted_cross_domain_policies_summary import summarize_source_x_permitted_cross_domain_policies
 from graph.store.source_clear_site_data_summary import summarize_source_clear_site_data_headers
 from graph.store.source_api_version_summary import summarize_source_api_versions
+from graph.store.source_openapi_hint_summary import summarize_source_openapi_hints
 from graph.store.unit_attachment_extension_summary import summarize_unit_attachment_extensions
 from graph.store.unit_attachment_orphan_file_summary import summarize_unit_attachment_orphan_files
 from graph.store.unit_blockquote_usage_summary import summarize_unit_blockquote_usage
@@ -258,6 +259,7 @@ __all__ = [
     "summarize_source_x_permitted_cross_domain_policies",
     "summarize_source_clear_site_data_headers",
     "summarize_source_api_versions",
+    "summarize_source_openapi_hints",
     "summarize_unit_attachment_extensions",
     "summarize_unit_attachment_orphan_files",
     "summarize_unit_blockquote_usage",
