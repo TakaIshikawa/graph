@@ -8,7 +8,9 @@ from graph.adapters.acorns_activity_csv import AcornsActivityCsvAdapter
 from graph.adapters.amazon_orders_csv import AmazonOrdersCsvAdapter
 from graph.adapters.audible_library_csv import AudibleLibraryCsvAdapter
 from graph.adapters.asana_projects_csv import AsanaProjectsCsvAdapter
+from graph.adapters.asana_stories_json import AsanaStoriesJsonAdapter
 from graph.adapters.asana_tasks_csv import AsanaTasksCsvAdapter
+from graph.adapters.airtable_bases_csv import AirtableBasesCsvAdapter
 from graph.adapters.atom import AtomAdapter
 from graph.adapters.bibdesk import BibDeskAdapter
 from graph.adapters.bibtex import BibtexAdapter
@@ -49,8 +51,10 @@ from graph.adapters.github_discussions_json import GithubDiscussionsJsonAdapter
 from graph.adapters.github_issues_json import GithubIssuesJsonAdapter
 from graph.adapters.github_releases_json import GithubReleasesJsonAdapter
 from graph.adapters.github_notifications_json import GithubNotificationsJsonAdapter
+from graph.adapters.github_review_comments_json import GithubReviewCommentsJsonAdapter
 from graph.adapters.gitlab_issues_json import GitlabIssuesJsonAdapter
 from graph.adapters.gitlab_merge_requests_json import GitlabMergeRequestsJsonAdapter
+from graph.adapters.gitlab_pipelines_json import GitlabPipelinesJsonAdapter
 from graph.adapters.github_stars_csv import GithubStarsCsvAdapter
 from graph.adapters.garmin_activities_csv import GarminActivitiesCsvAdapter
 from graph.adapters.goodreads_library import GoodreadsLibraryAdapter
@@ -59,6 +63,7 @@ from graph.adapters.instacart_orders_csv import InstacartOrdersCsvAdapter
 from graph.adapters.google_calendar_json import GoogleCalendarJsonAdapter
 from graph.adapters.google_calendar_takeout import GoogleCalendarTakeoutAdapter
 from graph.adapters.google_docs_takeout_html import GoogleDocsTakeoutHtmlAdapter
+from graph.adapters.google_fit_activity_csv import GoogleFitActivityCsvAdapter
 from graph.adapters.google_photos_takeout import GooglePhotosTakeoutAdapter
 from graph.adapters.google_keep import GoogleKeepAdapter
 from graph.adapters.google_location_semantic_history_json import GoogleLocationSemanticHistoryJsonAdapter
@@ -77,6 +82,7 @@ from graph.adapters.jira_projects_csv import JiraProjectsCsvAdapter
 from graph.adapters.jira_worklogs_csv import JiraWorklogsCsvAdapter
 from graph.adapters.linear_issues_json import LinearIssuesJsonAdapter
 from graph.adapters.linear_comments_json import LinearCommentsJsonAdapter
+from graph.adapters.linear_projects_json import LinearProjectsJsonAdapter
 from graph.adapters.jsonl_adapter import JsonlAdapter
 from graph.adapters.jsonl_notes import JsonlNotesAdapter
 from graph.adapters.kindle import KindleAdapter
@@ -114,6 +120,7 @@ from graph.adapters.bear_notes_markdown import BearNotesMarkdownAdapter
 from graph.adapters.apple_notes_export import AppleNotesExportAdapter
 from graph.adapters.apple_health_workouts import AppleHealthWorkoutsAdapter
 from graph.adapters.apple_calendar_events_csv import AppleCalendarEventsCsvAdapter
+from graph.adapters.apple_books_library_csv import AppleBooksLibraryCsvAdapter
 from graph.adapters.apple_music_library_csv import AppleMusicLibraryCsvAdapter
 from graph.adapters.apple_podcasts_history_csv import ApplePodcastsHistoryCsvAdapter
 from graph.adapters.medium_bookmarks_json import MediumBookmarksJsonAdapter
@@ -157,6 +164,7 @@ from graph.adapters.foam import FoamWorkspaceAdapter
 from graph.adapters.tana import TanaAdapter
 from graph.adapters.todoist import TodoistAdapter
 from graph.adapters.todoist_tasks_csv import TodoistTasksCsvAdapter
+from graph.adapters.todoist_completed_csv import TodoistCompletedCsvAdapter
 from graph.adapters.are_na import AreNaAdapter
 from graph.adapters.zotero_csv import ZoteroCsvAdapter
 from graph.adapters.google_tasks import GoogleTasksAdapter
@@ -252,6 +260,7 @@ from graph.adapters.microsoft_edge_bookmarks_json import MicrosoftEdgeBookmarksJ
 from graph.adapters.miro_boards_csv import MiroBoardsCsvAdapter
 from graph.adapters.notion_database_csv import NotionDatabaseCsvAdapter
 from graph.adapters.notion_pages_csv import NotionPagesCsvAdapter
+from graph.adapters.notion_comments_csv import NotionCommentsCsvAdapter
 from graph.adapters.pocket_casts_queue_csv import PocketCastsQueueCsvAdapter
 from graph.adapters.substack_posts_csv import SubstackPostsCsvAdapter
 from graph.adapters.zotero_notes_markdown import ZoteroNotesMarkdownAdapter
@@ -313,6 +322,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "apple_notes_export": AppleNotesExportAdapter,
     "apple_health_workouts": AppleHealthWorkoutsAdapter,
     "apple_calendar_events_csv": AppleCalendarEventsCsvAdapter,
+    "apple_books_library_csv": AppleBooksLibraryCsvAdapter,
     "apple_music_library_csv": AppleMusicLibraryCsvAdapter,
     "apple_podcasts_history_csv": ApplePodcastsHistoryCsvAdapter,
     "medium_bookmarks_json": MediumBookmarksJsonAdapter,
@@ -411,6 +421,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "tana": TanaAdapter,
     "todoist": TodoistAdapter,
     "todoist_tasks_csv": TodoistTasksCsvAdapter,
+    "todoist_completed_csv": TodoistCompletedCsvAdapter,
     "are_na": AreNaAdapter,
     "zotero_csv": ZoteroCsvAdapter,
     "zotero_library_csv": ZoteroLibraryCsvAdapter,
@@ -422,6 +433,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "hacker_news_upvoted_csv": HackerNewsUpvotedCsvAdapter,
     "github_stars_csv": GithubStarsCsvAdapter,
     "airtable_csv": AirtableCsvAdapter,
+    "airtable_bases_csv": AirtableBasesCsvAdapter,
     "google_calendar_json": GoogleCalendarJsonAdapter,
     "google_calendar_takeout": GoogleCalendarTakeoutAdapter,
     "google_docs_takeout_html": GoogleDocsTakeoutHtmlAdapter,
@@ -431,6 +443,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "audible_library_csv": AudibleLibraryCsvAdapter,
     "fidelity_activity_csv": FidelityActivityCsvAdapter,
     "fitbit_daily_activity_csv": FitbitDailyActivityCsvAdapter,
+    "google_fit_activity_csv": GoogleFitActivityCsvAdapter,
     "fitbit_sleep_csv": FitbitSleepCsvAdapter,
     "spotify_streaming_history": SpotifyStreamingHistoryAdapter,
     "spotify_takeout": SpotifyTakeoutAdapter,
@@ -450,12 +463,15 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "github_issues_json": GithubIssuesJsonAdapter,
     "github_releases_json": GithubReleasesJsonAdapter,
     "github_notifications_json": GithubNotificationsJsonAdapter,
+    "github_review_comments_json": GithubReviewCommentsJsonAdapter,
     "gitlab_issues_json": GitlabIssuesJsonAdapter,
     "gitlab_merge_requests_json": GitlabMergeRequestsJsonAdapter,
+    "gitlab_pipelines_json": GitlabPipelinesJsonAdapter,
     "jira_issues_csv": JiraIssuesCsvAdapter,
     "jira_projects_csv": JiraProjectsCsvAdapter,
     "jira_worklogs_csv": JiraWorklogsCsvAdapter,
     "linear_comments_json": LinearCommentsJsonAdapter,
+    "linear_projects_json": LinearProjectsJsonAdapter,
     "trello_board_json": TrelloBoardJsonAdapter,
     "google_maps_timeline_json": GoogleMapsTimelineJsonAdapter,
     "google_maps_reviews_json": GoogleMapsReviewsJsonAdapter,
@@ -492,6 +508,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "archivebox_index_json": ArchiveBoxIndexJsonAdapter,
     "asana_tasks_csv": AsanaTasksCsvAdapter,
     "asana_projects_csv": AsanaProjectsCsvAdapter,
+    "asana_stories_json": AsanaStoriesJsonAdapter,
     "strava_activities_json": StravaActivitiesJsonAdapter,
     "rescuetime_daily_csv": RescueTimeDailyCsvAdapter,
     "garmin_activities_csv": GarminActivitiesCsvAdapter,
@@ -514,6 +531,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "miro_boards_csv": MiroBoardsCsvAdapter,
     "notion_database_csv": NotionDatabaseCsvAdapter,
     "notion_pages_csv": NotionPagesCsvAdapter,
+    "notion_comments_csv": NotionCommentsCsvAdapter,
     "pocket_casts_queue_csv": PocketCastsQueueCsvAdapter,
     "substack_posts_csv": SubstackPostsCsvAdapter,
     "zotero_notes_markdown": ZoteroNotesMarkdownAdapter,
