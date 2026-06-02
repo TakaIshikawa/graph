@@ -215,6 +215,7 @@ from graph.adapters.slack_threads_json import SlackThreadsJsonAdapter
 from graph.adapters.sleep_as_android_csv import SleepAsAndroidCsvAdapter
 from graph.adapters.sofi_activity_csv import SofiActivityCsvAdapter
 from graph.adapters.sota import SOTAAdapter
+from graph.adapters.spotify_saved_tracks_json import SpotifySavedTracksJsonAdapter
 from graph.adapters.spotify_streaming_history import SpotifyStreamingHistoryAdapter
 from graph.adapters.spotify_takeout import SpotifyTakeoutAdapter
 from graph.adapters.stackoverflow_bookmarks_json import StackOverflowBookmarksJsonAdapter
@@ -445,6 +446,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "fitbit_daily_activity_csv": FitbitDailyActivityCsvAdapter,
     "google_fit_activity_csv": GoogleFitActivityCsvAdapter,
     "fitbit_sleep_csv": FitbitSleepCsvAdapter,
+    "spotify_saved_tracks_json": SpotifySavedTracksJsonAdapter,
     "spotify_streaming_history": SpotifyStreamingHistoryAdapter,
     "spotify_takeout": SpotifyTakeoutAdapter,
     "trakt_watch_history_csv": TraktWatchHistoryCsvAdapter,
