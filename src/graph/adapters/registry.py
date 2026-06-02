@@ -43,6 +43,7 @@ from graph.adapters.github_gists_json import GithubGistsJsonAdapter
 from graph.adapters.github_commits_json import GithubCommitsJsonAdapter
 from graph.adapters.github_discussions_json import GithubDiscussionsJsonAdapter
 from graph.adapters.github_issues_json import GithubIssuesJsonAdapter
+from graph.adapters.github_releases_json import GithubReleasesJsonAdapter
 from graph.adapters.github_notifications_json import GithubNotificationsJsonAdapter
 from graph.adapters.gitlab_issues_json import GitlabIssuesJsonAdapter
 from graph.adapters.gitlab_merge_requests_json import GitlabMergeRequestsJsonAdapter
@@ -429,6 +430,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "github_commits_json": GithubCommitsJsonAdapter,
     "github_discussions_json": GithubDiscussionsJsonAdapter,
     "github_issues_json": GithubIssuesJsonAdapter,
+    "github_releases_json": GithubReleasesJsonAdapter,
     "github_notifications_json": GithubNotificationsJsonAdapter,
     "gitlab_issues_json": GitlabIssuesJsonAdapter,
     "gitlab_merge_requests_json": GitlabMergeRequestsJsonAdapter,
