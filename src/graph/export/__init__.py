@@ -18,6 +18,7 @@ from graph.export.collection_gap_csv import export_collection_gap_csv
 from graph.export.collection_duplicate_title_csv import export_collection_duplicate_title_csv
 from graph.export.collection_empty_metadata_csv import export_collection_empty_metadata_csv
 from graph.export.collection_manifest_json import export_collection_manifest_json
+from graph.export.collection_orphan_unit_csv import export_collection_orphan_unit_csv
 from graph.export.collection_member_recency_csv import export_collection_member_recency_csv
 from graph.export.collection_metadata_completeness_csv import export_collection_metadata_completeness_csv
 from graph.export.collection_reading_progress_markdown import export_collection_reading_progress_markdown
@@ -88,6 +89,8 @@ from graph.export.relation_evidence import export_relation_evidence_markdown
 from graph.export.relation_confidence_matrix_csv import export_relation_confidence_matrix_csv
 from graph.export.relation_date_lag_csv import export_relation_date_lag_csv
 from graph.export.relation_direction_imbalance_csv import export_relation_direction_imbalance_csv
+from graph.export.relation_endpoint_orphan_csv import export_relation_endpoint_orphan_csv
+from graph.export.relation_evidence_age_csv import export_relation_evidence_age_csv
 from graph.export.relation_evidence_consistency_csv import export_relation_evidence_consistency_csv
 from graph.export.relation_evidence_density_csv import export_relation_evidence_density_csv
 from graph.export.relation_evidence_gap_csv import export_relation_evidence_gap_csv
@@ -184,6 +187,7 @@ from graph.export.unit_checkbox_task_status_csv import export_units_to_checkbox_
 from graph.export.unit_heading_duplicate_csv import export_units_to_heading_duplicate_csv
 from graph.export.unit_heading_hierarchy_csv import export_units_to_heading_hierarchy_csv
 from graph.export.unit_html_link_target_csv import export_units_to_html_link_target_csv
+from graph.export.unit_html_entity_csv import export_units_to_html_entity_csv
 from graph.export.unit_html_aria_attribute_csv import export_units_to_html_aria_attribute_csv
 from graph.export.unit_html_microdata_csv import export_units_to_html_microdata_csv
 from graph.export.unit_link_text_quality_csv import export_units_to_link_text_quality_csv
@@ -430,6 +434,7 @@ __all__ = [
     "export_collection_empty_metadata_csv",
     "export_collection_manifest_json",
     "export_collection_metadata_completeness_csv",
+    "export_collection_orphan_unit_csv",
     "export_collection_readme_markdown",
     "export_collection_tag_coverage_csv",
     "export_collection_tag_index_markdown",
@@ -491,6 +496,8 @@ __all__ = [
     "export_relation_confidence_trend_csv",
     "export_relation_date_lag_csv",
     "export_relation_direction_imbalance_csv",
+    "export_relation_endpoint_orphan_csv",
+    "export_relation_evidence_age_csv",
     "export_relation_evidence_consistency_csv",
     "export_relation_endpoint_type_matrix_csv",
     "export_relation_evidence_density_csv",
@@ -593,6 +600,7 @@ __all__ = [
     "export_unit_frontmatter_duplicate_key_csv",
     "export_units_to_heading_duplicate_csv",
     "export_units_to_html_link_target_csv",
+    "export_units_to_html_entity_csv",
     "export_units_to_html_aria_attribute_csv",
     "export_units_to_html_microdata_csv",
     "export_units_to_html_figure_inventory_csv",

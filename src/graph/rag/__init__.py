@@ -42,6 +42,7 @@ from graph.rag.keywords import extract_keywords
 from graph.rag.query_intent import classify_query_intent
 from graph.rag.query_citation_requirement import detect_query_citation_requirement
 from graph.rag.query_authorization_scope_requirement import detect_query_authorization_scope_requirements
+from graph.rag.query_authentication_method_requirement import detect_query_authentication_method_requirements
 from graph.rag.query_confidentiality_requirement import detect_query_confidentiality_requirement
 from graph.rag.query_device_posture_requirement import detect_query_device_posture_requirements
 from graph.rag.query_dpa_requirement import detect_query_dpa_requirement
@@ -170,6 +171,7 @@ __all__ = [
     "detect_citation_gaps",
     "detect_query_comparison_axes",
     "detect_query_authorization_scope_requirements",
+    "detect_query_authentication_method_requirements",
     "detect_query_citation_requirement",
     "detect_query_confidentiality_requirement",
     "detect_query_device_posture_requirements",
