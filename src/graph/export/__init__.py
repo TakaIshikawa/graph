@@ -224,6 +224,7 @@ from graph.export.unit_markdown_link_relation_csv import export_unit_markdown_li
 from graph.export.unit_markdown_link_title_attribute_csv import export_unit_markdown_link_title_attributes_to_csv
 from graph.export.unit_markdown_link_title_csv import export_units_to_markdown_link_title_csv
 from graph.export.unit_markdown_image_alt_text_inventory_csv import export_units_to_markdown_image_alt_text_inventory_csv
+from graph.export.unit_markdown_image_alt_csv import export_units_to_markdown_image_alt_csv
 from graph.export.unit_external_link_domain_csv import export_unit_external_link_domains_to_csv
 from graph.export.unit_markdown_internal_anchor_target_csv import export_units_to_markdown_internal_anchor_target_csv
 from graph.export.unit_markdown_mermaid_diagram_csv import export_units_to_markdown_mermaid_diagram_csv
@@ -236,6 +237,7 @@ from graph.export.unit_markdown_setext_heading_csv import export_unit_markdown_s
 from graph.export.unit_markdown_toc_entry_csv import export_unit_markdown_toc_entry_csv
 from graph.export.unit_markdown_image_dimension_hint_csv import export_units_to_markdown_image_dimension_hint_csv
 from graph.export.unit_markdown_image_dimension_csv import export_units_to_markdown_image_dimension_csv
+from graph.export.unit_markdown_link_rel_attribute_csv import export_units_to_markdown_link_rel_attribute_csv
 from graph.export.unit_markdown_details_inventory_csv import export_units_to_markdown_details_inventory_csv
 from graph.export.unit_markdown_reference_label_case_csv import export_units_to_markdown_reference_label_case_csv
 from graph.export.unit_markdown_superscript_inventory_csv import export_units_to_markdown_superscript_inventory_csv
@@ -619,7 +621,9 @@ __all__ = [
     "export_units_to_markdown_mermaid_diagram_csv",
     "export_units_to_markdown_strikethrough_csv",
     "export_units_to_markdown_details_inventory_csv",
+    "export_units_to_markdown_image_alt_csv",
     "export_units_to_markdown_image_dimension_csv",
+    "export_units_to_markdown_link_rel_attribute_csv",
     "export_unit_markdown_footnote_backref_csv",
     "export_unit_markdown_footnote_definition_csv",
     "export_unit_markdown_heading_trailing_hash_csv",
