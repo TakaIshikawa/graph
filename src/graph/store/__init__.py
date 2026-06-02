@@ -77,11 +77,21 @@ from graph.store.source_content_digest_summary import summarize_source_content_d
 from graph.store.source_content_md5_summary import summarize_source_content_md5s
 from graph.store.source_x_robots_tag_summary import summarize_source_x_robots_tags
 from graph.store.source_accept_ch_summary import summarize_source_accept_ch_headers, summarize_source_accept_ch_hints
+from graph.store.source_accept_language_summary import summarize_source_accept_languages
+from graph.store.source_cookie_domain_scope_summary import summarize_source_cookie_domain_scopes
+from graph.store.source_cookie_prefix_summary import summarize_source_cookie_prefixes
 from graph.store.source_open_graph_meta_summary import summarize_source_open_graph_meta
+from graph.store.source_preload_hint_summary import summarize_source_preload_hints
+from graph.store.source_resource_hint_summary import summarize_source_resource_hints
+from graph.store.source_service_worker_allowed_summary import summarize_source_service_worker_allowed
+from graph.store.source_subresource_integrity_summary import summarize_source_subresource_integrity
 from graph.store.source_json_ld_summary import summarize_source_json_ld
 from graph.store.source_trailer_header_summary import summarize_source_trailer_headers
 from graph.store.source_expires_header_summary import summarize_source_expires_headers
 from graph.store.source_pragma_header_summary import summarize_source_pragma_headers
+from graph.store.source_x_download_options_summary import summarize_source_x_download_options
+from graph.store.source_x_powered_by_summary import summarize_source_x_powered_by
+from graph.store.source_x_xss_protection_summary import summarize_source_x_xss_protections
 from graph.store.unit_attachment_extension_summary import summarize_unit_attachment_extensions
 from graph.store.unit_attachment_orphan_file_summary import summarize_unit_attachment_orphan_files
 from graph.store.unit_blockquote_usage_summary import summarize_unit_blockquote_usage
@@ -288,11 +298,21 @@ __all__ = [
     "summarize_source_x_robots_tags",
     "summarize_source_accept_ch_headers",
     "summarize_source_accept_ch_hints",
+    "summarize_source_accept_languages",
+    "summarize_source_cookie_domain_scopes",
+    "summarize_source_cookie_prefixes",
     "summarize_source_open_graph_meta",
+    "summarize_source_preload_hints",
+    "summarize_source_resource_hints",
+    "summarize_source_service_worker_allowed",
+    "summarize_source_subresource_integrity",
     "summarize_source_json_ld",
     "summarize_source_trailer_headers",
     "summarize_source_expires_headers",
     "summarize_source_pragma_headers",
+    "summarize_source_x_download_options",
+    "summarize_source_x_powered_by",
+    "summarize_source_x_xss_protections",
     "summarize_unit_attachment_extensions",
     "summarize_unit_attachment_orphan_files",
     "summarize_unit_blockquote_usage",
