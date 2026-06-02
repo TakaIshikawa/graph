@@ -11,6 +11,7 @@ from graph.adapters.asana_projects_csv import AsanaProjectsCsvAdapter
 from graph.adapters.asana_stories_json import AsanaStoriesJsonAdapter
 from graph.adapters.asana_tasks_csv import AsanaTasksCsvAdapter
 from graph.adapters.asana_tasks_json import AsanaTasksJsonAdapter
+from graph.adapters.claude_conversations_json import ClaudeConversationsJsonAdapter
 from graph.adapters.airtable_bases_csv import AirtableBasesCsvAdapter
 from graph.adapters.atom import AtomAdapter
 from graph.adapters.bibdesk import BibDeskAdapter
@@ -172,14 +173,18 @@ from graph.adapters.zotero_csv import ZoteroCsvAdapter
 from graph.adapters.google_tasks import GoogleTasksAdapter
 from graph.adapters.google_contacts_csv import GoogleContactsCsvAdapter
 from graph.adapters.google_forms_responses_csv import GoogleFormsResponsesCsvAdapter
+from graph.adapters.gmail_labels_csv import GmailLabelsCsvAdapter
+from graph.adapters.google_scholar_library_csv import GoogleScholarLibraryCsvAdapter
 from graph.adapters.fitbit_sleep_csv import FitbitSleepCsvAdapter
 from graph.adapters.airtable_csv import AirtableCsvAdapter
 from graph.adapters.google_keep_export import GoogleKeepExportAdapter
 from graph.adapters.archivebox_index_json import ArchiveBoxIndexJsonAdapter
 from graph.adapters.opml import OpmlAdapter
 from graph.adapters.obsidian_canvas import ObsidianCanvasAdapter
+from graph.adapters.obsidian_backlinks_markdown import ObsidianBacklinksMarkdownAdapter
 from graph.adapters.omnivore_json import OmnivoreJsonAdapter
 from graph.adapters.omnivore_highlights_json import OmnivoreHighlightsJsonAdapter
+from graph.adapters.openai_conversations_json import OpenAIConversationsJsonAdapter
 from graph.adapters.openlibrary_reading_log_csv import OpenLibraryReadingLogCsvAdapter
 from graph.adapters.org import OrgAdapter
 from graph.adapters.pdf import PdfAdapter
@@ -213,6 +218,7 @@ from graph.adapters.rss_reader_starred_json import RssReaderStarredJsonAdapter
 from graph.adapters.safari_bookmarks import SafariBookmarksAdapter
 from graph.adapters.safari_history import SafariHistoryAdapter
 from graph.adapters.slack_json import SlackJsonAdapter
+from graph.adapters.slack_bookmarks_json import SlackBookmarksJsonAdapter
 from graph.adapters.slack_threads_json import SlackThreadsJsonAdapter
 from graph.adapters.sleep_as_android_csv import SleepAsAndroidCsvAdapter
 from graph.adapters.sofi_activity_csv import SofiActivityCsvAdapter
@@ -228,6 +234,7 @@ from graph.adapters.storygraph_to_read_csv import StoryGraphToReadCsvAdapter
 from graph.adapters.steam_library_csv import SteamLibraryCsvAdapter
 from graph.adapters.tiller_transactions_csv import TillerTransactionsCsvAdapter
 from graph.adapters.trello_board_json import TrelloBoardJsonAdapter
+from graph.adapters.trello_cards_csv import TrelloCardsCsvAdapter
 from graph.adapters.trakt_watch_history_csv import TraktWatchHistoryCsvAdapter
 from graph.adapters.tastytrade_activity_csv import TastytradeActivityCsvAdapter
 from graph.adapters.libby_loans_csv import LibbyLoansCsvAdapter
@@ -253,6 +260,7 @@ from graph.adapters.webvtt import WebVttAdapter
 from graph.adapters.yaml_adapter import YamlAdapter
 from graph.adapters.yaml_frontmatter import YamlFrontmatterAdapter
 from graph.adapters.youtube_playlists_csv import YoutubePlaylistsCsvAdapter
+from graph.adapters.youtube_comments_json import YoutubeCommentsJsonAdapter
 from graph.adapters.youtube_playlists_json import YouTubePlaylistsJsonAdapter
 from graph.adapters.zoom_recordings_csv import ZoomRecordingsCsvAdapter
 from graph.adapters.zotero_library_csv import ZoteroLibraryCsvAdapter
@@ -347,8 +355,10 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "workflowy_opml": WorkflowyOpmlAdapter,
     "wikipedia_reading_list_csv": WikipediaReadingListCsvAdapter,
     "obsidian_canvas": ObsidianCanvasAdapter,
+    "obsidian_backlinks_markdown": ObsidianBacklinksMarkdownAdapter,
     "omnivore_json": OmnivoreJsonAdapter,
     "omnivore_highlights_json": OmnivoreHighlightsJsonAdapter,
+    "openai_conversations_json": OpenAIConversationsJsonAdapter,
     "openlibrary_reading_log_csv": OpenLibraryReadingLogCsvAdapter,
     "org": OrgAdapter,
     "pdf": PdfAdapter,
@@ -415,6 +425,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "m1_finance_activity_csv": M1FinanceActivityCsvAdapter,
     "sqlite_query_log": SqliteQueryLogAdapter,
     "slack_json": SlackJsonAdapter,
+    "slack_bookmarks_json": SlackBookmarksJsonAdapter,
     "slack_threads_json": SlackThreadsJsonAdapter,
     "sleep_as_android_csv": SleepAsAndroidCsvAdapter,
     "sofi_activity_csv": SofiActivityCsvAdapter,
@@ -432,6 +443,8 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "google_tasks": GoogleTasksAdapter,
     "google_contacts_csv": GoogleContactsCsvAdapter,
     "google_forms_responses_csv": GoogleFormsResponsesCsvAdapter,
+    "gmail_labels_csv": GmailLabelsCsvAdapter,
+    "google_scholar_library_csv": GoogleScholarLibraryCsvAdapter,
     "hacker_news_saved": HackerNewsSavedAdapter,
     "hacker_news_submissions_csv": HackerNewsSubmissionsCsvAdapter,
     "hacker_news_upvoted_csv": HackerNewsUpvotedCsvAdapter,
@@ -478,6 +491,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "linear_comments_json": LinearCommentsJsonAdapter,
     "linear_projects_json": LinearProjectsJsonAdapter,
     "trello_board_json": TrelloBoardJsonAdapter,
+    "trello_cards_csv": TrelloCardsCsvAdapter,
     "google_maps_timeline_json": GoogleMapsTimelineJsonAdapter,
     "google_maps_reviews_json": GoogleMapsReviewsJsonAdapter,
     "google_location_semantic_history_json": GoogleLocationSemanticHistoryJsonAdapter,
@@ -513,6 +527,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "archivebox_index_json": ArchiveBoxIndexJsonAdapter,
     "asana_tasks_csv": AsanaTasksCsvAdapter,
     "asana_tasks_json": AsanaTasksJsonAdapter,
+    "claude_conversations_json": ClaudeConversationsJsonAdapter,
     "asana_projects_csv": AsanaProjectsCsvAdapter,
     "asana_stories_json": AsanaStoriesJsonAdapter,
     "strava_activities_json": StravaActivitiesJsonAdapter,
@@ -528,6 +543,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "stackoverflow_answers_json": StackOverflowAnswersJsonAdapter,
     "stackoverflow_bookmarks_json": StackOverflowBookmarksJsonAdapter,
     "youtube_playlists_json": YouTubePlaylistsJsonAdapter,
+    "youtube_comments_json": YoutubeCommentsJsonAdapter,
     "youtube_playlists_csv": YoutubePlaylistsCsvAdapter,
     "zoom_recordings_csv": ZoomRecordingsCsvAdapter,
     "clickup_tasks_csv": ClickUpTasksCsvAdapter,
