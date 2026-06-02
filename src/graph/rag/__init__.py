@@ -44,6 +44,8 @@ from graph.rag.query_citation_requirement import detect_query_citation_requireme
 from graph.rag.query_authorization_scope_requirement import detect_query_authorization_scope_requirements
 from graph.rag.query_authentication_method_requirement import detect_query_authentication_method_requirements
 from graph.rag.query_secrets_rotation_requirement import detect_query_secrets_rotation_requirement, detect_query_secrets_rotation_requirements
+from graph.rag.query_secrets_management_requirement import detect_query_secrets_management_requirement
+from graph.rag.query_webhook_requirement import detect_query_webhook_requirement
 from graph.rag.query_access_review_requirement import detect_query_access_review_requirement
 from graph.rag.query_business_continuity_requirement import detect_query_business_continuity_requirement
 from graph.rag.query_change_management_requirement import detect_query_change_management_requirement
@@ -205,11 +207,13 @@ __all__ = [
     "detect_query_secure_development_requirement",
     "detect_query_secrets_rotation_requirement",
     "detect_query_secrets_rotation_requirements",
+    "detect_query_secrets_management_requirement",
     "detect_query_soc2_requirement",
     "detect_query_third_party_access_requirement",
     "detect_query_output_constraints",
     "detect_query_temporal_anchors",
     "detect_query_uptime_sla_requirement",
+    "detect_query_webhook_requirement",
     "extract_keywords",
     "extract_query_focus_terms",
     "extract_query_entity_focus",
