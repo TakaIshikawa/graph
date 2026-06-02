@@ -200,6 +200,13 @@ class SourceProject(StrEnum):
     ETRADE_TRANSACTIONS_CSV = "etrade_transactions_csv"
     VANGUARD_ACTIVITY_CSV = "vanguard_activity_csv"
     PLAID_TRANSACTIONS_CSV = "plaid_transactions_csv"
+    DROPBOX_PAPER_DOCS_JSON = "dropbox_paper_docs_json"
+    GOOGLE_FORMS_RESPONSES_CSV = "google_forms_responses_csv"
+    ASANA_PROJECTS_CSV = "asana_projects_csv"
+    ZOOM_RECORDINGS_CSV = "zoom_recordings_csv"
+    YOUTUBE_PLAYLISTS_CSV = "youtube_playlists_csv"
+    MIRO_BOARDS_CSV = "miro_boards_csv"
+    CALENDLY_EVENTS_CSV = "calendly_events_csv"
 
 
 class ContentType(StrEnum):
