@@ -8,8 +8,8 @@ from typing import Any
 
 from graph.export._report_csv import field_value, get, metadata, render_csv, sort_key, write_csv
 
-_FIELDNAMES = ["collection_id", "title", "required_key_count", "present_key_count", "missing_keys", "empty_keys", "completeness_ratio"]
-DEFAULT_REQUIRED_KEYS = ("title", "description", "source", "updated_at")
+_FIELDNAMES = ["collection_id", "title", "required_key_count", "present_key_count", "present_keys", "missing_keys", "empty_keys", "completeness_score"]
+DEFAULT_REQUIRED_KEYS = ("title", "description", "owner", "status", "updated_at")
 
 
 def export_collection_metadata_completeness_csv(collections: Iterable[Mapping[str, Any] | object], path: str | Path | None = None, *, required_keys: tuple[str, ...] = DEFAULT_REQUIRED_KEYS) -> str | dict[str, Any]:
@@ -25,15 +25,17 @@ def export_collection_metadata_completeness_csv(collections: Iterable[Mapping[st
 
 def _row(collection: Mapping[str, Any] | object, required_keys: tuple[str, ...]) -> dict[str, str | int]:
     empty = [key for key in required_keys if not _present(_value(collection, key))]
+    present_keys = [key for key in required_keys if key not in empty]
     present = len(required_keys) - len(empty)
     return {
         "collection_id": field_value(get(collection, "id") or get(collection, "collection_id") or metadata(collection).get("id")),
         "title": field_value(get(collection, "title") or get(collection, "name") or metadata(collection).get("title") or metadata(collection).get("name")),
         "required_key_count": len(required_keys),
         "present_key_count": present,
+        "present_keys": "; ".join(present_keys),
         "missing_keys": "; ".join(key for key in required_keys if key not in _all_keys(collection)),
         "empty_keys": "; ".join(empty),
-        "completeness_ratio": f"{(present / len(required_keys)):.2f}" if required_keys else "0.00",
+        "completeness_score": f"{(present / len(required_keys)):.2f}" if required_keys else "0.00",
     }
 
 

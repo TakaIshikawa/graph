@@ -10,7 +10,7 @@ from typing import Any
 
 from graph.export._report_csv import field_value, get, metadata, render_csv, sort_key, unit_id, write_csv
 
-_FIELDNAMES = ["unit_id", "title", "word_count", "estimated_minutes", "source", "entity_type"]
+_FIELDNAMES = ["unit_id", "title", "word_count", "estimated_minutes", "bucket", "source", "entity_type"]
 _WORD_RE = re.compile(r"\b[\w']+\b", re.UNICODE)
 
 
@@ -46,6 +46,18 @@ def _row(unit: Mapping[str, Any] | object, words_per_minute: int) -> dict[str, s
         "title": field_value(get(unit, "title") or metadata(unit).get("title")),
         "word_count": str(word_count),
         "estimated_minutes": str(math.ceil(word_count / words_per_minute) if word_count else 0),
+        "bucket": _bucket(word_count, words_per_minute),
         "source": field_value(get(unit, "source_project") or metadata(unit).get("source") or metadata(unit).get("source_project")),
         "entity_type": field_value(get(unit, "source_entity_type") or get(unit, "entity_type") or metadata(unit).get("entity_type")),
     }
+
+
+def _bucket(word_count: int, words_per_minute: int) -> str:
+    minutes = math.ceil(word_count / words_per_minute) if word_count else 0
+    if minutes == 0:
+        return "empty"
+    if minutes <= 5:
+        return "short"
+    if minutes <= 20:
+        return "medium"
+    return "long"

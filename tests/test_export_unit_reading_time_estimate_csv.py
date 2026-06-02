@@ -22,16 +22,17 @@ def test_reading_time_estimate_csv_counts_words_and_sorts_by_unit_id():
         words_per_minute=3,
     )
 
-    assert text.splitlines()[0] == "unit_id,title,word_count,estimated_minutes,source,entity_type"
+    assert text.splitlines()[0] == "unit_id,title,word_count,estimated_minutes,bucket,source,entity_type"
     assert rows(text) == [
-        {"unit_id": "a", "title": "Alpha", "word_count": "0", "estimated_minutes": "0", "source": "max", "entity_type": "note"},
-        {"unit_id": "b", "title": "Beta", "word_count": "3", "estimated_minutes": "1", "source": "kindle", "entity_type": "highlight"},
-        {"unit_id": "c", "title": "Gamma", "word_count": "5", "estimated_minutes": "2", "source": "web", "entity_type": "article"},
+        {"unit_id": "a", "title": "Alpha", "word_count": "0", "estimated_minutes": "0", "bucket": "empty", "source": "max", "entity_type": "note"},
+        {"unit_id": "b", "title": "Beta", "word_count": "3", "estimated_minutes": "1", "bucket": "short", "source": "kindle", "entity_type": "highlight"},
+        {"unit_id": "c", "title": "Gamma", "word_count": "5", "estimated_minutes": "2", "bucket": "short", "source": "web", "entity_type": "article"},
     ]
 
 
 def test_reading_time_estimate_csv_treats_missing_content_as_zero_words():
     assert rows(export_units_to_reading_time_estimate_csv([{"id": "a", "title": "Untitled"}]))[0]["word_count"] == "0"
+    assert rows(export_units_to_reading_time_estimate_csv([{"id": "a", "title": "Untitled"}]))[0]["bucket"] == "empty"
 
 
 def test_reading_time_estimate_csv_path_mode(tmp_path):
