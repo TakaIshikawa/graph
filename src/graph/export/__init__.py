@@ -298,6 +298,7 @@ from graph.export.unit_code_block_inventory_csv import export_units_to_code_bloc
 from graph.export.unit_content_encoding_hint_csv import export_units_to_content_encoding_hint_csv
 from graph.export.unit_content_language_hint_csv import export_unit_content_language_hint_csv
 from graph.export.unit_content_length_csv import export_unit_content_length_csv
+from graph.export.unit_content_length_bucket_csv import export_units_to_content_length_bucket_csv
 from graph.export.unit_content_length_summary_csv import export_unit_content_length_summary_csv
 from graph.export.unit_content_length_outliers_csv import export_unit_content_length_outliers_csv
 from graph.export.unit_content_length_distribution_csv import export_units_to_content_length_distribution_csv
@@ -645,6 +646,7 @@ __all__ = [
     "export_units_to_sensitive_token_hint_csv",
     "export_unit_content_language_hint_csv",
     "export_unit_content_length_csv",
+    "export_units_to_content_length_bucket_csv",
     "export_unit_content_length_summary_csv",
     "export_unit_content_length_outliers_csv",
     "export_units_to_content_length_distribution_csv",

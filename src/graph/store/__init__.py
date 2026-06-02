@@ -53,6 +53,9 @@ from graph.store.source_cross_origin_embedder_policy_summary import summarize_so
 from graph.store.source_cross_origin_resource_policy_summary import summarize_source_cross_origin_resource_policies
 from graph.store.source_dns_prefetch_control_summary import summarize_source_dns_prefetch_controls
 from graph.store.source_alt_svc_summary import summarize_source_alt_svc_headers
+from graph.store.source_alternate_link_summary import summarize_source_alternate_links
+from graph.store.source_generator_meta_summary import summarize_source_generator_meta
+from graph.store.source_fetch_duration_bucket_summary import summarize_source_fetch_duration_buckets
 from graph.store.source_origin_agent_cluster_summary import summarize_source_origin_agent_clusters
 from graph.store.source_x_permitted_cross_domain_policies_summary import summarize_source_x_permitted_cross_domain_policies
 from graph.store.source_clear_site_data_summary import summarize_source_clear_site_data_headers
@@ -237,6 +240,9 @@ __all__ = [
     "summarize_source_cross_origin_resource_policies",
     "summarize_source_dns_prefetch_controls",
     "summarize_source_alt_svc_headers",
+    "summarize_source_alternate_links",
+    "summarize_source_generator_meta",
+    "summarize_source_fetch_duration_buckets",
     "summarize_source_origin_agent_clusters",
     "summarize_source_x_permitted_cross_domain_policies",
     "summarize_source_clear_site_data_headers",
