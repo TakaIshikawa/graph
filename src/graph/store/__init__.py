@@ -46,6 +46,16 @@ from graph.store.source_status_page_summary import summarize_source_status_pages
 from graph.store.source_privacy_terms_link_summary import summarize_source_privacy_terms_links
 from graph.store.source_sdk_language_summary import summarize_source_sdk_languages
 from graph.store.source_changelog_hint_summary import summarize_source_changelog_hints
+from graph.store.source_viewport_meta_summary import summarize_source_viewport_meta
+from graph.store.source_x_content_type_options_summary import summarize_source_x_content_type_options
+from graph.store.source_cross_origin_opener_policy_summary import summarize_source_cross_origin_opener_policies
+from graph.store.source_cross_origin_embedder_policy_summary import summarize_source_cross_origin_embedder_policies
+from graph.store.source_cross_origin_resource_policy_summary import summarize_source_cross_origin_resource_policies
+from graph.store.source_dns_prefetch_control_summary import summarize_source_dns_prefetch_controls
+from graph.store.source_alt_svc_summary import summarize_source_alt_svc_headers
+from graph.store.source_origin_agent_cluster_summary import summarize_source_origin_agent_clusters
+from graph.store.source_x_permitted_cross_domain_policies_summary import summarize_source_x_permitted_cross_domain_policies
+from graph.store.source_clear_site_data_summary import summarize_source_clear_site_data_headers
 from graph.store.unit_attachment_extension_summary import summarize_unit_attachment_extensions
 from graph.store.unit_attachment_orphan_file_summary import summarize_unit_attachment_orphan_files
 from graph.store.unit_blockquote_usage_summary import summarize_unit_blockquote_usage
@@ -220,6 +230,16 @@ __all__ = [
     "summarize_source_privacy_terms_links",
     "summarize_source_sdk_languages",
     "summarize_source_changelog_hints",
+    "summarize_source_viewport_meta",
+    "summarize_source_x_content_type_options",
+    "summarize_source_cross_origin_opener_policies",
+    "summarize_source_cross_origin_embedder_policies",
+    "summarize_source_cross_origin_resource_policies",
+    "summarize_source_dns_prefetch_controls",
+    "summarize_source_alt_svc_headers",
+    "summarize_source_origin_agent_clusters",
+    "summarize_source_x_permitted_cross_domain_policies",
+    "summarize_source_clear_site_data_headers",
     "summarize_unit_attachment_extensions",
     "summarize_unit_attachment_orphan_files",
     "summarize_unit_blockquote_usage",
