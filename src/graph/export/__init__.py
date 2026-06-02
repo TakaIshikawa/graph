@@ -219,6 +219,7 @@ from graph.export.unit_markdown_link_scheme_csv import export_units_to_markdown_
 from graph.export.unit_markdown_link_definition_title_csv import export_units_to_markdown_link_definition_title_csv
 from graph.export.unit_markdown_link_context_csv import export_units_to_markdown_link_context_csv
 from graph.export.unit_markdown_list_structure_csv import export_units_to_markdown_list_structure_csv
+from graph.export.unit_markdown_reference_link_text_csv import export_units_to_markdown_reference_link_text_csv
 from graph.export.unit_markdown_reference_definition_csv import export_unit_markdown_reference_definition_csv
 from graph.export.unit_markdown_reference_usage_csv import export_unit_markdown_reference_usage_csv
 from graph.export.unit_markdown_link_fragment_csv import export_unit_markdown_link_fragment_csv
@@ -255,6 +256,7 @@ from graph.export.unit_markdown_frontmatter_key_csv import export_units_to_markd
 from graph.export.unit_markdown_hashtag_csv import export_units_to_markdown_hashtag_csv
 from graph.export.unit_markdown_task_due_date_csv import export_units_to_markdown_task_due_date_csv
 from graph.export.unit_markdown_emoji_shortcodes_csv import export_units_to_markdown_emoji_shortcodes_csv
+from graph.export.unit_markdown_fenced_div_csv import export_units_to_markdown_fenced_div_csv
 from graph.export.unit_frontmatter_alias_csv import export_unit_frontmatter_alias_csv
 from graph.export.unit_frontmatter_nested_key_csv import export_unit_frontmatter_nested_key_csv
 from graph.export.unit_code_fence_filename_csv import export_unit_code_fence_filename_csv
@@ -262,6 +264,14 @@ from graph.export.unit_notebook_cell_marker_csv import export_units_to_notebook_
 from graph.export.unit_yaml_tag_directive_csv import export_unit_yaml_tag_directive_csv
 from graph.export.unit_markdown_html_comment_csv import export_unit_markdown_html_comment_csv
 from graph.export.unit_markdown_html_class_csv import export_units_to_markdown_html_class_csv
+from graph.export.unit_markdown_html_mark_csv import export_units_to_markdown_html_mark_csv
+from graph.export.unit_markdown_html_underline_csv import export_units_to_markdown_html_underline_csv
+from graph.export.unit_markdown_html_block_csv import export_units_to_markdown_html_block_csv
+from graph.export.unit_markdown_link_attribute_csv import export_units_to_markdown_link_attribute_csv
+from graph.export.unit_markdown_heading_numbering_csv import export_units_to_markdown_heading_numbering_csv
+from graph.export.unit_markdown_mention_handle_csv import export_units_to_markdown_mention_handle_csv
+from graph.export.unit_markdown_bare_url_domain_csv import export_units_to_markdown_bare_url_domain_csv
+from graph.export.unit_markdown_math_span_csv import export_units_to_markdown_math_span_csv
 from graph.export.unit_markdown_escape_csv import export_unit_markdown_escape_csv
 from graph.export.unit_markdown_hard_break_csv import export_unit_markdown_hard_break_csv
 from graph.export.unit_markdown_highlight_csv import export_unit_markdown_highlight_csv
@@ -640,12 +650,18 @@ __all__ = [
     "export_units_to_markdown_embed_inventory_csv",
     "export_units_to_markdown_emphasis_inventory_csv",
     "export_units_to_markdown_footnote_reference_csv",
+    "export_units_to_markdown_fenced_div_csv",
     "export_units_to_markdown_heading_anchor_csv",
+    "export_units_to_markdown_heading_numbering_csv",
     "export_unit_markdown_heading_depths_to_csv",
     "export_units_to_markdown_horizontal_rule_csv",
     "export_units_to_markdown_internal_anchor_target_csv",
     "export_units_to_markdown_inline_code_csv",
     "export_units_to_markdown_html_class_csv",
+    "export_units_to_markdown_html_mark_csv",
+    "export_units_to_markdown_html_underline_csv",
+    "export_units_to_markdown_html_block_csv",
+    "export_units_to_markdown_link_attribute_csv",
     "export_units_to_markdown_link_context_csv",
     "export_units_to_markdown_definition_list_csv",
     "export_units_to_markdown_link_definition_title_csv",
@@ -671,9 +687,13 @@ __all__ = [
     "export_unit_markdown_callout_titles_to_csv",
     "export_unit_markdown_yaml_frontmatter_keys_to_csv",
     "export_units_to_markdown_list_structure_csv",
+    "export_units_to_markdown_reference_link_text_csv",
     "export_units_to_markdown_reference_label_case_csv",
     "export_units_to_markdown_superscript_inventory_csv",
     "export_units_to_markdown_tag_csv",
+    "export_units_to_markdown_mention_handle_csv",
+    "export_units_to_markdown_bare_url_domain_csv",
+    "export_units_to_markdown_math_span_csv",
     "export_units_to_markdown_todo_due_date_csv",
     "export_unit_markdown_math_blocks_to_csv",
     "export_unit_markdown_thematic_breaks_to_csv",
