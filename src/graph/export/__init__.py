@@ -248,6 +248,8 @@ from graph.export.unit_markdown_details_inventory_csv import export_units_to_mar
 from graph.export.unit_markdown_reference_label_case_csv import export_units_to_markdown_reference_label_case_csv
 from graph.export.unit_markdown_superscript_inventory_csv import export_units_to_markdown_superscript_inventory_csv
 from graph.export.unit_markdown_wikilink_inventory_csv import export_units_to_markdown_wikilink_inventory_csv
+from graph.export.unit_markdown_frontmatter_key_csv import export_units_to_markdown_frontmatter_key_csv
+from graph.export.unit_markdown_hashtag_csv import export_units_to_markdown_hashtag_csv
 from graph.export.unit_frontmatter_alias_csv import export_unit_frontmatter_alias_csv
 from graph.export.unit_frontmatter_nested_key_csv import export_unit_frontmatter_nested_key_csv
 from graph.export.unit_code_fence_filename_csv import export_unit_code_fence_filename_csv
@@ -758,6 +760,8 @@ __all__ = [
     "export_units_to_markdown_table",
     "export_units_to_markdown_table_csv",
     "export_units_to_markdown_table_inventory_csv",
+    "export_units_to_markdown_frontmatter_key_csv",
+    "export_units_to_markdown_hashtag_csv",
     "export_units_to_markdown_wikilink_csv",
     "export_units_to_markdown_wikilink_inventory_csv",
     "export_units_to_checklist_state_csv",
