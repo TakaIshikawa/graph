@@ -1,6 +1,8 @@
 from graph.adapters.google_keep_takeout_json import GoogleKeepTakeoutJsonAdapter
 from graph.adapters.letterboxd_diary_csv import LetterboxdDiaryCsvAdapter
 from graph.adapters.mastodon_bookmarks_json import MastodonBookmarksJsonAdapter
+from graph.adapters.mastodon_favourites_json import MastodonFavouritesJsonAdapter
+from graph.adapters.asana_tasks_json import AsanaTasksJsonAdapter
 from graph.adapters.apple_notes_takeout_html import AppleNotesTakeoutHtmlAdapter
 from graph.adapters.omnivore_library_json import OmnivoreLibraryJsonAdapter
 from graph.adapters.notion_pages_csv import NotionPagesCsvAdapter
@@ -21,6 +23,8 @@ __all__ = [
     "GoogleKeepTakeoutJsonAdapter",
     "LetterboxdDiaryCsvAdapter",
     "MastodonBookmarksJsonAdapter",
+    "MastodonFavouritesJsonAdapter",
+    "AsanaTasksJsonAdapter",
     "AppleNotesTakeoutHtmlAdapter",
     "OmnivoreLibraryJsonAdapter",
     "NotionPagesCsvAdapter",

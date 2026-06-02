@@ -10,6 +10,7 @@ from graph.adapters.audible_library_csv import AudibleLibraryCsvAdapter
 from graph.adapters.asana_projects_csv import AsanaProjectsCsvAdapter
 from graph.adapters.asana_stories_json import AsanaStoriesJsonAdapter
 from graph.adapters.asana_tasks_csv import AsanaTasksCsvAdapter
+from graph.adapters.asana_tasks_json import AsanaTasksJsonAdapter
 from graph.adapters.airtable_bases_csv import AirtableBasesCsvAdapter
 from graph.adapters.atom import AtomAdapter
 from graph.adapters.bibdesk import BibDeskAdapter
@@ -104,6 +105,7 @@ from graph.adapters.markdown_links import MarkdownLinksAdapter
 from graph.adapters.markdown_notes import MarkdownNotesAdapter
 from graph.adapters.markdown_tasks import MarkdownTasksAdapter
 from graph.adapters.mastodon import MastodonAdapter
+from graph.adapters.mastodon_favourites_json import MastodonFavouritesJsonAdapter
 from graph.adapters.mastodon_outbox_json import MastodonOutboxJsonAdapter
 from graph.adapters.matter import MatterAdapter
 from graph.adapters.max_adapter import MaxAdapter
@@ -285,6 +287,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "markdown_notes": MarkdownNotesAdapter,
     "markdown_tasks": MarkdownTasksAdapter,
     "mastodon": MastodonAdapter,
+    "mastodon_favourites_json": MastodonFavouritesJsonAdapter,
     "mastodon_outbox_json": MastodonOutboxJsonAdapter,
     "kindle": KindleAdapter,
     "kindle_clippings": KindleClippingsAdapter,
@@ -509,6 +512,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "rss_reader_starred_json": RssReaderStarredJsonAdapter,
     "archivebox_index_json": ArchiveBoxIndexJsonAdapter,
     "asana_tasks_csv": AsanaTasksCsvAdapter,
+    "asana_tasks_json": AsanaTasksJsonAdapter,
     "asana_projects_csv": AsanaProjectsCsvAdapter,
     "asana_stories_json": AsanaStoriesJsonAdapter,
     "strava_activities_json": StravaActivitiesJsonAdapter,
