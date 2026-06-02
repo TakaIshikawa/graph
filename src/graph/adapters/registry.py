@@ -22,6 +22,7 @@ from graph.adapters.calendar_events_csv import CalendarEventsCsvAdapter
 from graph.adapters.calendly_events_csv import CalendlyEventsCsvAdapter
 from graph.adapters.chatgpt_json import ChatGptJsonAdapter
 from graph.adapters.chrome_history import ChromeHistoryAdapter
+from graph.adapters.chrome_bookmarks_json import ChromeBookmarksJsonAdapter
 from graph.adapters.chrome_reading_list_json import ChromeReadingListJsonAdapter
 from graph.adapters.citi_credit_card_transactions_csv import CitiCreditCardTransactionsCsvAdapter
 from graph.adapters.confluence_pages_json import ConfluencePagesJsonAdapter
@@ -63,6 +64,8 @@ from graph.adapters.google_keep import GoogleKeepAdapter
 from graph.adapters.google_location_semantic_history_json import GoogleLocationSemanticHistoryJsonAdapter
 from graph.adapters.html import HtmlAdapter
 from graph.adapters.hacker_news_saved import HackerNewsSavedAdapter
+from graph.adapters.hacker_news_submissions_csv import HackerNewsSubmissionsCsvAdapter
+from graph.adapters.hacker_news_upvoted_csv import HackerNewsUpvotedCsvAdapter
 from graph.adapters.hypothesis import HypothesisAdapter
 from graph.adapters.hypothesis_annotations_json import HypothesisAnnotationsJsonAdapter
 from graph.adapters.ical import ICalAdapter
@@ -210,6 +213,7 @@ from graph.adapters.stackoverflow_bookmarks_json import StackOverflowBookmarksJs
 from graph.adapters.stackoverflow_answers_json import StackOverflowAnswersJsonAdapter
 from graph.adapters.strava_activities_json import StravaActivitiesJsonAdapter
 from graph.adapters.storygraph_reading_history_csv import StoryGraphReadingHistoryCsvAdapter
+from graph.adapters.storygraph_to_read_csv import StoryGraphToReadCsvAdapter
 from graph.adapters.steam_library_csv import SteamLibraryCsvAdapter
 from graph.adapters.tiller_transactions_csv import TillerTransactionsCsvAdapter
 from graph.adapters.trello_board_json import TrelloBoardJsonAdapter
@@ -285,6 +289,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "calendar_events_csv": CalendarEventsCsvAdapter,
     "calendly_events_csv": CalendlyEventsCsvAdapter,
     "chrome_history": ChromeHistoryAdapter,
+    "chrome_bookmarks_json": ChromeBookmarksJsonAdapter,
     "chrome_reading_list_json": ChromeReadingListJsonAdapter,
     "citi_credit_card_transactions_csv": CitiCreditCardTransactionsCsvAdapter,
     "confluence_pages_json": ConfluencePagesJsonAdapter,
@@ -413,6 +418,8 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "google_contacts_csv": GoogleContactsCsvAdapter,
     "google_forms_responses_csv": GoogleFormsResponsesCsvAdapter,
     "hacker_news_saved": HackerNewsSavedAdapter,
+    "hacker_news_submissions_csv": HackerNewsSubmissionsCsvAdapter,
+    "hacker_news_upvoted_csv": HackerNewsUpvotedCsvAdapter,
     "github_stars_csv": GithubStarsCsvAdapter,
     "airtable_csv": AirtableCsvAdapter,
     "google_calendar_json": GoogleCalendarJsonAdapter,
@@ -431,6 +438,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "tastytrade_activity_csv": TastytradeActivityCsvAdapter,
     "netflix_viewing_activity_csv": NetflixViewingActivityCsvAdapter,
     "storygraph_reading_history_csv": StoryGraphReadingHistoryCsvAdapter,
+    "storygraph_to_read_csv": StoryGraphToReadCsvAdapter,
     "myanimelist_xml": MyAnimeListXmlAdapter,
     "kobo_highlights_csv": KoboHighlightsCsvAdapter,
     "kobo_reading_stats_csv": KoboReadingStatsCsvAdapter,

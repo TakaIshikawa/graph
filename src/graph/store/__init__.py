@@ -36,6 +36,7 @@ from graph.store.source_robots_policy_summary import summarize_source_robots_pol
 from graph.store.source_http_method_summary import summarize_source_http_methods
 from graph.store.source_canonical_url_conflict_summary import summarize_source_canonical_url_conflicts
 from graph.store.source_cache_header_summary import summarize_source_cache_headers
+from graph.store.source_priority_header_summary import summarize_source_priority_headers
 from graph.store.source_charset_summary import summarize_source_charsets
 from graph.store.source_compression_encoding_summary import summarize_source_compression_encodings
 from graph.store.source_duplicate_identifier_summary import summarize_source_duplicate_identifiers
@@ -230,6 +231,7 @@ __all__ = [
     "summarize_source_http_methods",
     "summarize_source_canonical_url_conflicts",
     "summarize_source_cache_headers",
+    "summarize_source_priority_headers",
     "summarize_source_charsets",
     "summarize_source_compression_encodings",
     "summarize_source_duplicate_identifiers",
