@@ -13,7 +13,8 @@ def rows(text: str) -> list[dict[str, str]]:
 def test_complete_collection():
     [row] = rows(export_collection_metadata_completeness_csv([{"id": "c", "title": "T", "metadata": {"description": "D", "tags": ["x"]}}], required_keys=("title", "description", "tags")))
     assert row["present_key_count"] == "3"
-    assert row["completeness_ratio"] == "1.00"
+    assert row["present_keys"] == "title; description; tags"
+    assert row["completeness_score"] == "1.00"
 
 
 def test_missing_and_empty_values():
