@@ -232,8 +232,10 @@ from graph.export.unit_markdown_link_title_attribute_csv import export_unit_mark
 from graph.export.unit_markdown_link_download_attribute_csv import export_unit_markdown_link_download_attributes_to_csv
 from graph.export.unit_markdown_link_title_csv import export_units_to_markdown_link_title_csv
 from graph.export.unit_markdown_image_caption_csv import export_units_to_markdown_image_caption_csv
+from graph.export.unit_markdown_image_title_attribute_csv import export_units_to_markdown_image_title_attribute_csv
 from graph.export.unit_markdown_image_alt_text_inventory_csv import export_units_to_markdown_image_alt_text_inventory_csv
 from graph.export.unit_markdown_image_alt_csv import export_units_to_markdown_image_alt_csv
+from graph.export.unit_markdown_blockquote_depth_csv import export_units_to_markdown_blockquote_depth_csv
 from graph.export.unit_external_link_domain_csv import export_unit_external_link_domains_to_csv
 from graph.export.unit_markdown_internal_anchor_target_csv import export_units_to_markdown_internal_anchor_target_csv
 from graph.export.unit_markdown_mermaid_diagram_csv import export_units_to_markdown_mermaid_diagram_csv
@@ -672,6 +674,8 @@ __all__ = [
     "export_units_to_markdown_strikethrough_csv",
     "export_units_to_markdown_details_inventory_csv",
     "export_units_to_markdown_image_alt_csv",
+    "export_units_to_markdown_image_title_attribute_csv",
+    "export_units_to_markdown_blockquote_depth_csv",
     "export_units_to_markdown_image_dimension_csv",
     "export_units_to_markdown_link_rel_attribute_csv",
     "export_unit_markdown_footnote_backref_csv",
