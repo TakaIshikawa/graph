@@ -106,7 +106,7 @@ from graph.store.source_x_xss_protection_summary import summarize_source_x_xss_p
 from graph.store.source_accept_ranges_summary import summarize_source_accept_ranges
 from graph.store.source_retry_after_summary import summarize_source_retry_after_headers
 from graph.store.source_reporting_endpoints_summary import summarize_source_reporting_endpoints
-from graph.store.source_www_authenticate_summary import summarize_source_www_authenticate_headers
+from graph.store.source_www_authenticate_summary import summarize_source_www_authenticate_challenges, summarize_source_www_authenticate_headers
 from graph.store.unit_attachment_extension_summary import summarize_unit_attachment_extensions
 from graph.store.unit_attachment_orphan_file_summary import summarize_unit_attachment_orphan_files
 from graph.store.unit_blockquote_usage_summary import summarize_unit_blockquote_usage
@@ -338,6 +338,8 @@ __all__ = [
     "summarize_source_x_download_options",
     "summarize_source_x_powered_by",
     "summarize_source_x_xss_protections",
+    "summarize_source_www_authenticate_challenges",
+    "summarize_source_www_authenticate_headers",
     "summarize_unit_attachment_extensions",
     "summarize_unit_attachment_orphan_files",
     "summarize_unit_blockquote_usage",
