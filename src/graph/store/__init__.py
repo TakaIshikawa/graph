@@ -38,6 +38,7 @@ from graph.store.source_canonical_url_conflict_summary import summarize_source_c
 from graph.store.source_cache_header_summary import summarize_source_cache_headers
 from graph.store.source_priority_header_summary import summarize_source_priority_headers
 from graph.store.source_cache_control_summary import summarize_source_cache_control_headers, summarize_source_cache_controls
+from graph.store.source_content_encoding_summary import summarize_source_content_encodings
 from graph.store.source_content_type_charset_summary import summarize_source_content_type_charsets
 from graph.store.source_charset_summary import summarize_source_charsets
 from graph.store.source_compression_encoding_summary import summarize_source_compression_encodings
@@ -260,6 +261,7 @@ __all__ = [
     "summarize_source_cache_headers",
     "summarize_source_priority_headers",
     "summarize_source_cache_control_headers",
+    "summarize_source_content_encodings",
     "summarize_source_charsets",
     "summarize_source_compression_encodings",
     "summarize_source_duplicate_identifiers",
