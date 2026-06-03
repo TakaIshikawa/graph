@@ -56,6 +56,11 @@ from graph.store.source_x_content_type_options_summary import summarize_source_x
 from graph.store.source_cross_origin_opener_policy_summary import summarize_source_cross_origin_opener_policies
 from graph.store.source_cross_origin_embedder_policy_summary import summarize_source_cross_origin_embedder_policies
 from graph.store.source_cross_origin_resource_policy_summary import summarize_source_cross_origin_resource_policies
+from graph.store.source_cross_origin_isolation_summary import summarize_source_cross_origin_isolation
+from graph.store.source_content_security_policy_report_only_summary import summarize_source_content_security_policy_report_only
+from graph.store.source_access_control_allow_credentials_summary import summarize_source_access_control_allow_credentials
+from graph.store.source_access_control_expose_headers_summary import summarize_source_access_control_expose_headers
+from graph.store.source_access_control_max_age_summary import summarize_source_access_control_max_ages
 from graph.store.source_dns_prefetch_control_summary import summarize_source_dns_prefetch_controls
 from graph.store.source_alt_svc_summary import summarize_source_alt_svc_headers, summarize_source_alt_svcs
 from graph.store.source_alternate_link_summary import summarize_source_alternate_links
@@ -283,6 +288,11 @@ __all__ = [
     "summarize_source_cross_origin_opener_policies",
     "summarize_source_cross_origin_embedder_policies",
     "summarize_source_cross_origin_resource_policies",
+    "summarize_source_cross_origin_isolation",
+    "summarize_source_content_security_policy_report_only",
+    "summarize_source_access_control_allow_credentials",
+    "summarize_source_access_control_expose_headers",
+    "summarize_source_access_control_max_ages",
     "summarize_source_dns_prefetch_controls",
     "summarize_source_alt_svc_headers",
     "summarize_source_alt_svcs",
