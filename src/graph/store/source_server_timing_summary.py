@@ -4,19 +4,23 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Iterable, Mapping
+import re
 from typing import Any
 
 from graph.export._report_csv import field_value, get, metadata, sort_key, source_id
 
 _HEADER = "server-timing"
+_METRIC_NAME_RE = re.compile(r"^[a-z0-9_.:-]+$")
 
 
 def summarize_source_server_timings(sources: Iterable[Mapping[str, Any] | object], sample_limit: int = 5) -> dict[str, Any]:
     source_list = list(sources)
     limit = max(0, sample_limit)
     metric_counts: Counter[str] = Counter()
+    rows_by_metric: dict[str, dict[str, Any]] = {}
     duration_buckets: Counter[str] = Counter()
     samples: list[dict[str, Any]] = []
+    sample_order = 0
     sources_with = missing_duration_count = invalid_duration_count = description_count = 0
 
     for index, source in enumerate(source_list):
@@ -30,6 +34,12 @@ def summarize_source_server_timings(sources: Iterable[Mapping[str, Any] | object
         for metric in metrics:
             name = metric["name"]
             metric_counts[name] += 1
+            row = rows_by_metric.setdefault(name, {"metric": name, "count": 0, "source_ids": [], "examples": []})
+            row["count"] += 1
+            if sid not in row["source_ids"] and len(row["source_ids"]) < limit:
+                row["source_ids"].append(sid)
+            if metric["raw"] not in row["examples"] and len(row["examples"]) < limit:
+                row["examples"].append(metric["raw"])
             dur = metric["params"].get("dur")
             if dur is None:
                 missing_duration_count += 1
@@ -41,24 +51,30 @@ def summarize_source_server_timings(sources: Iterable[Mapping[str, Any] | object
             desc = field_value(metric["params"].get("desc"))
             if desc:
                 description_count += 1
-            if len(samples) < limit:
-                sample: dict[str, Any] = {"source_id": sid, "metric": name, "value": metric["raw"]}
-                if dur is not None:
-                    sample["dur"] = field_value(dur)
-                if desc:
-                    sample["desc"] = desc
-                samples.append(sample)
+            sample: dict[str, Any] = {"source_id": sid, "metric": name, "value": metric["raw"], "_order": sample_order}
+            sample_order += 1
+            if dur is not None:
+                sample["dur"] = field_value(dur)
+            if desc:
+                sample["desc"] = desc
+            samples.append(sample)
 
+    samples.sort(key=lambda row: (sort_key(row["source_id"]), row["_order"]))
+    bounded_samples = samples[:limit]
+    for sample in bounded_samples:
+        sample.pop("_order", None)
+    rows = [rows_by_metric[key] for key in sorted(rows_by_metric, key=sort_key)]
     return {
         "total_sources": len(source_list),
         "sources_with_server_timing": sources_with,
         "metric_counts": {key: metric_counts[key] for key in sorted(metric_counts, key=sort_key)},
+        "rows": rows,
         "duration_buckets": {key: duration_buckets[key] for key in ("lt_100ms", "100_499ms", "500_999ms", "gte_1000ms") if duration_buckets[key]},
         "missing_duration_count": missing_duration_count,
         "invalid_duration_count": invalid_duration_count,
         "description_count": description_count,
         "missing_server_timing_count": len(source_list) - sources_with,
-        "samples": samples,
+        "samples": bounded_samples,
     }
 
 
@@ -70,7 +86,7 @@ def _metrics(value: str) -> list[dict[str, Any]]:
             continue
         parts = _split_quoted(raw, ";")
         name = field_value(parts[0]).casefold()
-        if not name:
+        if not name or not _METRIC_NAME_RE.fullmatch(name):
             continue
         params = {}
         for part in parts[1:]:
