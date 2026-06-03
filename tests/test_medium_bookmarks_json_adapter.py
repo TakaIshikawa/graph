@@ -65,3 +65,41 @@ def test_medium_bookmarks_json_skips_missing_identity_bad_files_since_and_filter
     assert [unit.title for unit in first.units] == ["New"]
     assert [unit.source_id for unit in first.units] == [unit.source_id for unit in second.units]
     assert adapter.ingest(entity_types=["article"]).units == []
+
+
+def test_medium_bookmarks_json_accepts_nested_missing_people_and_deduplicates_urls(tmp_path):
+    export = tmp_path / "nested.json"
+    export.write_text(
+        json.dumps(
+            {
+                "items": [
+                    {
+                        "story": {
+                            "title": "Nested Story",
+                            "preview": "Nested preview",
+                            "url": "https://medium.com/p/nested",
+                            "topics": ["engineering"],
+                            "readingTime": "5",
+                        },
+                        "saved_at": "2025-01-04T00:00:00Z",
+                    },
+                    {
+                        "title": "Duplicate Story",
+                        "url": "https://medium.com/p/nested",
+                        "saved_at": "2025-01-05T00:00:00Z",
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = MediumBookmarksJsonAdapter(path=str(export)).ingest()
+
+    assert len(result.units) == 1
+    unit = result.units[0]
+    assert unit.metadata["title"] == "Duplicate Story"
+    assert unit.metadata["url"] == "https://medium.com/p/nested"
+    assert "author" not in unit.metadata
+    assert "publication" not in unit.metadata
+    assert unit.source_id == MediumBookmarksJsonAdapter(path=str(export)).ingest().units[0].source_id

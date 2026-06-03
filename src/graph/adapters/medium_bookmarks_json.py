@@ -68,14 +68,16 @@ class MediumBookmarksJsonAdapter(SourceAdapter):
         return []
 
     def _unit_from_record(self, record: dict[str, Any], source_file: str) -> KnowledgeUnit | None:
+        record = self._flatten_record(record)
         title = self._text(record.get("title") or record.get("name"))
-        subtitle = self._text(record.get("subtitle") or record.get("description"))
+        subtitle = self._text(record.get("subtitle") or record.get("preview") or record.get("description"))
         author = self._person(record.get("author") or record.get("creator"))
         publication = self._text(record.get("publication") or record.get("publication_title"))
         url = self._text(record.get("url") or record.get("canonical_url") or record.get("medium_url"))
         tags = self._list(record.get("tags") or record.get("topics"))
         claps = self._parse_int(record.get("claps") or record.get("clap_count"))
         responses = self._parse_int(record.get("responses") or record.get("responses_count") or record.get("comments_count"))
+        reading_time = self._parse_int(record.get("reading_time") or record.get("reading_time_minutes") or record.get("readingTime"))
         saved_at = self._parse_datetime(record.get("saved_at") or record.get("bookmarked_at") or record.get("created_at"))
         published_at = self._parse_datetime(record.get("published_at") or record.get("first_published_at"))
         updated_at = self._parse_datetime(record.get("updated_at") or record.get("last_modified_at")) or saved_at or published_at
@@ -90,6 +92,7 @@ class MediumBookmarksJsonAdapter(SourceAdapter):
             "tags": tags,
             "claps": claps,
             "responses": responses,
+            "reading_time_minutes": reading_time,
             "saved_at": saved_at.isoformat() if saved_at else self._text(record.get("saved_at")),
             "published_at": published_at.isoformat() if published_at else self._text(record.get("published_at")),
             "updated_at": updated_at.isoformat() if updated_at else self._text(record.get("updated_at")),
@@ -113,6 +116,17 @@ class MediumBookmarksJsonAdapter(SourceAdapter):
     def _content(self, title: str, subtitle: str, author: str, publication: str, url: str) -> str:
         parts = [title, subtitle, f"Author: {author}" if author else "", f"Publication: {publication}" if publication else "", f"URL: {url}" if url else ""]
         return "\n".join(part for part in parts if part)
+
+    def _flatten_record(self, record: dict[str, Any]) -> dict[str, Any]:
+        for key in ("story", "post", "article", "item"):
+            nested = record.get(key)
+            if isinstance(nested, dict):
+                merged = dict(nested)
+                for parent_key, value in record.items():
+                    if parent_key != key and parent_key not in merged:
+                        merged[parent_key] = value
+                return merged
+        return record
 
     def _source_id(self, url: str, title: str, author: str) -> str:
         digest = hashlib.sha256((url or f"{title}|{author}").encode("utf-8")).hexdigest()[:24]
