@@ -71,6 +71,7 @@ from graph.store.source_clear_site_data_summary import summarize_source_clear_si
 from graph.store.source_api_version_summary import summarize_source_api_versions
 from graph.store.source_openapi_hint_summary import summarize_source_openapi_hints
 from graph.store.source_via_header_summary import summarize_source_via_headers
+from graph.store.source_vary_header_summary import summarize_source_vary_headers
 from graph.store.source_warning_header_summary import summarize_source_warning_headers
 from graph.store.source_content_location_summary import summarize_source_content_location_headers
 from graph.store.source_content_disposition_summary import summarize_source_content_dispositions
@@ -293,6 +294,7 @@ __all__ = [
     "summarize_source_api_versions",
     "summarize_source_openapi_hints",
     "summarize_source_via_headers",
+    "summarize_source_vary_headers",
     "summarize_source_warning_headers",
     "summarize_source_content_location_headers",
     "summarize_source_content_dispositions",
