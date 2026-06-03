@@ -12,6 +12,36 @@ _HEADER = "cache-control"
 _COMMON = {"max-age", "no-cache", "no-store", "immutable", "private", "public"}
 
 
+def summarize_source_cache_controls(sources: Iterable[Mapping[str, Any] | object], sample_limit: int = 5) -> dict[str, Any]:
+    source_list = list(sources)
+    rows_by_name: dict[str, dict[str, Any]] = {}
+    sources_with = 0
+    for index, source in enumerate(source_list):
+        sid = source_id(source) or str(index)
+        value = _lookup_header(source, _HEADER)
+        if not value:
+            continue
+        sources_with += 1
+        for directive in _directives(value):
+            name = directive.split("=", 1)[0].strip().casefold()
+            if not name:
+                continue
+            row = rows_by_name.setdefault(name, {"directive": name, "count": 0, "source_ids": [], "examples": []})
+            row["count"] += 1
+            if sid not in row["source_ids"] and len(row["source_ids"]) < max(0, sample_limit):
+                row["source_ids"].append(sid)
+            if directive not in row["examples"] and len(row["examples"]) < max(0, sample_limit):
+                row["examples"].append(directive)
+    rows = sorted(rows_by_name.values(), key=lambda row: sort_key(row["directive"]))
+    return {
+        "total_sources": len(source_list),
+        "sources_with_cache_control": sources_with,
+        "missing_cache_control_count": len(source_list) - sources_with,
+        "rows": rows,
+        "directive_counts": {row["directive"]: row["count"] for row in rows},
+    }
+
+
 def summarize_source_cache_control_headers(sources: Iterable[Mapping[str, Any] | object], sample_limit: int = 5) -> dict[str, Any]:
     source_list = list(sources)
     limit = max(0, sample_limit)
