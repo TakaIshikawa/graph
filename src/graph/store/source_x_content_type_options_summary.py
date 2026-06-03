@@ -15,19 +15,20 @@ def summarize_source_x_content_type_options(sources: Iterable[Mapping[str, Any] 
     source_list = list(sources)
     rows = [_row(source, index) for index, source in enumerate(source_list)]
     present = [row for row in rows if row["value"]]
-    unusual = [row for row in present if row["value"] != "nosniff"]
+    unexpected = [row for row in present if row["value"] != "nosniff"]
     limit = max(0, sample_limit)
-    samples = [
-        {"source_id": row["source_id"], "value": row["value"], "field": row["field"]}
-        for row in sorted(unusual, key=lambda row: sort_key(row["source_id"]))[:limit]
-    ]
+    rows_sorted = sorted(present, key=lambda row: sort_key(row["source_id"]))
     return {
         "total_sources": len(source_list),
         "sources_with_header": len(present),
         "value_counts": dict(sorted(Counter(row["value"] for row in present).items())),
         "missing_header_count": len(source_list) - len(present),
-        "non_nosniff_count": len(unusual),
-        "samples": samples,
+        "non_nosniff_count": len(unexpected),
+        "unexpected_value_count": len(unexpected),
+        "unexpected_values": _unexpected_values(unexpected, limit),
+        "source_ids": [row["source_id"] for row in rows_sorted],
+        "rows": rows_sorted,
+        "samples": [{"source_id": row["source_id"], "value": row["value"], "field": row["field"]} for row in sorted(unexpected, key=lambda row: sort_key(row["source_id"]))[:limit]],
     }
 
 
@@ -49,3 +50,11 @@ def _header_value(source: Mapping[str, Any] | object) -> tuple[str, str]:
                 if str(key).casefold().replace("_", "-") == _HEADER:
                     return field_value(value), f"{owner}.{key}"
     return "", ""
+
+
+def _unexpected_values(rows: list[dict[str, str]], limit: int) -> list[dict[str, Any]]:
+    counts = Counter(row["value"] for row in rows)
+    source_ids: dict[str, list[str]] = {}
+    for row in sorted(rows, key=lambda item: sort_key(item["source_id"])):
+        source_ids.setdefault(row["value"], []).append(row["source_id"])
+    return [{"value": value, "count": counts[value], "source_ids": source_ids[value][:limit]} for value in sorted(counts, key=sort_key)[:limit]]
