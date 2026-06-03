@@ -65,3 +65,29 @@ def test_github_gists_json_wrappers_directory_since_and_filters(tmp_path):
     assert first.units[0].metadata["languages"] == ["JavaScript"]
     assert [unit.source_id for unit in first.units] == [unit.source_id for unit in second.units]
     assert adapter.ingest(entity_types=["file"]).units == []
+
+
+def test_github_gists_json_handles_private_empty_description_and_truncated_content(tmp_path):
+    export = tmp_path / "gists.json"
+    export.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "secret",
+                    "description": "",
+                    "public": False,
+                    "files": {"notes.md": {"filename": "notes.md", "truncated_content": "partial note"}},
+                    "updated_at": "2025-01-01T00:00:00Z",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    unit = GithubGistsJsonAdapter(path=str(export)).ingest().units[0]
+
+    assert unit.title == "secret"
+    assert unit.metadata["public"] is False
+    assert "description" not in unit.metadata
+    assert unit.metadata["file_names"] == ["notes.md"]
+    assert "partial note" in unit.content

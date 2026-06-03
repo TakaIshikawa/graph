@@ -170,6 +170,7 @@ from graph.adapters.foam import FoamWorkspaceAdapter
 from graph.adapters.tana import TanaAdapter
 from graph.adapters.todoist import TodoistAdapter
 from graph.adapters.todoist_tasks_csv import TodoistTasksCsvAdapter
+from graph.adapters.todoist_tasks_json import TodoistTasksJsonAdapter
 from graph.adapters.todoist_completed_csv import TodoistCompletedCsvAdapter
 from graph.adapters.are_na import AreNaAdapter
 from graph.adapters.zotero_csv import ZoteroCsvAdapter
@@ -441,6 +442,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "tana": TanaAdapter,
     "todoist": TodoistAdapter,
     "todoist_tasks_csv": TodoistTasksCsvAdapter,
+    "todoist_tasks_json": TodoistTasksJsonAdapter,
     "todoist_completed_csv": TodoistCompletedCsvAdapter,
     "are_na": AreNaAdapter,
     "zotero_csv": ZoteroCsvAdapter,
