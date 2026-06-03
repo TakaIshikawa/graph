@@ -53,6 +53,7 @@ from graph.rag.query_confidentiality_requirement import detect_query_confidentia
 from graph.rag.query_data_classification_requirement import detect_query_data_classification_requirement
 from graph.rag.query_device_posture_requirement import detect_query_device_posture_requirements
 from graph.rag.query_dpa_requirement import detect_query_dpa_requirement
+from graph.rag.query_encryption_requirement import detect_query_encryption_requirements
 from graph.rag.query_gdpr_requirement import detect_query_gdpr_requirement
 from graph.rag.query_geographic_scope import detect_query_geographic_scope
 from graph.rag.query_hipaa_requirement import detect_query_hipaa_requirement
@@ -192,6 +193,7 @@ __all__ = [
     "detect_query_data_classification_requirement",
     "detect_query_device_posture_requirements",
     "detect_query_dpa_requirement",
+    "detect_query_encryption_requirements",
     "detect_query_gdpr_requirement",
     "detect_query_geographic_scope",
     "detect_query_hipaa_requirement",

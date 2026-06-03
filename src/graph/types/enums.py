@@ -178,6 +178,7 @@ class SourceProject(StrEnum):
     LINEAR_ISSUES_JSON = "linear_issues_json"
     PELOTON_WORKOUTS_CSV = "peloton_workouts_csv"
     PODCASTS_OPML = "podcasts_opml"
+    DEVTO_BOOKMARKS_JSON = "devto_bookmarks_json"
     STACKOVERFLOW_BOOKMARKS_JSON = "stackoverflow_bookmarks_json"
     CHROME_READING_LIST_JSON = "chrome_reading_list_json"
     AUDIBLE_LIBRARY_CSV = "audible_library_csv"

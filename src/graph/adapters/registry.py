@@ -40,6 +40,7 @@ from graph.adapters.diigo import DiigoAdapter
 from graph.adapters.discover_credit_card_transactions_csv import DiscoverCreditCardTransactionsCsvAdapter
 from graph.adapters.discord_json import DiscordJsonAdapter
 from graph.adapters.discord_threads_json import DiscordThreadsJsonAdapter
+from graph.adapters.devto_bookmarks_json import DevtoBookmarksJsonAdapter
 from graph.adapters.dropbox_paper_docs_json import DropboxPaperDocsJsonAdapter
 from graph.adapters.email import EmailAdapter
 from graph.adapters.enex import EnexAdapter
@@ -540,6 +541,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "linear_issues_json": LinearIssuesJsonAdapter,
     "peloton_workouts_csv": PelotonWorkoutsCsvAdapter,
     "podcasts_opml": PodcastsOpmlAdapter,
+    "devto_bookmarks_json": DevtoBookmarksJsonAdapter,
     "stackoverflow_answers_json": StackOverflowAnswersJsonAdapter,
     "stackoverflow_bookmarks_json": StackOverflowBookmarksJsonAdapter,
     "youtube_playlists_json": YouTubePlaylistsJsonAdapter,
