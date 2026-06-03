@@ -29,6 +29,7 @@ from graph.store.source_response_time_summary import summarize_source_response_t
 from graph.store.source_redirect_hint_summary import summarize_source_redirect_hints
 from graph.store.source_redirect_chain_depth_summary import summarize_source_redirect_chain_depths
 from graph.store.source_etag_summary import summarize_source_etags
+from graph.store.source_etag_header_summary import summarize_source_etag_headers
 from graph.store.source_unit_count_summary import summarize_source_unit_counts
 from graph.store.source_url_domain_summary import summarize_source_url_domains
 from graph.store.source_ssl_expiry_summary import summarize_source_ssl_expiry
@@ -253,6 +254,7 @@ __all__ = [
     "summarize_source_redirect_hints",
     "summarize_source_redirect_chain_depths",
     "summarize_source_etags",
+    "summarize_source_etag_headers",
     "summarize_source_unit_counts",
     "summarize_source_url_domains",
     "summarize_source_ssl_expiry",
