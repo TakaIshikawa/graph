@@ -39,6 +39,7 @@ from graph.adapters.daily_journal import DailyJournalAdapter
 from graph.adapters.diigo import DiigoAdapter
 from graph.adapters.discover_credit_card_transactions_csv import DiscoverCreditCardTransactionsCsvAdapter
 from graph.adapters.discord_json import DiscordJsonAdapter
+from graph.adapters.discord_saved_messages_json import DiscordSavedMessagesJsonAdapter
 from graph.adapters.discord_threads_json import DiscordThreadsJsonAdapter
 from graph.adapters.devto_bookmarks_json import DevtoBookmarksJsonAdapter
 from graph.adapters.dropbox_paper_docs_json import DropboxPaperDocsJsonAdapter
@@ -84,6 +85,7 @@ from graph.adapters.jira_issues_csv import JiraIssuesCsvAdapter
 from graph.adapters.jira_projects_csv import JiraProjectsCsvAdapter
 from graph.adapters.jira_worklogs_csv import JiraWorklogsCsvAdapter
 from graph.adapters.linear_issues_json import LinearIssuesJsonAdapter
+from graph.adapters.linear_issues_csv import LinearIssuesCsvAdapter
 from graph.adapters.linear_comments_json import LinearCommentsJsonAdapter
 from graph.adapters.linear_projects_json import LinearProjectsJsonAdapter
 from graph.adapters.jsonl_adapter import JsonlAdapter
@@ -172,6 +174,7 @@ from graph.adapters.todoist_completed_csv import TodoistCompletedCsvAdapter
 from graph.adapters.are_na import AreNaAdapter
 from graph.adapters.zotero_csv import ZoteroCsvAdapter
 from graph.adapters.google_tasks import GoogleTasksAdapter
+from graph.adapters.google_tasks_json import GoogleTasksJsonAdapter
 from graph.adapters.google_contacts_csv import GoogleContactsCsvAdapter
 from graph.adapters.google_forms_responses_csv import GoogleFormsResponsesCsvAdapter
 from graph.adapters.gmail_labels_csv import GmailLabelsCsvAdapter
@@ -319,6 +322,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "chatgpt_json": ChatGptJsonAdapter,
     "discover_credit_card_transactions_csv": DiscoverCreditCardTransactionsCsvAdapter,
     "discord_json": DiscordJsonAdapter,
+    "discord_saved_messages_json": DiscordSavedMessagesJsonAdapter,
     "discord_threads_json": DiscordThreadsJsonAdapter,
     "csv": CsvAdapter,
     "csv_rows": CsvRowsAdapter,
@@ -442,6 +446,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "zotero_csv": ZoteroCsvAdapter,
     "zotero_library_csv": ZoteroLibraryCsvAdapter,
     "google_tasks": GoogleTasksAdapter,
+    "google_tasks_json": GoogleTasksJsonAdapter,
     "google_contacts_csv": GoogleContactsCsvAdapter,
     "google_forms_responses_csv": GoogleFormsResponsesCsvAdapter,
     "gmail_labels_csv": GmailLabelsCsvAdapter,
@@ -539,6 +544,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "tiller_transactions_csv": TillerTransactionsCsvAdapter,
     "webull_brokerage_transactions_csv": WebullBrokerageTransactionsCsvAdapter,
     "linear_issues_json": LinearIssuesJsonAdapter,
+    "linear_issues_csv": LinearIssuesCsvAdapter,
     "peloton_workouts_csv": PelotonWorkoutsCsvAdapter,
     "podcasts_opml": PodcastsOpmlAdapter,
     "devto_bookmarks_json": DevtoBookmarksJsonAdapter,

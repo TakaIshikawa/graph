@@ -136,3 +136,32 @@ def test_reddit_saved_json_redditor_entity_filtering(tmp_path):
 
     assert [unit.source_entity_type for unit in result.units] == ["redditor"]
     assert result.edges == []
+
+
+def test_reddit_saved_json_handles_deleted_author_and_crosspost_source(tmp_path):
+    export = tmp_path / "saved.json"
+    export.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "abc",
+                    "name": "t3_abc",
+                    "title": "Crosspost",
+                    "author": "[deleted]",
+                    "subreddit": "python",
+                    "crosspost_parent": "t3_parent",
+                    "crosspost_parent_list": [{"url": "https://example.com/source"}],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = RedditSavedJsonAdapter(path=str(export)).ingest(entity_types=["post", "redditor"])
+
+    post = next(unit for unit in result.units if unit.source_entity_type == "post")
+    redditor = next(unit for unit in result.units if unit.source_entity_type == "redditor")
+    assert post.metadata["author"] == "[deleted]"
+    assert post.metadata["crosspost_parent"] == "t3_parent"
+    assert post.metadata["crosspost_source_url"] == "https://example.com/source"
+    assert redditor.metadata["normalized_author"] == "[deleted]"
