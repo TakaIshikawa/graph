@@ -18,6 +18,14 @@ from graph.adapters.hackernews_favorites_csv import HackerNewsFavoritesCsvAdapte
 from graph.adapters.goodreads_books_csv import GoodreadsBooksCsvAdapter
 from graph.adapters.rss_subscriptions_opml import RssSubscriptionsOpmlAdapter
 from graph.adapters.browser_history_csv import BrowserHistoryCsvAdapter
+from graph.adapters.youtube_liked_videos_json import YouTubeLikedVideosJsonAdapter
+from graph.adapters.pocket_highlights_csv import PocketHighlightsCsvAdapter
+from graph.adapters.raindrop_highlights_json import RaindropHighlightsJsonAdapter
+from graph.adapters.linkedin_connections_csv import LinkedInConnectionsCsvAdapter
+from graph.adapters.spotify_playlists_json import SpotifyPlaylistsJsonAdapter
+from graph.adapters.google_drive_comments_json import GoogleDriveCommentsJsonAdapter
+from graph.adapters.linear_documents_json import LinearDocumentsJsonAdapter
+from graph.adapters.github_sponsors_csv import GitHubSponsorsCsvAdapter
 
 __all__ = [
     "GoogleKeepTakeoutJsonAdapter",
@@ -40,4 +48,12 @@ __all__ = [
     "GoodreadsBooksCsvAdapter",
     "RssSubscriptionsOpmlAdapter",
     "BrowserHistoryCsvAdapter",
+    "YouTubeLikedVideosJsonAdapter",
+    "PocketHighlightsCsvAdapter",
+    "RaindropHighlightsJsonAdapter",
+    "LinkedInConnectionsCsvAdapter",
+    "SpotifyPlaylistsJsonAdapter",
+    "GoogleDriveCommentsJsonAdapter",
+    "LinearDocumentsJsonAdapter",
+    "GitHubSponsorsCsvAdapter",
 ]
