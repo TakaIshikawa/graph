@@ -125,6 +125,8 @@ class RedditSavedJsonAdapter(SourceAdapter):
             "author": self._first(item, "author"),
             "permalink": self._absolute_permalink(permalink),
             "url": url,
+            "crosspost_parent": self._first(item, "crosspost_parent"),
+            "crosspost_source_url": self._crosspost_source_url(item),
             "created_utc": created_utc.isoformat() if created_utc else None,
             "score": self._parse_int(item.get("score")),
             "link_title": link_title,
@@ -274,6 +276,16 @@ class RedditSavedJsonAdapter(SourceAdapter):
         if value.startswith("/"):
             return f"https://www.reddit.com{value}"
         return value
+
+    def _crosspost_source_url(self, item: dict[str, Any]) -> str:
+        parent_list = item.get("crosspost_parent_list")
+        if isinstance(parent_list, list):
+            for parent in parent_list:
+                if isinstance(parent, dict):
+                    url = self._first(parent, "url", "permalink")
+                    if url:
+                        return self._absolute_permalink(url)
+        return self._first(item, "source_url")
 
     def _first(self, item: dict[str, Any], *keys: str) -> str:
         for key in keys:
