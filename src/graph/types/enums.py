@@ -130,6 +130,7 @@ class SourceProject(StrEnum):
     GOOGLE_CALENDAR_JSON = "google_calendar_json"
     GOOGLE_CALENDAR_TAKEOUT = "google_calendar_takeout"
     GOOGLE_PHOTOS_TAKEOUT = "google_photos_takeout"
+    GOOGLE_PHOTOS_FAVORITES_JSON = "google_photos_favorites_json"
     CALENDAR = "calendar"
     CALIBRE_SQLITE = "calibre_sqlite"
     ACTIVITYWATCH_JSON = "activitywatch_json"
@@ -162,6 +163,7 @@ class SourceProject(StrEnum):
     JIRA_ISSUES_CSV = "jira_issues_csv"
     JIRA_WORKLOGS_CSV = "jira_worklogs_csv"
     TRELLO_BOARD_JSON = "trello_board_json"
+    TRELLO_CARDS_JSON = "trello_cards_json"
     MIRO_BOARD_JSON = "miro_board_json"
     GOOGLE_MAPS_TIMELINE_JSON = "google_maps_timeline_json"
     GOOGLE_MAPS_REVIEWS_JSON = "google_maps_reviews_json"
@@ -213,6 +215,8 @@ class SourceProject(StrEnum):
     YOUTUBE_PLAYLISTS_CSV = "youtube_playlists_csv"
     MIRO_BOARDS_CSV = "miro_boards_csv"
     CALENDLY_EVENTS_CSV = "calendly_events_csv"
+    FIGMA_FILES_JSON = "figma_files_json"
+    SAFARI_READING_LIST_CSV = "safari_reading_list_csv"
 
 
 class ContentType(StrEnum):

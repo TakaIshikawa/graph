@@ -68,6 +68,7 @@ from graph.adapters.google_calendar_json import GoogleCalendarJsonAdapter
 from graph.adapters.google_calendar_takeout import GoogleCalendarTakeoutAdapter
 from graph.adapters.google_docs_takeout_html import GoogleDocsTakeoutHtmlAdapter
 from graph.adapters.google_fit_activity_csv import GoogleFitActivityCsvAdapter
+from graph.adapters.google_photos_favorites_json import GooglePhotosFavoritesJsonAdapter
 from graph.adapters.google_photos_takeout import GooglePhotosTakeoutAdapter
 from graph.adapters.google_keep import GoogleKeepAdapter
 from graph.adapters.google_location_semantic_history_json import GoogleLocationSemanticHistoryJsonAdapter
@@ -161,6 +162,7 @@ from graph.adapters.apple_reminders_csv import AppleRemindersCsvAdapter
 from graph.adapters.day_one_json import DayOneJsonAdapter
 from graph.adapters.firefox_places import FirefoxPlacesAdapter
 from graph.adapters.fitbit_daily_activity_csv import FitbitDailyActivityCsvAdapter
+from graph.adapters.figma_files_json import FigmaFilesJsonAdapter
 from graph.adapters.foursquare_checkins_csv import FoursquareCheckinsCsvAdapter
 from graph.adapters.fidelity_activity_csv import FidelityActivityCsvAdapter
 from graph.adapters.google_search_history_json import GoogleSearchHistoryJsonAdapter
@@ -222,6 +224,7 @@ from graph.adapters.roam import RoamAdapter
 from graph.adapters.rss_reader_starred_json import RssReaderStarredJsonAdapter
 from graph.adapters.safari_bookmarks import SafariBookmarksAdapter
 from graph.adapters.safari_history import SafariHistoryAdapter
+from graph.adapters.safari_reading_list_csv import SafariReadingListCsvAdapter
 from graph.adapters.slack_json import SlackJsonAdapter
 from graph.adapters.slack_bookmarks_json import SlackBookmarksJsonAdapter
 from graph.adapters.slack_threads_json import SlackThreadsJsonAdapter
@@ -239,6 +242,7 @@ from graph.adapters.storygraph_to_read_csv import StoryGraphToReadCsvAdapter
 from graph.adapters.steam_library_csv import SteamLibraryCsvAdapter
 from graph.adapters.tiller_transactions_csv import TillerTransactionsCsvAdapter
 from graph.adapters.trello_board_json import TrelloBoardJsonAdapter
+from graph.adapters.trello_cards_json import TrelloCardsJsonAdapter
 from graph.adapters.trello_cards_csv import TrelloCardsCsvAdapter
 from graph.adapters.trakt_watch_history_csv import TraktWatchHistoryCsvAdapter
 from graph.adapters.tastytrade_activity_csv import TastytradeActivityCsvAdapter
@@ -412,6 +416,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "wallabag": WallabagAdapter,
     "safari_bookmarks": SafariBookmarksAdapter,
     "safari_history": SafariHistoryAdapter,
+    "safari_reading_list_csv": SafariReadingListCsvAdapter,
     "zotero_rdf": ZoteroRdfAdapter,
     "zotero_better_bibtex_json": ZoteroBetterBibtexJsonAdapter,
     "hypothesis": HypothesisAdapter,
@@ -463,6 +468,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "google_calendar_takeout": GoogleCalendarTakeoutAdapter,
     "google_docs_takeout_html": GoogleDocsTakeoutHtmlAdapter,
     "google_photos_takeout": GooglePhotosTakeoutAdapter,
+    "google_photos_favorites_json": GooglePhotosFavoritesJsonAdapter,
     "activitywatch_json": ActivityWatchJsonAdapter,
     "acorns_activity_csv": AcornsActivityCsvAdapter,
     "audible_library_csv": AudibleLibraryCsvAdapter,
@@ -470,6 +476,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "fitbit_daily_activity_csv": FitbitDailyActivityCsvAdapter,
     "google_fit_activity_csv": GoogleFitActivityCsvAdapter,
     "fitbit_sleep_csv": FitbitSleepCsvAdapter,
+    "figma_files_json": FigmaFilesJsonAdapter,
     "spotify_saved_tracks_json": SpotifySavedTracksJsonAdapter,
     "spotify_streaming_history": SpotifyStreamingHistoryAdapter,
     "spotify_takeout": SpotifyTakeoutAdapter,
@@ -499,6 +506,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "linear_comments_json": LinearCommentsJsonAdapter,
     "linear_projects_json": LinearProjectsJsonAdapter,
     "trello_board_json": TrelloBoardJsonAdapter,
+    "trello_cards_json": TrelloCardsJsonAdapter,
     "trello_cards_csv": TrelloCardsCsvAdapter,
     "google_maps_timeline_json": GoogleMapsTimelineJsonAdapter,
     "google_maps_reviews_json": GoogleMapsReviewsJsonAdapter,
