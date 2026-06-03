@@ -57,7 +57,7 @@ from graph.store.source_cross_origin_opener_policy_summary import summarize_sour
 from graph.store.source_cross_origin_embedder_policy_summary import summarize_source_cross_origin_embedder_policies
 from graph.store.source_cross_origin_resource_policy_summary import summarize_source_cross_origin_resource_policies
 from graph.store.source_dns_prefetch_control_summary import summarize_source_dns_prefetch_controls
-from graph.store.source_alt_svc_summary import summarize_source_alt_svc_headers
+from graph.store.source_alt_svc_summary import summarize_source_alt_svc_headers, summarize_source_alt_svcs
 from graph.store.source_alternate_link_summary import summarize_source_alternate_links
 from graph.store.source_canonical_url_summary import summarize_source_canonical_urls
 from graph.store.source_expect_ct_summary import summarize_source_expect_ct_headers
@@ -74,7 +74,7 @@ from graph.store.source_openapi_hint_summary import summarize_source_openapi_hin
 from graph.store.source_via_header_summary import summarize_source_via_headers
 from graph.store.source_vary_header_summary import summarize_source_vary_headers
 from graph.store.source_warning_header_summary import summarize_source_warning_headers
-from graph.store.source_content_location_summary import summarize_source_content_location_headers
+from graph.store.source_content_location_summary import summarize_source_content_location_headers, summarize_source_content_locations
 from graph.store.source_content_disposition_summary import summarize_source_content_dispositions
 from graph.store.source_digest_header_summary import summarize_source_digest_headers
 from graph.store.source_content_digest_summary import summarize_source_content_digests
@@ -285,6 +285,7 @@ __all__ = [
     "summarize_source_cross_origin_resource_policies",
     "summarize_source_dns_prefetch_controls",
     "summarize_source_alt_svc_headers",
+    "summarize_source_alt_svcs",
     "summarize_source_alternate_links",
     "summarize_source_canonical_urls",
     "summarize_source_expect_ct_headers",
@@ -302,6 +303,7 @@ __all__ = [
     "summarize_source_vary_headers",
     "summarize_source_warning_headers",
     "summarize_source_content_location_headers",
+    "summarize_source_content_locations",
     "summarize_source_content_dispositions",
     "summarize_source_digest_headers",
     "summarize_source_content_digests",
