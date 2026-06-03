@@ -152,3 +152,18 @@ def test_jira_issues_csv_fix_version_entity_filtering(tmp_path):
 
     assert [unit.source_entity_type for unit in versions.units] == ["fix_version"]
     assert versions.edges == []
+
+
+def test_jira_issues_csv_tolerates_missing_optional_columns_and_resolved_issues(tmp_path):
+    export = tmp_path / "jira.csv"
+    export.write_text("Key,Summary,Status,Resolved\nPROJ-1,Done issue,Done,2025-01-03\n", encoding="utf-8")
+
+    result = JiraIssuesCsvAdapter(path=str(export)).ingest(entity_types=["issue"])
+
+    assert len(result.units) == 1
+    unit = result.units[0]
+    assert unit.source_id == "jira_issues_csv:PROJ-1"
+    assert unit.metadata["status"] == "Done"
+    assert unit.metadata["resolved_at"] == "2025-01-03T00:00:00+00:00"
+    assert "labels" not in unit.metadata
+    assert "components" not in unit.metadata
