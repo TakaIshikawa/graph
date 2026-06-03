@@ -245,6 +245,13 @@ from graph.export.unit_markdown_mermaid_diagram_csv import export_units_to_markd
 from graph.export.unit_markdown_mermaid_edge_csv import export_units_to_markdown_mermaid_edge_csv
 from graph.export.unit_markdown_mermaid_block_csv import export_units_to_markdown_mermaid_block_csv
 from graph.export.unit_markdown_embed_wikilink_csv import export_units_to_markdown_embed_wikilink_csv
+from graph.export.unit_markdown_html_details_csv import export_unit_markdown_html_details_csv
+from graph.export.unit_markdown_html_figure_csv import export_unit_markdown_html_figure_csv
+from graph.export.unit_markdown_html_time_csv import export_unit_markdown_html_time_csv
+from graph.export.unit_markdown_definition_term_csv import export_unit_markdown_definition_term_csv
+from graph.export.unit_markdown_html_meta_tag_csv import export_unit_markdown_html_meta_tag_csv
+from graph.export.unit_markdown_heading_emoji_prefix_csv import export_unit_markdown_heading_emoji_prefix_csv
+from graph.export.unit_markdown_code_fence_title_csv import export_unit_markdown_code_fence_title_csv
 from graph.export.unit_markdown_embed_inventory_csv import export_units_to_markdown_embed_inventory_csv
 from graph.export.unit_yaml_alias_anchor_csv import export_units_to_yaml_alias_anchor_csv
 from graph.export.unit_markdown_autolink_csv import export_units_to_markdown_autolink_csv
@@ -661,20 +668,27 @@ __all__ = [
     "export_units_to_markdown_comment_directive_csv",
     "export_units_to_markdown_code_fence_attribute_csv",
     "export_units_to_markdown_code_fence_csv",
+    "export_unit_markdown_code_fence_title_csv",
     "export_units_to_markdown_collapsed_section_csv",
+    "export_unit_markdown_definition_term_csv",
     "export_units_to_markdown_embed_wikilink_csv",
     "export_units_to_markdown_embed_inventory_csv",
     "export_units_to_markdown_emphasis_inventory_csv",
     "export_units_to_markdown_footnote_reference_csv",
     "export_units_to_markdown_fenced_div_csv",
     "export_units_to_markdown_heading_anchor_csv",
+    "export_unit_markdown_heading_emoji_prefix_csv",
     "export_units_to_markdown_heading_numbering_csv",
     "export_unit_markdown_heading_depths_to_csv",
     "export_units_to_markdown_horizontal_rule_csv",
     "export_units_to_markdown_internal_anchor_target_csv",
     "export_units_to_markdown_inline_code_csv",
     "export_units_to_markdown_html_class_csv",
+    "export_unit_markdown_html_details_csv",
+    "export_unit_markdown_html_figure_csv",
     "export_units_to_markdown_html_mark_csv",
+    "export_unit_markdown_html_meta_tag_csv",
+    "export_unit_markdown_html_time_csv",
     "export_units_to_markdown_html_underline_csv",
     "export_units_to_markdown_html_block_csv",
     "export_units_to_markdown_link_attribute_csv",
