@@ -244,11 +244,13 @@ from graph.export.unit_markdown_internal_anchor_target_csv import export_units_t
 from graph.export.unit_markdown_mermaid_diagram_csv import export_units_to_markdown_mermaid_diagram_csv
 from graph.export.unit_markdown_mermaid_edge_csv import export_units_to_markdown_mermaid_edge_csv
 from graph.export.unit_markdown_mermaid_block_csv import export_units_to_markdown_mermaid_block_csv
+from graph.export.unit_markdown_embed_wikilink_csv import export_units_to_markdown_embed_wikilink_csv
 from graph.export.unit_markdown_embed_inventory_csv import export_units_to_markdown_embed_inventory_csv
 from graph.export.unit_yaml_alias_anchor_csv import export_units_to_yaml_alias_anchor_csv
 from graph.export.unit_markdown_autolink_csv import export_units_to_markdown_autolink_csv
 from graph.export.unit_markdown_autolink_email_csv import export_units_to_markdown_autolink_email_csv
 from graph.export.unit_markdown_strikethrough_csv import export_units_to_markdown_strikethrough_csv
+from graph.export.unit_markdown_strikethrough_span_csv import export_units_to_markdown_strikethrough_span_csv
 from graph.export.unit_markdown_footnote_reference_csv import export_units_to_markdown_footnote_reference_csv
 from graph.export.unit_markdown_setext_heading_csv import export_unit_markdown_setext_heading_csv
 from graph.export.unit_markdown_toc_entry_csv import export_unit_markdown_toc_entry_csv
@@ -660,6 +662,7 @@ __all__ = [
     "export_units_to_markdown_code_fence_attribute_csv",
     "export_units_to_markdown_code_fence_csv",
     "export_units_to_markdown_collapsed_section_csv",
+    "export_units_to_markdown_embed_wikilink_csv",
     "export_units_to_markdown_embed_inventory_csv",
     "export_units_to_markdown_emphasis_inventory_csv",
     "export_units_to_markdown_footnote_reference_csv",
@@ -683,6 +686,7 @@ __all__ = [
     "export_units_to_markdown_mermaid_diagram_csv",
     "export_units_to_markdown_mermaid_block_csv",
     "export_units_to_markdown_strikethrough_csv",
+    "export_units_to_markdown_strikethrough_span_csv",
     "export_units_to_markdown_details_inventory_csv",
     "export_units_to_markdown_image_alt_csv",
     "export_units_to_markdown_image_title_attribute_csv",
