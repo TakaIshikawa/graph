@@ -65,3 +65,23 @@ def test_medium_bookmarks_json_skips_missing_identity_bad_files_since_and_filter
     assert [unit.title for unit in first.units] == ["New"]
     assert [unit.source_id for unit in first.units] == [unit.source_id for unit in second.units]
     assert adapter.ingest(entity_types=["article"]).units == []
+
+
+def test_medium_bookmarks_json_deduplicates_duplicate_urls_deterministically(tmp_path):
+    export = tmp_path / "medium.json"
+    export.write_text(
+        json.dumps(
+            [
+                {"title": "First", "url": "https://medium.com/p/duplicate", "author": "Ada"},
+                {"title": "Second", "url": "https://medium.com/p/duplicate", "author": "Grace"},
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    first = MediumBookmarksJsonAdapter(path=str(export)).ingest()
+    second = MediumBookmarksJsonAdapter(path=str(export)).ingest()
+
+    assert len(first.units) == 1
+    assert first.units[0].metadata["url"] == "https://medium.com/p/duplicate"
+    assert [unit.source_id for unit in first.units] == [unit.source_id for unit in second.units]

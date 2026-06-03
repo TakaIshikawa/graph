@@ -25,6 +25,7 @@ from graph.export.collection_reading_progress_markdown import export_collection_
 from graph.export.collection_readme_markdown import export_collection_readme_markdown
 from graph.export.collection_size_distribution_csv import export_collection_size_distribution_csv
 from graph.export.collection_source_diversity_csv import export_collection_source_diversity_csv
+from graph.export.collection_staleness_risk_csv import export_collection_staleness_risk_csv
 from graph.export.collection_tag_coverage_csv import export_collection_tag_coverage_csv
 from graph.export.collection_tag_overlap_csv import export_collection_tag_overlap_csv
 from graph.export.collection_update_cadence_csv import export_collection_update_cadence_csv
@@ -121,6 +122,7 @@ from graph.export.source_import_batch_timeline_csv import export_source_import_b
 from graph.export.source_import_error_summary_csv import export_source_import_error_summary_csv
 from graph.export.source_inventory import export_source_inventory_csv
 from graph.export.source_identifier_coverage_csv import export_source_identifier_coverage_csv
+from graph.export.source_identifier_namespace_matrix_csv import export_source_identifier_namespace_matrix_csv
 from graph.export.source_confidence_summary_csv import export_source_confidence_summary_csv
 from graph.export.source_freshness_summary_csv import export_source_freshness_summary_csv
 from graph.export.source_field_nullability_csv import export_source_field_nullability_csv
@@ -556,6 +558,7 @@ __all__ = [
     "export_units_to_rss",
     "export_source_collection_mix_csv",
     "export_source_collection_matrix_csv",
+    "export_collection_staleness_risk_csv",
     "export_source_content_format_csv",
     "export_source_coverage_markdown",
     "export_source_entity_activity_markdown",
@@ -564,6 +567,7 @@ __all__ = [
     "export_source_gap_markdown",
     "export_source_import_batch_timeline_csv",
     "export_source_inventory_csv",
+    "export_source_identifier_namespace_matrix_csv",
     "export_source_confidence_summary_csv",
     "export_source_account_summary_csv",
     "export_source_author_coverage_csv",
