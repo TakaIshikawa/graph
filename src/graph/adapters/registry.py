@@ -60,6 +60,7 @@ from graph.adapters.gitlab_issues_json import GitlabIssuesJsonAdapter
 from graph.adapters.gitlab_merge_requests_json import GitlabMergeRequestsJsonAdapter
 from graph.adapters.gitlab_pipelines_json import GitlabPipelinesJsonAdapter
 from graph.adapters.github_stars_csv import GithubStarsCsvAdapter
+from graph.adapters.github_sponsors_csv import GitHubSponsorsCsvAdapter
 from graph.adapters.garmin_activities_csv import GarminActivitiesCsvAdapter
 from graph.adapters.goodreads_library import GoodreadsLibraryAdapter
 from graph.adapters.inaturalist_observations_csv import INaturalistObservationsCsvAdapter
@@ -89,6 +90,7 @@ from graph.adapters.linear_issues_json import LinearIssuesJsonAdapter
 from graph.adapters.linear_issues_csv import LinearIssuesCsvAdapter
 from graph.adapters.linear_comments_json import LinearCommentsJsonAdapter
 from graph.adapters.linear_projects_json import LinearProjectsJsonAdapter
+from graph.adapters.linear_documents_json import LinearDocumentsJsonAdapter
 from graph.adapters.jsonl_adapter import JsonlAdapter
 from graph.adapters.jsonl_notes import JsonlNotesAdapter
 from graph.adapters.kindle import KindleAdapter
@@ -205,12 +207,14 @@ from graph.adapters.pocket_csv import PocketCsvAdapter
 from graph.adapters.pocket_export import PocketExportAdapter
 from graph.adapters.pocket_reading_list_csv import PocketReadingListCsvAdapter
 from graph.adapters.pocket_articles_csv import PocketArticlesCsvAdapter
+from graph.adapters.pocket_highlights_csv import PocketHighlightsCsvAdapter
 from graph.adapters.podcasts_opml import PodcastsOpmlAdapter
 from graph.adapters.presence import PresenceAdapter
 from graph.adapters.raindrop import RaindropAdapter
 from graph.adapters.raindrop_bookmarks_csv import RaindropBookmarksCsvAdapter
 from graph.adapters.raindrop_csv import RaindropCsvAdapter
 from graph.adapters.raindrop_json import RaindropJsonAdapter
+from graph.adapters.raindrop_highlights_json import RaindropHighlightsJsonAdapter
 from graph.adapters.readwise import ReadwiseAdapter
 from graph.adapters.readwise_csv import ReadwiseCsvAdapter
 from graph.adapters.readwise_reader_documents_csv import ReadwiseReaderDocumentsCsvAdapter
@@ -232,6 +236,7 @@ from graph.adapters.sleep_as_android_csv import SleepAsAndroidCsvAdapter
 from graph.adapters.sofi_activity_csv import SofiActivityCsvAdapter
 from graph.adapters.sota import SOTAAdapter
 from graph.adapters.spotify_saved_tracks_json import SpotifySavedTracksJsonAdapter
+from graph.adapters.spotify_playlists_json import SpotifyPlaylistsJsonAdapter
 from graph.adapters.spotify_streaming_history import SpotifyStreamingHistoryAdapter
 from graph.adapters.spotify_takeout import SpotifyTakeoutAdapter
 from graph.adapters.stackoverflow_bookmarks_json import StackOverflowBookmarksJsonAdapter
@@ -261,6 +266,7 @@ from graph.adapters.facebook_archive import FacebookArchiveAdapter
 from graph.adapters.instagram_archive import InstagramArchiveAdapter
 from graph.adapters.interactive_brokers_activity_csv import InteractiveBrokersActivityCsvAdapter
 from graph.adapters.linkedin_archive import LinkedInArchiveAdapter
+from graph.adapters.linkedin_connections_csv import LinkedInConnectionsCsvAdapter
 from graph.adapters.vcard import VCardAdapter
 from graph.adapters.vanguard_activity_csv import VanguardActivityCsvAdapter
 from graph.adapters.wallabag import WallabagAdapter
@@ -270,11 +276,13 @@ from graph.adapters.yaml_adapter import YamlAdapter
 from graph.adapters.yaml_frontmatter import YamlFrontmatterAdapter
 from graph.adapters.youtube_playlists_csv import YoutubePlaylistsCsvAdapter
 from graph.adapters.youtube_comments_json import YoutubeCommentsJsonAdapter
+from graph.adapters.youtube_liked_videos_json import YouTubeLikedVideosJsonAdapter
 from graph.adapters.youtube_playlists_json import YouTubePlaylistsJsonAdapter
 from graph.adapters.zoom_recordings_csv import ZoomRecordingsCsvAdapter
 from graph.adapters.zotero_library_csv import ZoteroLibraryCsvAdapter
 from graph.adapters.clickup_tasks_csv import ClickUpTasksCsvAdapter
 from graph.adapters.google_drive_files_csv import GoogleDriveFilesCsvAdapter
+from graph.adapters.google_drive_comments_json import GoogleDriveCommentsJsonAdapter
 from graph.adapters.instapaper_highlights_csv import InstapaperHighlightsCsvAdapter
 from graph.adapters.microsoft_edge_bookmarks_json import MicrosoftEdgeBookmarksJsonAdapter
 from graph.adapters.miro_boards_csv import MiroBoardsCsvAdapter
@@ -399,12 +407,14 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "instagram_archive": InstagramArchiveAdapter,
     "interactive_brokers_activity_csv": InteractiveBrokersActivityCsvAdapter,
     "linkedin_archive": LinkedInArchiveAdapter,
+    "linkedin_connections_csv": LinkedInConnectionsCsvAdapter,
     "webvtt": WebVttAdapter,
     "pocket": PocketAdapter,
     "pocket_csv": PocketCsvAdapter,
     "pocket_export": PocketExportAdapter,
     "pocket_reading_list_csv": PocketReadingListCsvAdapter,
     "pocket_articles_csv": PocketArticlesCsvAdapter,
+    "pocket_highlights_csv": PocketHighlightsCsvAdapter,
     "instapaper": InstapaperAdapter,
     "pinboard": PinboardAdapter,
     "pinboard_html_export": PinboardHtmlExportAdapter,
@@ -412,6 +422,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "raindrop_bookmarks_csv": RaindropBookmarksCsvAdapter,
     "raindrop_csv": RaindropCsvAdapter,
     "raindrop_json": RaindropJsonAdapter,
+    "raindrop_highlights_json": RaindropHighlightsJsonAdapter,
     "diigo": DiigoAdapter,
     "wallabag": WallabagAdapter,
     "safari_bookmarks": SafariBookmarksAdapter,
@@ -462,6 +473,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "hacker_news_submissions_csv": HackerNewsSubmissionsCsvAdapter,
     "hacker_news_upvoted_csv": HackerNewsUpvotedCsvAdapter,
     "github_stars_csv": GithubStarsCsvAdapter,
+    "github_sponsors_csv": GitHubSponsorsCsvAdapter,
     "airtable_csv": AirtableCsvAdapter,
     "airtable_bases_csv": AirtableBasesCsvAdapter,
     "google_calendar_json": GoogleCalendarJsonAdapter,
@@ -478,6 +490,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "fitbit_sleep_csv": FitbitSleepCsvAdapter,
     "figma_files_json": FigmaFilesJsonAdapter,
     "spotify_saved_tracks_json": SpotifySavedTracksJsonAdapter,
+    "spotify_playlists_json": SpotifyPlaylistsJsonAdapter,
     "spotify_streaming_history": SpotifyStreamingHistoryAdapter,
     "spotify_takeout": SpotifyTakeoutAdapter,
     "trakt_watch_history_csv": TraktWatchHistoryCsvAdapter,
@@ -505,6 +518,7 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "jira_worklogs_csv": JiraWorklogsCsvAdapter,
     "linear_comments_json": LinearCommentsJsonAdapter,
     "linear_projects_json": LinearProjectsJsonAdapter,
+    "linear_documents_json": LinearDocumentsJsonAdapter,
     "trello_board_json": TrelloBoardJsonAdapter,
     "trello_cards_json": TrelloCardsJsonAdapter,
     "trello_cards_csv": TrelloCardsCsvAdapter,
@@ -562,10 +576,12 @@ _ADAPTERS: dict[str, type[SourceAdapter]] = {
     "stackoverflow_bookmarks_json": StackOverflowBookmarksJsonAdapter,
     "youtube_playlists_json": YouTubePlaylistsJsonAdapter,
     "youtube_comments_json": YoutubeCommentsJsonAdapter,
+    "youtube_liked_videos_json": YouTubeLikedVideosJsonAdapter,
     "youtube_playlists_csv": YoutubePlaylistsCsvAdapter,
     "zoom_recordings_csv": ZoomRecordingsCsvAdapter,
     "clickup_tasks_csv": ClickUpTasksCsvAdapter,
     "google_drive_files_csv": GoogleDriveFilesCsvAdapter,
+    "google_drive_comments_json": GoogleDriveCommentsJsonAdapter,
     "instapaper_highlights_csv": InstapaperHighlightsCsvAdapter,
     "microsoft_edge_bookmarks_json": MicrosoftEdgeBookmarksJsonAdapter,
     "miro_boards_csv": MiroBoardsCsvAdapter,
