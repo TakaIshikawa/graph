@@ -281,6 +281,10 @@ from graph.export.unit_yaml_tag_directive_csv import export_unit_yaml_tag_direct
 from graph.export.unit_markdown_html_comment_csv import export_unit_markdown_html_comment_csv
 from graph.export.unit_markdown_html_class_csv import export_units_to_markdown_html_class_csv
 from graph.export.unit_markdown_html_mark_csv import export_units_to_markdown_html_mark_csv
+from graph.export.unit_markdown_html_kbd_csv import export_unit_markdown_html_kbd_csv
+from graph.export.unit_markdown_html_code_pre_csv import export_unit_markdown_html_code_pre_csv
+from graph.export.unit_markdown_html_label_csv import export_unit_markdown_html_label_csv
+from graph.export.unit_markdown_html_bdi_bdo_csv import export_unit_markdown_html_bdi_bdo_csv
 from graph.export.unit_markdown_html_underline_csv import export_units_to_markdown_html_underline_csv
 from graph.export.unit_markdown_html_block_csv import export_units_to_markdown_html_block_csv
 from graph.export.unit_markdown_link_attribute_csv import export_units_to_markdown_link_attribute_csv
@@ -687,6 +691,10 @@ __all__ = [
     "export_unit_markdown_html_details_csv",
     "export_unit_markdown_html_figure_csv",
     "export_units_to_markdown_html_mark_csv",
+    "export_unit_markdown_html_kbd_csv",
+    "export_unit_markdown_html_code_pre_csv",
+    "export_unit_markdown_html_label_csv",
+    "export_unit_markdown_html_bdi_bdo_csv",
     "export_unit_markdown_html_meta_tag_csv",
     "export_unit_markdown_html_time_csv",
     "export_units_to_markdown_html_underline_csv",
