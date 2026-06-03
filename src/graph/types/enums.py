@@ -70,6 +70,7 @@ class SourceProject(StrEnum):
     OMNIVORE_HIGHLIGHTS_JSON = "omnivore_highlights_json"
     BEAR_NOTES_MARKDOWN = "bear_notes_markdown"
     TODOIST_TASKS_CSV = "todoist_tasks_csv"
+    TODOIST_TASKS_JSON = "todoist_tasks_json"
     POCKET_ARTICLES_CSV = "pocket_articles_csv"
     DIIGO = "diigo"
     WALLABAG = "wallabag"
