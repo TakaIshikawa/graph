@@ -57,6 +57,13 @@ from graph.rag.query_encryption_requirement import detect_query_encryption_requi
 from graph.rag.query_gdpr_requirement import detect_query_gdpr_requirement
 from graph.rag.query_geographic_scope import detect_query_geographic_scope
 from graph.rag.query_hipaa_requirement import detect_query_hipaa_requirement
+from graph.rag.query_pci_dss_requirement import detect_query_pci_dss_requirement
+from graph.rag.query_ferpa_requirement import detect_query_ferpa_requirement
+from graph.rag.query_coppa_requirement import detect_query_coppa_requirement
+from graph.rag.query_fedramp_requirement import detect_query_fedramp_requirement
+from graph.rag.query_dora_requirement import detect_query_dora_requirement
+from graph.rag.query_sox_requirement import detect_query_sox_requirement
+from graph.rag.query_biometric_data_requirement import detect_query_biometric_data_requirement
 from graph.rag.query_ip_allowlist_requirement import detect_query_ip_allowlist_requirements
 from graph.rag.query_key_management_requirement import detect_query_key_management_requirement
 from graph.rag.query_latency_sla_requirement import detect_query_latency_sla_requirement
@@ -197,6 +204,13 @@ __all__ = [
     "detect_query_gdpr_requirement",
     "detect_query_geographic_scope",
     "detect_query_hipaa_requirement",
+    "detect_query_pci_dss_requirement",
+    "detect_query_ferpa_requirement",
+    "detect_query_coppa_requirement",
+    "detect_query_fedramp_requirement",
+    "detect_query_dora_requirement",
+    "detect_query_sox_requirement",
+    "detect_query_biometric_data_requirement",
     "detect_query_ip_allowlist_requirements",
     "detect_query_key_management_requirement",
     "detect_query_latency_sla_requirement",
