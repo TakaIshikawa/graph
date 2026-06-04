@@ -18,6 +18,7 @@ from graph.rag.answer_citation_overclaim import audit_answer_citation_overclaims
 from graph.rag.answer_citation_freshness import audit_answer_citation_freshness
 from graph.rag.answer_compliance_boundary_audit import audit_answer_compliance_boundaries
 from graph.rag.answer_jargon import audit_answer_jargon
+from graph.rag.answer_numeric_caveats import analyze_answer_numeric_caveats
 from graph.rag.answer_numeric_claims import audit_answer_numeric_claims
 from graph.rag.answer_step_order import audit_answer_step_order
 from graph.rag.claim_support_matrix import build_claim_support_matrix
@@ -40,7 +41,10 @@ from graph.rag.evidence_quote_spans import extract_evidence_quote_spans
 from graph.rag.evidence_specificity import score_evidence_specificity
 from graph.rag.keywords import extract_keywords
 from graph.rag.query_intent import classify_query_intent
+from graph.rag.query_comparator_intent import detect_query_comparator_intent
 from graph.rag.query_citation_requirement import detect_query_citation_requirement
+from graph.rag.query_comparison_operator_detector import detect_query_comparison_operators
+from graph.rag.query_definition_requirement import detect_query_definition_requirement
 from graph.rag.query_authorization_scope_requirement import detect_query_authorization_scope_requirements
 from graph.rag.query_authentication_method_requirement import detect_query_authentication_method_requirements
 from graph.rag.query_secrets_rotation_requirement import detect_query_secrets_rotation_requirement, detect_query_secrets_rotation_requirements
@@ -67,16 +71,21 @@ from graph.rag.query_biometric_data_requirement import detect_query_biometric_da
 from graph.rag.query_ip_allowlist_requirement import detect_query_ip_allowlist_requirements
 from graph.rag.query_key_management_requirement import detect_query_key_management_requirement
 from graph.rag.query_latency_sla_requirement import detect_query_latency_sla_requirement
+from graph.rag.query_locale_requirement import detect_query_locale_requirement
 from graph.rag.query_log_integrity_requirement import detect_query_log_integrity_requirement
 from graph.rag.query_oncall_escalation_requirement import detect_query_oncall_escalation_requirement
 from graph.rag.query_password_policy_requirement import detect_query_password_policy_requirements
+from graph.rag.query_persona_requirement import detect_query_persona_requirements
 from graph.rag.query_policy_exception_requirement import detect_query_policy_exception_requirement
 from graph.rag.query_privileged_access_requirement import detect_query_privileged_access_requirements
 from graph.rag.query_privacy_constraint import detect_query_privacy_constraints
 from graph.rag.query_secure_development_requirement import detect_query_secure_development_requirement
 from graph.rag.query_soc2_requirement import detect_query_soc2_requirement
+from graph.rag.query_source_freshness_intent import detect_query_source_freshness_intent
 from graph.rag.query_third_party_access_requirement import detect_query_third_party_access_requirement
+from graph.rag.query_time_horizon_requirement import detect_query_time_horizon_requirement
 from graph.rag.query_uptime_sla_requirement import detect_query_uptime_sla_requirement
+from graph.rag.query_deadline_requirement import detect_query_deadline_requirement
 from graph.rag.query_source_strategy import plan_query_source_strategy
 from graph.rag.query_term_coverage import score_query_term_coverage
 from graph.rag.dedupe import rank_duplicate_candidates
@@ -162,6 +171,7 @@ __all__ = [
     "audit_answer_counterargument_balance",
     "audit_answer_hedging",
     "audit_answer_jargon",
+    "analyze_answer_numeric_caveats",
     "audit_answer_numeric_claims",
     "audit_answer_source_attribution_integrity",
     "audit_answer_source_disagreement_disclosure",
@@ -189,7 +199,11 @@ __all__ = [
     "detect_contradiction_cues",
     "detect_context_gaps",
     "detect_citation_gaps",
+    "detect_query_comparator_intent",
     "detect_query_comparison_axes",
+    "detect_query_comparison_operators",
+    "detect_query_deadline_requirement",
+    "detect_query_definition_requirement",
     "detect_query_access_review_requirement",
     "detect_query_authorization_scope_requirements",
     "detect_query_authentication_method_requirements",
@@ -214,9 +228,11 @@ __all__ = [
     "detect_query_ip_allowlist_requirements",
     "detect_query_key_management_requirement",
     "detect_query_latency_sla_requirement",
+    "detect_query_locale_requirement",
     "detect_query_log_integrity_requirement",
     "detect_query_oncall_escalation_requirement",
     "detect_query_password_policy_requirements",
+    "detect_query_persona_requirements",
     "detect_query_policy_exception_requirement",
     "detect_query_privileged_access_requirements",
     "detect_query_privacy_constraints",
@@ -225,7 +241,9 @@ __all__ = [
     "detect_query_secrets_rotation_requirements",
     "detect_query_secrets_management_requirement",
     "detect_query_soc2_requirement",
+    "detect_query_source_freshness_intent",
     "detect_query_third_party_access_requirement",
+    "detect_query_time_horizon_requirement",
     "detect_query_output_constraints",
     "detect_query_temporal_anchors",
     "detect_query_uptime_sla_requirement",
