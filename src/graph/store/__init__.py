@@ -84,6 +84,7 @@ from graph.store.source_via_header_summary import summarize_source_via_headers
 from graph.store.source_vary_header_summary import summarize_source_vary_headers
 from graph.store.source_warning_header_summary import summarize_source_warning_headers
 from graph.store.source_content_location_summary import summarize_source_content_location_headers, summarize_source_content_locations
+from graph.store.source_content_range_summary import summarize_source_content_ranges
 from graph.store.source_content_disposition_summary import summarize_source_content_dispositions
 from graph.store.source_digest_header_summary import summarize_source_digest_headers
 from graph.store.source_content_digest_summary import summarize_source_content_digests
@@ -107,6 +108,7 @@ from graph.store.source_x_download_options_summary import summarize_source_x_dow
 from graph.store.source_x_powered_by_summary import summarize_source_x_powered_by
 from graph.store.source_x_xss_protection_summary import summarize_source_x_xss_protections
 from graph.store.source_accept_ranges_summary import summarize_source_accept_ranges
+from graph.store.source_transfer_encoding_summary import summarize_source_transfer_encodings
 from graph.store.source_retry_after_summary import summarize_source_retry_after_headers
 from graph.store.source_reporting_endpoints_summary import summarize_source_reporting_endpoints
 from graph.store.source_www_authenticate_summary import summarize_source_www_authenticate_challenges, summarize_source_www_authenticate_headers
@@ -319,6 +321,7 @@ __all__ = [
     "summarize_source_warning_headers",
     "summarize_source_content_location_headers",
     "summarize_source_content_locations",
+    "summarize_source_content_ranges",
     "summarize_source_content_dispositions",
     "summarize_source_digest_headers",
     "summarize_source_content_digests",
@@ -341,6 +344,7 @@ __all__ = [
     "summarize_source_x_download_options",
     "summarize_source_x_powered_by",
     "summarize_source_x_xss_protections",
+    "summarize_source_transfer_encodings",
     "summarize_source_www_authenticate_challenges",
     "summarize_source_www_authenticate_headers",
     "summarize_unit_attachment_extensions",
