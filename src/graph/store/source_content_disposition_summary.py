@@ -15,10 +15,10 @@ _HEADER = "content-disposition"
 def summarize_source_content_dispositions(sources: Iterable[Mapping[str, Any] | object], sample_limit: int = 5) -> dict[str, Any]:
     source_list = list(sources)
     limit = max(0, sample_limit)
-    disposition_type_counts: Counter[str] = Counter()
-    filename_extension_counts: Counter[str] = Counter()
+    disposition_counts: Counter[str] = Counter()
+    filename_ext_counts: Counter[str] = Counter()
     samples: list[dict[str, str]] = []
-    sources_with = 0
+    sources_with = filename_count = malformed_count = 0
 
     for index, source in enumerate(source_list):
         sid = source_id(source) or str(index)
@@ -26,35 +26,75 @@ def summarize_source_content_dispositions(sources: Iterable[Mapping[str, Any] | 
         if not raw:
             continue
         sources_with += 1
-        disposition_type, filename = _parse_content_disposition(raw)
-        disposition_type_counts[disposition_type] += 1
+        disposition, filename, malformed = _parse_content_disposition(raw)
+        disposition_counts[disposition] += 1
+        malformed_count += int(malformed)
+        if filename:
+            filename_count += 1
         extension = _filename_extension(filename)
         if extension:
-            filename_extension_counts[extension] += 1
+            filename_ext_counts[extension] += 1
         if len(samples) < limit:
-            samples.append({"source_id": sid, "disposition_type": disposition_type, "filename": filename, "raw": raw})
+            samples.append({"source_id": sid, "disposition": disposition, "filename": filename, "raw": raw})
 
     return {
         "total_sources": len(source_list),
         "sources_with_content_disposition": sources_with,
         "missing_content_disposition_count": len(source_list) - sources_with,
-        "disposition_type_counts": {key: disposition_type_counts[key] for key in sorted(disposition_type_counts, key=sort_key)},
-        "filename_extension_counts": {key: filename_extension_counts[key] for key in sorted(filename_extension_counts, key=sort_key)},
+        "disposition_counts": {key: disposition_counts[key] for key in sorted(disposition_counts, key=sort_key)},
+        "attachment_count": disposition_counts["attachment"],
+        "inline_count": disposition_counts["inline"],
+        "filename_count": filename_count,
+        "filename_ext_counts": {key: filename_ext_counts[key] for key in sorted(filename_ext_counts, key=sort_key)},
+        "malformed_count": malformed_count,
         "samples": samples,
     }
 
 
-def _parse_content_disposition(value: str) -> tuple[str, str]:
-    parts = [field_value(part) for part in value.split(";") if field_value(part)]
-    disposition_type = parts[0].casefold() if parts else "unknown"
+def _parse_content_disposition(value: str) -> tuple[str, str, bool]:
+    raw_parts = _split_semicolon_params(value)
+    disposition = field_value(raw_parts[0]).casefold() if raw_parts else "unknown"
+    parts = [field_value(part) for part in raw_parts[1:] if field_value(part)]
+    malformed = not _valid_token(disposition)
     params: dict[str, str] = {}
-    for part in parts[1:]:
+    for part in parts:
         if "=" not in part:
+            malformed = True
             continue
         key, raw_value = part.split("=", 1)
-        params[key.strip().casefold()] = raw_value.strip().strip("\"'")
+        clean_key = key.strip().casefold()
+        if not _valid_token(clean_key):
+            malformed = True
+            continue
+        params[clean_key] = raw_value.strip().strip("\"'")
     filename = _decode_filename_star(params.get("filename*") or "") or field_value(params.get("filename"))
-    return disposition_type or "unknown", filename
+    return disposition or "unknown", filename, malformed
+
+
+def _split_semicolon_params(value: str) -> list[str]:
+    parts: list[str] = []
+    start = 0
+    in_quote = False
+    escaped = False
+    for index, char in enumerate(value):
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\" and in_quote:
+            escaped = True
+            continue
+        if char == '"':
+            in_quote = not in_quote
+            continue
+        if char == ";" and not in_quote:
+            parts.append(value[start:index])
+            start = index + 1
+    parts.append(value[start:])
+    return parts
+
+
+def _valid_token(value: str) -> bool:
+    return bool(value and all(char.isalnum() or char in "!#$%&'*+-.^_`|~" for char in value))
 
 
 def _decode_filename_star(value: str) -> str:
