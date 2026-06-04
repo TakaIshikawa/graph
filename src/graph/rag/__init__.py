@@ -42,8 +42,10 @@ from graph.rag.evidence_specificity import score_evidence_specificity
 from graph.rag.keywords import extract_keywords
 from graph.rag.query_intent import classify_query_intent
 from graph.rag.query_comparator_intent import detect_query_comparator_intent
+from graph.rag.query_breach_notification_requirement import detect_query_breach_notification_requirement
 from graph.rag.query_citation_requirement import detect_query_citation_requirement
 from graph.rag.query_comparison_operator_detector import detect_query_comparison_operators
+from graph.rag.query_cookie_consent_requirement import detect_query_cookie_consent_requirement
 from graph.rag.query_definition_requirement import detect_query_definition_requirement
 from graph.rag.query_authorization_scope_requirement import detect_query_authorization_scope_requirements
 from graph.rag.query_authentication_method_requirement import detect_query_authentication_method_requirements
@@ -79,6 +81,7 @@ from graph.rag.query_persona_requirement import detect_query_persona_requirement
 from graph.rag.query_policy_exception_requirement import detect_query_policy_exception_requirement
 from graph.rag.query_privileged_access_requirement import detect_query_privileged_access_requirements
 from graph.rag.query_privacy_constraint import detect_query_privacy_constraints
+from graph.rag.query_right_to_erasure_requirement import detect_query_right_to_erasure_requirement
 from graph.rag.query_secure_development_requirement import detect_query_secure_development_requirement
 from graph.rag.query_soc2_requirement import detect_query_soc2_requirement
 from graph.rag.query_source_freshness_intent import detect_query_source_freshness_intent
@@ -133,6 +136,7 @@ from graph.rag.query_expansion import suggest_query_expansion_terms
 from graph.rag.query_comparison_axes import detect_query_comparison_axes
 from graph.rag.query_output_constraints import detect_query_output_constraints
 from graph.rag.query_temporal_anchors import detect_query_temporal_anchors
+from graph.rag.query_model_governance_requirement import detect_query_model_governance_requirement
 from graph.rag.evidence_tension_map import map_evidence_tensions
 from graph.rag.tag_cooccurrence import build_tag_cooccurrence_matrix
 from graph.rag.tag_hierarchy import build_tag_hierarchy
@@ -200,8 +204,10 @@ __all__ = [
     "detect_context_gaps",
     "detect_citation_gaps",
     "detect_query_comparator_intent",
+    "detect_query_breach_notification_requirement",
     "detect_query_comparison_axes",
     "detect_query_comparison_operators",
+    "detect_query_cookie_consent_requirement",
     "detect_query_deadline_requirement",
     "detect_query_definition_requirement",
     "detect_query_access_review_requirement",
@@ -236,6 +242,7 @@ __all__ = [
     "detect_query_policy_exception_requirement",
     "detect_query_privileged_access_requirements",
     "detect_query_privacy_constraints",
+    "detect_query_right_to_erasure_requirement",
     "detect_query_secure_development_requirement",
     "detect_query_secrets_rotation_requirement",
     "detect_query_secrets_rotation_requirements",
@@ -246,6 +253,7 @@ __all__ = [
     "detect_query_time_horizon_requirement",
     "detect_query_output_constraints",
     "detect_query_temporal_anchors",
+    "detect_query_model_governance_requirement",
     "detect_query_uptime_sla_requirement",
     "detect_query_webhook_requirement",
     "extract_keywords",
