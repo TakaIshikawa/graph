@@ -21,12 +21,14 @@ from graph.export.collection_manifest_json import export_collection_manifest_jso
 from graph.export.collection_orphan_unit_csv import export_collection_orphan_unit_csv
 from graph.export.collection_member_recency_csv import export_collection_member_recency_csv
 from graph.export.collection_metadata_completeness_csv import export_collection_metadata_completeness_csv
+from graph.export.collection_reading_velocity_csv import export_collection_reading_velocity_csv
 from graph.export.collection_reading_progress_markdown import export_collection_reading_progress_markdown
 from graph.export.collection_readme_markdown import export_collection_readme_markdown
 from graph.export.collection_size_distribution_csv import export_collection_size_distribution_csv
 from graph.export.collection_source_diversity_csv import export_collection_source_diversity_csv
 from graph.export.collection_staleness_risk_csv import export_collection_staleness_risk_csv
 from graph.export.collection_tag_coverage_csv import export_collection_tag_coverage_csv
+from graph.export.collection_tag_drift_csv import export_collection_tag_drift_csv
 from graph.export.collection_tag_overlap_csv import export_collection_tag_overlap_csv
 from graph.export.collection_update_cadence_csv import export_collection_update_cadence_csv
 from graph.export.collection_tag_index_markdown import export_collection_tag_index_markdown
@@ -495,8 +497,10 @@ __all__ = [
     "export_collection_manifest_json",
     "export_collection_metadata_completeness_csv",
     "export_collection_orphan_unit_csv",
+    "export_collection_reading_velocity_csv",
     "export_collection_readme_markdown",
     "export_collection_tag_coverage_csv",
+    "export_collection_tag_drift_csv",
     "export_collection_tag_index_markdown",
     "export_collection_tag_overlap_csv",
     "export_units_to_csl_json",
