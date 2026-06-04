@@ -288,6 +288,11 @@ from graph.export.unit_markdown_html_mark_csv import export_units_to_markdown_ht
 from graph.export.unit_markdown_html_kbd_csv import export_unit_markdown_html_kbd_csv
 from graph.export.unit_markdown_html_cite_q_csv import export_unit_markdown_html_cite_q_csv
 from graph.export.unit_markdown_html_picture_source_csv import export_unit_markdown_html_picture_source_csv
+from graph.export.unit_markdown_html_audio_source_csv import export_units_to_markdown_html_audio_source_csv
+from graph.export.unit_markdown_html_iframe_csv import export_units_to_markdown_html_iframe_csv
+from graph.export.unit_markdown_html_blockquote_cite_csv import export_units_to_markdown_html_blockquote_cite_csv
+from graph.export.unit_markdown_html_abbr_title_csv import export_units_to_markdown_html_abbr_title_csv
+from graph.export.unit_markdown_html_sup_sub_csv import export_units_to_markdown_html_sup_sub_csv
 from graph.export.unit_markdown_html_code_pre_csv import export_unit_markdown_html_code_pre_csv
 from graph.export.unit_markdown_html_label_csv import export_unit_markdown_html_label_csv
 from graph.export.unit_markdown_html_bdi_bdo_csv import export_unit_markdown_html_bdi_bdo_csv
@@ -305,6 +310,7 @@ from graph.export.unit_markdown_strikethrough_inventory_csv import export_units_
 from graph.export.unit_markdown_symbol_density_csv import export_units_to_markdown_symbol_density_csv
 from graph.export.unit_markdown_tag_csv import export_units_to_markdown_tag_csv
 from graph.export.unit_markdown_task_priority_csv import export_units_to_markdown_task_priority_csv
+from graph.export.unit_markdown_task_list_csv import export_units_to_markdown_task_list_csv
 from graph.export.unit_markdown_todo_due_date_csv import export_units_to_markdown_todo_due_date_csv
 from graph.export.unit_markdown_math_block_csv import export_unit_markdown_math_blocks_to_csv
 from graph.export.unit_markdown_table_csv import export_units_to_markdown_table_csv
@@ -698,6 +704,11 @@ __all__ = [
     "export_units_to_markdown_html_class_csv",
     "export_unit_markdown_html_details_csv",
     "export_unit_markdown_html_figure_csv",
+    "export_units_to_markdown_html_audio_source_csv",
+    "export_units_to_markdown_html_iframe_csv",
+    "export_units_to_markdown_html_blockquote_cite_csv",
+    "export_units_to_markdown_html_abbr_title_csv",
+    "export_units_to_markdown_html_sup_sub_csv",
     "export_units_to_markdown_html_mark_csv",
     "export_unit_markdown_html_kbd_csv",
     "export_unit_markdown_html_code_pre_csv",
@@ -744,6 +755,7 @@ __all__ = [
     "export_units_to_markdown_bare_url_domain_csv",
     "export_units_to_markdown_math_span_csv",
     "export_units_to_markdown_todo_due_date_csv",
+    "export_units_to_markdown_task_list_csv",
     "export_unit_markdown_math_blocks_to_csv",
     "export_unit_markdown_thematic_breaks_to_csv",
     "export_unit_markdown_setext_heading_csv",
