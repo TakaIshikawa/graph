@@ -296,6 +296,7 @@ from graph.export.unit_markdown_html_form_control_csv import export_units_to_mar
 from graph.export.unit_markdown_html_image_dimension_csv import export_units_to_markdown_html_image_dimension_csv
 from graph.export.unit_markdown_html_iframe_csv import export_units_to_markdown_html_iframe_csv
 from graph.export.unit_markdown_html_link_rel_csv import export_units_to_markdown_html_link_rel_csv
+from graph.export.unit_markdown_html_map_area_csv import export_units_to_markdown_html_map_area_csv
 from graph.export.unit_markdown_html_progress_meter_csv import export_units_to_markdown_html_progress_meter_csv
 from graph.export.unit_markdown_html_table_cell_scope_csv import export_units_to_markdown_html_table_cell_scope_csv
 from graph.export.unit_markdown_html_template_slot_csv import export_units_to_markdown_html_template_slot_csv
@@ -722,6 +723,7 @@ __all__ = [
     "export_units_to_markdown_html_image_dimension_csv",
     "export_units_to_markdown_html_iframe_csv",
     "export_units_to_markdown_html_link_rel_csv",
+    "export_units_to_markdown_html_map_area_csv",
     "export_units_to_markdown_html_progress_meter_csv",
     "export_units_to_markdown_html_table_cell_scope_csv",
     "export_units_to_markdown_html_template_slot_csv",
