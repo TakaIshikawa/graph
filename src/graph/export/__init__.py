@@ -297,6 +297,16 @@ from graph.export.unit_markdown_html_image_dimension_csv import export_units_to_
 from graph.export.unit_markdown_html_iframe_csv import export_units_to_markdown_html_iframe_csv
 from graph.export.unit_markdown_html_link_rel_csv import export_units_to_markdown_html_link_rel_csv
 from graph.export.unit_markdown_html_map_area_csv import export_units_to_markdown_html_map_area_csv
+from graph.export.unit_markdown_html_canvas_csv import export_units_to_markdown_html_canvas_csv
+from graph.export.unit_markdown_html_embed_object_csv import export_units_to_markdown_html_embed_object_csv
+from graph.export.unit_markdown_html_mathml_csv import export_units_to_markdown_html_mathml_csv
+from graph.export.unit_markdown_html_menu_command_csv import export_units_to_markdown_html_menu_command_csv
+from graph.export.unit_markdown_html_noscript_csv import export_units_to_markdown_html_noscript_csv
+from graph.export.unit_markdown_html_output_csv import export_units_to_markdown_html_output_csv
+from graph.export.unit_markdown_html_ruby_annotation_csv import export_units_to_markdown_html_ruby_annotation_csv
+from graph.export.unit_markdown_html_script_csv import export_units_to_markdown_html_script_csv
+from graph.export.unit_markdown_html_svg_csv import export_units_to_markdown_html_svg_csv
+from graph.export.unit_markdown_html_track_csv import export_units_to_markdown_html_track_csv
 from graph.export.unit_markdown_html_progress_meter_csv import export_units_to_markdown_html_progress_meter_csv
 from graph.export.unit_markdown_html_table_cell_scope_csv import export_units_to_markdown_html_table_cell_scope_csv
 from graph.export.unit_markdown_html_template_slot_csv import export_units_to_markdown_html_template_slot_csv
@@ -724,6 +734,16 @@ __all__ = [
     "export_units_to_markdown_html_iframe_csv",
     "export_units_to_markdown_html_link_rel_csv",
     "export_units_to_markdown_html_map_area_csv",
+    "export_units_to_markdown_html_canvas_csv",
+    "export_units_to_markdown_html_embed_object_csv",
+    "export_units_to_markdown_html_mathml_csv",
+    "export_units_to_markdown_html_menu_command_csv",
+    "export_units_to_markdown_html_noscript_csv",
+    "export_units_to_markdown_html_output_csv",
+    "export_units_to_markdown_html_ruby_annotation_csv",
+    "export_units_to_markdown_html_script_csv",
+    "export_units_to_markdown_html_svg_csv",
+    "export_units_to_markdown_html_track_csv",
     "export_units_to_markdown_html_progress_meter_csv",
     "export_units_to_markdown_html_table_cell_scope_csv",
     "export_units_to_markdown_html_template_slot_csv",
