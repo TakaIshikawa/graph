@@ -7,6 +7,7 @@ from graph.export.activitywatch_focus_sessions_csv import export_units_to_activi
 from graph.export.anki import export_units_to_anki_tsv
 from graph.export.atom import export_units_to_atom
 from graph.export.backlinks import export_unit_backlinks_markdown
+from graph.export.backlog_report_csv import export_backlog_report_csv
 from graph.export.bibliography_markdown import export_units_to_bibliography_markdown
 from graph.export.bibtex import export_units_to_bibtex
 from graph.export.bookmarks_html import export_units_to_bookmarks_html
@@ -145,6 +146,7 @@ from graph.export.source_license_coverage_csv import export_source_license_cover
 from graph.export.source_metadata_density_csv import export_source_metadata_density_csv
 from graph.export.source_metadata_completeness_csv import export_source_metadata_completeness_csv
 from graph.export.source_metadata_outliers_markdown import export_source_metadata_outliers_markdown
+from graph.export.source_quality_csv import export_source_quality_csv
 from graph.export.source_quality_markdown import export_source_quality_markdown
 from graph.export.source_link_rot_risk_csv import export_source_link_rot_risk_csv
 from graph.export.source_provenance_chain_csv import export_source_provenance_chain_csv
@@ -647,6 +649,7 @@ __all__ = [
     "export_relation_tag_pair_matrix_csv",
     "export_units_to_ris",
     "export_units_to_rss",
+    "export_backlog_report_csv",
     "export_source_collection_mix_csv",
     "export_source_collection_matrix_csv",
     "export_collection_staleness_risk_csv",
@@ -678,6 +681,7 @@ __all__ = [
     "export_source_metadata_density_csv",
     "export_source_metadata_completeness_csv",
     "export_source_metadata_outliers_markdown",
+    "export_source_quality_csv",
     "export_source_quality_markdown",
     "export_source_link_rot_risk_csv",
     "export_source_record_volume_csv",
