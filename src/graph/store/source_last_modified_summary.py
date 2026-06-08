@@ -13,25 +13,34 @@ def summarize_source_last_modified(sources: Iterable[Mapping[str, Any] | object]
     source_list = list(sources)
     rows = [_row(source, index) for index, source in enumerate(source_list)]
     present = [row for row in rows if row["last_modified"]]
-    parseable = [row for row in present if row["parsed"]]
-    invalid = [row for row in present if not row["parsed"]]
-    parsed_values = sorted(row["parsed"] for row in parseable if row["parsed"])
+    parseable = [row for row in present if row["parseable"]]
+    invalid = [row for row in present if not row["parseable"]]
+    parsed_values = sorted(row["normalized_last_modified"] for row in parseable)
     limit = max(0, sample_limit)
     return {
         "total_sources": len(source_list),
-        "present_count": len(present),
-        "missing_count": len(source_list) - len(present),
-        "parseable_count": len(parseable),
-        "invalid_count": len(invalid),
-        "oldest": parsed_values[0].isoformat() if parsed_values else "",
-        "newest": parsed_values[-1].isoformat() if parsed_values else "",
-        "samples": sorted((row for row in rows if not row["last_modified"] or not row["parsed"]), key=lambda row: sort_key(row["source_id"]))[:limit],
+        "sources_with_last_modified": len(present),
+        "missing_last_modified_count": len(source_list) - len(present),
+        "parseable_last_modified_count": len(parseable),
+        "unparseable_last_modified_count": len(invalid),
+        "oldest_last_modified": parsed_values[0] if parsed_values else "",
+        "newest_last_modified": parsed_values[-1] if parsed_values else "",
+        "rows": sorted(rows, key=lambda row: sort_key(row["source_id"])),
+        "samples": sorted(present, key=lambda row: sort_key(row["source_id"]))[:limit],
     }
 
 
 def _row(source: Mapping[str, Any] | object, index: int) -> dict[str, Any]:
     value = _last_modified(source)
-    return {"source_id": source_id(source) or str(index), "last_modified": value, "parsed": _parse(value)}
+    parsed = _parse(value)
+    normalized = parsed.isoformat() if parsed else ""
+    return {
+        "source_id": source_id(source) or str(index),
+        "last_modified": value,
+        "parseable": bool(parsed),
+        "normalized_last_modified": normalized,
+        "age_order_key": normalized,
+    }
 
 
 def _last_modified(source: Mapping[str, Any] | object) -> str:
